@@ -187,6 +187,53 @@ async def models(x_jarvis_token: str | None = Header(None)):
     }
 
 
+@app.get("/diagnostics")
+async def diagnostics(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from diagnostics import run_diagnostics
+    return {"checks": await run_diagnostics()}
+
+
+@app.post("/repair")
+async def repair_subsystem(body: dict, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from diagnostics import repair
+    result = await repair(body.get("subsystem", ""))
+    await bus.emit("repair", subsystem=body.get("subsystem"), **result)
+    return result
+
+
+@app.get("/stats")
+async def stats(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    import psutil
+    from llm.llama_server import llama
+    vm = psutil.virtual_memory()
+    return {
+        "cpu": psutil.cpu_percent(interval=0.1),
+        "ram_percent": vm.percent,
+        "ram_used_gb": round(vm.used / 1e9, 1),
+        "model": llama.model_name,
+        "model_external": llama.external,
+        "state": orchestrator.sm.state.value,
+        "wake_mode": config.get("wake", "mode"),
+    }
+
+
+@app.get("/tasks")
+async def tasks_list(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tasks.scheduler import scheduler
+    return {"tasks": scheduler.list_pending()}
+
+
+@app.delete("/tasks/{task_id}")
+async def tasks_cancel(task_id: int, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tasks.scheduler import scheduler
+    return {"ok": scheduler.cancel(task_id)}
+
+
 @app.get("/memory")
 async def memory_list(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

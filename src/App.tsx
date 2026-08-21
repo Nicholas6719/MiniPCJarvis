@@ -5,13 +5,20 @@ import { ActivityLog } from "./components/ActivityLog";
 import { ConfirmationModal } from "./components/ConfirmationModal";
 import { MemoryView } from "./components/MemoryView";
 import { SettingsView } from "./components/SettingsView";
+import { ResearchView } from "./components/ResearchView";
+import { TasksView } from "./components/TasksView";
+import { DiagnosticsView } from "./components/DiagnosticsView";
+import { StatusBar } from "./components/StatusBar";
 import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
 import { useStore, View } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "conversation", label: "CONVERSATION" },
+  { id: "research", label: "RESEARCH" },
   { id: "memory", label: "MEMORY" },
+  { id: "tasks", label: "TASKS" },
+  { id: "diagnostics", label: "DIAGNOSTICS" },
   { id: "settings", label: "SETTINGS" },
 ];
 
@@ -53,13 +60,17 @@ export default function App() {
         </section>
         <section className="hud__center">
           {view === "conversation" && <ConversationView />}
+          {view === "research" && <ResearchView />}
           {view === "memory" && <MemoryView />}
+          {view === "tasks" && <TasksView />}
+          {view === "diagnostics" && <DiagnosticsView />}
           {view === "settings" && <SettingsView />}
         </section>
         <section className="hud__right">
           <ActivityLog />
         </section>
       </main>
+      <StatusBar />
       <ConfirmationModal />
       <FirstRunSetup />
       <BootOverlay />

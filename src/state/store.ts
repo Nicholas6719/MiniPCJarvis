@@ -28,17 +28,35 @@ export interface Confirmation {
   risk: string;
 }
 
-export type View = "conversation" | "memory" | "settings";
+export type View = "conversation" | "memory" | "research" | "tasks" | "diagnostics" | "settings";
+
+export interface ResearchSource {
+  title?: string;
+  url: string;
+}
+
+export interface ResearchRun {
+  id: string;
+  ts: number;
+  query: string;
+  stage: "searching" | "reading" | "done";
+  sources: ResearchSource[];
+  fetched?: number;
+  answer?: string;
+}
 
 interface Store {
   state: JarvisState;
   view: View;
+  autoSwitch: boolean;
   transcript: TranscriptEntry[];
   activity: ActivityEntry[];
   confirmation: Confirmation | null;
   assistantDraft: string;
+  researchRuns: ResearchRun[];
   setState: (s: JarvisState) => void;
   setView: (v: View) => void;
+  setAutoSwitch: (b: boolean) => void;
   onEvent: (evt: any) => void;
   clearConfirmation: () => void;
 }
@@ -48,13 +66,16 @@ let draftId = "";
 export const useStore = create<Store>((set, get) => ({
   state: "offline",
   view: "conversation",
+  autoSwitch: true,
   transcript: [],
   activity: [],
   confirmation: null,
   assistantDraft: "",
+  researchRuns: [],
 
   setState: (s) => set({ state: s }),
   setView: (v) => set({ view: v }),
+  setAutoSwitch: (b) => set({ autoSwitch: b }),
   clearConfirmation: () => set({ confirmation: null }),
 
   onEvent: (evt) => {
@@ -82,6 +103,15 @@ export const useStore = create<Store>((set, get) => ({
       }
       case "turn_done": {
         const draft = get().assistantDraft;
+        // attach the synthesized answer to a finished research run
+        set((st) => {
+          const runs = [...st.researchRuns];
+          const last = runs[runs.length - 1];
+          if (last && last.stage === "done" && !last.answer && draft.trim()) {
+            last.answer = draft.trim();
+          }
+          return { researchRuns: runs };
+        });
         if (draft.trim()) {
           set((st) => ({
             transcript: [
@@ -129,8 +159,38 @@ export const useStore = create<Store>((set, get) => ({
           id: evt.id, ts: evt.ts, kind: "research", summary: label,
           detail: evt.sources?.map((s: any) => s.title || s.url).join(" · "),
         });
+        set((st) => {
+          const runs = [...st.researchRuns];
+          let run = runs.find((r) => r.query === evt.query && r.stage !== "done");
+          if (evt.stage === "searching" || !run) {
+            run = { id: evt.id, ts: evt.ts, query: evt.query, stage: evt.stage, sources: [] };
+            runs.push(run);
+          }
+          run.stage = evt.stage;
+          if (evt.sources) run.sources = evt.sources;
+          if (evt.fetched != null) run.fetched = evt.fetched;
+          return {
+            researchRuns: runs.slice(-10),
+            // dynamic view switching: research activity pulls up the research view
+            view: st.autoSwitch ? "research" : st.view,
+          };
+        });
         break;
       }
+      case "task_due":
+        push({ id: evt.id, ts: evt.ts, kind: "task", summary: `reminder fired: ${evt.text}` });
+        break;
+      case "announcement":
+        set((st) => ({
+          transcript: [
+            ...st.transcript,
+            { id: evt.id, role: "assistant", text: evt.text, ts: evt.ts },
+          ],
+        }));
+        break;
+      case "repair":
+        push({ id: evt.id, ts: evt.ts, kind: "repair", summary: `repair ${evt.subsystem}: ${evt.ok ? evt.action : evt.error}` });
+        break;
       case "wake":
         push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
         break;
