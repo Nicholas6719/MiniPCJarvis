@@ -53,8 +53,8 @@ unusable for voice).
 | 3 | Memory governance depth (edit/pin/categories UI, retention), first-run wizard | queued |
 | 4 | Windows control depth: window mgmt (list/focus/min/max/close), volume/mute, media keys, clipboard, screenshots, open URL, lock, power actions (HIGH-gated) — 15 tools | **DONE 2026-08-21** — all handlers tested live; LLM turns verified. UI Automation (element-level control) deferred to the computer-use/vision phase where it pairs with screen understanding |
 | 5 | Research agent: `research` tool (search → parallel fetch → extracts + citations, staged events visible in UI) + `fetch_page` (httpx/2 + trafilatura; engine-agnostic interface so Playwright can slot in later for interactive browsing) + first-run experience (boot overlay on real events + setup wizard) | **DONE 2026-08-21** — fetch verified on Wikipedia/GitHub/news sites; research end-to-end pending the user's Brave API key |
-| 6 | Vision: screen understanding (Qwen3.6 mmproj is on disk already) | queued |
-| 7 | Tasks/automations/routines; proactive assistance w/ quiet hours | queued |
+| 6 | Vision: `analyze_screen`/`analyze_image` via on-demand Gemma3-4B+mmproj server (lazy start, 5-min idle auto-stop; ~5 s warm) | **DONE 2026-08-21** — described real screen accurately through full voice pipeline |
+| 7 | Reminders/routines: scheduler (one-shot + daily/weekdays/weekly), proactive spoken announcements, set/list/cancel tools | **DONE 2026-08-21** — fire/recur/cancel verified; quiet-hours + richer proactive triggers still queued |
 | 8 | OS-like nav (full view set), dynamic view switching, HUD polish | queued |
 | 9 | Security hardening, performance profiling, self-healing depth | queued |
 | 10 | Plugin/MCP system | queued |
