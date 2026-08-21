@@ -169,18 +169,21 @@ class TTSRouter:
     async def warmup(self) -> None:
         try:
             await self._active().warmup()
-        except FileNotFoundError:
-            log.warning("preferred tts unavailable — falling back to piper")
+        except Exception as e:
+            log.warning("preferred tts unavailable (%s) — falling back to piper", e)
             await self.piper.warmup()
 
     async def synthesize_stream(self, text: str, cancel: asyncio.Event):
         active = self._active()
         try:
+            produced = False
             async for chunk in active.synthesize_stream(text, cancel):
+                produced = True
                 yield chunk
-            return
-        except FileNotFoundError:
-            pass
+            if produced or cancel.is_set():
+                return
+        except Exception as e:
+            log.warning("tts engine failed (%s) — falling back to piper", e)
         if active is not self.piper:  # graceful quality->latency fallback
             async for chunk in self.piper.synthesize_stream(text, cancel):
                 yield chunk

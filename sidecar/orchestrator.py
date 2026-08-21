@@ -99,12 +99,19 @@ class Orchestrator:
             await bus.emit("boot_error", summary="language model failed to start — retrying")
             asyncio.create_task(self._llm_retry_loop())
             return
-        await stt.warmup()
+        # warmups are optional at boot — any failure degrades, never wedges
+        for label, warm in (("speech recognition", stt.warmup),
+                            ("voice synthesis", tts.warmup)):
+            try:
+                await warm()
+            except Exception as e:
+                log.error("%s warmup failed (continuing): %s", label, e)
+                await bus.emit("boot", summary=f"{label} degraded: {e}")
         try:
-            await tts.warmup()
-        except FileNotFoundError as e:
-            log.error("tts voice missing: %s", e)
-        mic.start()
+            mic.start()
+        except Exception as e:
+            log.error("microphone unavailable: %s", e)
+            await bus.emit("boot", summary="microphone unavailable")
         self._loop_task = asyncio.create_task(self._listen_loop())
         self._wake_task = asyncio.create_task(self._wake_loop())
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
