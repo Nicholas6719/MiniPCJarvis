@@ -46,7 +46,9 @@ DEFAULTS: dict[str, Any] = {
     "stt": {"model": "small.en", "compute_type": "int8", "device": "cpu"},
     "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
     "audio": {"input_device": None, "output_device": None,
-              "sound_cues": True, "boot_sound": True},
+              "sound_cues": True, "boot_sound": True,
+              # always prefer the webcam mic when present; onboard mic is the fallback
+              "preferred_input_names": ["C920", "Webcam", "Logitech"]},
     # threshold 0.45: "Hey Jarvis" scores ~0.99, bare "Jarvis" 0.46-0.95 by voice,
     # confusables (service/nervous/harvest) 0.00-0.04. Raise if the TV wakes him,
     # lower if bare "Jarvis" gets missed.

@@ -40,17 +40,31 @@ async def run_diagnostics() -> list[dict]:
         repairable=True)
 
     # TTS
-    voice = config.get("tts", "voice")
-    if tts._voice is not None:
-        add("Voice Synthesis", "ok", voice)
-    elif (VOICES_DIR / f"{voice}.onnx").exists():
-        add("Voice Synthesis", "warn", f"{voice} (loads on first use)", repairable=True)
+    voice = str(config.get("tts", "voice"))
+    if voice.startswith("en_"):
+        loaded = getattr(tts.piper, "_voice", None) is not None
+        available = (VOICES_DIR / f"{voice}.onnx").exists()
+        engine = "Piper"
     else:
-        add("Voice Synthesis", "error", f"voice file missing: {voice}", repairable=False)
+        from audio.tts import KOKORO_DIR
+        loaded = getattr(tts.kokoro, "_k", None) is not None
+        available = (KOKORO_DIR / "kokoro-v1.0.onnx").exists()
+        engine = "Kokoro"
+    if loaded:
+        add("Voice Synthesis", "ok", f"{voice} ({engine})")
+    elif available:
+        add("Voice Synthesis", "warn", f"{voice} ({engine}, loads on first use)", repairable=True)
+    else:
+        add("Voice Synthesis", "error", f"{engine} voice files missing — will fall back", repairable=False)
 
     # Microphone
-    add("Microphone", "ok" if mic._stream is not None else "error",
-        "capturing" if mic._stream is not None else "not capturing", repairable=True)
+    if mic._stream is None:
+        add("Microphone", "error", "not capturing", repairable=True)
+    elif mic.using_preferred:
+        add("Microphone", "ok", f"{mic.device_name} (webcam mic)", repairable=True)
+    else:
+        add("Microphone", "warn", f"{mic.device_name} — webcam mic not detected, using fallback",
+            repairable=True)
 
     # Wake word
     from audio.wake import wake

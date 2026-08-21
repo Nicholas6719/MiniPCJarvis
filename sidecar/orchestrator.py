@@ -148,10 +148,49 @@ class Orchestrator:
         self._loop_task = asyncio.create_task(self._listen_loop())
         self._wake_task = asyncio.create_task(self._wake_loop())
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
+        self._device_task = asyncio.create_task(self._device_watch())
         if config.get("audio", "boot_sound", default=True):
             asyncio.create_task(self.play_sound("boot"))
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
+
+    async def _device_watch(self) -> None:
+        """Hot-plug: always use the webcam mic when present, fall back to the
+        onboard mic when it's gone. Checks Windows' endpoint list (independent
+        of PortAudio's cached view) and re-inits audio only on a change."""
+        from audio.io import refresh_devices, speaker as _spk
+        patterns = [str(x).lower() for x in
+                    config.get("audio", "preferred_input_names",
+                               default=["C920", "Webcam", "Logitech"])]
+        while True:
+            await asyncio.sleep(15)
+            try:
+                if config.get("audio", "input_device") is not None:
+                    continue  # user pinned a device explicitly
+                if self.sm.state not in (State.IDLE, State.SLEEPING):
+                    continue  # never yank the mic mid-conversation
+                from pycaw.pycaw import AudioUtilities
+                present = False
+                for dev in AudioUtilities.GetAllDevices():
+                    try:
+                        name = (dev.FriendlyName or "").lower()
+                        if dev.state == 1 and any(p in name for p in patterns):  # 1 = active
+                            present = True
+                            break
+                    except Exception:
+                        continue
+                if present != mic.using_preferred:
+                    log.info("audio device change: webcam mic %s",
+                             "connected" if present else "disconnected")
+                    mic.stop()
+                    _spk.close()
+                    refresh_devices()
+                    mic.start()
+                    await bus.emit("boot", summary=f"microphone: {mic.device_name}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.debug("device watch: %s", e)
 
     async def _llm_watchdog(self) -> None:
         """Runtime self-healing: recover a dead llama-server without a restart."""

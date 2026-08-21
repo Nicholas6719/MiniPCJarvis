@@ -15,6 +15,54 @@ MIC_RATE = 16000
 MIC_BLOCK = 1024  # 64 ms
 
 
+def refresh_devices() -> None:
+    """PortAudio caches the device list at init; re-init so hot-plugged
+    devices (the webcam mic) show up. Only call with no streams open."""
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception as e:
+        log.debug("portaudio re-init failed: %s", e)
+
+
+def resolve_input_device() -> tuple[int | None, str, bool]:
+    """Pick the microphone.
+
+    Priority: explicit user choice (audio.input_device) > a device whose name
+    matches audio.preferred_input_names (the webcam) > system default.
+    Returns (device_index_or_None, human_name, is_preferred).
+    """
+    explicit = config.get("audio", "input_device")
+    devs = sd.query_devices()
+    if explicit is not None:
+        try:
+            return int(explicit), devs[int(explicit)]["name"], False
+        except Exception:
+            pass
+    patterns = [str(x).lower() for x in
+                config.get("audio", "preferred_input_names",
+                           default=["C920", "Webcam", "Logitech"])]
+    # prefer the default host API (MME, index-stable), then any host API
+    default_api = sd.default.hostapi
+    candidates = []
+    for i, d in enumerate(devs):
+        if d["max_input_channels"] <= 0:
+            continue
+        name = d["name"].lower()
+        if any(pat in name for pat in patterns):
+            rank = 0 if d["hostapi"] == default_api else 1
+            candidates.append((rank, i, d["name"]))
+    if candidates:
+        candidates.sort()
+        _, idx, name = candidates[0]
+        return idx, name, True
+    try:
+        di = sd.default.device[0]
+        return None, devs[di]["name"], False
+    except Exception:
+        return None, "system default", False
+
+
 class Microphone:
     """Continuous 16 kHz mono capture broadcast to any number of subscribers.
 
@@ -26,6 +74,8 @@ class Microphone:
         self._subs: set[asyncio.Queue] = set()
         self._stream: sd.InputStream | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.device_name: str = "not started"
+        self.using_preferred: bool = False
         # legacy single-consumer queue, kept for existing call sites
         self.queue: asyncio.Queue[np.ndarray] = self.subscribe()
 
@@ -41,7 +91,10 @@ class Microphone:
         if self._stream is not None:
             return
         self._loop = asyncio.get_running_loop()
-        device = config.get("audio", "input_device")
+        device, name, preferred = resolve_input_device()
+        self.device_name = name
+        self.using_preferred = preferred
+        log.info("microphone: %s%s", name, " (preferred webcam mic)" if preferred else "")
 
         def _cb(indata, frames, t, status):
             if status:
