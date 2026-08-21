@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:benchlm.ai)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:huggingface.co)",
+      "Bash(curl -s \"https://huggingface.co/api/models/unsloth/Qwen3.6-35B-A3B-GGUF/tree/main\")",
+      "Bash(python -c \"import json,sys; [print\\(f['path'], round\\(f.get\\('size',0\\)/1e9,1\\),'GB'\\) for f in json.load\\(sys.stdin\\)]\")",
+      "Read(//c/AI/models/**)",
+      "Bash(curl -sL -C - -o Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf \"https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf\")",
+      "Bash(curl -sL -C - -o Qwen3.6-35B-A3B-mmproj-F16.gguf \"https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf\")",
+      "Bash(python -m venv .venv)",
+      "Bash(.venv/Scripts/python.exe -m pip install --upgrade pip -q)",
+      "Bash(.venv/Scripts/python.exe -m pip install -r requirements.txt -q)",
+      "Bash(.venv/Scripts/python.exe -c \"import faster_whisper, piper, fastembed, sounddevice, fastapi; print\\('imports OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(npm install *)",
+      "Bash(sidecar/.venv/Scripts/python.exe -m pip install pillow -q)",
+      "Bash(sidecar/.venv/Scripts/python.exe -)",
+      "Bash(cargo check *)",
+      "Bash(.venv/Scripts/python.exe tests/bakeoff.py --only gpt-oss-20b --skip-bench)",
+      "Bash(python -c ' *)",
+      "Bash(.venv/Scripts/python.exe -)",
+      "Bash(.venv/Scripts/python.exe main.py --port 8790 --token devtoken123)",
+      "Bash(curl -s http://127.0.0.1:8790/health)",
+      "Bash(npx vite *)",
+      "Bash(git -C \"/c/Users/nicho/Documents/Coding_Projects/JARVIS\" add -A)",
+      "Bash(git -C \"/c/Users/nicho/Documents/Coding_Projects/JARVIS\" status --short)"
+    ]
+  }
+}

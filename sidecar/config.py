@@ -1,0 +1,86 @@
+"""JARVIS configuration. Lives in %LOCALAPPDATA%/JARVIS/config.json — never holds secrets."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+APP_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "JARVIS"
+APP_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_PATH = APP_DIR / "config.json"
+LOG_DIR = APP_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+DB_PATH = APP_DIR / "jarvis.db"
+
+DEFAULTS: dict[str, Any] = {
+    "llm": {
+        "server_binary": r"C:\AI\llama.cpp\llama-server.exe",
+        "port": 8033,
+        "context": 16384,
+        "active_model": "gpt-oss-20b",
+        "models": {
+            "gpt-oss-20b": {
+                "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
+                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja"],
+                "template_kwargs": {"reasoning_effort": "low"},
+                "reasoning_field": "reasoning_content",
+            },
+            "qwen3.6-35b-a3b": {
+                "path": r"C:\AI\models\Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf",
+                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja"],
+                "template_kwargs": {"enable_thinking": False},
+                "reasoning_field": "reasoning_content",
+            },
+        },
+    },
+    "stt": {"model": "small.en", "compute_type": "int8", "device": "cpu"},
+    "tts": {"voice": "en_GB-alan-medium", "rate": 1.0},
+    "audio": {"input_device": None, "output_device": None},
+    "wake": {"mode": "push_to_talk"},
+    "memory": {"enabled": True},
+    "search": {"provider": "brave"},
+}
+
+
+def _merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+class Config:
+    def __init__(self) -> None:
+        self.data: dict[str, Any] = DEFAULTS
+        self.load()
+
+    def load(self) -> None:
+        if CONFIG_PATH.exists():
+            try:
+                self.data = _merge(DEFAULTS, json.loads(CONFIG_PATH.read_text("utf-8")))
+            except Exception:
+                self.data = dict(DEFAULTS)
+        else:
+            self.save()
+
+    def save(self) -> None:
+        CONFIG_PATH.write_text(json.dumps(self.data, indent=2), "utf-8")
+
+    def get(self, *keys: str, default: Any = None) -> Any:
+        cur: Any = self.data
+        for k in keys:
+            if not isinstance(cur, dict) or k not in cur:
+                return default
+            cur = cur[k]
+        return cur
+
+
+config = Config()
+
+# Secrets are held in memory only; the Rust core injects them from Windows
+# Credential Manager after startup. Never written to disk here.
+secrets: dict[str, str] = {}

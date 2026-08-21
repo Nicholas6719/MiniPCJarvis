@@ -1,0 +1,35 @@
+# Node
+node_modules/
+dist/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+sidecar/build/
+sidecar/dist/
+*.spec.bak
+
+# Models / large binaries (never commit weights)
+*.gguf
+*.onnx
+models/
+
+# Logs / local data
+*.log
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets — never commit
+.env
+*.dpapi
+
+# OS
+Thumbs.db
+desktop.ini

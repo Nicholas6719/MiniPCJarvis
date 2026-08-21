@@ -1,0 +1,99 @@
+.core {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  display: grid;
+  place-items: center;
+  --core-color: #27c7ff;
+  --core-speed: 14s;
+  --core-glow: 0.35;
+}
+
+.core--offline   { --core-color: #3a4656; --core-glow: 0.08; }
+.core--starting  { --core-color: #27c7ff; --core-speed: 3s; }
+.core--idle      { --core-color: #27c7ff; --core-speed: 14s; }
+.core--listening { --core-color: #45ffc8; --core-speed: 4s;  --core-glow: 0.6; }
+.core--processing{ --core-color: #45d7ff; --core-speed: 2.2s; }
+.core--thinking  { --core-color: #7a9bff; --core-speed: 1.6s; --core-glow: 0.55; }
+.core--searching { --core-color: #45d7ff; --core-speed: 1.2s; }
+.core--executing { --core-color: #ffc94d; --core-speed: 1.6s; }
+.core--waiting   { --core-color: #ffc94d; --core-speed: 6s; }
+.core--speaking  { --core-color: #27c7ff; --core-speed: 2.4s; --core-glow: 0.75; }
+.core--interrupted { --core-color: #ff8a5c; --core-speed: 0.9s; }
+.core--error     { --core-color: #ff5c6a; --core-speed: 0.8s; --core-glow: 0.7; }
+.core--sleeping  { --core-color: #22506b; --core-speed: 20s; --core-glow: 0.12; }
+
+.core__halo {
+  position: absolute;
+  inset: -30px;
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    color-mix(in srgb, var(--core-color) 45%, transparent) 0%,
+    transparent 65%);
+  opacity: var(--core-glow);
+  transition: opacity 0.6s;
+  animation: breathe calc(var(--core-speed) * 1.5) ease-in-out infinite;
+}
+
+.core__ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--core-color) 55%, transparent);
+  transition: border-color 0.6s;
+}
+
+.core__ring--outer {
+  inset: 8px;
+  border-top-color: var(--core-color);
+  border-right-color: transparent;
+  animation: spin var(--core-speed) linear infinite;
+}
+
+.core__ring--mid {
+  inset: 26px;
+  border-bottom-color: var(--core-color);
+  border-left-color: transparent;
+  animation: spin calc(var(--core-speed) * 0.7) linear infinite reverse;
+}
+
+.core__ring--inner {
+  inset: 44px;
+  border-style: dashed;
+  opacity: 0.7;
+  animation: spin calc(var(--core-speed) * 1.8) linear infinite;
+}
+
+.core__nucleus {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%,
+    color-mix(in srgb, var(--core-color) 90%, white) 0%,
+    var(--core-color) 35%,
+    color-mix(in srgb, var(--core-color) 30%, #001018) 100%);
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--core-color) 70%, transparent),
+    0 0 90px color-mix(in srgb, var(--core-color) 35%, transparent),
+    inset 0 0 18px rgba(0, 8, 14, 0.55);
+  transition: all 0.6s;
+  animation: breathe var(--core-speed) ease-in-out infinite;
+}
+
+.core__label {
+  position: absolute;
+  bottom: -34px;
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  color: color-mix(in srgb, var(--core-color) 85%, white);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--core-color) 60%, transparent);
+  white-space: nowrap;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.045); }
+}
