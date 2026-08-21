@@ -49,6 +49,15 @@ DEFAULTS: dict[str, Any] = {
     "wake": {"mode": "push_to_talk"},
     "memory": {"enabled": True},
     "search": {"provider": "brave"},
+    "proactive": {
+        "enabled": True,
+        "quiet_start": "22:00",
+        "quiet_end": "08:00",
+        "max_per_hour": 2,
+        "disk_free_gb_warn": 50,
+        "ram_percent_warn": 94,
+        "break_after_min": 180,
+    },
 }
 
 

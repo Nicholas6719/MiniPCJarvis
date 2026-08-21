@@ -48,8 +48,12 @@ async def lifespan(app: FastAPI):
     vision_tools.register_all()
     scheduler.announce = orchestrator.announce
     scheduler.start()
+    from proactive import proactive
+    proactive.announce = orchestrator.announce
+    proactive.start()
     asyncio.create_task(orchestrator.start())
     yield
+    proactive.stop()
     scheduler.stop()
     from llm.vision_server import vision
     await vision.stop()

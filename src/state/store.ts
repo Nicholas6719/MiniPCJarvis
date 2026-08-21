@@ -177,6 +177,9 @@ export const useStore = create<Store>((set, get) => ({
         });
         break;
       }
+      case "proactive":
+        push({ id: evt.id, ts: evt.ts, kind: "proactive", summary: `proactive: ${evt.alert}`, detail: evt.text });
+        break;
       case "task_due":
         push({ id: evt.id, ts: evt.ts, kind: "task", summary: `reminder fired: ${evt.text}` });
         break;

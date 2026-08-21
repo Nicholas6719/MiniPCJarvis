@@ -142,6 +142,27 @@ export function SettingsView() {
       </section>
 
       <section className="settings__group">
+        <h3>PROACTIVE ASSISTANCE</h3>
+        <label className="settings__row settings__row--toggle">
+          <span>Let JARVIS speak up on its own (disk, memory, break reminders)</span>
+          <button className={`toggle ${cfg.proactive?.enabled ? "toggle--on" : ""}`}
+                  onClick={() => patch({ proactive: { enabled: !cfg.proactive?.enabled } })}>
+            <span className="toggle__knob" />
+          </button>
+        </label>
+        <div className="settings__row">
+          <label style={{ flex: 1 }}>Quiet hours start
+            <input type="text" value={cfg.proactive?.quiet_start ?? "22:00"}
+                   onChange={(e) => patch({ proactive: { quiet_start: e.target.value } })} />
+          </label>
+          <label style={{ flex: 1 }}>Quiet hours end
+            <input type="text" value={cfg.proactive?.quiet_end ?? "08:00"}
+                   onChange={(e) => patch({ proactive: { quiet_end: e.target.value } })} />
+          </label>
+        </div>
+      </section>
+
+      <section className="settings__group">
         <h3>SYSTEM</h3>
         <label className="settings__row settings__row--toggle">
           <span>Start JARVIS with Windows</span>
