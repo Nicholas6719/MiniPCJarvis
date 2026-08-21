@@ -48,7 +48,7 @@ unusable for voice).
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Discovery: machine inspection, model research, architecture | **DONE** |
-| 1 | Foundation: voice loop (VAD→STT→LLM+tools→TTS), barge-in, state machine, HUD shell (orb/conversation/activity), 7 real tools w/ risk gating, memory store+recall, secrets, tray/hotkey, NSIS installer | **IN PROGRESS** |
+| 1 | Foundation: voice loop (VAD→STT→LLM+tools→TTS), barge-in, state machine, HUD shell (orb/conversation/activity), 7 real tools w/ risk gating, memory store+recall, secrets, tray/hotkey, NSIS installer | **DONE 2026-08-21** — installer verified: silent install → launch → full boot to idle, no terminal. Human-at-machine checks still open: mic voice turn, barge-in feel, tray/hotkey UX |
 | 2 | Wake word ("Jarvis"), always-listening mode, settings UI, first-run setup | queued |
 | 3 | Memory UI (inspect/edit/forget/pin), memory governance | queued |
 | 4 | Windows control depth: UI Automation, window mgmt, volume/display/clipboard | queued |
