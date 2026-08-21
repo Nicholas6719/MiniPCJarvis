@@ -20,6 +20,8 @@ DEFAULTS: dict[str, Any] = {
     "llm": {
         "server_binary": r"C:\AI\llama.cpp\llama-server.exe",
         "port": 8033,
+        # other local apps (Houston) may already serve the same model — reuse it
+        "adopt_ports": [8080],
         "context": 16384,
         "active_model": "gpt-oss-20b",
         "models": {

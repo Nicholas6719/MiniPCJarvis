@@ -85,18 +85,53 @@ class LlamaServer:
         self.model_name: str | None = None
         self.port: int = config.get("llm", "port", default=8033)
         self.base_url = f"http://127.0.0.1:{self.port}"
+        self.external = False  # adopted server owned by another app (e.g. Houston)
         self._starting = asyncio.Lock()
 
     @property
     def running(self) -> bool:
+        if self.external:
+            return True
         return self.proc is not None and self.proc.poll() is None
+
+    async def _try_adopt(self, model_name: str) -> bool:
+        """This machine runs other assistants (Houston on :8080) that may already
+        be serving the exact same GGUF. Reuse instead of loading a duplicate 11GB."""
+        mcfg = config.get("llm", "models", default={}).get(model_name)
+        if not mcfg:
+            return False
+        want = str(mcfg["path"]).lower()
+        for port in config.get("llm", "adopt_ports", default=[8080]):
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as c:
+                    r = await c.get(f"http://127.0.0.1:{port}/v1/models")
+                    if r.status_code != 200:
+                        continue
+                    ids = [str(m.get("id", "")).lower() for m in r.json().get("data", [])]
+                    if any(want == i or want in i for i in ids):
+                        self.base_url = f"http://127.0.0.1:{port}"
+                        self.model_name = model_name
+                        self.external = True
+                        self.proc = None
+                        log.info("adopted external llama-server on :%s for %s",
+                                 port, model_name)
+                        return True
+            except Exception:
+                continue
+        return False
 
     async def ensure(self, model_name: str | None = None) -> bool:
         """Ensure llama-server is up and serving `model_name` (default: active model)."""
         model_name = model_name or config.get("llm", "active_model")
         async with self._starting:
             if self.running and self.model_name == model_name:
-                return await self.healthy()
+                if await self.healthy():
+                    return True
+                # adopted server vanished — fall through to respawn our own
+                self.external = False
+                self.model_name = None
+            if await self._try_adopt(model_name):
+                return True
             await self.stop()
             return await self._start(model_name)
 
@@ -147,6 +182,12 @@ class LlamaServer:
             return False
 
     async def stop(self) -> None:
+        if self.external:
+            # never kill a server another application owns
+            self.external = False
+            self.model_name = None
+            self.base_url = f"http://127.0.0.1:{self.port}"
+            return
         if self.proc is not None:
             try:
                 self.proc.terminate()
