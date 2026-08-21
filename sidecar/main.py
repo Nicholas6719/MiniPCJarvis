@@ -22,7 +22,8 @@ from memory.store import memory
 from orchestrator import orchestrator
 from state_machine import State
 from tasks.scheduler import scheduler
-from tools import builtin, memory_tools, task_tools, vision_tools, web_tools, windows_tools
+from tools import (builtin, browser_tools, memory_tools, task_tools,
+                   vision_tools, web_tools, windows_tools)
 from tools.registry import registry
 
 logging.basicConfig(
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
     web_tools.register_all()
     task_tools.register_all()
     vision_tools.register_all()
+    browser_tools.register_all()
     scheduler.announce = orchestrator.announce
     scheduler.start()
     from proactive import proactive
@@ -55,6 +57,8 @@ async def lifespan(app: FastAPI):
     yield
     proactive.stop()
     scheduler.stop()
+    from browser.session import browser
+    await browser.close()
     from llm.vision_server import vision
     await vision.stop()
     await orchestrator.shutdown()
@@ -175,9 +179,15 @@ async def audio_devices(x_jarvis_token: str | None = Header(None)):
 @app.get("/voices")
 async def voices(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
-    from audio.tts import VOICES_DIR
-    installed = sorted(p.stem for p in VOICES_DIR.glob("*.onnx"))
-    return {"voices": installed, "active": config.get("tts", "voice")}
+    from audio.tts import KOKORO_DIR, VOICES_DIR
+    piper = sorted(p.stem for p in VOICES_DIR.glob("*.onnx"))
+    kokoro = []
+    if (KOKORO_DIR / "kokoro-v1.0.onnx").exists():
+        # curated British + strongest general voices (full list is 50+)
+        kokoro = ["bm_george", "bm_fable", "bm_daniel", "bm_lewis",
+                  "bf_emma", "bf_isabella", "am_michael", "af_bella"]
+    return {"voices": kokoro + piper, "active": config.get("tts", "voice"),
+            "note": "bm_/bf_/am_/af_ voices use the Kokoro engine (higher quality); en_GB voices use Piper (lowest latency)"}
 
 
 @app.get("/models")

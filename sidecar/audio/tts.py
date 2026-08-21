@@ -1,4 +1,8 @@
-"""TTSProvider interface + local Piper implementation (streaming, interruptible)."""
+"""TTS providers: Kokoro (quality, default) and Piper (lowest latency).
+
+Both are local/offline and expose the same interface:
+    sample_rate, warmup(), synthesize_stream(text, cancel) -> float32 chunks.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -84,4 +88,102 @@ class PiperTTS:
                 queue.get_nowait()
 
 
-tts = PiperTTS()
+KOKORO_DIR = VOICES_DIR / "kokoro"
+
+
+class KokoroTTS:
+    """Kokoro-82M ONNX — measured 3.4-3.8x realtime on this CPU."""
+
+    def __init__(self) -> None:
+        self._k = None
+        self._sample_rate = 24000
+
+    def _ensure(self):
+        if self._k is None:
+            from kokoro_onnx import Kokoro
+            model = KOKORO_DIR / "kokoro-v1.0.onnx"
+            voices = KOKORO_DIR / "voices-v1.0.bin"
+            if not (model.exists() and voices.exists()):
+                raise FileNotFoundError(f"kokoro model files missing in {KOKORO_DIR}")
+            log.info("loading kokoro tts")
+            self._k = Kokoro(str(model), str(voices))
+        return self._k
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    def reload(self) -> None:
+        pass  # voice is per-call; nothing cached to invalidate
+
+    async def warmup(self) -> None:
+        await asyncio.to_thread(self._ensure)
+
+    async def synthesize_stream(self, text: str, cancel: asyncio.Event):
+        k = await asyncio.to_thread(self._ensure)
+        voice = config.get("tts", "voice", default="bm_george")
+        if not voice.startswith(("af_", "am_", "bf_", "bm_")):
+            voice = "bm_george"
+        speed = float(config.get("tts", "rate", default=1.0))
+        try:
+            samples, sr = await asyncio.to_thread(
+                k.create, text, voice=voice, speed=speed)
+        except Exception as e:
+            log.error("kokoro synth failed: %s", e)
+            return
+        self._sample_rate = sr
+        audio = np.asarray(samples, dtype=np.float32)
+        # emit in ~0.4s chunks so barge-in cancellation stays responsive
+        step = int(sr * 0.4)
+        for i in range(0, len(audio), step):
+            if cancel.is_set():
+                return
+            yield audio[i:i + step]
+
+
+class TTSRouter:
+    """Selects the engine from config; falls back Kokoro -> Piper."""
+
+    def __init__(self) -> None:
+        self.kokoro = KokoroTTS()
+        self.piper = PiperTTS()
+
+    def _active(self):
+        engine = config.get("tts", "engine", default="kokoro")
+        voice = str(config.get("tts", "voice", default="bm_george"))
+        # voice prefix wins over engine setting so a single dropdown works
+        if voice.startswith("en_"):
+            return self.piper
+        if engine == "piper":
+            return self.piper
+        return self.kokoro
+
+    @property
+    def sample_rate(self) -> int:
+        return self._active().sample_rate
+
+    def reload(self) -> None:
+        self.kokoro.reload()
+        self.piper.reload()
+
+    async def warmup(self) -> None:
+        try:
+            await self._active().warmup()
+        except FileNotFoundError:
+            log.warning("preferred tts unavailable — falling back to piper")
+            await self.piper.warmup()
+
+    async def synthesize_stream(self, text: str, cancel: asyncio.Event):
+        active = self._active()
+        try:
+            async for chunk in active.synthesize_stream(text, cancel):
+                yield chunk
+            return
+        except FileNotFoundError:
+            pass
+        if active is not self.piper:  # graceful quality->latency fallback
+            async for chunk in self.piper.synthesize_stream(text, cancel):
+                yield chunk
+
+
+tts = TTSRouter()

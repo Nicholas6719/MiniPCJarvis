@@ -375,16 +375,19 @@ class Orchestrator:
         """Run the LLM, executing tool calls in a loop, streaming sentences to TTS."""
         tools = registry.schemas()
         full_text = ""
-        for _round in range(6):
+        empty_retries = 0
+        for _round in range(8):
+            round_text = ""
             pending = ""
             tool_calls: list[dict] | None = None
             # generous budget: gpt-oss spends tokens on hidden reasoning first —
             # a tight cap silently starves the spoken reply (see Houston notes)
             async for chunk in local_llm.stream(messages, tools=tools,
-                                                max_tokens=3072):
+                                                max_tokens=4096):
                 if chunk.text:
                     self.metrics.mark("first_token_ms")
                     pending += chunk.text
+                    round_text += chunk.text
                     full_text += chunk.text
                     await bus.emit("assistant_delta", text=chunk.text)
                     # flush complete sentences to TTS
@@ -403,8 +406,16 @@ class Orchestrator:
                 await speak_queue.put(pending.strip())
 
             if not tool_calls:
+                if not round_text.strip() and empty_retries < 1:
+                    # empty round (reasoning ate the budget) — nudge once
+                    empty_retries += 1
+                    log.warning("empty LLM round — retrying with a nudge")
+                    messages.append({"role": "user", "content":
+                                     "(Continue: finish the task or answer now, "
+                                     "in one or two spoken sentences.)"})
+                    continue
                 if not full_text.strip():
-                    # never end a turn in silence (e.g. reasoning ate the budget)
+                    # never end a turn in silence
                     fallback = "Sorry, I lost my train of thought. Ask me again?"
                     await bus.emit("assistant_delta", text=fallback)
                     await speak_queue.put(fallback)

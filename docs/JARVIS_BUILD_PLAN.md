@@ -30,7 +30,7 @@ bandwidth ceiling for a 3.6B-active model. SMT (16 threads) is *slower*; use 8.
 | Primary model | **gpt-oss-20b MXFP4** (bake-off winner, 2026-08-21) | 27.3 t/s Vulkan, 6/6 tool-calling, ~1.7 s first token. Qwen3.6-35B-A3B (UD-Q3_K_XL) OOMs the Vulkan heap on this iGPU even with `--cpu-moe`, host-memory placement, and llama.cpp b10549 — CPU-only it manages just 9.2 t/s: 3× too slow for voice. Kept on disk (+mmproj) as a vision-phase candidate where latency matters less |
 | STT | faster-whisper `small.en` int8 CPU | Best CPU speed/accuracy tradeoff; `base.en` fallback if contended |
 | VAD | Silero (ONNX, bundled with faster-whisper) | Streaming, low CPU, drives barge-in |
-| TTS | **Piper local** (user choice), voice `en_GB-alan-medium` | Real-time on CPU, private, free; Fish Audio cloud optional later behind `TTSProvider` |
+| TTS | **Kokoro-82M local** (bm_george), Piper fallback | Near-cloud quality, 3.4-3.8x realtime CPU, both offline; Fish Audio still possible later |
 | Embeddings | fastembed / bge-small-en-v1.5 (ONNX) | Torch-free (packaging), fast on CPU |
 | Search | Brave Search API (user choice) | Key stored in Windows Credential Manager only |
 | Secrets | Windows Credential Manager via Rust `keyring`; pushed to sidecar over token-authed loopback; memory-only there | Never in files/logs |
@@ -58,7 +58,7 @@ unusable for voice).
 | 8 | AI-OS interface: 6-view nav (Conversation/Research/Memory/Tasks/Diagnostics/Settings), Diagnostics w/ 12 live checks + repair actions, Research view w/ sources+conclusions, Tasks view, persistent status bar, dynamic view switching | **DONE 2026-08-21** — all views verified against live data; installer deployed |
 | 9 | Proactive intelligence: disk/RAM/work-session monitors + full suppression stack (quiet hours, cooldowns, hourly cap, idle-only, master toggle + Settings UI) | **DONE 2026-08-21** — 7/7 suppression tests; live-fire verified spoken announcement |
 | 10 | Hardening + observability: persistent audit log for all tool executions, per-session API key on llama-server (401 without it), turn-latency metrics (/metrics: stt/first-token/first-audio/total medians), runtime LLM watchdog (kill→auto-recover, verified 67 s), Rust sidecar supervisor (auto-restart same port/token, crash-loop backoff), memory pin/edit UI + pinned-always-in-context | **DONE 2026-08-21** |
-| 11 | Interactive browser agent (Playwright), computer-use verify loops, webcam presence features | queued |
+| 11 | Kokoro TTS upgrade (bm_george default, 3.4-3.8x realtime, Piper fallback via TTSRouter) + interactive browser agent (Playwright on system Edge — bundled Chromium needs admin-gated MSVC runtime; 6 tools w/ observe-act-verify contract, submit is MEDIUM-gated) + dynamic llama-server port (fixes orphan-port 401 class) | **DONE 2026-08-21** — browser flow verified at session level (type/submit/back) and via LLM turn; Kokoro benchmarked. Webcam presence features still queued (hardware in transit) |
 | 12 | Plugin/MCP system | queued |
 
 ## Current Risks

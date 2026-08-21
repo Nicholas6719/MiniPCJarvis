@@ -82,9 +82,14 @@ _job = _KillOnCloseJob()
 class LlamaServer:
     def __init__(self) -> None:
         import secrets as _secrets
+        import socket
         self.proc: subprocess.Popen | None = None
         self.model_name: str | None = None
-        self.port: int = config.get("llm", "port", default=8033)
+        # dynamic port per session — a fixed port let an orphaned server from a
+        # previous session answer our health checks with the wrong API key
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.external = False  # adopted server owned by another app (e.g. Houston)
         # per-session API key so other local processes can't use our server

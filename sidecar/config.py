@@ -44,7 +44,7 @@ DEFAULTS: dict[str, Any] = {
         },
     },
     "stt": {"model": "small.en", "compute_type": "int8", "device": "cpu"},
-    "tts": {"voice": "en_GB-alan-medium", "rate": 1.0},
+    "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
     "audio": {"input_device": None, "output_device": None},
     "wake": {"mode": "push_to_talk"},
     "memory": {"enabled": True},
