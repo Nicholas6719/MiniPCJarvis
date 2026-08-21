@@ -8,6 +8,7 @@ interface Memory {
   content: string;
   source: string;
   confidence: string;
+  pinned?: boolean;
 }
 
 export function MemoryView() {
@@ -33,6 +34,30 @@ export function MemoryView() {
     try {
       await api(`/memory/${id}`, { method: "DELETE" });
       setMemories((m) => m.filter((x) => x.id !== id));
+    } catch {}
+  };
+
+  const togglePin = async (m: Memory) => {
+    try {
+      await api(`/memory/${m.id}`, {
+        method: "PATCH", body: JSON.stringify({ pinned: !m.pinned }),
+      });
+      setMemories((ms) => ms.map((x) => x.id === m.id ? { ...x, pinned: !m.pinned } : x));
+    } catch {}
+  };
+
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+
+  const saveEdit = async (id: number) => {
+    const content = editText.trim();
+    setEditing(null);
+    if (!content) return;
+    try {
+      await api(`/memory/${id}`, {
+        method: "PATCH", body: JSON.stringify({ content }),
+      });
+      setMemories((ms) => ms.map((x) => x.id === id ? { ...x, content } : x));
     } catch {}
   };
 
@@ -64,7 +89,7 @@ export function MemoryView() {
           </div>
         )}
         {shown.map((m) => (
-          <div key={m.id} className="memory__card">
+          <div key={m.id} className={`memory__card ${m.pinned ? "memory__card--pinned" : ""}`}>
             <div className="memory__meta">
               <span className={`memory__cat memory__cat--${m.category}`}>
                 {m.category.toUpperCase()}
@@ -75,9 +100,34 @@ export function MemoryView() {
                 })}
               </span>
               <span className="memory__conf">{m.confidence}</span>
+              {m.pinned && <span className="memory__pinbadge">PINNED</span>}
             </div>
-            <p className="memory__content">{m.content}</p>
+            {editing === m.id ? (
+              <textarea
+                className="memory__edit"
+                value={editText}
+                autoFocus
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) saveEdit(m.id);
+                  if (e.key === "Escape") setEditing(null);
+                }}
+              />
+            ) : (
+              <p className="memory__content">{m.content}</p>
+            )}
             <div className="memory__actions">
+              <button className="ghost-btn" onClick={() => togglePin(m)}>
+                {m.pinned ? "UNPIN" : "PIN"}
+              </button>
+              {editing === m.id ? (
+                <button className="ghost-btn" onClick={() => saveEdit(m.id)}>SAVE</button>
+              ) : (
+                <button className="ghost-btn"
+                        onClick={() => { setEditing(m.id); setEditText(m.content); }}>
+                  EDIT
+                </button>
+              )}
               <button className="ghost-btn ghost-btn--danger" onClick={() => forget(m.id)}>
                 FORGET
               </button>

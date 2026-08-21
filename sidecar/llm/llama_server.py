@@ -81,11 +81,14 @@ _job = _KillOnCloseJob()
 
 class LlamaServer:
     def __init__(self) -> None:
+        import secrets as _secrets
         self.proc: subprocess.Popen | None = None
         self.model_name: str | None = None
         self.port: int = config.get("llm", "port", default=8033)
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.external = False  # adopted server owned by another app (e.g. Houston)
+        # per-session API key so other local processes can't use our server
+        self.api_key: str | None = _secrets.token_hex(16)
         self._starting = asyncio.Lock()
 
     @property
@@ -112,6 +115,7 @@ class LlamaServer:
                         self.base_url = f"http://127.0.0.1:{port}"
                         self.model_name = model_name
                         self.external = True
+                        self.api_key = None  # shared servers are unauthenticated
                         self.proc = None
                         log.info("adopted external llama-server on :%s for %s",
                                  port, model_name)
@@ -136,6 +140,9 @@ class LlamaServer:
             return await self._start(model_name)
 
     async def _start(self, model_name: str) -> bool:
+        if not self.api_key:
+            import secrets as _secrets
+            self.api_key = _secrets.token_hex(16)
         mcfg = config.get("llm", "models", default={}).get(model_name)
         if not mcfg:
             log.error("unknown model %s", model_name)
@@ -149,6 +156,7 @@ class LlamaServer:
             binary, "-m", model_path,
             "-c", str(config.get("llm", "context", default=16384)),
             "--host", "127.0.0.1", "--port", str(self.port),
+            "--api-key", self.api_key,
             "--log-file", str(LOG_DIR / "llama-server.log"),
             *mcfg.get("args", []),
         ]

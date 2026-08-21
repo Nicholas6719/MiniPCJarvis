@@ -36,10 +36,47 @@ SILENCE_END_S = 0.9          # end of speech after this much silence
 MIN_SPEECH_FRAMES = 3        # ~100ms of speech to count as real
 
 
+class TurnMetrics:
+    """Rolling per-turn latency breakdown (last 50 turns)."""
+
+    def __init__(self) -> None:
+        self.turns: list[dict] = []
+        self.current: dict = {}
+
+    def begin(self) -> None:
+        self.current = {"t0": time.time()}
+
+    def mark(self, key: str) -> None:
+        if self.current and key not in self.current:
+            self.current[key] = round((time.time() - self.current["t0"]) * 1000)
+
+    def finish(self) -> dict:
+        cur = self.current
+        cur["total_ms"] = round((time.time() - cur.get("t0", time.time())) * 1000)
+        cur.pop("t0", None)
+        self.turns.append(cur)
+        self.turns = self.turns[-50:]
+        self.current = {}
+        return cur
+
+    def summary(self) -> dict:
+        if not self.turns:
+            return {}
+        def med(key: str) -> int | None:
+            vals = sorted(t[key] for t in self.turns if key in t)
+            return vals[len(vals) // 2] if vals else None
+        return {"turns": len(self.turns),
+                "median_stt_ms": med("stt_ms"),
+                "median_first_token_ms": med("first_token_ms"),
+                "median_first_audio_ms": med("first_audio_ms"),
+                "median_total_ms": med("total_ms")}
+
+
 class Orchestrator:
     def __init__(self) -> None:
         self.sm = StateMachine()
         self.vad = StreamingVAD()
+        self.metrics = TurnMetrics()
         self._history: list[dict] = []
         self._turn_task: asyncio.Task | None = None
         self._listen_flag = asyncio.Event()   # push-to-talk pressed / listening on
@@ -70,8 +107,27 @@ class Orchestrator:
         mic.start()
         self._loop_task = asyncio.create_task(self._listen_loop())
         self._wake_task = asyncio.create_task(self._wake_loop())
+        self._watchdog_task = asyncio.create_task(self._llm_watchdog())
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
+
+    async def _llm_watchdog(self) -> None:
+        """Runtime self-healing: recover a dead llama-server without a restart."""
+        while True:
+            await asyncio.sleep(60)
+            if self.sm.state not in (State.IDLE, State.SLEEPING, State.ERROR):
+                continue  # never health-poke mid-turn
+            if await llama.healthy():
+                if self.sm.state == State.ERROR:
+                    await self.sm.to(State.IDLE, force=True)
+                continue
+            log.warning("llama-server unhealthy — attempting recovery")
+            if self.sm.state != State.ERROR:
+                await self.sm.to(State.ERROR, force=True)
+                await bus.emit("error", summary="language model connection lost — recovering")
+            if await llama.ensure():
+                await self.sm.to(State.IDLE, force=True)
+                await bus.emit("boot", summary="language model recovered")
 
     async def _llm_retry_loop(self) -> None:
         """Self-healing: keep retrying LLM startup with backoff (e.g. after OOM)."""
@@ -240,6 +296,7 @@ class Orchestrator:
     async def run_text_turn(self, text: str) -> None:
         """Typed input path — same pipeline, no STT."""
         await self.sm.to(State.PROCESSING, force=True)
+        self.metrics.begin()
         await bus.emit("transcript", role="user", text=text, source="text")
         try:
             await self._converse(text, time.time())
@@ -252,7 +309,9 @@ class Orchestrator:
     async def _run_turn(self, audio: np.ndarray) -> None:
         await self.sm.to(State.PROCESSING)
         t_start = time.time()
+        self.metrics.begin()
         text = await stt.transcribe(audio)
+        self.metrics.mark("stt_ms")
         await bus.emit("transcript", role="user", text=text,
                        stt_ms=int((time.time() - t_start) * 1000))
         if not text:
@@ -270,7 +329,11 @@ class Orchestrator:
         except Exception:
             log.exception("memory search failed — continuing without recall")
             mem_hits = []
-        mem_ctx = "\n".join(f"- {m['content']}" for m in mem_hits)
+        pinned = memory.list_pinned()
+        lines = [f"- {p}" for p in pinned]
+        lines += [f"- {m['content']}" for m in mem_hits
+                  if m["content"] not in pinned]
+        mem_ctx = "\n".join(lines)
 
         messages: list[dict] = [{"role": "system", "content": system_prompt(mem_ctx)}]
         messages += self._history[-10:]
@@ -301,7 +364,9 @@ class Orchestrator:
             self._history.append({"role": "assistant", "content": full_reply})
             self._history = self._history[-20:]
             memory.log_turn("assistant", full_reply)
-        await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000))
+        breakdown = self.metrics.finish()
+        await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
+                       breakdown=breakdown)
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
 
@@ -318,6 +383,7 @@ class Orchestrator:
             async for chunk in local_llm.stream(messages, tools=tools,
                                                 max_tokens=3072):
                 if chunk.text:
+                    self.metrics.mark("first_token_ms")
                     pending += chunk.text
                     full_text += chunk.text
                     await bus.emit("assistant_delta", text=chunk.text)
@@ -385,6 +451,7 @@ class Orchestrator:
                 async for chunk in tts.synthesize_stream(sentence, self._speak_cancel):
                     if self._speak_cancel.is_set():
                         break
+                    self.metrics.mark("first_audio_ms")
                     await speaker.play_chunk(chunk, tts.sample_rate)
                 if self._speak_cancel.is_set():
                     break  # interrupted — drop any remaining queued sentences

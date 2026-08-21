@@ -53,7 +53,9 @@ class LocalLLM:
 
         # Accumulate streamed tool-call fragments by index.
         pending_tools: dict[int, dict] = {}
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as c:
+        headers = {"Authorization": f"Bearer {llama.api_key}"} if llama.api_key else {}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10),
+                                     headers=headers) as c:
             async with c.stream(
                 "POST", f"{llama.base_url}/v1/chat/completions", json=body
             ) as resp:

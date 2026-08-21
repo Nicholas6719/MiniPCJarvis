@@ -18,6 +18,7 @@ pub struct SidecarInfo {
 pub struct Sidecar {
     pub info: SidecarInfo,
     child: Mutex<Option<Child>>,
+    resource_dir: Option<PathBuf>,
 }
 
 fn free_port() -> u16 {
@@ -58,13 +59,12 @@ fn sidecar_command(resource_dir: Option<PathBuf>) -> Option<Command> {
 }
 
 impl Sidecar {
-    pub fn start(resource_dir: Option<PathBuf>) -> Result<Self, String> {
-        let info = SidecarInfo {
-            port: free_port(),
-            token: random_token(),
-        };
-        let mut cmd =
-            sidecar_command(resource_dir).ok_or("sidecar runtime not found".to_string())?;
+    fn spawn_child(
+        resource_dir: &Option<PathBuf>,
+        info: &SidecarInfo,
+    ) -> Result<Child, String> {
+        let mut cmd = sidecar_command(resource_dir.clone())
+            .ok_or("sidecar runtime not found".to_string())?;
         cmd.arg("--port")
             .arg(info.port.to_string())
             .arg("--token")
@@ -77,11 +77,28 @@ impl Sidecar {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        let child = cmd.spawn().map_err(|e| format!("sidecar spawn: {e}"))?;
+        cmd.spawn().map_err(|e| format!("sidecar spawn: {e}"))
+    }
+
+    pub fn start(resource_dir: Option<PathBuf>) -> Result<Self, String> {
+        let info = SidecarInfo {
+            port: free_port(),
+            token: random_token(),
+        };
+        let child = Self::spawn_child(&resource_dir, &info)?;
         Ok(Self {
             info,
             child: Mutex::new(Some(child)),
+            resource_dir,
         })
+    }
+
+    /// Respawn with the SAME port/token so the UI's connection info stays valid.
+    pub fn restart(&self) -> Result<(), String> {
+        self.stop();
+        let child = Self::spawn_child(&self.resource_dir, &self.info)?;
+        *self.child.lock().unwrap() = Some(child);
+        Ok(())
     }
 
     pub fn is_alive(&self) -> bool {

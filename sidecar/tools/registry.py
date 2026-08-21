@@ -52,6 +52,28 @@ class ToolRegistry:
         self._tools: dict[str, Tool] = {}
         # confirmation_id -> future resolved by the UI's answer
         self._pending: dict[str, asyncio.Future] = {}
+        self._audit_db = None
+
+    def _audit(self, tool: str, args: Any, risk: str, status: str,
+               confirmed: bool | None = None) -> None:
+        """Persistent audit trail of every tool execution attempt."""
+        try:
+            if self._audit_db is None:
+                import sqlite3
+                from config import DB_PATH
+                self._audit_db = sqlite3.connect(DB_PATH, check_same_thread=False)
+                self._audit_db.execute(
+                    "CREATE TABLE IF NOT EXISTS audit_log ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, tool TEXT, "
+                    "args TEXT, risk TEXT, status TEXT, confirmed INTEGER)")
+            self._audit_db.execute(
+                "INSERT INTO audit_log (ts, tool, args, risk, status, confirmed) "
+                "VALUES (?,?,?,?,?,?)",
+                (time.time(), tool, json.dumps(args, default=str)[:1000], risk,
+                 status, None if confirmed is None else int(confirmed)))
+            self._audit_db.commit()
+        except Exception:
+            log.exception("audit write failed")
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -98,7 +120,9 @@ class ToolRegistry:
                 return {"ok": False, "error": "user did not confirm in time"}
             if not approved:
                 await bus.emit("tool_call", call_id=call_id, tool=name, status="denied")
+                self._audit(name, args, tool.risk.value, "denied", confirmed=False)
                 return {"ok": False, "error": "user declined the action"}
+            self._audit(name, args, tool.risk.value, "confirmed", confirmed=True)
 
         t0 = time.time()
         try:
@@ -110,6 +134,7 @@ class ToolRegistry:
             ms = int((time.time() - t0) * 1000)
             await bus.emit("tool_call", call_id=call_id, tool=name,
                            status="success", latency_ms=ms, result=_truncate(result))
+            self._audit(name, args, tool.risk.value, "success")
             return {"ok": True, "result": result}
         except asyncio.TimeoutError:
             await bus.emit("tool_call", call_id=call_id, tool=name, status="error",

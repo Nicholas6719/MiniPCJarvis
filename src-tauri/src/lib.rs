@@ -77,6 +77,37 @@ pub fn run() {
         });
     }
 
+    // Supervisor: if the sidecar process dies, restart it (same port/token)
+    // and re-push secrets. Backs off to avoid a crash loop.
+    {
+        let sc3 = sc.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut recent_restarts: Vec<std::time::Instant> = Vec::new();
+            loop {
+                tokio::time::sleep(Duration::from_secs(20)).await;
+                if sc3.is_alive() {
+                    continue;
+                }
+                recent_restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
+                if recent_restarts.len() >= 3 {
+                    // crash-looping — stop trying for this 10-minute window
+                    continue;
+                }
+                eprintln!("[jarvis] sidecar died — restarting");
+                if sc3.restart().is_ok() {
+                    recent_restarts.push(std::time::Instant::now());
+                    if sc3.wait_healthy(Duration::from_secs(180)).await {
+                        for name in credentials::KNOWN_SECRETS {
+                            if let Some(v) = credentials::get_secret(name) {
+                                push_secret_async(sc3.clone(), name.to_string(), v);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     let sc_for_state = sc.clone();
     let sc_for_hotkey = sc.clone();
     let sc_for_exit = sc.clone();

@@ -35,6 +35,10 @@ class MemoryStore:
     def __init__(self) -> None:
         self.db = sqlite3.connect(DB_PATH, check_same_thread=False)
         self.db.executescript(_SCHEMA)
+        # migration: pinned flag
+        cols = [r[1] for r in self.db.execute("PRAGMA table_info(memories)")]
+        if "pinned" not in cols:
+            self.db.execute("ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
         self._embedder = None
         self._lock = asyncio.Lock()
@@ -83,10 +87,30 @@ class MemoryStore:
 
     def list_all(self, limit: int = 200) -> list[dict]:
         rows = self.db.execute(
-            "SELECT id, ts, category, content, source, confidence FROM memories "
-            "ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+            "SELECT id, ts, category, content, source, confidence, pinned FROM memories "
+            "ORDER BY pinned DESC, ts DESC LIMIT ?", (limit,)).fetchall()
         return [{"id": r[0], "ts": r[1], "category": r[2], "content": r[3],
-                 "source": r[4], "confidence": r[5]} for r in rows]
+                 "source": r[4], "confidence": r[5], "pinned": bool(r[6])} for r in rows]
+
+    def list_pinned(self, limit: int = 10) -> list[str]:
+        rows = self.db.execute(
+            "SELECT content FROM memories WHERE pinned=1 ORDER BY ts DESC LIMIT ?",
+            (limit,)).fetchall()
+        return [r[0] for r in rows]
+
+    def set_pinned(self, memory_id: int, pinned: bool) -> bool:
+        cur = self.db.execute("UPDATE memories SET pinned=? WHERE id=?",
+                              (int(pinned), memory_id))
+        self.db.commit()
+        return cur.rowcount > 0
+
+    async def update_content(self, memory_id: int, content: str) -> bool:
+        vec = await asyncio.to_thread(self._embed, [content])
+        cur = self.db.execute(
+            "UPDATE memories SET content=?, embedding=?, source='edited' WHERE id=?",
+            (content, vec[0].tobytes(), memory_id))
+        self.db.commit()
+        return cur.rowcount > 0
 
     def forget(self, memory_id: int) -> bool:
         cur = self.db.execute("DELETE FROM memories WHERE id=?", (memory_id,))

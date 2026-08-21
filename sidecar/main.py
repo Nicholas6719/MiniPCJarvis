@@ -250,6 +250,25 @@ async def memory_forget(memory_id: int, x_jarvis_token: str | None = Header(None
     return {"ok": memory.forget(memory_id)}
 
 
+@app.patch("/memory/{memory_id}")
+async def memory_update(memory_id: int, body: dict,
+                        x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    ok = True
+    if "pinned" in body:
+        ok = memory.set_pinned(memory_id, bool(body["pinned"])) and ok
+    if body.get("content"):
+        ok = await memory.update_content(memory_id, str(body["content"])) and ok
+    return {"ok": ok}
+
+
+@app.get("/metrics")
+async def metrics(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    return {"summary": orchestrator.metrics.summary(),
+            "recent": orchestrator.metrics.turns[-10:]}
+
+
 @app.post("/text")
 async def text_input(body: dict, x_jarvis_token: str | None = Header(None)):
     """Typed input path (secondary to voice) — runs the same turn pipeline."""
