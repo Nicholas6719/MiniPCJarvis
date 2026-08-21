@@ -27,7 +27,7 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["tkinter", "matplotlib", "PIL", "pyinstaller"],
+    excludes=["tkinter", "matplotlib", "pyinstaller"],  # PIL required by fastembed
     noarchive=False,
 )
 

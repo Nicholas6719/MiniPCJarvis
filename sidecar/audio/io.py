@@ -93,11 +93,18 @@ class Microphone:
 
 
 class Speaker:
-    """Plays float32 chunks; cancellable mid-stream for barge-in."""
+    """Plays float32 chunks; cancellable mid-stream for barge-in.
+
+    PortAudio safety: closing a stream while another thread is blocked inside
+    write() crashes natively. abort() first unblocks the writer, then the
+    close happens under the write lock so the two can never overlap.
+    """
 
     def __init__(self) -> None:
+        import threading
         self._stream: sd.OutputStream | None = None
         self._rate: int | None = None
+        self._wlock = threading.Lock()
 
     def _ensure(self, rate: int) -> sd.OutputStream:
         if self._stream is None or self._rate != rate:
@@ -111,27 +118,52 @@ class Speaker:
 
     async def play_chunk(self, chunk: np.ndarray, rate: int) -> None:
         stream = self._ensure(rate)
-        await asyncio.to_thread(stream.write, chunk.reshape(-1, 1))
+
+        def _write() -> None:
+            with self._wlock:
+                if stream.closed:
+                    return
+                try:
+                    stream.write(chunk.reshape(-1, 1))
+                except Exception as e:
+                    log.debug("write after abort: %s", e)
+
+        await asyncio.to_thread(_write)
 
     def abort(self) -> None:
         """Immediately stop output (drops buffered audio)."""
-        if self._stream is not None:
+        stream = self._stream
+        if stream is None:
+            return
+        try:
+            stream.abort()  # unblocks any in-flight write
+        except Exception:
+            pass
+        with self._wlock:  # writer has returned; safe to close
             try:
-                self._stream.abort()
-                self._stream.close()
+                stream.close()
             except Exception:
                 pass
-            self._stream = None
-            self._rate = None
+            if self._stream is stream:
+                self._stream = None
+                self._rate = None
 
     def close(self) -> None:
-        if self._stream is not None:
+        stream = self._stream
+        if stream is None:
+            return
+        try:
+            stream.stop()
+        except Exception:
+            pass
+        with self._wlock:
             try:
-                self._stream.stop()
-                self._stream.close()
+                stream.close()
             except Exception:
                 pass
-            self._stream = None
+            if self._stream is stream:
+                self._stream = None
+                self._rate = None
 
 
 mic = Microphone()

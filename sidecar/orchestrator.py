@@ -93,6 +93,28 @@ class Orchestrator:
                 await self.sm.to(State.IDLE, force=True)
                 return
 
+    # ---------- proactive announcements ----------
+
+    async def announce(self, text: str) -> None:
+        """Speak proactively (reminders etc). Only interrupts IDLE; otherwise
+        the message still reaches the user via the event stream/transcript."""
+        await bus.emit("announcement", text=text)
+        memory.log_turn("assistant", text)
+        if self.sm.state != State.IDLE:
+            return
+        await self.sm.to(State.SPEAKING, force=True)
+        cancel = asyncio.Event()
+        self._speak_cancel = cancel
+        try:
+            await bus.emit("speaking", text=text)
+            async for chunk in tts.synthesize_stream(text, cancel):
+                if cancel.is_set():
+                    break
+                await speaker.play_chunk(chunk, tts.sample_rate)
+        finally:
+            if self.sm.state == State.SPEAKING:
+                await self.sm.to(State.IDLE, force=True)
+
     # ---------- wake word ----------
 
     async def _wake_loop(self) -> None:
@@ -175,6 +197,10 @@ class Orchestrator:
                     await self._turn_task
                 except asyncio.CancelledError:
                     pass
+                except Exception as e:
+                    log.exception("voice turn failed")
+                    await bus.emit("error", summary=f"turn failed: {e}")
+                    await self.sm.to(State.IDLE, force=True)
             else:
                 await asyncio.sleep(0.05)
 
@@ -215,7 +241,13 @@ class Orchestrator:
         """Typed input path — same pipeline, no STT."""
         await self.sm.to(State.PROCESSING, force=True)
         await bus.emit("transcript", role="user", text=text, source="text")
-        await self._converse(text, time.time())
+        try:
+            await self._converse(text, time.time())
+        except Exception as e:
+            # a failed turn must never wedge the state machine
+            log.exception("text turn failed")
+            await bus.emit("error", summary=f"turn failed: {e}")
+            await self.sm.to(State.IDLE, force=True)
 
     async def _run_turn(self, audio: np.ndarray) -> None:
         await self.sm.to(State.PROCESSING)
@@ -233,7 +265,11 @@ class Orchestrator:
 
     async def _converse(self, text: str, t_start: float) -> None:
         memory.log_turn("user", text)
-        mem_hits = await memory.search(text, top_k=4)
+        try:
+            mem_hits = await memory.search(text, top_k=4)
+        except Exception:
+            log.exception("memory search failed — continuing without recall")
+            mem_hits = []
         mem_ctx = "\n".join(f"- {m['content']}" for m in mem_hits)
 
         messages: list[dict] = [{"role": "system", "content": system_prompt(mem_ctx)}]
@@ -277,7 +313,10 @@ class Orchestrator:
         for _round in range(6):
             pending = ""
             tool_calls: list[dict] | None = None
-            async for chunk in local_llm.stream(messages, tools=tools):
+            # generous budget: gpt-oss spends tokens on hidden reasoning first —
+            # a tight cap silently starves the spoken reply (see Houston notes)
+            async for chunk in local_llm.stream(messages, tools=tools,
+                                                max_tokens=3072):
                 if chunk.text:
                     pending += chunk.text
                     full_text += chunk.text
@@ -298,6 +337,12 @@ class Orchestrator:
                 await speak_queue.put(pending.strip())
 
             if not tool_calls:
+                if not full_text.strip():
+                    # never end a turn in silence (e.g. reasoning ate the budget)
+                    fallback = "Sorry, I lost my train of thought. Ask me again?"
+                    await bus.emit("assistant_delta", text=fallback)
+                    await speak_queue.put(fallback)
+                    return fallback
                 return full_text
 
             # execute tools, then loop for the model's follow-up

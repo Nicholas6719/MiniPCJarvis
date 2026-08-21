@@ -21,7 +21,8 @@ from events import bus
 from memory.store import memory
 from orchestrator import orchestrator
 from state_machine import State
-from tools import builtin, memory_tools, web_tools, windows_tools
+from tasks.scheduler import scheduler
+from tools import builtin, memory_tools, task_tools, vision_tools, web_tools, windows_tools
 from tools.registry import registry
 
 logging.basicConfig(
@@ -43,8 +44,15 @@ async def lifespan(app: FastAPI):
     memory_tools.register_all()
     windows_tools.register_all()
     web_tools.register_all()
+    task_tools.register_all()
+    vision_tools.register_all()
+    scheduler.announce = orchestrator.announce
+    scheduler.start()
     asyncio.create_task(orchestrator.start())
     yield
+    scheduler.stop()
+    from llm.vision_server import vision
+    await vision.stop()
     await orchestrator.shutdown()
 
 
