@@ -79,6 +79,29 @@ class _KillOnCloseJob:
 _job = _KillOnCloseJob()
 
 
+def _pid_on_port(port: int) -> int | None:
+    try:
+        import psutil
+        for c in psutil.net_connections(kind="tcp"):
+            if c.laddr and c.laddr.port == port and c.status == "LISTEN":
+                return c.pid
+    except Exception:
+        pass
+    return None
+
+
+def _parent_alive(pid: int | None) -> bool:
+    """True if the process has a living, non-system parent (someone manages it)."""
+    if not pid:
+        return True  # unknown — be conservative, treat as owned
+    try:
+        import psutil
+        parent = psutil.Process(pid).parent()
+        return parent is not None and parent.is_running() and parent.pid > 4
+    except Exception:
+        return True
+
+
 class LlamaServer:
     def __init__(self) -> None:
         import secrets as _secrets
@@ -92,6 +115,7 @@ class LlamaServer:
             self.port = s.getsockname()[1]
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.external = False  # adopted server owned by another app (e.g. Houston)
+        self.adopted_pid: int | None = None
         # per-session API key so other local processes can't use our server
         self.api_key: str | None = _secrets.token_hex(16)
         self._starting = asyncio.Lock()
@@ -100,6 +124,9 @@ class LlamaServer:
     def running(self) -> bool:
         if self.external:
             return True
+        if self.proc is None and self.adopted_pid:
+            import psutil
+            return psutil.pid_exists(self.adopted_pid)
         return self.proc is not None and self.proc.poll() is None
 
     async def _try_adopt(self, model_name: str) -> bool:
@@ -119,11 +146,20 @@ class LlamaServer:
                     if any(want == i or want in i for i in ids):
                         self.base_url = f"http://127.0.0.1:{port}"
                         self.model_name = model_name
-                        self.external = True
                         self.api_key = None  # shared servers are unauthenticated
                         self.proc = None
-                        log.info("adopted external llama-server on :%s for %s",
-                                 port, model_name)
+                        # Is anyone still managing it? If its parent is dead it's
+                        # an orphan — take ownership so we shut it down on exit.
+                        self.adopted_pid = _pid_on_port(port)
+                        owner_alive = _parent_alive(self.adopted_pid)
+                        self.external = owner_alive
+                        if not owner_alive and self.adopted_pid:
+                            # bind the orphan to our job object: it dies with us
+                            # even if we're hard-killed
+                            _job.assign(self.adopted_pid)
+                        log.info("adopted %s llama-server on :%s for %s (pid %s)",
+                                 "shared" if owner_alive else "orphaned",
+                                 port, model_name, self.adopted_pid)
                         return True
             except Exception:
                 continue
@@ -200,6 +236,17 @@ class LlamaServer:
             self.external = False
             self.model_name = None
             self.base_url = f"http://127.0.0.1:{self.port}"
+            return
+        if self.proc is None and getattr(self, "adopted_pid", None):
+            # orphan we took ownership of
+            try:
+                import psutil
+                psutil.Process(self.adopted_pid).kill()
+                log.info("stopped adopted orphan llama-server pid %s", self.adopted_pid)
+            except Exception:
+                pass
+            self.adopted_pid = None
+            self.model_name = None
             return
         if self.proc is not None:
             try:

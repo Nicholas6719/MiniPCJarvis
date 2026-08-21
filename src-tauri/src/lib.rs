@@ -111,6 +111,7 @@ pub fn run() {
     let sc_for_state = sc.clone();
     let sc_for_hotkey = sc.clone();
     let sc_for_exit = sc.clone();
+    let sc_for_close = sc.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
@@ -184,11 +185,13 @@ pub fn run() {
                 .build(app)?;
             Ok(())
         })
-        .on_window_event(|window, event| {
-            // Close button hides to tray; Exit lives in the tray menu.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+        .on_window_event(move |window, event| {
+            // Close button = full shutdown, immediately: kill the backend
+            // (which takes the model server and any in-progress speech with
+            // it) and exit. The tray "Exit" does the same.
+            if let WindowEvent::CloseRequested { .. } = event {
+                sc_for_close.stop();
+                window.app_handle().exit(0);
             }
         })
         .build(tauri::generate_context!())
