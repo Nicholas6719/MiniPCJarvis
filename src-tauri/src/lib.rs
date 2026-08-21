@@ -189,9 +189,16 @@ pub fn run() {
             // Close button = full shutdown, immediately: kill the backend
             // (which takes the model server and any in-progress speech with
             // it) and exit. The tray "Exit" does the same.
-            if let WindowEvent::CloseRequested { .. } = event {
-                sc_for_close.stop();
-                window.app_handle().exit(0);
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // vanish instantly, tear down in the background, then exit
+                api.prevent_close();
+                let _ = window.hide();
+                let sc = sc_for_close.clone();
+                let app = window.app_handle().clone();
+                std::thread::spawn(move || {
+                    sc.stop();
+                    app.exit(0);
+                });
             }
         })
         .build(tauri::generate_context!())
