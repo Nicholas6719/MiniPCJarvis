@@ -276,6 +276,36 @@ async def memory_update(memory_id: int, body: dict,
     return {"ok": ok}
 
 
+@app.post("/debug/inject_audio")
+async def debug_inject_audio(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): push float32 16 kHz audio into the mic
+    broadcast as if the microphone heard it. Lets the wake/capture loop be
+    tested end-to-end without hardware."""
+    _auth(x_jarvis_token)
+    import os, base64
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    import numpy as np
+    from audio.io import mic
+    audio = np.frombuffer(base64.b64decode(body["audio_b64"]), dtype=np.float32)
+    # pause the hardware mic so injected audio isn't interleaved with room noise
+    mic.stop()
+    try:
+        for i in range(0, len(audio), 1024):
+            blk = audio[i:i + 1024]
+            if len(blk) < 1024:
+                blk = np.pad(blk, (0, 1024 - len(blk)))
+            mic._put(blk.copy())
+            await asyncio.sleep(1024 / 16000)  # real-time pacing
+        # keep feeding silence while the turn captures end-of-speech
+        for _ in range(int(16000 * 1.5 / 1024)):
+            mic._put(np.zeros(1024, dtype=np.float32))
+            await asyncio.sleep(1024 / 16000)
+    finally:
+        mic.start()
+    return {"ok": True, "seconds": round(len(audio) / 16000, 2)}
+
+
 @app.get("/transcript")
 async def transcript(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

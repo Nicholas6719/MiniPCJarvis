@@ -45,8 +45,14 @@ DEFAULTS: dict[str, Any] = {
     },
     "stt": {"model": "small.en", "compute_type": "int8", "device": "cpu"},
     "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
-    "audio": {"input_device": None, "output_device": None},
-    "wake": {"mode": "push_to_talk"},
+    "audio": {"input_device": None, "output_device": None,
+              "sound_cues": True, "boot_sound": True},
+    # threshold 0.45: "Hey Jarvis" scores ~0.99, bare "Jarvis" 0.46-0.95 by voice,
+    # confusables (service/nervous/harvest) 0.00-0.04. Raise if the TV wakes him,
+    # lower if bare "Jarvis" gets missed.
+    "wake": {"mode": "push_to_talk", "threshold": 0.45},
+    "conversation": {"window_s": 8},      # follow-up without wake word after a reply
+    "interrupt": {"mode": "wake_word"},   # wake_word | any_speech
     "memory": {"enabled": True},
     "search": {"provider": "brave"},
     # MCP plugin servers: {"name": {"command": "...", "args": [...], "risk": "medium"}}

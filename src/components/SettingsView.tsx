@@ -90,9 +90,29 @@ export function SettingsView() {
         </label>
         <label>Wake sensitivity
           <input type="range" min={0.3} max={0.8} step={0.05}
-                 value={cfg.wake?.threshold ?? 0.5}
+                 value={cfg.wake?.threshold ?? 0.45}
                  onChange={(e) => patch({ wake: { threshold: Number(e.target.value) } })} />
-          <span className="settings__val">{(cfg.wake?.threshold ?? 0.5).toFixed(2)}</span>
+          <span className="settings__val">{(cfg.wake?.threshold ?? 0.45).toFixed(2)}</span>
+        </label>
+        <label>Follow-up window (seconds without repeating the wake word)
+          <input type="range" min={0} max={20} step={1}
+                 value={cfg.conversation?.window_s ?? 8}
+                 onChange={(e) => patch({ conversation: { window_s: Number(e.target.value) } })} />
+          <span className="settings__val">{cfg.conversation?.window_s ?? 8}s</span>
+        </label>
+        <label>Interrupting JARVIS while he speaks
+          <select value={cfg.interrupt?.mode ?? "wake_word"}
+                  onChange={(e) => patch({ interrupt: { mode: e.target.value } })}>
+            <option value="wake_word">Only his name stops him (safe with speakers)</option>
+            <option value="any_speech">Any speech stops him (headset / isolated mic)</option>
+          </select>
+        </label>
+        <label className="settings__row settings__row--toggle">
+          <span>Sound cues (wake chime, boot, attention tone)</span>
+          <button className={`toggle ${cfg.audio?.sound_cues !== false ? "toggle--on" : ""}`}
+                  onClick={() => patch({ audio: { sound_cues: !(cfg.audio?.sound_cues !== false) } })}>
+            <span className="toggle__knob" />
+          </button>
         </label>
       </section>
 

@@ -18,6 +18,10 @@ from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
 from audio.wake import wake
+from audio.sounds import PALETTE
+import collections
+import re as _re
+from config import config
 from events import bus
 from llm.llama_server import llama
 from llm.prompts import system_prompt
@@ -28,6 +32,7 @@ from tools.registry import registry
 
 log = logging.getLogger("jarvis.orchestrator")
 
+WAKE_PHRASE = _re.compile(r"^\s*(?:hey|hi|ok|okay|yo)?[,\s]*jarvis[,.!?\s]*", _re.I)
 STOP_WORDS = re.compile(r"^\s*(stop|cancel|never\s*mind|nevermind|shut\s*up|quiet|that's\s+enough)\W*$", re.I)
 SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
 
@@ -83,7 +88,35 @@ class Orchestrator:
         self._speak_cancel = asyncio.Event()
         self._loop_task: asyncio.Task | None = None
         self._wake_task: asyncio.Task | None = None
+        self._preroll: np.ndarray | None = None     # audio from before the wake word fired
+        self._armed_until: float = 0.0               # conversation window (no wake word needed)
+        self._sounds = {k: f() for k, f in PALETTE.items()}  # built once, replayed
         self.sm.on_change(self._announce_state)
+
+    # ---------- sound cues ----------
+
+    async def play_sound(self, name: str) -> None:
+        if not config.get("audio", "sound_cues", default=True):
+            return
+        snd = self._sounds.get(name)
+        if snd is None:
+            return
+        try:
+            from audio.sounds import RATE
+            await speaker.play_chunk(snd, RATE)
+        except Exception as e:
+            log.debug("sound %s failed: %s", name, e)
+
+    def _arm_conversation(self) -> None:
+        """Open the follow-up window: speech alone opens a turn, no wake word."""
+        mode = config.get("wake", "mode", default="push_to_talk")
+        win = float(config.get("conversation", "window_s", default=8))
+        if mode in ("wake_word", "both") and win > 0:
+            self._armed_until = time.time() + win
+
+    @property
+    def armed(self) -> bool:
+        return time.time() < self._armed_until
 
     async def _announce_state(self, old: State, new: State) -> None:
         await bus.emit("state", state=new.value, prev=old.value)
@@ -115,6 +148,8 @@ class Orchestrator:
         self._loop_task = asyncio.create_task(self._listen_loop())
         self._wake_task = asyncio.create_task(self._wake_loop())
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
+        if config.get("audio", "boot_sound", default=True):
+            asyncio.create_task(self.play_sound("boot"))
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
 
@@ -169,6 +204,8 @@ class Orchestrator:
         cancel = asyncio.Event()
         self._speak_cancel = cancel
         try:
+            await self.play_sound("attention")  # 'this wasn't asked for'
+            await asyncio.sleep(0.3)
             await bus.emit("speaking", text=text)
             async for chunk in tts.synthesize_stream(text, cancel):
                 if cancel.is_set():
@@ -181,9 +218,17 @@ class Orchestrator:
     # ---------- wake word ----------
 
     async def _wake_loop(self) -> None:
-        """Always-listening 'hey jarvis' detector; active only while IDLE."""
+        """Always-listening detector, active while IDLE.
+
+        - keeps a rolling pre-roll so the words spoken *during* wake-word
+          detection ("hey jarvis what time is it") are not lost
+        - while the conversation window is armed, plain speech opens a turn
+        """
         q = mic.subscribe()
         last_fire = 0.0
+        preroll: collections.deque = collections.deque(maxlen=int(MIC_RATE * 2.0 / 1024) + 1)
+        armed_vad = StreamingVAD(threshold=0.6)
+        consec = 0
         try:
             await asyncio.to_thread(wake.warmup)
         except Exception as e:
@@ -193,19 +238,34 @@ class Orchestrator:
         try:
             while True:
                 block = await q.get()
+                preroll.append(block)
                 mode = config.get("wake", "mode", default="push_to_talk")
                 if mode not in ("wake_word", "both") or self.sm.state != State.IDLE:
-                    # stay subscribed but ignore audio; cheap enough
+                    consec = 0
                     continue
+                # follow-up window: speech alone is enough
+                if self.armed:
+                    probs = armed_vad.feed(block)
+                    consec = consec + 1 if any(p >= armed_vad.threshold for p in probs) else 0
+                    if consec >= 3:
+                        consec = 0
+                        log.info("follow-up speech (conversation window)")
+                        self._preroll = np.concatenate(list(preroll)[-8:])  # ~0.5 s lead-in
+                        self._armed_until = 0.0
+                        self.vad.reset()
+                        self._listen_flag.set()
+                        continue
                 score = await asyncio.to_thread(wake.feed, block)
                 if score >= wake.threshold and time.time() - last_fire > 2.0:
                     last_fire = time.time()
                     log.info("wake word detected (%.2f)", score)
                     await bus.emit("wake", score=round(score, 2))
                     wake.reset()
-                    mic.drain()
+                    self._preroll = np.concatenate(list(preroll))
+                    preroll.clear()
                     self.vad.reset()
                     self._listen_flag.set()
+                    await self.play_sound("chime")
         except asyncio.CancelledError:
             raise
         finally:
@@ -274,6 +334,15 @@ class Orchestrator:
         last_speech_t: float | None = None
         t0 = time.time()
         self.vad.reset()
+        lead_in = self._preroll
+        self._preroll = None
+        if lead_in is not None and len(lead_in):
+            # the wake phrase (and any words already spoken) live in here;
+            # count it as speech so a command said in one breath is kept
+            buf.append(lead_in)
+            speech_frames = MIN_SPEECH_FRAMES
+            last_speech_t = time.time()
+        mic.drain()
         while True:
             if time.time() - t0 > MAX_UTTERANCE_S:
                 break
@@ -319,15 +388,28 @@ class Orchestrator:
         self.metrics.begin()
         text = await stt.transcribe(audio)
         self.metrics.mark("stt_ms")
+        text = WAKE_PHRASE.sub("", text or "", count=1).strip()
         await bus.emit("transcript", role="user", text=text,
                        stt_ms=int((time.time() - t_start) * 1000))
         if not text:
-            await self.sm.to(State.IDLE)
+            # just the wake word — acknowledge and open the window
+            await self.sm.to(State.SPEAKING, force=True)
+            cancel = asyncio.Event()
+            self._speak_cancel = cancel
+            try:
+                async for chunk in tts.synthesize_stream("Yes?", cancel):
+                    if cancel.is_set():
+                        break
+                    await speaker.play_chunk(chunk, tts.sample_rate)
+            finally:
+                await self.sm.to(State.IDLE, force=True)
+            self._arm_conversation()
             return
         if STOP_WORDS.match(text):
             await self.sm.to(State.IDLE)
             return
         await self._converse(text, t_start)
+        self._arm_conversation()
 
     async def _converse(self, text: str, t_start: float) -> None:
         memory.log_turn("user", text)
@@ -477,7 +559,13 @@ class Orchestrator:
             barge_task.cancel()
 
     async def _barge_in_watch(self) -> None:
-        """While speaking, watch the mic for user speech → interrupt."""
+        """While speaking, watch for the user cutting in.
+
+        interrupt.mode = "wake_word" (default): only his name interrupts him —
+        immune to his own voice bleeding from speakers into the mic.
+        interrupt.mode = "any_speech": any sustained speech interrupts
+        (needs a headset or good echo isolation).
+        """
         vad = StreamingVAD(threshold=0.75)
         consec = 0
         q = mic.subscribe()
@@ -487,19 +575,29 @@ class Orchestrator:
                 if self.sm.state != State.SPEAKING:
                     consec = 0
                     continue
-                probs = vad.feed(block)
-                consec = consec + sum(1 for p in probs if p >= vad.threshold) \
-                    if any(p >= vad.threshold for p in probs) else 0
-                if consec >= 6:  # ~200ms of sustained speech over TTS output
-                    log.info("barge-in detected")
+                mode = config.get("interrupt", "mode", default="wake_word")
+                fired = False
+                if mode == "any_speech":
+                    probs = vad.feed(block)
+                    consec = (consec + sum(1 for p in probs if p >= vad.threshold)
+                              if any(p >= vad.threshold for p in probs) else 0)
+                    fired = consec >= 6
+                else:
+                    score = await asyncio.to_thread(wake.feed, block)
+                    fired = score >= wake.threshold
+                if fired:
+                    log.info("barge-in detected (%s)", mode)
                     self._speak_cancel.set()
                     speaker.abort()
+                    wake.reset()
                     await self.sm.to(State.INTERRUPTED, force=True)
                     await bus.emit("interrupted", reason="barge-in")
                     mic.drain()
                     self.vad.reset()
+                    self._preroll = None
                     self._listen_flag.set()  # capture what the user is saying
                     await self.sm.to(State.LISTENING, force=True)
+                    await self.play_sound("chime")  # same cue: 'listening now'
                     return
         except asyncio.CancelledError:
             raise
