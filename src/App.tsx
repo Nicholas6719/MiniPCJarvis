@@ -5,6 +5,7 @@ import { ActivityLog } from "./components/ActivityLog";
 import { ConfirmationModal } from "./components/ConfirmationModal";
 import { MemoryView } from "./components/MemoryView";
 import { SettingsView } from "./components/SettingsView";
+import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
 import { useStore, View } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
 
@@ -60,6 +61,8 @@ export default function App() {
         </section>
       </main>
       <ConfirmationModal />
+      <FirstRunSetup />
+      <BootOverlay />
     </div>
   );
 }

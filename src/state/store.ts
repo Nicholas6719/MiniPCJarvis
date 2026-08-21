@@ -120,6 +120,17 @@ export const useStore = create<Store>((set, get) => ({
       case "error":
         push({ id: evt.id, ts: evt.ts, kind: evt.kind, summary: evt.summary ?? evt.kind });
         break;
+      case "research": {
+        const label =
+          evt.stage === "searching" ? `research: searching "${evt.query}"` :
+          evt.stage === "reading" ? `research: reading ${evt.sources?.length ?? 0} sources` :
+          `research: done (${evt.fetched}/${evt.total} sources read)`;
+        push({
+          id: evt.id, ts: evt.ts, kind: "research", summary: label,
+          detail: evt.sources?.map((s: any) => s.title || s.url).join(" · "),
+        });
+        break;
+      }
       case "wake":
         push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
         break;

@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 datas, binaries, hiddenimports = [], [], []
 
 for pkg in ["faster_whisper", "piper", "fastembed", "onnxruntime", "tokenizers",
-            "openwakeword"]:
+            "openwakeword", "trafilatura", "pycaw", "comtypes"]:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -17,6 +17,8 @@ hiddenimports += [
     "uvicorn.protocols.websockets", "uvicorn.protocols.websockets.auto",
     "uvicorn.lifespan", "uvicorn.lifespan.on",
     "sounddevice", "_sounddevice_data",
+    "win32gui", "win32con", "win32clipboard", "win32api",
+    "mss", "webbrowser",
 ]
 
 a = Analysis(

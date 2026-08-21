@@ -17,6 +17,7 @@ LOG_DIR.mkdir(exist_ok=True)
 DB_PATH = APP_DIR / "jarvis.db"
 
 DEFAULTS: dict[str, Any] = {
+    "general": {"first_run_complete": False},
     "llm": {
         "server_binary": r"C:\AI\llama.cpp\llama-server.exe",
         "port": 8033,

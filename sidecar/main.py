@@ -21,7 +21,7 @@ from events import bus
 from memory.store import memory
 from orchestrator import orchestrator
 from state_machine import State
-from tools import builtin, memory_tools
+from tools import builtin, memory_tools, web_tools, windows_tools
 from tools.registry import registry
 
 logging.basicConfig(
@@ -41,6 +41,8 @@ SESSION_TOKEN = ""
 async def lifespan(app: FastAPI):
     builtin.register_all()
     memory_tools.register_all()
+    windows_tools.register_all()
+    web_tools.register_all()
     asyncio.create_task(orchestrator.start())
     yield
     await orchestrator.shutdown()

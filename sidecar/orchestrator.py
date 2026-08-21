@@ -310,7 +310,9 @@ class Orchestrator:
                     for tc in tool_calls],
             })
             for tc in tool_calls:
-                state = State.SEARCHING if tc["name"] == "web_search" else State.EXECUTING
+                state = (State.SEARCHING
+                         if tc["name"] in ("web_search", "research", "fetch_page")
+                         else State.EXECUTING)
                 await self.sm.to(state, force=True)
                 result = await registry.execute(tc["name"], tc["arguments"])
                 messages.append({
