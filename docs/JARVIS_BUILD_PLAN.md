@@ -59,7 +59,7 @@ unusable for voice).
 | 9 | Proactive intelligence: disk/RAM/work-session monitors + full suppression stack (quiet hours, cooldowns, hourly cap, idle-only, master toggle + Settings UI) | **DONE 2026-08-21** — 7/7 suppression tests; live-fire verified spoken announcement |
 | 10 | Hardening + observability: persistent audit log for all tool executions, per-session API key on llama-server (401 without it), turn-latency metrics (/metrics: stt/first-token/first-audio/total medians), runtime LLM watchdog (kill→auto-recover, verified 67 s), Rust sidecar supervisor (auto-restart same port/token, crash-loop backoff), memory pin/edit UI + pinned-always-in-context | **DONE 2026-08-21** |
 | 11 | Kokoro TTS upgrade (bm_george default, 3.4-3.8x realtime, Piper fallback via TTSRouter) + interactive browser agent (Playwright on system Edge — bundled Chromium needs admin-gated MSVC runtime; 6 tools w/ observe-act-verify contract, submit is MEDIUM-gated) + dynamic llama-server port (fixes orphan-port 401 class) | **DONE 2026-08-21** — browser flow verified at session level (type/submit/back) and via LLM turn; Kokoro benchmarked. Webcam presence features still queued (hardware in transit) |
-| 12 | Plugin/MCP system | queued |
+| 12 | MCP plugin system (config-driven stdio servers, MEDIUM-risk default, tools flow through the gated registry) + transcript hydration + TROUBLESHOOTING/CHANGELOG docs | **DONE 2026-08-21** — demo server: 2 tools registered and executed through the registry |
 
 ## Current Risks
 

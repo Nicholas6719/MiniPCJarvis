@@ -50,6 +50,8 @@ async def lifespan(app: FastAPI):
     browser_tools.register_all()
     scheduler.announce = orchestrator.announce
     scheduler.start()
+    from mcp_client import mcp_manager
+    asyncio.create_task(mcp_manager.start())
     from proactive import proactive
     proactive.announce = orchestrator.announce
     proactive.start()
@@ -57,6 +59,8 @@ async def lifespan(app: FastAPI):
     yield
     proactive.stop()
     scheduler.stop()
+    from mcp_client import mcp_manager
+    await mcp_manager.stop()
     from browser.session import browser
     await browser.close()
     from llm.vision_server import vision
@@ -270,6 +274,12 @@ async def memory_update(memory_id: int, body: dict,
     if body.get("content"):
         ok = await memory.update_content(memory_id, str(body["content"])) and ok
     return {"ok": ok}
+
+
+@app.get("/transcript")
+async def transcript(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    return {"transcript": memory.recent_transcript(30)}
 
 
 @app.get("/metrics")

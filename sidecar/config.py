@@ -49,6 +49,8 @@ DEFAULTS: dict[str, Any] = {
     "wake": {"mode": "push_to_talk"},
     "memory": {"enabled": True},
     "search": {"provider": "brave"},
+    # MCP plugin servers: {"name": {"command": "...", "args": [...], "risk": "medium"}}
+    "mcp": {"servers": {}},
     "proactive": {
         "enabled": True,
         "quiet_start": "22:00",

@@ -59,6 +59,7 @@ interface Store {
   setAutoSwitch: (b: boolean) => void;
   onEvent: (evt: any) => void;
   clearConfirmation: () => void;
+  hydrateTranscript: (rows: { role: string; content: string }[]) => void;
 }
 
 let draftId = "";
@@ -77,6 +78,17 @@ export const useStore = create<Store>((set, get) => ({
   setView: (v) => set({ view: v }),
   setAutoSwitch: (b) => set({ autoSwitch: b }),
   clearConfirmation: () => set({ confirmation: null }),
+  hydrateTranscript: (rows) =>
+    set((st) => st.transcript.length > 0 ? {} : {
+      transcript: rows
+        .filter((r) => r.role === "user" || r.role === "assistant")
+        .map((r, i) => ({
+          id: `hist-${i}`,
+          role: r.role as "user" | "assistant",
+          text: r.content,
+          ts: 0,
+        })),
+    }),
 
   onEvent: (evt) => {
     const push = (a: ActivityEntry) =>

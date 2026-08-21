@@ -30,6 +30,16 @@ export default function App() {
 
   useEffect(() => connectEvents(onEvent), [onEvent]);
 
+  // hydrate conversation history so restarting the window keeps continuity
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api("/transcript");
+        useStore.getState().hydrateTranscript(r.transcript);
+      } catch {}
+    })();
+  }, []);
+
   const micClick = async () => {
     try {
       await api("/listen/toggle", { method: "POST" });
