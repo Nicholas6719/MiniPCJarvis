@@ -102,6 +102,81 @@ async def confirm(body: dict, x_jarvis_token: str | None = Header(None)):
     return {"ok": ok}
 
 
+@app.get("/config")
+async def get_config(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    return {"config": config.data}
+
+
+@app.patch("/config")
+async def patch_config(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Merge partial settings and apply them live where possible."""
+    _auth(x_jarvis_token)
+    from config import _merge
+    old = config.data
+    config.data = _merge(config.data, body)
+    config.save()
+
+    applied = []
+    if body.get("tts"):
+        from audio.tts import tts
+        tts.reload()
+        applied.append("tts")
+    if body.get("stt"):
+        from audio.stt import stt
+        stt.reload()
+        applied.append("stt")
+    if (body.get("audio") or {}).get("input_device") is not None:
+        from audio.io import mic
+        mic.restart()
+        applied.append("microphone")
+    if (body.get("audio") or {}).get("output_device") is not None:
+        from audio.io import speaker
+        speaker.close()
+        applied.append("speaker")
+    new_model = (body.get("llm") or {}).get("active_model")
+    if new_model and new_model != (old.get("llm") or {}).get("active_model"):
+        from llm.llama_server import llama
+        ok = await llama.ensure(new_model)
+        applied.append(f"llm:{new_model}:{'ok' if ok else 'FAILED'}")
+    await bus.emit("config_changed", applied=applied)
+    return {"ok": True, "applied": applied}
+
+
+@app.get("/audio/devices")
+async def audio_devices(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    import sounddevice as sd
+    devs = sd.query_devices()
+    return {
+        "input": [{"id": i, "name": d["name"]}
+                  for i, d in enumerate(devs) if d["max_input_channels"] > 0],
+        "output": [{"id": i, "name": d["name"]}
+                   for i, d in enumerate(devs) if d["max_output_channels"] > 0],
+        "default_input": sd.default.device[0],
+        "default_output": sd.default.device[1],
+    }
+
+
+@app.get("/voices")
+async def voices(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from audio.tts import VOICES_DIR
+    installed = sorted(p.stem for p in VOICES_DIR.glob("*.onnx"))
+    return {"voices": installed, "active": config.get("tts", "voice")}
+
+
+@app.get("/models")
+async def models(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from llm.llama_server import llama
+    return {
+        "models": list(config.get("llm", "models", default={}).keys()),
+        "active": llama.model_name or config.get("llm", "active_model"),
+        "external": llama.external,
+    }
+
+
 @app.get("/memory")
 async def memory_list(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

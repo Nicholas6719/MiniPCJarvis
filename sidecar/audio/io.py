@@ -16,12 +16,26 @@ MIC_BLOCK = 1024  # 64 ms
 
 
 class Microphone:
-    """Continuous 16 kHz mono capture pushing blocks onto an asyncio queue."""
+    """Continuous 16 kHz mono capture broadcast to any number of subscribers.
+
+    Each consumer (utterance capture, wake-word watcher, barge-in watcher) gets
+    its own queue so they never steal frames from each other.
+    """
 
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[np.ndarray] = asyncio.Queue(maxsize=200)
+        self._subs: set[asyncio.Queue] = set()
         self._stream: sd.InputStream | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # legacy single-consumer queue, kept for existing call sites
+        self.queue: asyncio.Queue[np.ndarray] = self.subscribe()
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=200)
+        self._subs.add(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        self._subs.discard(q)
 
     def start(self) -> None:
         if self._stream is not None:
@@ -45,21 +59,31 @@ class Microphone:
         log.info("microphone started")
 
     def _put(self, block: np.ndarray) -> None:
-        try:
-            self.queue.put_nowait(block)
-        except asyncio.QueueFull:
+        for q in list(self._subs):
             try:
-                self.queue.get_nowait()
-                self.queue.put_nowait(block)
-            except asyncio.QueueEmpty:
-                pass
+                q.put_nowait(block)
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                    q.put_nowait(block)
+                except asyncio.QueueEmpty:
+                    pass
 
-    def drain(self) -> None:
-        while not self.queue.empty():
+    @staticmethod
+    def drain_queue(q: asyncio.Queue) -> None:
+        while not q.empty():
             try:
-                self.queue.get_nowait()
+                q.get_nowait()
             except asyncio.QueueEmpty:
                 break
+
+    def drain(self) -> None:
+        self.drain_queue(self.queue)
+
+    def restart(self) -> None:
+        """Apply a changed input device."""
+        self.stop()
+        self.start()
 
     def stop(self) -> None:
         if self._stream is not None:

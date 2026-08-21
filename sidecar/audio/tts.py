@@ -36,6 +36,10 @@ class PiperTTS:
         self._ensure()
         return self._sample_rate
 
+    def reload(self) -> None:
+        """Pick up a changed voice config on next synthesis."""
+        self._voice = None
+
     async def warmup(self) -> None:
         await asyncio.to_thread(self._ensure)
 

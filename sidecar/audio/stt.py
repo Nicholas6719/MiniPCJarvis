@@ -33,6 +33,10 @@ class STT:
         async with self._lock:
             await asyncio.to_thread(self._ensure)
 
+    def reload(self) -> None:
+        """Pick up a changed model config on next transcription."""
+        self._model = None
+
     async def transcribe(self, audio: np.ndarray) -> str:
         """audio: 16 kHz mono float32 in [-1, 1]."""
         async with self._lock:

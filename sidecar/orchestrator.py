@@ -17,6 +17,7 @@ from audio.io import mic, speaker, MIC_RATE
 from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
+from audio.wake import wake
 from events import bus
 from llm.llama_server import llama
 from llm.prompts import system_prompt
@@ -44,6 +45,7 @@ class Orchestrator:
         self._listen_flag = asyncio.Event()   # push-to-talk pressed / listening on
         self._speak_cancel = asyncio.Event()
         self._loop_task: asyncio.Task | None = None
+        self._wake_task: asyncio.Task | None = None
         self.sm.on_change(self._announce_state)
 
     async def _announce_state(self, old: State, new: State) -> None:
@@ -67,6 +69,7 @@ class Orchestrator:
             log.error("tts voice missing: %s", e)
         mic.start()
         self._loop_task = asyncio.create_task(self._listen_loop())
+        self._wake_task = asyncio.create_task(self._wake_loop())
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
 
@@ -90,7 +93,42 @@ class Orchestrator:
                 await self.sm.to(State.IDLE, force=True)
                 return
 
+    # ---------- wake word ----------
+
+    async def _wake_loop(self) -> None:
+        """Always-listening 'hey jarvis' detector; active only while IDLE."""
+        q = mic.subscribe()
+        last_fire = 0.0
+        try:
+            await asyncio.to_thread(wake.warmup)
+        except Exception as e:
+            log.error("wake model unavailable: %s", e)
+            mic.unsubscribe(q)
+            return
+        try:
+            while True:
+                block = await q.get()
+                mode = config.get("wake", "mode", default="push_to_talk")
+                if mode not in ("wake_word", "both") or self.sm.state != State.IDLE:
+                    # stay subscribed but ignore audio; cheap enough
+                    continue
+                score = await asyncio.to_thread(wake.feed, block)
+                if score >= wake.threshold and time.time() - last_fire > 2.0:
+                    last_fire = time.time()
+                    log.info("wake word detected (%.2f)", score)
+                    await bus.emit("wake", score=round(score, 2))
+                    wake.reset()
+                    mic.drain()
+                    self.vad.reset()
+                    self._listen_flag.set()
+        except asyncio.CancelledError:
+            raise
+        finally:
+            mic.unsubscribe(q)
+
     async def shutdown(self) -> None:
+        if self._wake_task:
+            self._wake_task.cancel()
         if self._loop_task:
             self._loop_task.cancel()
         self._speak_cancel.set()
@@ -310,30 +348,31 @@ class Orchestrator:
         """While speaking, watch the mic for user speech → interrupt."""
         vad = StreamingVAD(threshold=0.75)
         consec = 0
-        mic.drain()
-        while True:
-            try:
-                block = await mic.queue.get()
-            except asyncio.CancelledError:
-                raise
-            if self.sm.state != State.SPEAKING:
-                consec = 0
-                await asyncio.sleep(0.02)
-                continue
-            probs = vad.feed(block)
-            consec = consec + sum(1 for p in probs if p >= vad.threshold) \
-                if any(p >= vad.threshold for p in probs) else 0
-            if consec >= 6:  # ~200ms of sustained speech over TTS output
-                log.info("barge-in detected")
-                self._speak_cancel.set()
-                speaker.abort()
-                await self.sm.to(State.INTERRUPTED, force=True)
-                await bus.emit("interrupted", reason="barge-in")
-                mic.drain()
-                self.vad.reset()
-                self._listen_flag.set()  # capture what the user is saying
-                await self.sm.to(State.LISTENING, force=True)
-                return
+        q = mic.subscribe()
+        try:
+            while True:
+                block = await q.get()
+                if self.sm.state != State.SPEAKING:
+                    consec = 0
+                    continue
+                probs = vad.feed(block)
+                consec = consec + sum(1 for p in probs if p >= vad.threshold) \
+                    if any(p >= vad.threshold for p in probs) else 0
+                if consec >= 6:  # ~200ms of sustained speech over TTS output
+                    log.info("barge-in detected")
+                    self._speak_cancel.set()
+                    speaker.abort()
+                    await self.sm.to(State.INTERRUPTED, force=True)
+                    await bus.emit("interrupted", reason="barge-in")
+                    mic.drain()
+                    self.vad.reset()
+                    self._listen_flag.set()  # capture what the user is saying
+                    await self.sm.to(State.LISTENING, force=True)
+                    return
+        except asyncio.CancelledError:
+            raise
+        finally:
+            mic.unsubscribe(q)
 
 
 orchestrator = Orchestrator()

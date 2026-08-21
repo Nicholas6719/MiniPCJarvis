@@ -28,13 +28,17 @@ export interface Confirmation {
   risk: string;
 }
 
+export type View = "conversation" | "memory" | "settings";
+
 interface Store {
   state: JarvisState;
+  view: View;
   transcript: TranscriptEntry[];
   activity: ActivityEntry[];
   confirmation: Confirmation | null;
   assistantDraft: string;
   setState: (s: JarvisState) => void;
+  setView: (v: View) => void;
   onEvent: (evt: any) => void;
   clearConfirmation: () => void;
 }
@@ -43,12 +47,14 @@ let draftId = "";
 
 export const useStore = create<Store>((set, get) => ({
   state: "offline",
+  view: "conversation",
   transcript: [],
   activity: [],
   confirmation: null,
   assistantDraft: "",
 
   setState: (s) => set({ state: s }),
+  setView: (v) => set({ view: v }),
   clearConfirmation: () => set({ confirmation: null }),
 
   onEvent: (evt) => {
@@ -113,6 +119,12 @@ export const useStore = create<Store>((set, get) => ({
       case "boot_error":
       case "error":
         push({ id: evt.id, ts: evt.ts, kind: evt.kind, summary: evt.summary ?? evt.kind });
+        break;
+      case "wake":
+        push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
+        break;
+      case "config_changed":
+        push({ id: evt.id, ts: evt.ts, kind: "config", summary: `settings applied: ${(evt.applied ?? []).join(", ") || "saved"}` });
         break;
       case "speaking":
         break;
