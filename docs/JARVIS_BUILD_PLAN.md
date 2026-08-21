@@ -49,8 +49,8 @@ unusable for voice).
 |---|---|---|
 | 0 | Discovery: machine inspection, model research, architecture | **DONE** |
 | 1 | Foundation: voice loop (VAD→STT→LLM+tools→TTS), barge-in, state machine, HUD shell (orb/conversation/activity), 7 real tools w/ risk gating, memory store+recall, secrets, tray/hotkey, NSIS installer | **DONE 2026-08-21** — installer verified: silent install → launch → full boot to idle, no terminal. Human-at-machine checks still open: mic voice turn, barge-in feel, tray/hotkey UX |
-| 2 | Wake word ("Jarvis"), always-listening mode, settings UI, first-run setup | queued |
-| 3 | Memory UI (inspect/edit/forget/pin), memory governance | queued |
+| 2 | Wake word ("Hey Jarvis" via openWakeWord ONNX, ~2% of one core), always-listening mode, Settings UI (wake/audio/voice/model/search-key/autostart) with live-apply config API, Memory browser (list/search/forget), 4 en_GB voices | **DONE 2026-08-21** — wake detector scored 0.999 on TTS-spoken positives, 0.000 on negatives; installed build verified booting with wake loop active. Human checks open: real-mic wake reliability + sensitivity tuning |
+| 3 | Memory governance depth (edit/pin/categories UI, retention), first-run wizard | queued |
 | 4 | Windows control depth: UI Automation, window mgmt, volume/display/clipboard | queued |
 | 5 | Browser agent (Playwright) + research mode with visible sources | queued |
 | 6 | Vision: screen understanding (Qwen3.6 mmproj is on disk already) | queued |
