@@ -55,7 +55,7 @@ unusable for voice).
 | 5 | Research agent: `research` tool (search → parallel fetch → extracts + citations, staged events visible in UI) + `fetch_page` (httpx/2 + trafilatura; engine-agnostic interface so Playwright can slot in later for interactive browsing) + first-run experience (boot overlay on real events + setup wizard) | **DONE 2026-08-21** — fetch verified on Wikipedia/GitHub/news sites; research end-to-end pending the user's Brave API key |
 | 6 | Vision: `analyze_screen`/`analyze_image` via on-demand Gemma3-4B+mmproj server (lazy start, 5-min idle auto-stop; ~5 s warm) | **DONE 2026-08-21** — described real screen accurately through full voice pipeline |
 | 7 | Reminders/routines: scheduler (one-shot + daily/weekdays/weekly), proactive spoken announcements, set/list/cancel tools | **DONE 2026-08-21** — fire/recur/cancel verified; quiet-hours + richer proactive triggers still queued |
-| 8 | OS-like nav (full view set), dynamic view switching, HUD polish | queued |
+| 8 | AI-OS interface: 6-view nav (Conversation/Research/Memory/Tasks/Diagnostics/Settings), Diagnostics w/ 12 live checks + repair actions, Research view w/ sources+conclusions, Tasks view, persistent status bar, dynamic view switching | **DONE 2026-08-21** — all views verified against live data; installer deployed |
 | 9 | Security hardening, performance profiling, self-healing depth | queued |
 | 10 | Plugin/MCP system | queued |
 
