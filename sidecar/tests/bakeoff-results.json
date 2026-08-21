@@ -1,104 +1,17 @@
 {
-  "gpt-oss-20b": {
+  "qwen3.6-35b-a3b": {
+    "bench": {
+      "error": "raphics (AMD proprietary driver) | uma: 1 | fp16: 1 | bf16: 1 | fp4: 0 | warp size: 64 | shared memory: 32768 | int dot: 1 | matrix cores: KHR_coopmat\nload_backend: loaded Vulkan backend from C:\\AI\\llama.cpp\\ggml-vulkan.dll\nload_backend: loaded CPU backend from C:\\AI\\llama.cpp\\ggml-cpu-zen4.dll\nggml_vulkan: Memory allocation of size 8192 failed.\nggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory\nllama_bench: error: failed to load model 'C:\\AI\\models\\Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf'\n"
+    },
     "quality": {
-      "tool_pass": 6,
-      "tool_total": 6,
-      "qa_pass": 4,
-      "qa_total": 6,
-      "avg_first_ms": 1689,
-      "avg_total_ms": 2012,
-      "details": [
-        {
-          "prompt": "Open Spotify.",
-          "want": "open_application",
-          "got": [
-            "open_application"
-          ],
-          "ok": true,
-          "s": 2.8
-        },
-        {
-          "prompt": "How much RAM am I using right now?",
-          "want": "get_system_stats",
-          "got": [
-            "get_system_stats"
-          ],
-          "ok": true,
-          "s": 1.9
-        },
-        {
-          "prompt": "What's the weather in Boston today?",
-          "want": "web_search",
-          "got": [
-            "web_search"
-          ],
-          "ok": true,
-          "s": 1.8
-        },
-        {
-          "prompt": "Remember that I prefer short answers.",
-          "want": "remember_fact",
-          "got": [
-            "remember_fact"
-          ],
-          "ok": true,
-          "s": 1.9
-        },
-        {
-          "prompt": "Can you put on some music?",
-          "want": "open_application",
-          "got": [
-            "open_application"
-          ],
-          "ok": true,
-          "s": 2.1
-        },
-        {
-          "prompt": "Read the file called notes.txt in my documents.",
-          "want": "read_file",
-          "got": [
-            "read_file"
-          ],
-          "ok": true,
-          "s": 2.6
-        },
-        {
-          "prompt": "What is the capital of Australia?",
-          "text": "Canberra.",
-          "ok": true,
-          "s": 1.2
-        },
-        {
-          "prompt": "What's 17 times 24?",
-          "text": "408.",
-          "ok": true,
-          "s": 1.2
-        },
-        {
-          "prompt": "If a train leaves at 3:15 PM and the trip takes 2 hours 50 minutes, when does it arrive?",
-          "text": "It will arrive at 6:05\u202fPM.",
-          "ok": true,
-          "s": 2.5
-        },
-        {
-          "prompt": "Say exactly three words.",
-          "text": "Sure, here you go.",
-          "ok": false,
-          "s": 2.1
-        },
-        {
-          "prompt": "Who wrote Pride and Prejudice?",
-          "text": "Jane Austen wrote Pride and Prejudice.",
-          "ok": true,
-          "s": 1.5
-        },
-        {
-          "prompt": "I'm heading out, is it worth checking anything before a road trip?",
-          "text": "",
-          "ok": false,
-          "s": 2.6
-        }
-      ]
+      "tool_pass": 0,
+      "tool_total": 0,
+      "qa_pass": 0,
+      "qa_total": 0,
+      "avg_first_ms": 0,
+      "avg_total_ms": 0,
+      "details": [],
+      "error": "server never became healthy"
     }
   }
 }

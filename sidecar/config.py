@@ -6,7 +6,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-APP_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "JARVIS"
+# Roaming AppData — deliberately NOT %LOCALAPPDATA%\JARVIS, which is where the
+# NSIS per-user installer places the application itself (uninstall must never
+# be able to take user data with it).
+APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "JARVIS"
 APP_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_PATH = APP_DIR / "config.json"
 LOG_DIR = APP_DIR / "logs"
@@ -26,9 +29,12 @@ DEFAULTS: dict[str, Any] = {
                 "template_kwargs": {"reasoning_effort": "low"},
                 "reasoning_field": "reasoning_content",
             },
+            # CPU-only: its hybrid attention OOMs the 780M Vulkan heap (tested
+            # b10488 + b10549, --cpu-moe, host-memory). ~9 t/s — not for voice;
+            # reserved for future non-realtime/vision use.
             "qwen3.6-35b-a3b": {
                 "path": r"C:\AI\models\Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf",
-                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja"],
+                "args": ["--device", "none", "-ngl", "0", "-t", "8", "--jinja"],
                 "template_kwargs": {"enable_thinking": False},
                 "reasoning_field": "reasoning_content",
             },

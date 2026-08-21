@@ -27,7 +27,7 @@ bandwidth ceiling for a 3.6B-active model. SMT (16 threads) is *slower*; use 8.
 | AI backend | Python sidecar (FastAPI), spawned+supervised by Rust core | Richest local-AI ecosystem; user never opens a terminal |
 | Inference | llama.cpp `llama-server` (existing tuned Vulkan build), managed as a child of the sidecar | Proven 27 t/s on this machine; OpenAI-compatible API; no Ollama daemon to babysit |
 | LLM strategy | **Fully local first** (user choice) | Privacy, zero API cost; cloud can be added behind `LLMProvider` later |
-| Primary model | gpt-oss-20b MXFP4 vs Qwen3.6-35B-A3B UD-Q3_K_XL — **bake-off in progress**, winner becomes default | Both MoE ~3B active ≈ same speed class; measuring smarts + tool calling on-device |
+| Primary model | **gpt-oss-20b MXFP4** (bake-off winner, 2026-08-21) | 27.3 t/s Vulkan, 6/6 tool-calling, ~1.7 s first token. Qwen3.6-35B-A3B (UD-Q3_K_XL) OOMs the Vulkan heap on this iGPU even with `--cpu-moe`, host-memory placement, and llama.cpp b10549 — CPU-only it manages just 9.2 t/s: 3× too slow for voice. Kept on disk (+mmproj) as a vision-phase candidate where latency matters less |
 | STT | faster-whisper `small.en` int8 CPU | Best CPU speed/accuracy tradeoff; `base.en` fallback if contended |
 | VAD | Silero (ONNX, bundled with faster-whisper) | Streaming, low CPU, drives barge-in |
 | TTS | **Piper local** (user choice), voice `en_GB-alan-medium` | Real-time on CPU, private, free; Fish Audio cloud optional later behind `TTSProvider` |

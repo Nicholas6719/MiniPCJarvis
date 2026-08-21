@@ -23,10 +23,16 @@ MODELS = {
     "gpt-oss-20b": {
         "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
         "template_kwargs": {"reasoning_effort": "low"},
+        "bench_args": ["-ngl", "999", "-t", "8", "-fa", "1"],
+        "server_args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja"],
     },
     "qwen3.6-35b-a3b": {
         "path": r"C:\AI\models\Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf",
         "template_kwargs": {"enable_thinking": False},
+        # 16.8 GB > ~17.8 GB Vulkan UMA window with KV/compute buffers:
+        # keep MoE expert weights on CPU (same DRAM), attention on iGPU.
+        "bench_args": ["-ngl", "999", "-ncmoe", "999", "-t", "8", "-fa", "1"],
+        "server_args": ["-ngl", "999", "--cpu-moe", "-t", "8", "-fa", "on", "--jinja"],
     },
 }
 
@@ -91,9 +97,9 @@ def wait_healthy(timeout=180) -> bool:
     return False
 
 
-def run_bench(name: str, path: str) -> dict:
+def run_bench(name: str, path: str, args: list[str]) -> dict:
     out = subprocess.run(
-        [str(BENCH), "-m", path, "-ngl", "999", "-t", "8", "-fa", "1", "-o", "json"],
+        [str(BENCH), "-m", path, *args, "-o", "json"],
         capture_output=True, text=True, timeout=1200)
     try:
         data = json.loads(out.stdout)
@@ -108,8 +114,8 @@ def run_bench(name: str, path: str) -> dict:
 
 def run_quality(name: str, cfg: dict) -> dict:
     proc = subprocess.Popen(
-        [str(SERVER), "-m", cfg["path"], "-ngl", "999", "-t", "8", "-fa", "on",
-         "--jinja", "-c", "16384", "--host", "127.0.0.1", "--port", str(PORT)],
+        [str(SERVER), "-m", cfg["path"], *cfg["server_args"],
+         "-c", "16384", "--host", "127.0.0.1", "--port", str(PORT)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     results = {"tool_pass": 0, "tool_total": 0, "qa_pass": 0, "qa_total": 0,
                "avg_first_ms": 0, "avg_total_ms": 0, "details": []}
@@ -209,7 +215,7 @@ def main() -> None:
         entry = {}
         if not args.skip_bench:
             print("  running llama-bench…")
-            entry["bench"] = run_bench(name, cfg["path"])
+            entry["bench"] = run_bench(name, cfg["path"], cfg["bench_args"])
             print("  bench:", entry["bench"])
         print("  running quality suite…")
         q = run_quality(name, cfg)
