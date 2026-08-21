@@ -194,6 +194,37 @@ async def voices(x_jarvis_token: str | None = Header(None)):
             "note": "bm_/bf_/am_/af_ voices use the Kokoro engine (higher quality); en_GB voices use Piper (lowest latency)"}
 
 
+@app.post("/voices/preview")
+async def voice_preview(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Speak a short sample in a given voice without changing settings."""
+    _auth(x_jarvis_token)
+    from audio.io import speaker
+    from audio.tts import tts
+    voice = str(body.get("voice") or config.get("tts", "voice"))
+    text = str(body.get("text") or
+               "Good evening. I'm JARVIS — this is how I sound.")
+    if orchestrator.sm.state not in (State.IDLE, State.SLEEPING):
+        return {"ok": False, "error": "busy"}
+    await orchestrator.sm.to(State.SPEAKING, force=True)
+    # temporarily swap the voice for this one synthesis
+    prev = config.get("tts", "voice")
+    config.data["tts"]["voice"] = voice
+    cancel = asyncio.Event()
+    orchestrator._speak_cancel = cancel
+    try:
+        async for chunk in tts.synthesize_stream(text, cancel):
+            if cancel.is_set():
+                break
+            await speaker.play_chunk(chunk, tts.sample_rate)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        config.data["tts"]["voice"] = prev
+        if orchestrator.sm.state == State.SPEAKING:
+            await orchestrator.sm.to(State.IDLE, force=True)
+    return {"ok": True, "voice": voice}
+
+
 @app.get("/models")
 async def models(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

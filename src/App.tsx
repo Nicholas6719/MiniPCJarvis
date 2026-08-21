@@ -27,8 +27,21 @@ export default function App() {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
   const onEvent = useStore((s) => s.onEvent);
+  const wakeMode = useStore((s) => s.wakeMode);
+  const armedUntil = useStore((s) => s.armedUntil);
+  const configVersion = useStore((s) => s.configVersion);
 
   useEffect(() => connectEvents(onEvent), [onEvent]);
+
+  // keep the orb's mode label in sync with settings
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api("/config");
+        useStore.getState().setWakeMode(r.config?.wake?.mode ?? "push_to_talk");
+      } catch {}
+    })();
+  }, [configVersion, state === "idle"]);
 
   // hydrate conversation history so restarting the window keeps continuity
   useEffect(() => {
@@ -65,7 +78,7 @@ export default function App() {
       <main className="hud__main">
         <section className="hud__left">
           <button className="hud__corebtn" onClick={micClick} title="Toggle listening (Ctrl+Shift+J)">
-            <JarvisCore state={state} />
+            <JarvisCore state={state} wakeMode={wakeMode} armedUntil={armedUntil} />
           </button>
         </section>
         <section className="hud__center">

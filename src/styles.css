@@ -531,7 +531,7 @@ body {
 }
 
 .settings__row { display: flex; gap: 8px; margin-top: 5px; }
-.settings__row input { flex: 1; }
+.settings__row input, .settings__row select { flex: 1; margin-top: 0 !important; }
 .settings__row--toggle {
   align-items: center;
   justify-content: space-between;

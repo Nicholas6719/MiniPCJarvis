@@ -113,6 +113,8 @@ class Orchestrator:
         win = float(config.get("conversation", "window_s", default=8))
         if mode in ("wake_word", "both") and win > 0:
             self._armed_until = time.time() + win
+            asyncio.create_task(bus.emit("conversation", armed=True,
+                                         until=self._armed_until, window_s=win))
 
     @property
     def armed(self) -> bool:
@@ -291,6 +293,7 @@ class Orchestrator:
                         log.info("follow-up speech (conversation window)")
                         self._preroll = np.concatenate(list(preroll)[-8:])  # ~0.5 s lead-in
                         self._armed_until = 0.0
+                        await bus.emit("conversation", armed=False)
                         self.vad.reset()
                         self._listen_flag.set()
                         continue

@@ -48,6 +48,9 @@ export interface ResearchRun {
 interface Store {
   state: JarvisState;
   view: View;
+  wakeMode: string;
+  armedUntil: number;      // epoch seconds; follow-up window open while now < armedUntil
+  configVersion: number;   // bumps on config_changed so views can refetch
   autoSwitch: boolean;
   transcript: TranscriptEntry[];
   activity: ActivityEntry[];
@@ -60,6 +63,7 @@ interface Store {
   onEvent: (evt: any) => void;
   clearConfirmation: () => void;
   hydrateTranscript: (rows: { role: string; content: string }[]) => void;
+  setWakeMode: (m: string) => void;
 }
 
 let draftId = "";
@@ -67,6 +71,9 @@ let draftId = "";
 export const useStore = create<Store>((set, get) => ({
   state: "offline",
   view: "conversation",
+  wakeMode: "push_to_talk",
+  armedUntil: 0,
+  configVersion: 0,
   autoSwitch: true,
   transcript: [],
   activity: [],
@@ -75,6 +82,7 @@ export const useStore = create<Store>((set, get) => ({
   researchRuns: [],
 
   setState: (s) => set({ state: s }),
+  setWakeMode: (m) => set({ wakeMode: m }),
   setView: (v) => set({ view: v }),
   setAutoSwitch: (b) => set({ autoSwitch: b }),
   clearConfirmation: () => set({ confirmation: null }),
@@ -96,7 +104,7 @@ export const useStore = create<Store>((set, get) => ({
 
     switch (evt.kind) {
       case "state":
-        set({ state: evt.state });
+        set({ state: evt.state, ...(evt.state !== "idle" ? { armedUntil: 0 } : {}) });
         break;
       case "transcript":
         set((st) => ({
@@ -211,6 +219,10 @@ export const useStore = create<Store>((set, get) => ({
         break;
       case "config_changed":
         push({ id: evt.id, ts: evt.ts, kind: "config", summary: `settings applied: ${(evt.applied ?? []).join(", ") || "saved"}` });
+        set((st) => ({ configVersion: st.configVersion + 1 }));
+        break;
+      case "conversation":
+        set({ armedUntil: evt.armed ? Number(evt.until) : 0 });
         break;
       case "speaking":
         break;

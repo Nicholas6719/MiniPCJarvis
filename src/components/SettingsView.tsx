@@ -51,6 +51,13 @@ export function SettingsView() {
     }
   };
 
+  const preview = async (voice?: string) => {
+    try {
+      const r = await api("/voices/preview", { method: "POST", body: JSON.stringify({ voice }) });
+      if (!r.ok) setStatus(r.error === "busy" ? "JARVIS is busy — try again in a moment" : `preview failed: ${r.error}`);
+    } catch { setStatus("preview unavailable"); }
+  };
+
   const saveBraveKey = async () => {
     if (!braveKey.trim()) return;
     try {
@@ -133,10 +140,13 @@ export function SettingsView() {
           </select>
         </label>
         <label>Voice
-          <select value={cfg.tts?.voice ?? ""}
-                  onChange={(e) => patch({ tts: { voice: e.target.value } })}>
-            {voiceList.map((v) => <option key={v} value={v}>{v}</option>)}
-          </select>
+          <div className="settings__row">
+            <select value={cfg.tts?.voice ?? ""}
+                    onChange={(e) => { patch({ tts: { voice: e.target.value } }); preview(e.target.value); }}>
+              {voiceList.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+            <button className="ghost-btn" onClick={() => preview(cfg.tts?.voice)}>▶ PREVIEW</button>
+          </div>
         </label>
       </section>
 

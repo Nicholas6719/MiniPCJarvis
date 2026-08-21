@@ -97,3 +97,19 @@
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.045); }
 }
+
+/* follow-up window open: a softer, attentive variant of listening */
+.core--armed { --core-color: #45ffc8; --core-speed: 6s; --core-glow: 0.4; }
+
+.core__sublabel {
+  position: absolute;
+  bottom: -52px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: "Share Tech Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  opacity: 0.85;
+}
