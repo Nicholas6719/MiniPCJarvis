@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import logging
 import subprocess
+from ctypes import wintypes
 from pathlib import Path
 
 import httpx
@@ -11,6 +13,70 @@ import httpx
 from config import config, LOG_DIR
 
 log = logging.getLogger("jarvis.llm.server")
+
+
+class _KillOnCloseJob:
+    """Windows Job Object: children assigned to it die when our process dies."""
+
+    def __init__(self) -> None:
+        self.handle = None
+        try:
+            k32 = ctypes.windll.kernel32
+            self.handle = k32.CreateJobObjectW(None, None)
+
+            class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("PerProcessUserTimeLimit", ctypes.c_int64),
+                    ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD),
+                    ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t),
+                    ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t),
+                    ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD),
+                ]
+
+            class IO_COUNTERS(ctypes.Structure):
+                _fields_ = [(n, ctypes.c_uint64) for n in (
+                    "ReadOperationCount", "WriteOperationCount",
+                    "OtherOperationCount", "ReadTransferCount",
+                    "WriteTransferCount", "OtherTransferCount")]
+
+            class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                    ("IoInfo", IO_COUNTERS),
+                    ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t),
+                ]
+
+            info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+            info.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
+            k32.SetInformationJobObject(
+                self.handle, 9,  # JobObjectExtendedLimitInformation
+                ctypes.byref(info), ctypes.sizeof(info))
+        except Exception as e:
+            log.warning("job object unavailable: %s", e)
+            self.handle = None
+
+    def assign(self, pid: int) -> None:
+        if not self.handle:
+            return
+        try:
+            k32 = ctypes.windll.kernel32
+            PROCESS_SET_QUOTA, PROCESS_TERMINATE = 0x0100, 0x0001
+            h = k32.OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, False, pid)
+            if h:
+                k32.AssignProcessToJobObject(self.handle, h)
+                k32.CloseHandle(h)
+        except Exception as e:
+            log.warning("job assign failed: %s", e)
+
+
+_job = _KillOnCloseJob()
 
 
 class LlamaServer:
@@ -58,6 +124,7 @@ class LlamaServer:
             stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
+        _job.assign(self.proc.pid)
         self.model_name = model_name
         for _ in range(120):  # model load can take ~10-60s
             await asyncio.sleep(1)

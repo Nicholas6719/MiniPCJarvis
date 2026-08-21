@@ -42,6 +42,8 @@
         "startMenuFolder": "JARVIS"
       }
     },
-    "resources": {}
+    "resources": {
+      "../sidecar/dist/jarvis-sidecar/": "sidecar/"
+    }
   }
 }

@@ -57,7 +57,8 @@ class Orchestrator:
         ok = await llama.ensure()
         if not ok:
             await self.sm.to(State.ERROR, force=True)
-            await bus.emit("boot_error", summary="language model failed to start")
+            await bus.emit("boot_error", summary="language model failed to start — retrying")
+            asyncio.create_task(self._llm_retry_loop())
             return
         await stt.warmup()
         try:
@@ -68,6 +69,26 @@ class Orchestrator:
         self._loop_task = asyncio.create_task(self._listen_loop())
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
+
+    async def _llm_retry_loop(self) -> None:
+        """Self-healing: keep retrying LLM startup with backoff (e.g. after OOM)."""
+        delay = 15
+        while self.sm.state == State.ERROR:
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 120)
+            log.info("retrying llama-server startup")
+            if await llama.ensure():
+                await bus.emit("boot", summary="language model recovered")
+                await stt.warmup()
+                try:
+                    await tts.warmup()
+                except FileNotFoundError:
+                    pass
+                mic.start()
+                if self._loop_task is None or self._loop_task.done():
+                    self._loop_task = asyncio.create_task(self._listen_loop())
+                await self.sm.to(State.IDLE, force=True)
+                return
 
     async def shutdown(self) -> None:
         if self._loop_task:

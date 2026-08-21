@@ -116,6 +116,16 @@ impl Sidecar {
     pub fn stop(&self) {
         let mut guard = self.child.lock().unwrap();
         if let Some(mut child) = guard.take() {
+            // Kill the whole tree — the sidecar spawns llama-server, which a
+            // plain kill() would orphan on Windows.
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &child.id().to_string()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+            }
             let _ = child.kill();
             let _ = child.wait();
         }

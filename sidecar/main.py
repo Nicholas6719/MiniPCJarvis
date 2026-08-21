@@ -123,8 +123,6 @@ async def text_input(body: dict, x_jarvis_token: str | None = Header(None)):
         raise HTTPException(400, "text required")
     if orchestrator.sm.state not in (State.IDLE, State.INTERRUPTED):
         return {"ok": False, "error": "busy"}
-    import numpy as np
-    # Synthesize a fake 'utterance' by bypassing STT: run the turn directly.
     asyncio.create_task(orchestrator.run_text_turn(text))
     return {"ok": True}
 

@@ -1,4 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600&family=Share+Tech+Mono&display=swap');
+@font-face {
+  font-family: "Rajdhani";
+  font-weight: 400;
+  src: url("./assets/fonts/rajdhani-400.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Rajdhani";
+  font-weight: 500;
+  src: url("./assets/fonts/rajdhani-500.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Rajdhani";
+  font-weight: 600;
+  src: url("./assets/fonts/rajdhani-600.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Share Tech Mono";
+  font-weight: 400;
+  src: url("./assets/fonts/sharetechmono-400.ttf") format("truetype");
+}
 
 :root {
   --bg: #05090f;
