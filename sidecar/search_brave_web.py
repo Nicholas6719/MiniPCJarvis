@@ -218,7 +218,6 @@ class BraveWebSearch:
             async with self._lock:
                 ctx = await self._ensure()
                 page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            await page.bring_to_front()
                 await page.bring_to_front()
                 await page.goto("https://search.brave.com/", wait_until="domcontentloaded",
                                 timeout=20000)

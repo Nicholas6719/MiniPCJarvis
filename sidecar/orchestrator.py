@@ -632,9 +632,11 @@ class Orchestrator:
         full_text = ""
         empty_retries = 0
         user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
-        must_use_tool = bool(SEARCH_INTENT.search(user_text or ""))
-        used_tools: list[tuple[str, bool]] = []   # (name, ok) - for self-training
+        # the message carries a bracketed context note ("current time", ...) above the
+        # utterance: only the user's own words decide whether a search is mandatory
         raw_user = user_text.split(chr(10))[-1] if user_text else ""
+        must_use_tool = bool(SEARCH_INTENT.search(raw_user or ""))
+        used_tools: list[tuple[str, bool]] = []   # (name, ok) - for self-training
         for _round in range(8):
             round_text = ""
             pending = ""
