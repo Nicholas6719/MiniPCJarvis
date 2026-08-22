@@ -30,9 +30,9 @@ _APP_ALIASES = {
     "explorer": "explorer.exe",
     "file explorer": "explorer.exe",
     "spotify": "spotify.exe",
-    "vs code": "code",
-    "vscode": "code",
-    "code": "code",
+    "vs code": "visual studio code",
+    "vscode": "visual studio code",
+    "code": "visual studio code",
     "terminal": "wt.exe",
     "settings": "ms-settings:",
     "steam": "steam.exe",
@@ -62,20 +62,99 @@ def get_system_stats() -> dict:
     }
 
 
+_START_MENUS = [
+    _HOME / "AppData/Roaming/Microsoft/Windows/Start Menu/Programs",
+    Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "Microsoft/Windows/Start Menu/Programs",
+]
+
+
+_store_apps_cache: dict[str, str] | None = None
+
+
+def _store_apps() -> dict[str, str]:
+    """Name -> AppUserModelId for everything Windows' Start search knows (incl. Store
+    apps like Spotify). Cached; gathered once with a hidden PowerShell (~1 s)."""
+    global _store_apps_cache
+    if _store_apps_cache is not None:
+        return _store_apps_cache
+    apps: dict[str, str] = {}
+    try:
+        import json
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        data = json.loads(out.stdout or "[]")
+        for row in (data if isinstance(data, list) else [data]):
+            if row.get("Name") and row.get("AppID"):
+                apps[str(row["Name"]).lower()] = str(row["AppID"])
+    except Exception as e:
+        log.warning("Get-StartApps failed: %s", e)
+    _store_apps_cache = apps
+    return apps
+
+
+def _best_match(key: str, names) -> str | None:
+    exact = [n for n in names if n == key]
+    if exact:
+        return exact[0]
+    subs = sorted((n for n in names if key in n and "uninstall" not in n), key=len)
+    return subs[0] if subs else None
+
+
+def _resolve_app(name: str) -> str | None:
+    """Find something launchable for a friendly app name, WITHOUT a shell:
+    alias -> Start Menu shortcut -> PATH exe -> Start-search app list (Store apps).
+    Returns None if nothing matches so the caller can report it (no stray windows)."""
+    import shutil
+    key = name.strip().lower()
+    target = _APP_ALIASES.get(key)
+    if target:
+        if target.startswith("ms-settings") or target.endswith(":"):
+            return target
+        found = shutil.which(target)
+        if found and not found.lower().endswith((".cmd", ".bat")):
+            return found
+    # Start Menu shortcuts (what the Start search launches)
+    links: dict[str, str] = {}
+    for root in _START_MENUS:
+        if root.exists():
+            for lnk in root.rglob("*.lnk"):
+                links.setdefault(lnk.stem.lower(), str(lnk))
+    keys = [key]
+    if target and not target.startswith("ms-settings"):
+        keys.append(target.lower().removesuffix(".exe"))
+    for k in keys:
+        m = _best_match(k, links)
+        if m:
+            return links[m]
+    for k in keys:
+        found = shutil.which(k) or shutil.which(k + ".exe")
+        if found and not found.lower().endswith((".cmd", ".bat")):
+            return found
+    apps = _store_apps()
+    for k in keys:
+        m = _best_match(k, apps)
+        if m:
+            return "shell:AppsFolder\\" + apps[m]
+    return None
+
+
 def open_application(name: str) -> dict:
     key = name.strip().lower()
     if re.search(r"^https?://|\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai)\b", key):
         # a website: never hand it to the default browser - stays inside JARVIS
         return {"error": f"'{name}' is a website, not an app. Use open_url to show it inside JARVIS."}
-    target = _APP_ALIASES.get(key, key)
+    target = _resolve_app(name)
+    if not target:
+        return {"error": f"I can't find an app called '{name}' on this PC."}
     try:
-        if target.startswith("ms-settings"):
-            os.startfile(target)
+        if target.startswith("shell:AppsFolder"):
+            subprocess.Popen(["explorer.exe", target])   # Store app via its AppID, no console
         else:
-            subprocess.Popen(
-                f'start "" "{target}"', shell=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return {"launched": name}
+            os.startfile(target)   # no shell, no console window
+        return {"launched": name, "target": target}
     except Exception as e:
         return {"error": f"could not launch {name}: {e}"}
 

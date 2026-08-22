@@ -16,7 +16,7 @@ CASES = [
     ("what windows do i have open", "windows"),
     ("remember that i like my coffee black", "remember"),
     ("remind me in 90 minutes to stretch", "reminder"),
-    ("tell me a one sentence fun fact about octopuses", None),   # LLM path
+    ("tell me a one sentence fun fact about octopuses", "general"),   # LLM path, brain flags it general
 ]
 
 

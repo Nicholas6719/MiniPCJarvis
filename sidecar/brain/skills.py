@@ -46,6 +46,11 @@ def slots_app(t: str) -> dict | None:
     return {"name": name}
 
 
+def slots_site(t: str) -> dict | None:
+    m = re.search(r"(https?://\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b(?:/\S*)?)", t)
+    return {"url": m.group(1)} if m else None
+
+
 def say_media(slots: dict, res: dict) -> str:
     return {"play_pause": "Done.", "next": "Skipping.", "previous": "Going back.",
             "stop": "Stopped."}.get(slots.get("action", ""), "Done.") if "error" not in res else "I couldn't control playback."
@@ -316,6 +321,11 @@ SKILLS: list[Skill] = [
         "what's on my clipboard", "read my clipboard", "what did i copy", "what's in the clipboard",
         "read me what i just copied", "show me my clipboard"],
         speak=say_clipboard),
+    Skill("open_site", "open_url", [
+        "open youtube.com", "go to wikipedia.org", "pull up amazon.com", "open the website reddit.com",
+        "open example.com and tell me what the page says", "take me to github.com",
+        "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up weather.com"],
+        slots=slots_site, llm_after=True),
     Skill("recall", "recall", [
         "what did i tell you about my coffee", "do you remember my favorite color",
         "what do you know about me", "what did i say my dentist's name was",

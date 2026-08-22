@@ -27,9 +27,15 @@ def _visible_windows() -> list[tuple[int, str]]:
     import win32con, win32process
     hidden_pids: set[int] = set()
     try:
-        from search_brave_web import brave_web
-        if brave_web._pid:
-            hidden_pids.add(int(brave_web._pid))
+        import psutil
+        for pr in psutil.process_iter(["name", "cmdline"]):
+            try:
+                if (pr.info["name"] or "").lower() == "brave.exe":
+                    cl = " ".join(pr.info["cmdline"] or []).lower()
+                    if "jarvis" in cl and ("browser-profile" in cl or "session-browser" in cl):
+                        hidden_pids.add(pr.pid)
+            except Exception:
+                continue
     except Exception:
         pass
 
@@ -44,11 +50,10 @@ def _visible_windows() -> list[tuple[int, str]]:
                     return True
                 if hidden_pids and win32process.GetWindowThreadProcessId(hwnd)[1] in hidden_pids:
                     return True
-                # our search browser parks off-screen / minimized far away; never list it
-                if title.endswith("- Brave Search - Brave"):
-                    l, t, r, b = win32gui.GetWindowRect(hwnd)
-                    if r < 0 or b < 0 or l < -5000 or t < -5000:
-                        return True
+                # JARVIS's hidden browsers park off-screen (not minimized): never a user window
+                l, t, r, b = win32gui.GetWindowRect(hwnd)
+                if (l <= -5000 or t <= -5000) and not win32gui.IsIconic(hwnd):
+                    return True
             except Exception:
                 pass
             out.append((hwnd, title))
