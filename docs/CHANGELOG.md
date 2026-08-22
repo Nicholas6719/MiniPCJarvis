@@ -32,6 +32,7 @@
 - `scripts/build_sidecar.cmd` gates PyInstaller on compileall + imports
 
 ### Evening: model bake-off
+- STT: Parakeet TDT 0.6B v3 (int8, onnx-asr) replaces whisper: 3x faster, ~0 errors on commands
 - Gemma 4 26B-A4B benchmarked on-device (faster first token, smarter) but RAM-bound
   with vision on a 32 GB PC -> selectable, not default; harness kept in tests/
 - Keyless weather reflex (Open-Meteo); vision tool 3-4x faster; prompt tuning

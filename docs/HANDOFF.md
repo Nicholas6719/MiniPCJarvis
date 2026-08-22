@@ -161,7 +161,7 @@ but the user's folder was empty; log files diverge.
   prompt tuning (brevity cap, no example parroting, one search then fetch_page/open_url),
   vision tool 3-4x faster (1024px JPEG, 2-sentence answers, 120 tokens), model entries
   in config always mirror DEFAULTS (config.py _migrate).
-- STT candidates still untested: Parakeet TDT 0.6B v3 (ONNX), Moonshine v2 (streaming).
+- STT bake-off DONE (tests/stt_ab2.py): Parakeet TDT 0.6B v3 int8 139 ms / 0.6% WER beat whisper base.en (450 ms / 5.1%) and Moonshine (86 ms but 'Newt the speakers'). Now default (audio/stt.py, config v5, whisper fallback). Real voice turns: stt ~140-310 ms (was 430-520).
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
