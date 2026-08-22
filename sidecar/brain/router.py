@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS brain_commands (
 
 _CANON = [
     # (pattern, replacement) — applied to seeds AND queries so embeddings encode intent, not objects
+    # meta-requests first: they contain other commands inside them
+    (r"^(?:from now on[, ]*|ok[, ]*|okay[, ]*)?(?:when(?:ever)? i say|if i say|teach you).*", "when i say PHRASE do ACTION"),
+    (r"^(?:no|nope|wrong|not that|that's wrong|that is wrong|that's not)\b.*", "no i meant ACTION"),
     (r"\b(?:remind me|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
     (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
     (r"\b(?:show|find|pull up|get|display|bring up)\s+(?:me\s+)?(?:a\s+|some\s+|an\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+.+", "show me pictures of THING"),

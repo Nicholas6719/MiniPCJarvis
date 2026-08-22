@@ -781,6 +781,8 @@ class Orchestrator:
         # utterance: only the user's own words decide whether a search is mandatory
         raw_user = user_text.split(chr(10))[-1] if user_text else ""
         must_use_tool = bool(SEARCH_INTENT.search(raw_user or ""))
+        if getattr(self, "_no_tools_first", False):
+            must_use_tool = False   # the brain already ran the tool; the model only composes
         used_tools: list[tuple[str, bool]] = []   # (name, ok) - for self-training
         for _round in range(8):
             round_text = ""
