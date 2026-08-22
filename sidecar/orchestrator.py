@@ -34,6 +34,10 @@ from tools.registry import registry
 log = logging.getLogger("jarvis.orchestrator")
 
 WAKE_PHRASE = _re.compile(r"^\s*(?:hey|hi|ok|okay|yo)?[,\s]*jarvis[,.!?\s]*", _re.I)
+# explicit requests to go online: the model must not answer from memory
+SEARCH_INTENT = re.compile(
+    r"\b(search|look\s*up|google|research|find\s+(?:me\s+)?(?:online|on the web)|"
+    r"what'?s the latest|latest|current|today'?s|right now|news|price of|weather)\b", re.I)
 STOP_WORDS = re.compile(r"^\s*(stop|cancel|never\s*mind|nevermind|shut\s*up|quiet|that's\s+enough)\W*$", re.I)
 SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
 
@@ -512,6 +516,8 @@ class Orchestrator:
         tools = registry.schemas()
         full_text = ""
         empty_retries = 0
+        user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+        must_use_tool = bool(SEARCH_INTENT.search(user_text or ""))
         for _round in range(8):
             round_text = ""
             pending = ""
@@ -519,8 +525,10 @@ class Orchestrator:
             # generous budget: gpt-oss spends tokens on hidden reasoning first —
             # a tight cap silently starves the spoken reply (see Houston notes)
             cancelled = False
+            # first round of an explicit search/lookup request: a tool call is required
+            choice = "required" if (must_use_tool and _round == 0) else None
             async for chunk in local_llm.stream(messages, tools=tools,
-                                                max_tokens=4096):
+                                                max_tokens=4096, tool_choice=choice):
                 if self._speak_cancel.is_set():
                     # user interrupted: stop generating AND stop streaming to the UI
                     cancelled = True

@@ -34,10 +34,18 @@ export function ConversationView() {
             Press <kbd>Ctrl+Shift+J</kbd> and speak — or type below.
           </div>
         )}
+        {transcript.filter((m) => m.id.startsWith("hist-")).map((t) => (
+          <div key={t.id} className={`convo__msg convo__msg--${t.role} convo__msg--hist`}>
+            <span className="convo__who">{t.role === "user" ? "YOU" : "JARVIS"}</span>
+            <p>{t.text}</p>
+          </div>
+        ))}
         {transcript.some((m) => m.id.startsWith("hist-")) && (
-          <div className="convo__divider">earlier conversation</div>
+          <div className="convo__session">
+            <div className="convo__divider">↑ earlier conversation · new session ↓</div>
+          </div>
         )}
-        {transcript.map((t) => (
+        {transcript.filter((m) => !m.id.startsWith("hist-")).map((t) => (
           <div key={t.id + t.ts} className={`convo__msg convo__msg--${t.role}`}>
             <span className="convo__who">{t.role === "user" ? "YOU" : "JARVIS"}</span>
             <p>{t.text}</p>

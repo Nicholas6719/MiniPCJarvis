@@ -773,3 +773,15 @@ body {
   border: 1px solid var(--line);
   border-radius: 999px;
 }
+
+/* restored history sits above a full-height "new session" block, so the view
+   opens clean and scrolling up reveals the past */
+.convo__session {
+  flex: none;
+  min-height: calc(100% - 8px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 6px;
+}
+.convo__msg--hist { opacity: 0.7; }

@@ -14,8 +14,22 @@ log = logging.getLogger("jarvis.tools.vision")
 
 async def analyze_screen(question: str = "Describe what is on the screen.",
                          monitor: int = 0) -> dict:
-    question = (question + " Describe only what is actually visible; do not guess "
-                "or invent applications that are not clearly shown.")
+    # Ground the vision model in what the OS says is actually open, so it
+    # cannot mistake a video's contents or a thumbnail for a running app.
+    from tools.windows_tools import list_windows
+    import win32gui
+    _hide = {"JARVIS", "Program Manager", "Windows Input Experience", "Settings"}
+    titles = [t for t in list_windows().get("windows", []) if t not in _hide]
+    try:
+        fg = win32gui.GetWindowText(win32gui.GetForegroundWindow())
+    except Exception:
+        fg = ""
+    grounding = ("Facts from the operating system — treat as ground truth: "
+                 f"the active window is '{fg}'. Open windows: {titles[:10]}. "
+                 "Anything else on screen is content INSIDE those windows (a web "
+                 "page, a playing video, thumbnails), not separate applications. ")
+    question = (grounding + question + " Describe only what is actually visible, "
+                "briefly, without inventing applications or windows.")
     shot = take_screenshot(monitor, hide_self=True)
     if "error" in shot:
         return shot

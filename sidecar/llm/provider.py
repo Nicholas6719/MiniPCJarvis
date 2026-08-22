@@ -37,6 +37,7 @@ class LocalLLM:
         messages: list[dict],
         tools: list[dict] | None = None,
         max_tokens: int = 1024,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[Chunk]:
         model_name = llama.model_name or config.get("llm", "active_model")
         mcfg = config.get("llm", "models", default={}).get(model_name, {})
@@ -50,6 +51,8 @@ class LocalLLM:
             body["chat_template_kwargs"] = tk
         if tools:
             body["tools"] = tools
+            if tool_choice:
+                body["tool_choice"] = tool_choice
 
         # Accumulate streamed tool-call fragments by index.
         pending_tools: dict[int, dict] = {}
