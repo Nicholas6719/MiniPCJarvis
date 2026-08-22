@@ -48,6 +48,8 @@ async def lifespan(app: FastAPI):
     task_tools.register_all()
     vision_tools.register_all()
     browser_tools.register_all()
+    from tools import file_tools
+    file_tools.register_all()
     scheduler.announce = orchestrator.announce
     scheduler.start()
     from mcp_client import mcp_manager
@@ -311,6 +313,44 @@ async def browser_back_ep(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
     from browser.session import browser
     return await browser.back()
+
+
+@app.get("/files")
+async def files_list(path: str = "downloads", x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tools import file_tools
+    return await file_tools.list_folder(path)
+
+
+@app.get("/files/search")
+async def files_search(q: str, folder: str | None = None, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tools import file_tools
+    return await file_tools.find_files(q, folder)
+
+
+@app.get("/files/preview")
+async def files_preview(path: str, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tools import file_tools
+    return await file_tools.preview_file(path)
+
+
+@app.post("/files/op")
+async def files_op(body: dict, x_jarvis_token: str | None = Header(None)):
+    """HUD-initiated file operations (the user clicked, so no voice confirmation)."""
+    _auth(x_jarvis_token)
+    from tools import file_tools
+    op = body.get("op")
+    if op == "rename":
+        return await file_tools.rename_file(body["path"], body["new_name"])
+    if op == "move":
+        return await file_tools.move_file(body["path"], body["destination"])
+    if op == "delete":
+        return await file_tools.delete_file(body["path"])
+    if op == "open":
+        return await file_tools.open_with_windows(body["path"])
+    raise HTTPException(400, "unknown op")
 
 
 @app.get("/diagnostics")

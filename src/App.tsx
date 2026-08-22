@@ -12,6 +12,7 @@ import { StatusBar } from "./components/StatusBar";
 import { WebPanel } from "./components/WebPanel";
 import { MediaView } from "./components/MediaView";
 import { BrowserView } from "./components/BrowserView";
+import { FilesView } from "./components/FilesView";
 import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
 import { useStore, View } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
@@ -21,6 +22,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "research", label: "RESEARCH" },
   { id: "media", label: "MEDIA" },
   { id: "browser", label: "BROWSER" },
+  { id: "files", label: "FILES" },
   { id: "memory", label: "MEMORY" },
   { id: "tasks", label: "TASKS" },
   { id: "diagnostics", label: "DIAGNOSTICS" },
@@ -92,6 +94,7 @@ export default function App() {
           {view === "research" && <ResearchView />}
           {view === "media" && <MediaView />}
           {view === "browser" && <BrowserView />}
+          {view === "files" && <FilesView />}
           {view === "memory" && <MemoryView />}
           {view === "tasks" && <TasksView />}
           {view === "diagnostics" && <DiagnosticsView />}

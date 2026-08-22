@@ -28,7 +28,7 @@ export interface Confirmation {
   risk: string;
 }
 
-export type View = "conversation" | "memory" | "research" | "media" | "browser" | "tasks" | "diagnostics" | "settings";
+export type View = "conversation" | "memory" | "research" | "media" | "browser" | "files" | "tasks" | "diagnostics" | "settings";
 export type RightPanel = "activity" | "web";
 
 export interface WebResult { title?: string; url: string; snippet?: string; host?: string }
@@ -56,6 +56,19 @@ export interface BrowserState {
   ts: number;
 }
 
+export interface FileEntry { name: string; path: string; kind: string; type?: string; size: number; modified?: number }
+export interface FilesState {
+  path: string | null;
+  label: string;
+  parent: string | null;
+  count: number;
+  entries: FileEntry[];
+  roots: Record<string, string>;
+  query?: string;
+  ts: number;
+}
+export interface FilePreview { path: string; name: string; type: string; text?: string; data?: string; size: number }
+
 export interface ResearchSource {
   title?: string;
   url: string;
@@ -79,6 +92,8 @@ interface Store {
   web: WebState | null;
   media: MediaState | null;
   browser: BrowserState | null;
+  files: FilesState | null;
+  filePreview: FilePreview | null;
   armedUntil: number;      // epoch seconds; follow-up window open while now < armedUntil
   configVersion: number;   // bumps on config_changed so views can refetch
   autoSwitch: boolean;
@@ -95,6 +110,7 @@ interface Store {
   hydrateTranscript: (rows: { role: string; content: string }[]) => void;
   setWakeMode: (m: string) => void;
   setRightPanel: (p: RightPanel) => void;
+  setFilePreview: (p: FilePreview | null) => void;
 }
 
 let draftId = "";
@@ -107,6 +123,8 @@ export const useStore = create<Store>((set, get) => ({
   web: null,
   media: null,
   browser: null,
+  files: null,
+  filePreview: null,
   armedUntil: 0,
   configVersion: 0,
   autoSwitch: true,
@@ -119,6 +137,7 @@ export const useStore = create<Store>((set, get) => ({
   setState: (s) => set({ state: s }),
   setWakeMode: (m) => set({ wakeMode: m }),
   setRightPanel: (p) => set({ rightPanel: p }),
+  setFilePreview: (p) => set({ filePreview: p }),
   setView: (v) => set({ view: v }),
   setAutoSwitch: (b) => set({ autoSwitch: b }),
   clearConfirmation: () => set({ confirmation: null }),
@@ -151,7 +170,7 @@ export const useStore = create<Store>((set, get) => ({
           assistantDraft: "",
           // a new request returns to the conversation; research/media views only
           // take over again if the new turn actually produces that activity
-          view: st.autoSwitch && (st.view === "media" || st.view === "research" || st.view === "browser") ? "conversation" : st.view,
+          view: st.autoSwitch && (st.view === "media" || st.view === "research" || st.view === "browser" || st.view === "files") ? "conversation" : st.view,
           rightPanel: st.rightPanel === "web" && st.autoSwitch ? "activity" : st.rightPanel,
         }));
         draftId = "";
@@ -263,6 +282,18 @@ export const useStore = create<Store>((set, get) => ({
           view: st.autoSwitch ? "browser" : st.view,
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `browser: ${evt.action} ${evt.title ? `"${evt.title}"` : evt.url ?? ""}` });
+        break;
+      case "files":
+        set((st) => ({
+          files: { path: evt.path, label: evt.label, parent: evt.parent, count: evt.count, entries: evt.entries ?? [], roots: evt.roots ?? {}, query: evt.query, ts: evt.ts },
+          view: st.autoSwitch ? "files" : st.view,
+        }));
+        push({ id: evt.id, ts: evt.ts, kind: "files", summary: `files: ${evt.label} (${evt.count})` });
+        break;
+      case "file_preview":
+        set((st) => ({ filePreview: { path: evt.path, name: evt.name, type: evt.type, text: evt.text, data: evt.data, size: evt.size },
+                       view: st.autoSwitch ? "files" : st.view }));
+        push({ id: evt.id, ts: evt.ts, kind: "files", summary: `preview: ${evt.name}` });
         break;
       case "images":
         set((st) => ({

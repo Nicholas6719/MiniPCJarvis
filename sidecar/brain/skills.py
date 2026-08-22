@@ -110,6 +110,64 @@ def slots_correction(t: str) -> dict | None:
     return {"rest": rest}
 
 
+_FOLDER_WORDS = {"desktop": "desktop", "documents": "documents", "document": "documents", "docs": "documents",
+                 "downloads": "downloads", "download": "downloads", "pictures": "pictures", "photos": "pictures",
+                 "picture": "pictures", "images": "pictures"}
+
+
+def slots_folder(t: str) -> dict | None:
+    for w, root in _FOLDER_WORDS.items():
+        if re.search(rf"\b{w}\b", t):
+            return {"path": root}
+    return None
+
+
+def say_folder(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return "I couldn't open that folder."
+    n = res.get("count", 0)
+    return f"Here's your {slots['path']}: {n} item{'s' if n != 1 else ''}."
+
+
+_FIND_A = re.compile(r"(?:file|folder|document)s?\s+(?:called|named|with|containing)\s+(.+?)"
+                     r"(?:\s+(?:in|on|under)\s+(?:my\s+)?(desktop|documents|downloads|pictures))?[.!?]*$")
+_FIND_B = re.compile(r"\b(?:find|search for|look for|locate|where is|where's)\s+(?:my\s+|the\s+|a\s+)?(.+?)"
+                     r"(?:\s+(?:in|on|under)\s+(?:my\s+)?(desktop|documents|downloads|pictures))?[.!?]*$")
+
+
+_FIND_C = re.compile(r"\bsearch\s+(?:my\s+)?(desktop|documents|downloads|pictures)\s+for\s+(.+?)[.!?]*$")
+
+
+def slots_find(t: str) -> dict | None:
+    mc = _FIND_C.search(t)
+    if mc:
+        return {"query": mc.group(2).strip(" '\""), "folder": mc.group(1)}
+    m = _FIND_A.search(t) or _FIND_B.search(t)
+    if not m:
+        return None
+    q = re.sub(r"^(?:file|folder|document)s?\s+", "", m.group(1).strip(" '\""))
+    q = re.sub(r"\s+(?:file|folder|document)s?$", "", q)
+    q = re.sub(r"\s+(?:in the name|from earlier|on my computer|on this pc)$", "", q)
+    if not q or len(q) < 2:
+        return None
+    out = {"query": q}
+    if m.group(2):
+        out["folder"] = m.group(2)
+    return out
+
+
+def say_find(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return "I couldn't search for that."
+    n = res.get("count", 0)
+    if n == 0:
+        return f"I couldn't find anything called {slots['query']}."
+    first = res.get("results", [{}])[0]
+    if n == 1:
+        return f"Found it: {first.get('name')} in your {first.get('where')}."
+    return f"I found {n} matches; the closest is {first.get('name')} in your {first.get('where')}."
+
+
 def say_lock(_: dict, res: dict) -> str:
     return "Locking." if "error" not in res else "I couldn't lock the computer."
 
@@ -291,7 +349,7 @@ class Skill:
         return _LABELS.get(self.name, self.name.replace("_", " "))
 
 
-_LABELS = {"volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+_LABELS = {"folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
            "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
            "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
            "remember": "remember it", "stats": "check the system", "windows": "list your windows",
@@ -405,6 +463,16 @@ SKILLS: list[Skill] = [
         "open example.com and tell me what the page says", "take me to github.com",
         "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up weather.com"],
         slots=slots_site, speak=say_site, llm_after=True, direct_if=site_direct, speak_first=True),
+    Skill("folder", "list_folder", [
+        "open my downloads folder", "show me my desktop", "show my documents", "open downloads",
+        "what's in my downloads", "show me my pictures", "open the documents folder", "what's on my desktop",
+        "list my downloads", "show me the files on my desktop", "browse my documents", "go to my downloads"],
+        slots=slots_folder, speak=say_folder),
+    Skill("find_file", "find_files", [
+        "find the file called budget", "find my resume", "where is the file named invoice",
+        "look for a file called notes", "search my documents for taxes", "find files with report in the name",
+        "locate the folder called projects", "where's my screenshot from earlier", "find the document named plan"],
+        slots=slots_find, speak=say_find),
     Skill("lock", "lock_computer", [
         "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
         "lock the workstation", "lock windows", "lock up"],
