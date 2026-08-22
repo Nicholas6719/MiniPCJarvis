@@ -175,6 +175,41 @@ class BrowserSession:
             return await self.observe()
         return await self._act("back", fn)
 
+    # ---- direct interaction from the HUD (click-through on the screenshot) ----
+
+    async def click_at(self, fx: float, fy: float) -> dict:
+        async def fn(page):
+            await page.mouse.click(fx * SHOT_W, fy * SHOT_H)
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=6000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(600)
+            return await self.observe()
+        return await self._act("click", fn)
+
+    async def scroll_by(self, dy: int) -> dict:
+        async def fn(page):
+            await page.mouse.move(SHOT_W / 2, SHOT_H / 2)
+            await page.mouse.wheel(0, dy)
+            await page.wait_for_timeout(250)
+            return await self.observe()
+        return await self._act("scroll", fn)
+
+    async def type_keys(self, text: str, enter: bool = False) -> dict:
+        async def fn(page):
+            if text:
+                await page.keyboard.type(text, delay=20)
+            if enter:
+                await page.keyboard.press("Enter")
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=8000)
+                except Exception:
+                    pass
+            await page.wait_for_timeout(500)
+            return await self.observe()
+        return await self._act("type", fn)
+
     async def close(self) -> None:
         from search_brave_web import brave_session
         self._page = None

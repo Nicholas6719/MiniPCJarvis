@@ -308,6 +308,28 @@ async def browser_open_ep(body: dict, x_jarvis_token: str | None = Header(None))
     return await browser.goto(url)
 
 
+@app.post("/browser/click")
+async def browser_click_ep(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Click-through: fractional x/y on the HUD screenshot -> real click in the hidden browser."""
+    _auth(x_jarvis_token)
+    from browser.session import browser
+    return await browser.click_at(float(body.get("x", 0)), float(body.get("y", 0)))
+
+
+@app.post("/browser/scroll")
+async def browser_scroll_ep(body: dict, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from browser.session import browser
+    return await browser.scroll_by(int(body.get("dy", 400)))
+
+
+@app.post("/browser/type")
+async def browser_type_ep(body: dict, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from browser.session import browser
+    return await browser.type_keys(str(body.get("text", "")), bool(body.get("enter", False)))
+
+
 @app.post("/browser/back")
 async def browser_back_ep(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
