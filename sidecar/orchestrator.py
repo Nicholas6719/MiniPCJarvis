@@ -25,7 +25,7 @@ import re as _re
 from config import config
 from events import bus
 from llm.llama_server import llama
-from llm.prompts import system_prompt
+from llm.prompts import system_prompt, turn_context
 from llm.provider import local_llm
 from memory.store import memory
 from state_machine import State, StateMachine
@@ -502,9 +502,11 @@ class Orchestrator:
                   if m["content"] not in pinned]
         mem_ctx = "\n".join(lines)
 
-        messages: list[dict] = [{"role": "system", "content": system_prompt(mem_ctx)}]
+        # Static prefix (persona + tools) is identical every turn -> KV-cache hit.
+        # Time + memories ride along inside the latest user message instead.
+        messages: list[dict] = [{"role": "system", "content": system_prompt()}]
         messages += self._history[-10:]
-        messages.append({"role": "user", "content": text})
+        messages.append({"role": "user", "content": turn_context(mem_ctx) + chr(10) + text})
 
         await self.sm.to(State.THINKING)
         self._speak_cancel = asyncio.Event()

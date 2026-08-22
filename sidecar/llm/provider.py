@@ -45,6 +45,7 @@ class LocalLLM:
             "messages": messages,
             "max_tokens": max_tokens,
             "stream": True,
+            "cache_prompt": True,   # reuse the KV cache for the shared prefix
         }
         tk = mcfg.get("template_kwargs")
         if tk:

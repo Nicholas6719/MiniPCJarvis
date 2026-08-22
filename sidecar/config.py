@@ -35,7 +35,7 @@ DEFAULTS: dict[str, Any] = {
         "models": {
             "gpt-oss-20b": {
                 "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
-                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja"],
+                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256"],
                 "template_kwargs": {"reasoning_effort": "low"},
                 "reasoning_field": "reasoning_content",
             },
