@@ -19,6 +19,7 @@ from audio.tts import tts
 from audio.vad import StreamingVAD
 from audio.wake import wake
 from audio.sounds import PALETTE
+from audio.speech_text import clean_for_speech
 import collections
 import re as _re
 from config import config
@@ -164,9 +165,12 @@ class Orchestrator:
         patterns = [str(x).lower() for x in
                     config.get("audio", "preferred_input_names",
                                default=["C920", "Webcam", "Logitech"])]
+        last_switch = 0.0
         while True:
             await asyncio.sleep(15)
             try:
+                if time.time() - last_switch < 300:
+                    continue  # never thrash the device: one switch per 5 min max
                 if config.get("audio", "input_device") is not None:
                     continue  # user pinned a device explicitly
                 if self.sm.state not in (State.IDLE, State.SLEEPING):
@@ -184,6 +188,7 @@ class Orchestrator:
                 if present != mic.using_preferred:
                     log.info("audio device change: webcam mic %s",
                              "connected" if present else "disconnected")
+                    last_switch = time.time()
                     mic.stop()
                     _spk.close()
                     refresh_devices()
@@ -248,7 +253,7 @@ class Orchestrator:
             await self.play_sound("attention")  # 'this wasn't asked for'
             await asyncio.sleep(0.3)
             await bus.emit("speaking", text=text)
-            async for chunk in tts.synthesize_stream(text, cancel):
+            async for chunk in tts.synthesize_stream(clean_for_speech(text), cancel):
                 if cancel.is_set():
                     break
                 await speaker.play_chunk(chunk, tts.sample_rate)
@@ -513,8 +518,13 @@ class Orchestrator:
             tool_calls: list[dict] | None = None
             # generous budget: gpt-oss spends tokens on hidden reasoning first —
             # a tight cap silently starves the spoken reply (see Houston notes)
+            cancelled = False
             async for chunk in local_llm.stream(messages, tools=tools,
                                                 max_tokens=4096):
+                if self._speak_cancel.is_set():
+                    # user interrupted: stop generating AND stop streaming to the UI
+                    cancelled = True
+                    break
                 if chunk.text:
                     self.metrics.mark("first_token_ms")
                     pending += chunk.text
@@ -529,12 +539,14 @@ class Orchestrator:
                         sentence = pending[: m.end()].strip()
                         pending = pending[m.end():]
                         if sentence:
-                            await speak_queue.put(sentence)
+                            await speak_queue.put(clean_for_speech(sentence))
                 if chunk.done:
                     tool_calls = chunk.tool_calls
                     break
+            if cancelled:
+                return full_text
             if pending.strip():
-                await speak_queue.put(pending.strip())
+                await speak_queue.put(clean_for_speech(pending.strip()))
 
             if not tool_calls:
                 if not round_text.strip() and empty_retries < 1:
@@ -549,7 +561,7 @@ class Orchestrator:
                     # never end a turn in silence
                     fallback = "Sorry, I lost my train of thought. Ask me again?"
                     await bus.emit("assistant_delta", text=fallback)
-                    await speak_queue.put(fallback)
+                    await speak_queue.put(clean_for_speech(fallback))
                     return fallback
                 return full_text
 

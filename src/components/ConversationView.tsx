@@ -9,7 +9,12 @@ export function ConversationView() {
   const [input, setInput] = useState("");
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    const toBottom = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    toBottom();
+    // hydrated history paints after fonts/layout settle — scroll again shortly
+    const r = requestAnimationFrame(toBottom);
+    const t = setTimeout(toBottom, 250);
+    return () => { cancelAnimationFrame(r); clearTimeout(t); };
   }, [transcript, draft]);
 
   const send = async () => {
@@ -28,6 +33,9 @@ export function ConversationView() {
           <div className="convo__empty">
             Press <kbd>Ctrl+Shift+J</kbd> and speak — or type below.
           </div>
+        )}
+        {transcript.some((m) => m.id.startsWith("hist-")) && (
+          <div className="convo__divider">earlier conversation</div>
         )}
         {transcript.map((t) => (
           <div key={t.id + t.ts} className={`convo__msg convo__msg--${t.role}`}>

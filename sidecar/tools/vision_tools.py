@@ -14,7 +14,9 @@ log = logging.getLogger("jarvis.tools.vision")
 
 async def analyze_screen(question: str = "Describe what is on the screen.",
                          monitor: int = 0) -> dict:
-    shot = take_screenshot(monitor)
+    question = (question + " Describe only what is actually visible; do not guess "
+                "or invent applications that are not clearly shown.")
+    shot = take_screenshot(monitor, hide_self=True)
     if "error" in shot:
         return shot
     if not await vision.ensure():

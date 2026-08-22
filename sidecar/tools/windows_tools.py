@@ -163,16 +163,44 @@ def set_clipboard(text: str) -> dict:
 
 # ---------- screenshot / url / power ----------
 
-def take_screenshot(monitor: int = 0) -> dict:
+def _our_windows() -> list[int]:
+    """Top-level windows belonging to the JARVIS app itself."""
+    hits = []
+
+    def cb(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd).strip() == "JARVIS":
+            hits.append(hwnd)
+        return True
+
+    win32gui.EnumWindows(cb, None)
+    return hits
+
+
+def take_screenshot(monitor: int = 0, hide_self: bool = False) -> dict:
+    """Capture the screen. hide_self=True minimizes JARVIS's own window first so
+    'look at my screen' sees the user's screen, not the assistant."""
     import mss
     import mss.tools
+    import time as _t
     SCREENSHOT_DIR.mkdir(exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     path = SCREENSHOT_DIR / f"screen-{ts}.png"
-    with mss.mss() as sct:
-        mon = sct.monitors[monitor] if monitor < len(sct.monitors) else sct.monitors[0]
-        img = sct.grab(mon)
-        mss.tools.to_png(img.rgb, img.size, output=str(path))
+    hidden = []
+    if hide_self:
+        for hwnd in _our_windows():
+            if not win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                hidden.append(hwnd)
+        if hidden:
+            _t.sleep(0.45)  # let the desktop repaint
+    try:
+        with mss.mss() as sct:
+            mon = sct.monitors[monitor] if monitor < len(sct.monitors) else sct.monitors[0]
+            img = sct.grab(mon)
+            mss.tools.to_png(img.rgb, img.size, output=str(path))
+    finally:
+        for hwnd in hidden:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
     return {"path": str(path), "width": img.size[0], "height": img.size[1]}
 
 

@@ -42,16 +42,18 @@ def resolve_input_device() -> tuple[int | None, str, bool]:
     patterns = [str(x).lower() for x in
                 config.get("audio", "preferred_input_names",
                            default=["C920", "Webcam", "Logitech"])]
-    # prefer the default host API (MME, index-stable), then any host API
-    default_api = sd.default.hostapi
+    # ONLY shared-mode host APIs. WDM-KS opens the device EXCLUSIVELY and
+    # silences it for every other app (Wispr Flow, browser mic tests...).
+    apis = {h["name"]: idx for idx, h in enumerate(sd.query_hostapis())}
+    allowed = {apis.get("MME"): 0, apis.get("Windows WASAPI"): 1}
+    allowed.pop(None, None)
     candidates = []
     for i, d in enumerate(devs):
-        if d["max_input_channels"] <= 0:
+        if d["max_input_channels"] <= 0 or d["hostapi"] not in allowed:
             continue
         name = d["name"].lower()
         if any(pat in name for pat in patterns):
-            rank = 0 if d["hostapi"] == default_api else 1
-            candidates.append((rank, i, d["name"]))
+            candidates.append((allowed[d["hostapi"]], i, d["name"]))
     if candidates:
         candidates.sort()
         _, idx, name = candidates[0]

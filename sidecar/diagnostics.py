@@ -87,9 +87,13 @@ async def run_diagnostics() -> list[dict]:
         add("Vision", "error", "vision model files missing")
 
     # Web search
-    add("Web Search", "ok" if secrets.get("brave_api_key") else "warn",
-        "Brave API configured" if secrets.get("brave_api_key")
-        else "no API key — add one in Settings")
+    from search_brave_web import brave_web
+    if secrets.get("brave_api_key"):
+        add("Web Search", "ok", "Brave Search API")
+    elif brave_web.available:
+        add("Web Search", "ok", "via your Brave browser (no API key needed)")
+    else:
+        add("Web Search", "warn", "install Brave browser or add a Brave API key in Settings")
 
     # Memory
     try:

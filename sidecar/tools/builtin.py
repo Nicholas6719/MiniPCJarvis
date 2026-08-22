@@ -92,11 +92,51 @@ def close_application(name: str) -> dict:
     return {"closed": name, "processes": killed}
 
 
+async def _ddg_search(query: str, count: int) -> dict:
+    """Keyless search via DuckDuckGo's HTML endpoint (no API, no account)."""
+    from lxml import html as _html
+    headers = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/126.0.0.0 Safari/537.36")}
+    async with httpx.AsyncClient(timeout=12, follow_redirects=True,
+                                 headers=headers, http2=True) as c:
+        r = await c.post("https://html.duckduckgo.com/html/", data={"q": query})
+        r.raise_for_status()
+    doc = _html.fromstring(r.text)
+    results = []
+    for res in doc.cssselect("div.result"):
+        a = res.cssselect("a.result__a")
+        sn = res.cssselect(".result__snippet")
+        if not a:
+            continue
+        href = a[0].get("href", "")
+        # DDG wraps links: //duckduckgo.com/l/?uddg=<url>&...
+        if "uddg=" in href:
+            from urllib.parse import parse_qs, unquote, urlparse
+            href = unquote(parse_qs(urlparse(href).query).get("uddg", [href])[0])
+        results.append({"title": a[0].text_content().strip(), "url": href,
+                        "snippet": sn[0].text_content().strip() if sn else ""})
+        if len(results) >= count:
+            break
+    return {"query": query, "results": results, "provider": "duckduckgo"}
+
+
 async def web_search(query: str, count: int = 5) -> dict:
     key = secrets.get("brave_api_key")
     if not key:
-        return {"error": "Web search isn't configured yet — the Brave Search API key "
-                         "hasn't been added in settings."}
+        # No key needed: drive the user's installed Brave browser (hidden).
+        from search_brave_web import brave_web
+        if brave_web.available:
+            try:
+                results = await brave_web.search(query, count)
+                if results:
+                    return {"query": query, "results": results, "provider": "brave-browser"}
+            except Exception as e:
+                log.warning("brave browser search failed: %s", e)
+        try:
+            return await _ddg_search(query, count)
+        except Exception as e:
+            return {"error": f"web search failed: {e}"}
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.get(
             "https://api.search.brave.com/res/v1/web/search",

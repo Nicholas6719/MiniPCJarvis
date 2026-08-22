@@ -63,6 +63,8 @@ async def lifespan(app: FastAPI):
     await mcp_manager.stop()
     from browser.session import browser
     await browser.close()
+    from search_brave_web import brave_web
+    await brave_web.close()
     from llm.vision_server import vision
     await vision.stop()
     await orchestrator.shutdown()

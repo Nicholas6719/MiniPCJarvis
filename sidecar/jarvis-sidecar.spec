@@ -7,7 +7,7 @@ datas, binaries, hiddenimports = [], [], []
 for pkg in ["faster_whisper", "piper", "fastembed", "onnxruntime", "tokenizers",
             "openwakeword", "trafilatura", "pycaw", "comtypes",
             "kokoro_onnx", "playwright", "mcp",
-            "espeakng_loader", "phonemizer"]:
+            "espeakng_loader", "phonemizer", "num2words", "cssselect", "lxml"]:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

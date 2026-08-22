@@ -31,12 +31,19 @@ class BrowserSession:
             # (admin-gated install). System Edge/Chrome ship their own runtime,
             # so prefer those channels; bundled build is the last resort.
             last_err = None
-            for channel in ("msedge", "chrome", None):
+            import os
+            brave = next((p for p in (
+                r"C:\Program Files\BraveSoftware\Brave-Browser\Applicationrave.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Applicationrave.exe"),
+            ) if os.path.exists(p)), None)
+            attempts = ([("brave", {"executable_path": brave})] if brave else []) + [
+                ("msedge", {"channel": "msedge"}), ("chrome", {"channel": "chrome"}),
+                ("bundled", {})]
+            for label, kw in attempts:
                 try:
-                    log.info("launching browser (channel=%s)", channel or "bundled")
+                    log.info("launching browser (%s)", label)
                     self._browser = await self._pw.chromium.launch(
-                        headless=False, channel=channel,
-                        args=["--window-size=1200,800"])
+                        headless=False, args=["--window-size=1200,800"], **kw)
                     break
                 except Exception as e:
                     last_err = e
