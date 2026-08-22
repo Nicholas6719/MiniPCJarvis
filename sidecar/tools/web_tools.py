@@ -80,7 +80,12 @@ async def research(query: str, num_sources: int = 4) -> dict:
     await bus.emit("research", stage="reading", query=query,
                    sources=[{"url": r["url"], "title": r["title"]}
                             for r in results[:num_sources]])
-    pages = await asyncio.gather(*(fetch_page(u, max_chars=2500) for u in urls))
+    async def _read(u):
+        page = await fetch_page(u, max_chars=2500)
+        await bus.emit("web", stage="read", query=query, url=u,
+                       ok=bool(page.get("content")), title=page.get("title"))
+        return page
+    pages = await asyncio.gather(*(_read(u) for u in urls))
 
     sources = []
     for r, page in zip(results[:num_sources], pages):
@@ -103,7 +108,33 @@ async def research(query: str, num_sources: int = 4) -> dict:
     }
 
 
+async def show_images(query: str, count: int = 8) -> dict:
+    """Find pictures and display them in the JARVIS interface."""
+    from search_brave_web import brave_web
+    if not brave_web.available:
+        return {"error": "image search needs the Brave browser installed"}
+    await bus.emit("web", stage="images_searching", query=query)
+    try:
+        imgs = await brave_web.images(query, max(1, min(12, count)))
+    except Exception as e:
+        return {"error": f"image search failed: {e}"}
+    if not imgs:
+        return {"error": "no images found"}
+    await bus.emit("images", query=query, images=imgs)
+    return {"shown": len(imgs), "query": query,
+            "instruction": "The pictures are now displayed on screen. Say so briefly."}
+
+
 def register_all() -> None:
+    registry.register(Tool(
+        name="show_images",
+        description="Find pictures of something and display them on the JARVIS "
+                    "screen. Use for 'show me a picture/photo/image of X'.",
+        parameters={"type": "object", "properties": {
+            "query": {"type": "string"},
+            "count": {"type": "integer", "minimum": 1, "maximum": 12}},
+            "required": ["query"]},
+        risk=Risk.LOW, handler=show_images, timeout=60))
     registry.register(Tool(
         name="fetch_page",
         description="Fetch a web page and return its readable text content.",
@@ -119,4 +150,4 @@ def register_all() -> None:
             "query": {"type": "string"},
             "num_sources": {"type": "integer", "minimum": 2, "maximum": 6}},
             "required": ["query"]},
-        risk=Risk.LOW, handler=research, timeout=60))
+        risk=Risk.LOW, handler=research, timeout=120))

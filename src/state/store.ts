@@ -28,7 +28,23 @@ export interface Confirmation {
   risk: string;
 }
 
-export type View = "conversation" | "memory" | "research" | "tasks" | "diagnostics" | "settings";
+export type View = "conversation" | "memory" | "research" | "media" | "tasks" | "diagnostics" | "settings";
+export type RightPanel = "activity" | "web";
+
+export interface WebResult { title?: string; url: string; snippet?: string; host?: string }
+export interface WebState {
+  query: string;
+  stage: string;
+  results: WebResult[];
+  read: Record<string, { ok: boolean; title?: string }>;
+  error?: string;
+  ts: number;
+}
+export interface MediaState {
+  query: string;
+  images: { src: string; alt: string; w: number; h: number; page?: string }[];
+  ts: number;
+}
 
 export interface ResearchSource {
   title?: string;
@@ -49,6 +65,9 @@ interface Store {
   state: JarvisState;
   view: View;
   wakeMode: string;
+  rightPanel: RightPanel;
+  web: WebState | null;
+  media: MediaState | null;
   armedUntil: number;      // epoch seconds; follow-up window open while now < armedUntil
   configVersion: number;   // bumps on config_changed so views can refetch
   autoSwitch: boolean;
@@ -64,6 +83,7 @@ interface Store {
   clearConfirmation: () => void;
   hydrateTranscript: (rows: { role: string; content: string }[]) => void;
   setWakeMode: (m: string) => void;
+  setRightPanel: (p: RightPanel) => void;
 }
 
 let draftId = "";
@@ -72,6 +92,9 @@ export const useStore = create<Store>((set, get) => ({
   state: "offline",
   view: "conversation",
   wakeMode: "push_to_talk",
+  rightPanel: "activity",
+  web: null,
+  media: null,
   armedUntil: 0,
   configVersion: 0,
   autoSwitch: true,
@@ -83,6 +106,7 @@ export const useStore = create<Store>((set, get) => ({
 
   setState: (s) => set({ state: s }),
   setWakeMode: (m) => set({ wakeMode: m }),
+  setRightPanel: (p) => set({ rightPanel: p }),
   setView: (v) => set({ view: v }),
   setAutoSwitch: (b) => set({ autoSwitch: b }),
   clearConfirmation: () => set({ confirmation: null }),
@@ -189,14 +213,41 @@ export const useStore = create<Store>((set, get) => ({
           run.stage = evt.stage;
           if (evt.sources) run.sources = evt.sources;
           if (evt.fetched != null) run.fetched = evt.fetched;
+          const web = st.web && st.web.query === evt.query && evt.stage === "done"
+            ? { ...st.web, stage: "done" } : st.web;
           return {
             researchRuns: runs.slice(-10),
+            web,
             // dynamic view switching: research activity pulls up the research view
             view: st.autoSwitch ? "research" : st.view,
           };
         });
         break;
       }
+      case "web": {
+        // live web activity takes over the right panel so the user can watch
+        set((st) => {
+          const prev = st.web && st.web.query === evt.query ? st.web : null;
+          const web: WebState = prev ?? { query: evt.query, stage: evt.stage, results: [], read: {}, ts: evt.ts };
+          const next: WebState = { ...web, stage: evt.stage, read: { ...web.read } };
+          if (evt.results) next.results = evt.results;
+          if (evt.stage === "read" && evt.url) {
+            next.read[evt.url] = { ok: !!evt.ok, title: evt.title };
+            next.stage = "reading";
+          }
+          if (evt.error) next.error = evt.error;
+          return { web: next, rightPanel: "web" };
+        });
+        push({ id: evt.id, ts: evt.ts, kind: "web", summary: `web: ${evt.stage}${evt.query ? ` "${evt.query}"` : ""}` });
+        break;
+      }
+      case "images":
+        set((st) => ({
+          media: { query: evt.query, images: evt.images ?? [], ts: evt.ts },
+          view: st.autoSwitch ? "media" : st.view,
+        }));
+        push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
+        break;
       case "proactive":
         push({ id: evt.id, ts: evt.ts, kind: "proactive", summary: `proactive: ${evt.alert}`, detail: evt.text });
         break;

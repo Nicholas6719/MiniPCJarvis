@@ -43,6 +43,7 @@ SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
 
 MAX_UTTERANCE_S = 30
 SILENCE_END_S = 0.9          # end of speech after this much silence
+WAKE_GRACE_S = 3.5           # after a bare 'Jarvis', wait this long for the request to start
 MIN_SPEECH_FRAMES = 3        # ~100ms of speech to count as real
 
 
@@ -160,6 +161,10 @@ class Orchestrator:
             asyncio.create_task(self.play_sound("boot"))
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
+        # pre-warm the hidden search browser so the first web search is instant
+        from search_brave_web import brave_web
+        if brave_web.available:
+            asyncio.create_task(brave_web.warmup())
 
     async def _device_watch(self) -> None:
         """Hot-plug: always use the webcam mic when present, fall back to the
@@ -173,6 +178,18 @@ class Orchestrator:
         while True:
             await asyncio.sleep(15)
             try:
+                # self-heal: if the stream is open but no audio has arrived for
+                # 6 s (e.g. an exclusive-mode app yanked the device), reopen it
+                if (mic._stream is not None and mic.last_frame_at
+                        and time.time() - mic.last_frame_at > 6
+                        and self.sm.state in (State.IDLE, State.SLEEPING)):
+                    log.warning("microphone went silent — reopening")
+                    mic.stop()
+                    refresh_devices()
+                    mic.start()
+                    await bus.emit("boot", summary=f"microphone recovered: {mic.device_name}")
+                    last_switch = time.time()
+                    continue
                 if time.time() - last_switch < 300:
                     continue  # never thrash the device: one switch per 5 min max
                 if config.get("audio", "input_device") is not None:
@@ -387,12 +404,15 @@ class Orchestrator:
         self.vad.reset()
         lead_in = self._preroll
         self._preroll = None
+        woke_by_name = False
+        new_speech_frames = 0
         if lead_in is not None and len(lead_in):
             # the wake phrase (and any words already spoken) live in here;
             # count it as speech so a command said in one breath is kept
             buf.append(lead_in)
             speech_frames = MIN_SPEECH_FRAMES
             last_speech_t = time.time()
+            woke_by_name = True
         mic.drain()
         while True:
             if time.time() - t0 > MAX_UTTERANCE_S:
@@ -408,11 +428,18 @@ class Orchestrator:
             buf.append(block)
             probs = self.vad.feed(block)
             if any(p >= self.vad.threshold for p in probs):
-                speech_frames += sum(1 for p in probs if p >= self.vad.threshold)
+                n = sum(1 for p in probs if p >= self.vad.threshold)
+                speech_frames += n
+                new_speech_frames += n
                 last_speech_t = time.time()
+            # After a bare "Jarvis" people often pause before the request.
+            # Until new speech actually starts, allow a longer grace period
+            # instead of the normal end-of-speech silence.
+            end_silence = (WAKE_GRACE_S if (woke_by_name and new_speech_frames < MIN_SPEECH_FRAMES)
+                           else SILENCE_END_S)
             if (last_speech_t is not None
                     and speech_frames >= MIN_SPEECH_FRAMES
-                    and time.time() - last_speech_t > SILENCE_END_S):
+                    and time.time() - last_speech_t > end_silence):
                 break
         if speech_frames < MIN_SPEECH_FRAMES:
             return None

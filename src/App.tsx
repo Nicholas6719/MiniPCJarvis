@@ -9,6 +9,8 @@ import { ResearchView } from "./components/ResearchView";
 import { TasksView } from "./components/TasksView";
 import { DiagnosticsView } from "./components/DiagnosticsView";
 import { StatusBar } from "./components/StatusBar";
+import { WebPanel } from "./components/WebPanel";
+import { MediaView } from "./components/MediaView";
 import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
 import { useStore, View } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
@@ -16,6 +18,7 @@ import { connectEvents, api } from "./lib/sidecar";
 const VIEWS: { id: View; label: string }[] = [
   { id: "conversation", label: "CONVERSATION" },
   { id: "research", label: "RESEARCH" },
+  { id: "media", label: "MEDIA" },
   { id: "memory", label: "MEMORY" },
   { id: "tasks", label: "TASKS" },
   { id: "diagnostics", label: "DIAGNOSTICS" },
@@ -30,6 +33,7 @@ export default function App() {
   const wakeMode = useStore((s) => s.wakeMode);
   const armedUntil = useStore((s) => s.armedUntil);
   const configVersion = useStore((s) => s.configVersion);
+  const rightPanel = useStore((s) => s.rightPanel);
 
   useEffect(() => connectEvents(onEvent), [onEvent]);
 
@@ -84,13 +88,14 @@ export default function App() {
         <section className="hud__center">
           {view === "conversation" && <ConversationView />}
           {view === "research" && <ResearchView />}
+          {view === "media" && <MediaView />}
           {view === "memory" && <MemoryView />}
           {view === "tasks" && <TasksView />}
           {view === "diagnostics" && <DiagnosticsView />}
           {view === "settings" && <SettingsView />}
         </section>
         <section className="hud__right">
-          <ActivityLog />
+          {rightPanel === "web" ? <WebPanel /> : <ActivityLog />}
         </section>
       </main>
       <StatusBar />

@@ -123,6 +123,8 @@ async def _ddg_search(query: str, count: int) -> dict:
 
 async def web_search(query: str, count: int = 5) -> dict:
     key = secrets.get("brave_api_key")
+    from events import bus
+    await bus.emit("web", stage="searching", query=query)
     if not key:
         # No key needed: drive the user's installed Brave browser (hidden).
         from search_brave_web import brave_web
@@ -130,9 +132,12 @@ async def web_search(query: str, count: int = 5) -> dict:
             try:
                 results = await brave_web.search(query, count)
                 if results:
+                    await bus.emit("web", stage="results", query=query, results=results)
                     return {"query": query, "results": results, "provider": "brave-browser"}
+                await bus.emit("web", stage="empty", query=query)
             except Exception as e:
                 log.warning("brave browser search failed: %s", e)
+                await bus.emit("web", stage="error", query=query, error=str(e)[:120])
         try:
             return await _ddg_search(query, count)
         except Exception as e:
@@ -207,7 +212,7 @@ def register_all() -> None:
             "query": {"type": "string"},
             "count": {"type": "integer", "minimum": 1, "maximum": 10}},
             "required": ["query"]},
-        risk=Risk.LOW, handler=web_search, timeout=15))
+        risk=Risk.LOW, handler=web_search, timeout=45))
     registry.register(Tool(
         name="read_file",
         description="Read a text file from the user's Documents, Downloads, Desktop or Pictures folders.",

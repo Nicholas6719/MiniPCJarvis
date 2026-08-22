@@ -41,9 +41,7 @@ export function ConversationView() {
           </div>
         ))}
         {transcript.some((m) => m.id.startsWith("hist-")) && (
-          <div className="convo__session">
-            <div className="convo__divider">↑ earlier conversation · new session ↓</div>
-          </div>
+          <div className="convo__session" />
         )}
         {transcript.filter((m) => !m.id.startsWith("hist-")).map((t) => (
           <div key={t.id + t.ts} className={`convo__msg convo__msg--${t.role}`}>

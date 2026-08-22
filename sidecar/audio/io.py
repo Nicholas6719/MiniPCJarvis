@@ -44,9 +44,13 @@ def resolve_input_device() -> tuple[int | None, str, bool]:
                            default=["C920", "Webcam", "Logitech"])]
     # ONLY shared-mode host APIs. WDM-KS opens the device EXCLUSIVELY and
     # silences it for every other app (Wispr Flow, browser mic tests...).
-    apis = {h["name"]: idx for idx, h in enumerate(sd.query_hostapis())}
-    allowed = {apis.get("MME"): 0, apis.get("Windows WASAPI"): 1}
-    allowed.pop(None, None)
+    allowed = {}
+    for idx, h in enumerate(sd.query_hostapis()):
+        n = h["name"].upper()
+        if "MME" in n:
+            allowed[idx] = 0
+        elif "WASAPI" in n:
+            allowed[idx] = 1
     candidates = []
     for i, d in enumerate(devs):
         if d["max_input_channels"] <= 0 or d["hostapi"] not in allowed:
@@ -60,7 +64,9 @@ def resolve_input_device() -> tuple[int | None, str, bool]:
         return idx, name, True
     try:
         di = sd.default.device[0]
-        return None, devs[di]["name"], False
+        dname = devs[di]["name"]
+        # the system default IS the webcam mic — that's still "preferred"
+        return None, dname, any(pat in dname.lower() for pat in patterns)
     except Exception:
         return None, "system default", False
 
@@ -78,6 +84,7 @@ class Microphone:
         self._loop: asyncio.AbstractEventLoop | None = None
         self.device_name: str = "not started"
         self.using_preferred: bool = False
+        self.last_frame_at: float = 0.0
         # legacy single-consumer queue, kept for existing call sites
         self.queue: asyncio.Queue[np.ndarray] = self.subscribe()
 
@@ -125,6 +132,8 @@ class Microphone:
         log.info("microphone started")
 
     def _put(self, block: np.ndarray) -> None:
+        import time as _t
+        self.last_frame_at = _t.time()
         for q in list(self._subs):
             try:
                 q.put_nowait(block)
