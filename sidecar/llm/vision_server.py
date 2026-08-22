@@ -47,10 +47,13 @@ class VisionServer:
             if not (Path(model).exists() and Path(mmproj).exists()):
                 log.error("vision model files missing")
                 return False
-            log.info("starting vision server (gemma3-4b)")
+            active = config.get("llm", "models", default={}).get(config.get("llm", "active_model"), {})
+            on_cpu = bool(active.get("gpu_full")) or config.get("vision", "device", default="auto") == "cpu"
+            device_args = ["--device", "none", "-ngl", "0"] if on_cpu else ["-ngl", "999"]
+            log.info("starting vision server (gemma3-4b, %s)", "cpu" if on_cpu else "gpu")
             self.proc = subprocess.Popen(
                 [binary, "-m", model, "--mmproj", mmproj,
-                 "-ngl", "999", "-t", "8", "-fa", "on", "-c", "8192",
+                 *device_args, "-t", "8", "-fa", "on", "-c", "8192",
                  "--host", "127.0.0.1", "--port", str(VISION_PORT),
                  "--log-file", str(LOG_DIR / "vision-server.log")],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

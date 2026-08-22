@@ -34,14 +34,17 @@ DEFAULTS: dict[str, Any] = {
         "active_model": "gpt-oss-20b",
         "models": {
             # Google's QAT q4_0 (near-bf16 quality). MoE 26B/3.8B-active: ~25 t/s on the
-            # 780M, tool calling native, thinking off for voice. MTP measured +5-8% only
-            # on Vulkan/UMA - not worth it. Multimodal via mmproj (vision).
+            # 780M, first token ~0.8 s warm, native tool calling, thinking off for voice.
+            # Measured and rejected on this iGPU (2026-08-22): MTP (+5-8% only), in-model
+            # vision (14.4 GB weights + image compute buffers overflow the 17.4 GB Vulkan
+            # heap -> crashes), CPU experts (-27% speed). Vision runs on the CPU side
+            # server instead (gpu_full below).
             "gemma-4-26b-a4b": {
                 "path": r"C:\AI\models\gemma-4-26B-A4B-it-qat-q4_0.gguf",
-                "mmproj": r"C:\AI\models\gemma-4-26B-A4B-it-mmproj.gguf",
                 "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256"],
                 "template_kwargs": {"enable_thinking": False},
                 "reasoning_field": "reasoning_content",
+                "gpu_full": True,   # fills the iGPU heap: the vision server must use the CPU
             },
             "gpt-oss-20b": {
                 "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
@@ -118,7 +121,7 @@ class Config:
 
     # Saved configs snapshot every default, so improved defaults never reach an
     # existing install on their own. Each migration runs once (tracked by version).
-    CONFIG_VERSION = 3
+    CONFIG_VERSION = 4
 
     def _migrate(self) -> bool:
         v = int(self.data.get("config_version", 1) or 1)
@@ -133,6 +136,13 @@ class Config:
             models = self.data.setdefault("llm", {}).setdefault("models", {})
             for name, entry in DEFAULTS["llm"]["models"].items():
                 if name not in models:
+                    models[name] = entry
+                    changed = True
+        if v < 4:
+            # built-in model entries are ours to tune: refresh them (user-added ones untouched)
+            models = self.data.setdefault("llm", {}).setdefault("models", {})
+            for name, entry in DEFAULTS["llm"]["models"].items():
+                if models.get(name) != entry:
                     models[name] = entry
                     changed = True
         if v != self.CONFIG_VERSION:
