@@ -19,7 +19,7 @@ from llm.llama_server import _job
 log = logging.getLogger("jarvis.vision")
 
 VISION_PORT = 8034
-IDLE_STOP_S = 300  # stop after 5 min unused
+IDLE_STOP_S = 90   # stop soon after use: on a 32 GB box RAM is the scarce resource
 
 
 class VisionServer:
@@ -49,11 +49,13 @@ class VisionServer:
                 return False
             active = config.get("llm", "models", default={}).get(config.get("llm", "active_model"), {})
             on_cpu = bool(active.get("gpu_full")) or config.get("vision", "device", default="auto") == "cpu"
-            device_args = ["--device", "none", "-ngl", "0"] if on_cpu else ["-ngl", "999"]
+            # CPU mode runs beside a GPU-filling main model: keep its footprint small
+            device_args = (["--device", "none", "-ngl", "0", "-c", "2048", "-b", "256"] if on_cpu
+                           else ["-ngl", "999", "-c", "8192"])
             log.info("starting vision server (gemma3-4b, %s)", "cpu" if on_cpu else "gpu")
             self.proc = subprocess.Popen(
                 [binary, "-m", model, "--mmproj", mmproj,
-                 *device_args, "-t", "8", "-fa", "on", "-c", "8192",
+                 *device_args, "-t", "8", "-fa", "on",
                  "--host", "127.0.0.1", "--port", str(VISION_PORT),
                  "--log-file", str(LOG_DIR / "vision-server.log")],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -77,7 +79,7 @@ class VisionServer:
 
     async def _reap_idle(self) -> None:
         while self.running:
-            await asyncio.sleep(30)
+            await asyncio.sleep(15)
             if time.time() - self.last_used > IDLE_STOP_S:
                 log.info("vision server idle — stopping to free RAM")
                 await self.stop()

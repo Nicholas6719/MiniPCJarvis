@@ -195,7 +195,7 @@ class LlamaServer:
             return False
         args = [
             binary, "-m", model_path,
-            "-c", str(config.get("llm", "context", default=16384)),
+            "-c", str(mcfg.get("context") or config.get("llm", "context", default=16384)),
             "--host", "127.0.0.1", "--port", str(self.port),
             "--api-key", self.api_key,
             "--log-file", str(LOG_DIR / "llama-server.log"),

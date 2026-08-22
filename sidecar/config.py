@@ -41,7 +41,10 @@ DEFAULTS: dict[str, Any] = {
             # server instead (gpu_full below).
             "gemma-4-26b-a4b": {
                 "path": r"C:\AI\models\gemma-4-26B-A4B-it-qat-q4_0.gguf",
-                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256"],
+                # q8 KV cache + 12K context: ~1.5 GB less RAM than 16K f16 (measured 2026-08-22)
+                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256",
+                         "-ctk", "q8_0", "-ctv", "q8_0"],
+                "context": 12288,
                 "template_kwargs": {"enable_thinking": False},
                 "reasoning_field": "reasoning_content",
                 "gpu_full": True,   # fills the iGPU heap: the vision server must use the CPU
@@ -139,8 +142,8 @@ class Config:
                 if name not in models:
                     models[name] = entry
                     changed = True
-        if v < 4:
-            # built-in model entries are ours to tune: refresh them (user-added ones untouched)
+        if True:
+            # built-in model entries are ours to tune: always mirror DEFAULTS (user-added untouched)
             models = self.data.setdefault("llm", {}).setdefault("models", {})
             for name, entry in DEFAULTS["llm"]["models"].items():
                 if models.get(name) != entry:
