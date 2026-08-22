@@ -233,6 +233,7 @@ class Skill:
     fixed_args: dict = field(default_factory=dict)
     llm_after: bool = False          # run the tool, then let the LLM compose the answer
     direct_if: Callable[[str], bool] | None = None   # llm_after skill may still go direct
+    speak_first: bool = False        # announce ("Opening X.") before running the tool
 
 
 SKILLS: list[Skill] = [
@@ -265,7 +266,7 @@ SKILLS: list[Skill] = [
         "fire up steam", "open vs code", "bring up task manager", "launch discord",
         "open file explorer", "start brave", "open settings", "put on spotify",
         "can you open notepad", "open up chrome for me", "run terminal"],
-        slots=slots_app, speak=say_open),
+        slots=slots_app, speak=say_open, speak_first=True),
     Skill("close_app", "close_application", [
         "close notepad", "quit spotify", "close chrome", "exit steam", "kill discord",
         "shut down notepad", "close the calculator", "close brave", "quit vs code",
@@ -339,7 +340,7 @@ SKILLS: list[Skill] = [
         "open youtube.com", "go to wikipedia.org", "pull up amazon.com", "open the website reddit.com",
         "open example.com and tell me what the page says", "take me to github.com",
         "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up weather.com"],
-        slots=slots_site, speak=say_site, llm_after=True, direct_if=site_direct),
+        slots=slots_site, speak=say_site, llm_after=True, direct_if=site_direct, speak_first=True),
     Skill("recall", "recall", [
         "what did i tell you about my coffee", "do you remember my favorite color",
         "what do you know about me", "what did i say my dentist's name was",

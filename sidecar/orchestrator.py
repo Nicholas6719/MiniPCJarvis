@@ -519,6 +519,14 @@ class Orchestrator:
                 await bus.emit("reflex", skill="general", tool=None, args={},
                                confidence=brain._last[1],
                                mode="answer_directly" if level == "sure" else "answer_hint")
+        # speaker + speak-before-thinking start now, before memory search and any tool
+        # pre-run, so the filler lands ~0.7 s after the user stops talking
+        await self.sm.to(State.THINKING)
+        self._speak_cancel = asyncio.Event()
+        speak_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        speaker_task = asyncio.create_task(self._speaker_worker(speak_queue))
+        self._first_token = asyncio.Event()
+        filler_task = asyncio.create_task(self._filler(speak_queue, reflex))
         try:
             mem_hits = await memory.search(text, top_k=4)
         except Exception:
@@ -550,19 +558,15 @@ class Orchestrator:
             messages.append({"role": "assistant", "content": None, "tool_calls": [
                 {"id": call_id, "type": "function",
                  "function": {"name": skill.tool, "arguments": json.dumps(args)}}]})
+            if isinstance(result, dict) and result.get("ok"):
+                result = {**result, "note": "Answer the user from these results now, in one or two "
+                                            "spoken sentences. Only call another tool if they are empty."}
             messages.append({"role": "tool", "tool_call_id": call_id,
                              "content": json.dumps(result, default=str)})
         else:
             brain.stats["llm"] += 1
 
-        await self.sm.to(State.THINKING)
-        self._speak_cancel = asyncio.Event()
-        speak_queue: asyncio.Queue[str | None] = asyncio.Queue()
-        speaker_task = asyncio.create_task(self._speaker_worker(speak_queue))
-        # speak-before-thinking: if the first token isn't here quickly, say something
-        # human while the model works - perceived latency drops to ~0.3 s
-        self._first_token = asyncio.Event()
-        filler_task = asyncio.create_task(self._filler(speak_queue, reflex))
+        await self.sm.to(State.THINKING, force=True)
         full_reply = ""
         try:
             full_reply = await self._llm_with_tools(messages, speak_queue)
@@ -625,23 +629,37 @@ class Orchestrator:
         await bus.emit("reflex", skill=skill.name, tool=skill.tool, args=args,
                        confidence=conf, mode="direct")
         res: dict = {}
+        self._speak_cancel = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        task = asyncio.create_task(self._speaker_worker(queue))
+        reply = ""
+        if skill.speak_first and skill.tool:
+            # announce the action immediately ("Opening youtube.com."), then do it
+            reply = skill.speak(args, {})
+            self.metrics.mark("first_token_ms")
+            await bus.emit("assistant_delta", text=reply)
+            await queue.put(clean_for_speech(reply))
         if skill.tool:
             await self.sm.to(State.EXECUTING, force=True)
             out = await registry.execute(skill.tool, args)
             res = out.get("result") if out.get("ok") else {"error": out.get("error", "failed")}
             if not isinstance(res, dict):
                 res = {"value": res}
-        try:
-            reply = skill.speak(args, res)
-        except Exception:
-            log.exception("reflex speak template failed")
-            reply = "Done." if "error" not in res else "That didn't work."
-        self.metrics.mark("first_token_ms")
-        await bus.emit("assistant_delta", text=reply)
-        self._speak_cancel = asyncio.Event()
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
-        task = asyncio.create_task(self._speaker_worker(queue))
-        await queue.put(clean_for_speech(reply))
+        if skill.speak_first and skill.tool:
+            if "error" in res:
+                extra = skill.speak(args, res)
+                reply += " " + extra
+                await bus.emit("assistant_delta", text=" " + extra)
+                await queue.put(clean_for_speech(extra))
+        else:
+            try:
+                reply = skill.speak(args, res)
+            except Exception:
+                log.exception("reflex speak template failed")
+                reply = "Done." if "error" not in res else "That didn't work."
+            self.metrics.mark("first_token_ms")
+            await bus.emit("assistant_delta", text=reply)
+            await queue.put(clean_for_speech(reply))
         await queue.put(None)
         try:
             await task
