@@ -390,6 +390,40 @@ async def windows_act(body: dict, x_jarvis_token: str | None = Header(None)):
     return await asyncio.to_thread(act, int(body.get("hwnd", 0)), str(body.get("action", "focus")))
 
 
+@app.get("/system")
+async def system_snapshot(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tools.system_panel import snapshot
+    return await asyncio.to_thread(snapshot)
+
+
+@app.post("/system/volume")
+async def system_volume(body: dict, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tools.windows_tools import set_volume
+    return await asyncio.to_thread(set_volume, int(body.get("percent", 50)))
+
+
+@app.post("/system/mute")
+async def system_mute(body: dict, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tools.windows_tools import set_mute
+    return await asyncio.to_thread(set_mute, bool(body.get("muted", True)))
+
+
+@app.post("/system/power")
+async def system_power(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Power actions from the HUD (the user clicked and confirmed in the UI)."""
+    _auth(x_jarvis_token)
+    from tools.windows_tools import lock_computer, power_action
+    action = str(body.get("action", ""))
+    if action == "lock":
+        return await asyncio.to_thread(lock_computer)
+    if action in ("sleep", "restart", "shutdown"):
+        return await asyncio.to_thread(power_action, action)
+    raise HTTPException(400, "unknown action")
+
+
 @app.get("/diagnostics")
 async def diagnostics(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

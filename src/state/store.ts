@@ -28,7 +28,7 @@ export interface Confirmation {
   risk: string;
 }
 
-export type View = "conversation" | "memory" | "research" | "media" | "browser" | "files" | "apps" | "tasks" | "diagnostics" | "settings";
+export type View = "conversation" | "memory" | "research" | "media" | "browser" | "files" | "apps" | "system" | "tasks" | "diagnostics" | "settings";
 export type RightPanel = "activity" | "web";
 
 export interface WebResult { title?: string; url: string; snippet?: string; host?: string }

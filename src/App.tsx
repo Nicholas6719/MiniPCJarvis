@@ -14,6 +14,7 @@ import { MediaView } from "./components/MediaView";
 import { BrowserView } from "./components/BrowserView";
 import { FilesView } from "./components/FilesView";
 import { AppsView } from "./components/AppsView";
+import { SystemView } from "./components/SystemView";
 import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
 import { useStore, View } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
@@ -25,6 +26,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "browser", label: "BROWSER" },
   { id: "files", label: "FILES" },
   { id: "apps", label: "APPS" },
+  { id: "system", label: "SYSTEM" },
   { id: "memory", label: "MEMORY" },
   { id: "tasks", label: "TASKS" },
   { id: "diagnostics", label: "DIAGNOSTICS" },
@@ -98,6 +100,7 @@ export default function App() {
           {view === "browser" && <BrowserView />}
           {view === "files" && <FilesView />}
           {view === "apps" && <AppsView />}
+          {view === "system" && <SystemView />}
           {view === "memory" && <MemoryView />}
           {view === "tasks" && <TasksView />}
           {view === "diagnostics" && <DiagnosticsView />}
