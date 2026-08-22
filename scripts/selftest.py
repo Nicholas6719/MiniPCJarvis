@@ -2,7 +2,32 @@
 Usage: selftest.py PORT TOKEN OUT.json"""
 import json, os, subprocess, sys, time
 
-port, tok, out = sys.argv[1], sys.argv[2], sys.argv[3]
+def _find_app():
+    """Port/token from the running jarvis-sidecar.exe command line."""
+    import re
+    try:
+        import psutil
+        for p in psutil.process_iter(["name", "cmdline"]):
+            if (p.info["name"] or "").lower() == "jarvis-sidecar.exe":
+                cl = " ".join(p.info["cmdline"] or [])
+                m1, m2 = re.search(r"--port (\d+)", cl), re.search(r"--token ([0-9a-f]+)", cl)
+                if m1 and m2:
+                    return m1.group(1), m2.group(1)
+    except Exception:
+        pass
+    return None, None
+
+
+if len(sys.argv) >= 4:
+    port, tok, out = sys.argv[1], sys.argv[2], sys.argv[3]
+else:
+    out = sys.argv[1]
+    port, tok = _find_app()
+    if not port:
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump({"ts": time.time(), "ok": False, "results": [], "error": "JARVIS is not running"}, f)
+        print("JARVIS is not running"); sys.exit(1)
+print(f"selftest against :{port} at {time.strftime('%H:%M:%S')}")
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 py = os.path.join(root, "sidecar", ".venv", "Scripts", "python.exe")
 SUITES = ["brain_e2e.py", "files_e2e.py", "teach_e2e.py", "general_e2e.py", "voice_ux_e2e.py"]
@@ -19,7 +44,7 @@ except Exception as e:
 for s in SUITES:
     t0 = time.time()
     try:
-        r = subprocess.run([py, os.path.join(root, "sidecar", "tests", s), port, tok], capture_output=True, text=True,
+        r = subprocess.run([py, os.path.join(root, "sidecar", "tests", s), port, tok], capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=900, cwd=os.path.join(root, "sidecar"), env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         text = (r.stdout or "") + (r.stderr or "")
         ok = PASS_MARK[s] in text and (s != "brain_e2e.py" or "8/8 passed" in text)
