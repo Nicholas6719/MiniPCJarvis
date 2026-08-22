@@ -31,6 +31,11 @@
 ### Build
 - `scripts/build_sidecar.cmd` gates PyInstaller on compileall + imports
 
+### Evening: model bake-off
+- Gemma 4 26B-A4B benchmarked on-device (faster first token, smarter) but RAM-bound
+  with vision on a 32 GB PC -> selectable, not default; harness kept in tests/
+- Keyless weather reflex (Open-Meteo); vision tool 3-4x faster; prompt tuning
+
 ### Afternoon additions
 - Speak-before-thinking fillers; STT base.en (3x faster); announce-then-act for
   apps/sites; tool-then-LLM composes without tools

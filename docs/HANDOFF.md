@@ -144,6 +144,25 @@ but the user's folder was empty; log files diverge.
 - Deferred (needs the user): webcam presence (needs OpenCV +40 MB, camera LED on),
   Windows notification listener (needs a privacy permission grant in Settings).
 
+## Model bake-off 2026-08-22 (evening) - READ BEFORE TOUCHING MODELS
+- Candidate: Gemma 4 26B-A4B (google QAT q4_0, 14.4 GB) at C:\AI\models\gemma-4-26B-A4B-it-qat-q4_0.gguf
+  (+ mmproj, + MTP head). Harness: tests/model_bench.py (real prompt + schemas), gen_speed.py,
+  pp_speed.py, bench_server.ps1, scripts/model_trial.ps1 (live switch + all suites),
+  tests/vision_mem_e2e.py (vision turn + RAM peak).
+- Results on the 780M: gen 24.7 t/s (= gpt-oss), warm first token 0.81 s (gpt-oss 1.44 s),
+  behaviour 18/18 semantic, cold 3.4K prefix 12.8 s once. MTP: +5-8% only (Vulkan/UMA) -> no.
+  In-model vision: 14.4 GB + image compute buffers overflow the 17.4 GB Vulkan heap
+  (fits only at 8K ctx; 12-16K crashes) -> no. CPU experts -27% -> no.
+- The blocker is SYSTEM RAM (28.8 GB usable): Gemma 4 + CPU vision server + sidecar +
+  hidden browsers peaked at 96% and the engine was killed once; gpt-oss peaks 80%.
+  => DEFAULT STAYS gpt-oss-20b. Gemma 4 is selectable (config entry has gpu_full: True so
+  the vision server runs on CPU, q8 KV, 12K ctx). If the user buys 64 GB RAM, flip it.
+- Kept from the exercise: keyless weather tool + reflex (tools/weather.py, Open-Meteo),
+  prompt tuning (brevity cap, no example parroting, one search then fetch_page/open_url),
+  vision tool 3-4x faster (1024px JPEG, 2-sentence answers, 120 tokens), model entries
+  in config always mirror DEFAULTS (config.py _migrate).
+- STT candidates still untested: Parakeet TDT 0.6B v3 (ONNX), Moonshine v2 (streaming).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
