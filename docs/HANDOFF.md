@@ -127,6 +127,23 @@ but the user's folder was empty; log files diverge.
 - NOT yet visually checked in the real HUD: FILES and BROWSER views (built from
   typed-checked TSX; the agent can't see the user's session). Ask the user.
 
+## Later afternoon 2026-08-22
+- `scripts/release.ps1` = THE way to ship: gated sidecar build -> tauri -> real-session
+  install -> wait -> all suites. ~15 min; run in background (tool cap is 10 min):
+  `Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\release.ps1' -RedirectStandardOutput C:\Users\nicho\Documents\jarvis_release.log`
+  then poll the log for "RELEASE OK".
+- APPS view (`tools/window_thumbs.py`, `/windows`, `/windows/act`), "switch to X" reflex.
+- SYSTEM view (`tools/system_panel.py`, `/system*`).
+- BROWSER click-through (`/browser/click|scroll|type`).
+- Nightly self-test: `scripts/selftest.cmd` (register once with `scripts/install_selftest.cmd`
+  from the real session -> task JARVIS_SELFTEST 03:30). Silences the speaker via
+  `/debug/silence`; report at `%APPDATA%/JARVIS/selftest.json`, shown in Diagnostics.
+- Proactive rules: "tell me if CPU goes above 90 for 5 minutes" (watch/unwatch skills,
+  `proactive.rules` in config, `run_rules()` each tick).
+- `/brain/export` -> `%APPDATA%/JARVIS/dataset.jsonl`.
+- Deferred (needs the user): webcam presence (needs OpenCV +40 MB, camera LED on),
+  Windows notification listener (needs a privacy permission grant in Settings).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
