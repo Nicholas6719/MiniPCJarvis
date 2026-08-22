@@ -33,6 +33,16 @@ DEFAULTS: dict[str, Any] = {
         "context": 16384,
         "active_model": "gpt-oss-20b",
         "models": {
+            # Google's QAT q4_0 (near-bf16 quality). MoE 26B/3.8B-active: ~25 t/s on the
+            # 780M, tool calling native, thinking off for voice. MTP measured +5-8% only
+            # on Vulkan/UMA - not worth it. Multimodal via mmproj (vision).
+            "gemma-4-26b-a4b": {
+                "path": r"C:\AI\models\gemma-4-26B-A4B-it-qat-q4_0.gguf",
+                "mmproj": r"C:\AI\models\gemma-4-26B-A4B-it-mmproj.gguf",
+                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256"],
+                "template_kwargs": {"enable_thinking": False},
+                "reasoning_field": "reasoning_content",
+            },
             "gpt-oss-20b": {
                 "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
                 "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256"],
@@ -108,7 +118,7 @@ class Config:
 
     # Saved configs snapshot every default, so improved defaults never reach an
     # existing install on their own. Each migration runs once (tracked by version).
-    CONFIG_VERSION = 2
+    CONFIG_VERSION = 3
 
     def _migrate(self) -> bool:
         v = int(self.data.get("config_version", 1) or 1)
@@ -118,6 +128,13 @@ class Config:
             if self.data.get("stt", {}).get("model") == "small.en":
                 self.data["stt"]["model"] = "base.en"
                 changed = True
+        if v < 3:
+            # new model entries become available without touching the active choice
+            models = self.data.setdefault("llm", {}).setdefault("models", {})
+            for name, entry in DEFAULTS["llm"]["models"].items():
+                if name not in models:
+                    models[name] = entry
+                    changed = True
         if v != self.CONFIG_VERSION:
             self.data["config_version"] = self.CONFIG_VERSION
             changed = True

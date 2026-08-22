@@ -201,6 +201,8 @@ class LlamaServer:
             "--log-file", str(LOG_DIR / "llama-server.log"),
             *mcfg.get("args", []),
         ]
+        if mcfg.get("mmproj") and Path(mcfg["mmproj"]).exists():
+            args += ["--mmproj", mcfg["mmproj"]]
         log.info("starting llama-server: %s", model_name)
         self.proc = subprocess.Popen(
             args,
