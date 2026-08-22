@@ -88,6 +88,38 @@ def _kill_stale_profile_users(profile: str) -> None:
         pass
 
 
+def _show_windows_of_pid_offscreen(pid: int) -> None:
+    """Make the (off-screen, tool-style) window 'visible' so Chromium renders and
+    lazy-loads images; it stays off-screen and off the taskbar."""
+    try:
+        import win32con
+        import win32gui
+        import win32process
+        import psutil
+        pids = {pid} | {c.pid for c in psutil.Process(pid).children(recursive=True)}
+    except Exception:
+        return
+
+    def cb(hwnd, _):
+        try:
+            _, wpid = win32process.GetWindowThreadProcessId(hwnd)
+            if wpid in pids and win32gui.GetWindowText(hwnd):
+                ex = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE,
+                                       (ex | win32con.WS_EX_TOOLWINDOW) & ~win32con.WS_EX_APPWINDOW)
+                win32gui.SetWindowPos(hwnd, 0, -32000, -32000, 1200, 900,
+                                      win32con.SWP_NOACTIVATE | win32con.SWP_NOZORDER)
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(cb, None)
+    except Exception:
+        pass
+
+
 def _hide_windows_of_pid(pid: int) -> int:
     """Hide (SW_HIDE) every top-level window owned by a process tree so the
     search browser has no taskbar button at all."""
@@ -199,7 +231,28 @@ class BraveWebSearch:
             if time.time() - self._last > IDLE_CLOSE_S:
                 await self.close()
 
+    async def _reset(self) -> None:
+        """Browser died or was killed: drop the dead handles, relaunch next call."""
+        log.warning("search browser unusable — relaunching")
+        await self.close()
+
     async def search(self, query: str, count: int = 5) -> list[dict]:
+        try:
+            return await self._search(query, count)
+        except Exception as e:
+            log.warning("search failed (%s) — retrying with a fresh browser", str(e)[:80])
+            await self._reset()
+            return await self._search(query, count)
+
+    async def images(self, query: str, count: int = 8) -> list[dict]:
+        try:
+            return await self._images(query, count)
+        except Exception as e:
+            log.warning("image search failed (%s) — retrying with a fresh browser", str(e)[:80])
+            await self._reset()
+            return await self._images(query, count)
+
+    async def _search(self, query: str, count: int = 5) -> list[dict]:
         async with self._lock:
             self._last = time.time()
             ctx = await self._ensure()
@@ -216,24 +269,27 @@ class BraveWebSearch:
             self._last = time.time()
             return results[:count]
 
-    async def images(self, query: str, count: int = 8) -> list[dict]:
+    async def _images(self, query: str, count: int = 8) -> list[dict]:
         async with self._lock:
             self._last = time.time()
             ctx = await self._ensure()
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            # Chromium won't lazy-load images in a hidden window: show it
+            # off-screen (invisible, no taskbar button) just for this load.
+            if self._pid:
+                _show_windows_of_pid_offscreen(self._pid)
             await page.goto(f"https://search.brave.com/images?q={quote_plus(query)}",
                             wait_until="domcontentloaded", timeout=25000)
-            self._hide()
             try:
                 await page.wait_for_selector("img[src*='imgs.search.brave.com']", timeout=15000)
             except Exception:
                 pass
-            # nudge lazy-loading, then give thumbnails a moment to land
             for _ in range(3):
                 await page.mouse.wheel(0, 900)
                 await page.wait_for_timeout(500)
             await page.wait_for_timeout(800)
             imgs = await page.evaluate(_EXTRACT_IMAGES_JS)
+            self._hide()
             self._last = time.time()
             return imgs[:count]
 
