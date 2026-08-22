@@ -55,6 +55,14 @@ async def lifespan(app: FastAPI):
     from proactive import proactive
     proactive.announce = orchestrator.announce
     proactive.start()
+    from brain.router import brain
+
+    async def _load_brain():
+        try:
+            await brain.load()
+        except Exception:
+            logging.getLogger("jarvis").exception("brain failed to load (LLM-only mode)")
+    asyncio.create_task(_load_brain())
     asyncio.create_task(orchestrator.start())
     yield
     proactive.stop()
@@ -249,6 +257,35 @@ async def models(x_jarvis_token: str | None = Header(None)):
         "active": llama.model_name or config.get("llm", "active_model"),
         "external": llama.external,
     }
+
+
+@app.get("/brain")
+async def brain_status(x_jarvis_token: str | None = Header(None)):
+    """JARVIS's own brain: examples, skills, reflex/LLM split, recent learning."""
+    _auth(x_jarvis_token)
+    from brain.router import brain
+    return brain.status()
+
+
+@app.post("/brain/teach")
+async def brain_teach(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Teach a phrasing -> skill explicitly (from the UI)."""
+    _auth(x_jarvis_token)
+    from brain.router import brain
+    text, skill = str(body.get("text", "")), str(body.get("skill", ""))
+    ok = await brain.learn(text, skill, source="user")
+    return {"ok": ok, "examples": brain.example_count}
+
+
+@app.post("/brain/classify")
+async def brain_classify(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dry-run: what would the brain do with this text? (no side effects)"""
+    _auth(x_jarvis_token)
+    from brain.router import brain
+    d = await brain.decide(str(body.get("text", "")))
+    name, conf = await brain.classify(str(body.get("text", "")))
+    return {"skill": d[0].name if d else None, "args": d[1] if d else None,
+            "confidence": d[2] if d else conf, "nearest": name}
 
 
 @app.get("/diagnostics")

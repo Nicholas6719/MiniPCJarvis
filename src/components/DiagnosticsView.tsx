@@ -8,6 +8,52 @@ interface Check {
   repairable: boolean;
 }
 
+interface BrainStatus {
+  examples: number;
+  skills: { name: string; tool: string | null; examples: number; llm_after: boolean }[];
+  stats: { reflex: number; llm: number; learned: number };
+  threshold: number;
+  recent: { ts: number; text: string; skill: string; source: string }[];
+}
+
+function BrainPanel() {
+  const [b, setB] = useState<BrainStatus | null>(null);
+  useEffect(() => {
+    const load = async () => { try { setB(await api("/brain")); } catch {} };
+    load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
+  }, []);
+  if (!b) return null;
+  const total = b.stats.reflex + b.stats.llm;
+  return (
+    <div className="brain">
+      <span className="panel-title">BRAIN — REFLEXES (NO LLM)</span>
+      <div className="brain__stats">
+        <span><b>{b.examples}</b> examples</span>
+        <span><b>{b.skills.length}</b> skills</span>
+        <span><b>{total ? Math.round((b.stats.reflex / total) * 100) : 0}%</b> of turns handled by reflex</span>
+        <span><b>{b.stats.learned}</b> learned this session</span>
+      </div>
+      <div className="brain__grid">
+        {b.skills.map((s) => (
+          <div key={s.name} className="brain__skill">
+            <span>{s.name}{s.llm_after ? " +LLM" : ""}</span>
+            <span>{s.examples}</span>
+          </div>
+        ))}
+      </div>
+      {b.recent.length > 0 && (
+        <div className="brain__recent">
+          {b.recent.slice(0, 8).map((r) => (
+            <div key={r.ts + r.text}>learned <b>"{r.text}"</b> → {r.skill}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DiagnosticsView() {
   const [checks, setChecks] = useState<Check[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -61,6 +107,7 @@ export function DiagnosticsView() {
           </div>
         ))}
       </div>
+      <BrainPanel />
     </div>
   );
 }

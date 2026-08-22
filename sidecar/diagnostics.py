@@ -33,6 +33,18 @@ async def run_diagnostics() -> list[dict]:
     else:
         add("AI Engine", "error", "llama-server not responding", repairable=True)
 
+    # Brain (reflex router)
+    try:
+        from brain.router import brain
+        if brain.example_count:
+            st = brain.stats
+            add("Brain", "ok", f"{brain.example_count} examples, {len(__import__('brain.skills', fromlist=['SKILLS']).SKILLS) - 1} skills "
+                f"(reflex {st['reflex']} / llm {st['llm']}, learned {st['learned']})")
+        else:
+            add("Brain", "warn", "no examples loaded yet", repairable=False)
+    except Exception as e:
+        add("Brain", "error", f"brain unavailable: {e}")
+
     # STT
     add("Speech Recognition", "ok" if stt._model is not None else "warn",
         f"faster-whisper {config.get('stt', 'model')}"

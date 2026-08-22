@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import time
+import uuid
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from audio.vad import StreamingVAD
 from audio.wake import wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech
+from brain.router import brain
 import collections
 import re as _re
 from config import config
@@ -491,6 +493,16 @@ class Orchestrator:
 
     async def _converse(self, text: str, t_start: float) -> None:
         memory.log_turn("user", text)
+        # ---- reflex: JARVIS's own brain handles known requests without the LLM ----
+        reflex = None
+        if config.get("brain", "enabled", default=True):
+            try:
+                reflex = await brain.decide(text)
+            except Exception:
+                log.exception("brain decide failed - falling back to the LLM")
+        if reflex and not reflex[0].llm_after:
+            await self._reflex_turn(text, reflex, t_start)
+            return
         try:
             mem_hits = await memory.search(text, top_k=4)
         except Exception:
@@ -507,6 +519,24 @@ class Orchestrator:
         messages: list[dict] = [{"role": "system", "content": system_prompt()}]
         messages += self._history[-10:]
         messages.append({"role": "user", "content": turn_context(mem_ctx) + chr(10) + text})
+
+        if reflex:
+            # brain knew which tool to run; run it now and let the LLM compose the answer
+            skill, args, conf = reflex
+            brain.stats["reflex"] += 1
+            await bus.emit("reflex", skill=skill.name, tool=skill.tool, args=args,
+                           confidence=conf, mode="tool_then_llm")
+            await self.sm.to(State.SEARCHING if skill.tool in ("web_search", "research")
+                             else State.EXECUTING, force=True)
+            result = await registry.execute(skill.tool, args)
+            call_id = "reflex-" + uuid.uuid4().hex[:8]
+            messages.append({"role": "assistant", "content": None, "tool_calls": [
+                {"id": call_id, "type": "function",
+                 "function": {"name": skill.tool, "arguments": json.dumps(args)}}]})
+            messages.append({"role": "tool", "tool_call_id": call_id,
+                             "content": json.dumps(result, default=str)})
+        else:
+            brain.stats["llm"] += 1
 
         await self.sm.to(State.THINKING)
         self._speak_cancel = asyncio.Event()
@@ -539,6 +569,46 @@ class Orchestrator:
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
 
+    async def _reflex_turn(self, text: str, reflex, t_start: float) -> None:
+        """Handle a request JARVIS recognized himself: tool + templated speech, no LLM."""
+        skill, args, conf = reflex
+        brain.stats["reflex"] += 1
+        await bus.emit("reflex", skill=skill.name, tool=skill.tool, args=args,
+                       confidence=conf, mode="direct")
+        res: dict = {}
+        if skill.tool:
+            await self.sm.to(State.EXECUTING, force=True)
+            out = await registry.execute(skill.tool, args)
+            res = out.get("result") if out.get("ok") else {"error": out.get("error", "failed")}
+            if not isinstance(res, dict):
+                res = {"value": res}
+        try:
+            reply = skill.speak(args, res)
+        except Exception:
+            log.exception("reflex speak template failed")
+            reply = "Done." if "error" not in res else "That didn't work."
+        self.metrics.mark("first_token_ms")
+        await bus.emit("assistant_delta", text=reply)
+        self._speak_cancel = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        task = asyncio.create_task(self._speaker_worker(queue))
+        await queue.put(clean_for_speech(reply))
+        await queue.put(None)
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        self._history.append({"role": "user", "content": text})
+        self._history.append({"role": "assistant", "content": reply})
+        self._history = self._history[-20:]
+        memory.log_turn("assistant", reply)
+        breakdown = self.metrics.finish()
+        breakdown["reflex"] = skill.name
+        await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
+                       breakdown=breakdown, reflex=skill.name)
+        if self.sm.state != State.ERROR:
+            await self.sm.to(State.IDLE, force=True)
+
     async def _llm_with_tools(self, messages: list[dict],
                               speak_queue: asyncio.Queue) -> str:
         """Run the LLM, executing tool calls in a loop, streaming sentences to TTS."""
@@ -547,6 +617,8 @@ class Orchestrator:
         empty_retries = 0
         user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
         must_use_tool = bool(SEARCH_INTENT.search(user_text or ""))
+        used_tools: list[tuple[str, bool]] = []   # (name, ok) - for self-training
+        raw_user = user_text.split(chr(10))[-1] if user_text else ""
         for _round in range(8):
             round_text = ""
             pending = ""
@@ -600,6 +672,7 @@ class Orchestrator:
                     await bus.emit("assistant_delta", text=fallback)
                     await speak_queue.put(clean_for_speech(fallback))
                     return fallback
+                await self._maybe_learn(raw_user, used_tools)
                 return full_text
 
             # execute tools, then loop for the model's follow-up
@@ -617,12 +690,28 @@ class Orchestrator:
                          else State.EXECUTING)
                 await self.sm.to(state, force=True)
                 result = await registry.execute(tc["name"], tc["arguments"])
+                used_tools.append((tc["name"], bool(result.get("ok"))))
                 messages.append({
                     "role": "tool", "tool_call_id": tc["id"],
                     "content": json.dumps(result, default=str),
                 })
             await self.sm.to(State.THINKING, force=True)
         return full_text
+
+    async def _maybe_learn(self, user_text: str, used_tools: list[tuple[str, bool]]) -> None:
+        """Self-training: a turn the LLM solved with exactly one successful known tool
+        teaches the brain that phrasing -> skill, so next time it's a reflex."""
+        if len(used_tools) != 1 or not used_tools[0][1]:
+            return
+        skill = brain.learned_from_tool(used_tools[0][0])
+        if not skill or not user_text.strip():
+            return
+        try:
+            if await brain.learn(user_text, skill):
+                await bus.emit("brain_learned", text=user_text, skill=skill,
+                               examples=brain.example_count)
+        except Exception:
+            log.exception("brain learn failed")
 
     async def _speaker_worker(self, queue: asyncio.Queue) -> None:
         """Consumes sentences, synthesizes and plays them; watches for barge-in."""

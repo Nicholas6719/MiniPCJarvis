@@ -137,6 +137,10 @@ export const useStore = create<Store>((set, get) => ({
             { id: evt.id, role: "user", text: evt.text, ts: evt.ts },
           ],
           assistantDraft: "",
+          // a new request returns to the conversation; research/media views only
+          // take over again if the new turn actually produces that activity
+          view: st.autoSwitch && (st.view === "media" || st.view === "research") ? "conversation" : st.view,
+          rightPanel: st.rightPanel === "web" && st.autoSwitch ? "activity" : st.rightPanel,
         }));
         draftId = "";
         break;
@@ -247,6 +251,16 @@ export const useStore = create<Store>((set, get) => ({
           view: st.autoSwitch ? "media" : st.view,
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
+        break;
+      case "reflex":
+        push({
+          id: evt.id, ts: evt.ts, kind: "reflex",
+          summary: `brain: ${evt.skill} (${Math.round((evt.confidence ?? 0) * 100)}%)${evt.mode === "tool_then_llm" ? " → tool, then LLM" : " — no LLM"}`,
+          detail: evt.args && Object.keys(evt.args).length ? evt.args : undefined,
+        });
+        break;
+      case "brain_learned":
+        push({ id: evt.id, ts: evt.ts, kind: "reflex", summary: `brain learned: "${evt.text}" → ${evt.skill} (${evt.examples} examples)` });
         break;
       case "proactive":
         push({ id: evt.id, ts: evt.ts, kind: "proactive", summary: `proactive: ${evt.alert}`, detail: evt.text });
