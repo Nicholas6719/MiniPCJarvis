@@ -125,6 +125,13 @@ class Config:
     def save(self) -> None:
         CONFIG_PATH.write_text(json.dumps(self.data, indent=2), "utf-8")
 
+    def set(self, *keys: str, value: Any) -> None:
+        cur = self.data
+        for k in keys[:-1]:
+            cur = cur.setdefault(k, {})
+        cur[keys[-1]] = value
+        self.save()
+
     def get(self, *keys: str, default: Any = None) -> Any:
         cur: Any = self.data
         for k in keys:

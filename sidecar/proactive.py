@@ -43,6 +43,7 @@ class Proactive:
         self._hour_window: list[float] = []
         self._active_since: float | None = None   # continuous user activity start
         self.announce = None  # wired to orchestrator.announce
+        self._rule_since: dict[str, float] = {}   # rule key -> when its condition started holding
 
     # ---------- config ----------
 
@@ -113,9 +114,65 @@ class Proactive:
             except Exception:
                 log.exception("proactive tick failed")
 
+    # ---------- user rules ("tell me if CPU goes above 90 percent") ----------
+
+    METRICS = {
+        "cpu": lambda: psutil.cpu_percent(interval=0.2),
+        "ram": lambda: psutil.virtual_memory().percent,
+        "disk_free_gb": lambda: psutil.disk_usage("C:\\").free / 1e9,
+        "battery": lambda: (psutil.sensors_battery().percent if psutil.sensors_battery() else None),
+    }
+    METRIC_WORDS = {"cpu": "CPU", "ram": "memory", "disk_free_gb": "free disk space", "battery": "the battery"}
+
+    def rules(self) -> list[dict]:
+        return list(config.get("proactive", "rules", default=[]) or [])
+
+    @staticmethod
+    def rule_key(r: dict) -> str:
+        return f"{r['metric']}{r['op']}{r['value']}"
+
+    def add_rule(self, rule: dict) -> None:
+        rules = [r for r in self.rules() if self.rule_key(r) != self.rule_key(rule)]
+        rules.append(rule)
+        config.set("proactive", "rules", value=rules)
+
+    def remove_rules(self, metric: str | None) -> int:
+        rules = self.rules()
+        keep = [r for r in rules if metric and r["metric"] != metric]
+        config.set("proactive", "rules", value=keep)
+        return len(rules) - len(keep)
+
+    def describe(self, r: dict) -> str:
+        unit = {"cpu": " percent", "ram": " percent", "disk_free_gb": " gigabytes", "battery": " percent"}[r["metric"]]
+        word = "above" if r["op"] == ">" else "below"
+        hold = f" for {int(r['for_min'])} minutes" if r.get("for_min") else ""
+        return f"{self.METRIC_WORDS[r['metric']]} is {word} {int(r['value'])}{unit}{hold}"
+
+    async def run_rules(self) -> None:
+        now = time.time()
+        for r in self.rules():
+            try:
+                val = self.METRICS[r["metric"]]()
+            except Exception:
+                continue
+            if val is None:
+                continue
+            holds = val > float(r["value"]) if r["op"] == ">" else val < float(r["value"])
+            key = self.rule_key(r)
+            if not holds:
+                self._rule_since.pop(key, None)
+                continue
+            since = self._rule_since.setdefault(key, now)
+            if now - since < float(r.get("for_min", 0)) * 60:
+                continue
+            text = r.get("message") or f"Heads up: {self.describe(r)}. It's at {int(val)} right now."
+            if await self._fire("rule:" + key, text, cooldown_h=float(r.get("cooldown_h", 1))):
+                self._rule_since[key] = now
+
     # ---------- checks ----------
 
     async def run_checks(self) -> None:
+        await self.run_rules()
         # disk space
         try:
             disk = psutil.disk_usage("C:\\")

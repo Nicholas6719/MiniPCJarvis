@@ -268,7 +268,40 @@ def read_file(path: str, max_chars: int = 4000) -> dict:
     return {"path": str(p), "truncated": truncated, "content": text[:max_chars]}
 
 
+def watch_metric(metric: str, op: str, value: float, for_min: int = 0, message: str = "") -> dict:
+    """User-defined proactive rule: JARVIS speaks up when a system metric crosses a line."""
+    from proactive import proactive
+    if metric not in proactive.METRICS or op not in (">", "<"):
+        return {"error": "metric must be cpu|ram|disk_free_gb|battery and op > or <"}
+    rule = {"metric": metric, "op": op, "value": float(value), "for_min": int(for_min or 0)}
+    if message:
+        rule["message"] = message
+    proactive.add_rule(rule)
+    return {"watching": f"I'll tell you if {proactive.describe(rule)}.", "rules": len(proactive.rules())}
+
+
+def unwatch_metric(metric: str | None = None) -> dict:
+    from proactive import proactive
+    return {"removed": proactive.remove_rules(metric)}
+
+
 def register_all() -> None:
+    registry.register(Tool(
+        name="watch_metric",
+        description="Set a standing alert: JARVIS will tell the user when a system metric crosses a "
+                    "threshold (cpu/ram/battery in percent, disk_free_gb in gigabytes), optionally "
+                    "only after it has held for for_min minutes.",
+        parameters={"type": "object", "properties": {
+            "metric": {"type": "string", "enum": ["cpu", "ram", "disk_free_gb", "battery"]},
+            "op": {"type": "string", "enum": [">", "<"]},
+            "value": {"type": "number"}, "for_min": {"type": "integer"}, "message": {"type": "string"}},
+            "required": ["metric", "op", "value"]},
+        risk=Risk.LOW, handler=watch_metric))
+    registry.register(Tool(
+        name="unwatch_metric",
+        description="Remove standing metric alerts (all, or for one metric).",
+        parameters={"type": "object", "properties": {"metric": {"type": "string"}}, "required": []},
+        risk=Risk.LOW, handler=unwatch_metric))
     registry.register(Tool(
         name="get_system_stats",
         description="Get current CPU, RAM, disk, battery, and process stats for this PC.",

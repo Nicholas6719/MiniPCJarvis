@@ -185,6 +185,45 @@ def say_switch(slots: dict, res: dict) -> str:
     return f"Switching to {res.get('focused') or slots['title']}."
 
 
+_WATCH_METRIC = [("cpu", r"\bcpu\b|\bprocessor\b"), ("ram", r"\bram\b|\bmemory\b"),
+                 ("disk_free_gb", r"\bdisk\b|\bstorage\b|\bdrive\b|\bspace\b"), ("battery", r"\bbattery\b")]
+_WATCH_HEAD = re.compile(r"\b(?:tell me|let me know|warn me|alert me|notify me|ping me|say something)\b")
+
+
+def slots_watch(t: str) -> dict | None:
+    if not _WATCH_HEAD.search(t) and not re.search(r"\bwatch\b|\bkeep an eye on\b", t):
+        return None
+    metric = next((m for m, pat in _WATCH_METRIC if re.search(pat, t)), None)
+    if not metric:
+        return None
+    m = re.search(r"\b(above|over|exceeds|more than|higher than|hits|reaches|below|under|drops below|less than|lower than|falls under)\b\s*(\d{1,4})", t)
+    if not m:
+        return None
+    op = "<" if m.group(1) in ("below", "under", "drops below", "less than", "lower than", "falls under") else ">"
+    out = {"metric": metric, "op": op, "value": int(m.group(2))}
+    h = re.search(r"\bfor\s+(\d{1,3})\s*(?:minutes?|mins?)\b", t)
+    if h:
+        out["for_min"] = int(h.group(1))
+    return out
+
+
+def say_watch(slots: dict, res: dict) -> str:
+    return "Okay. " + str(res.get("watching", "I'll keep an eye on it.")) if "error" not in res else "I couldn't set that up."
+
+
+def slots_unwatch(t: str) -> dict | None:
+    if not re.search(r"\b(?:stop|quit|cancel|forget about)\b.*\b(?:watching|monitoring|alert|alerts|warning|telling me|rule|rules)\b", t) and \
+            not re.search(r"\bstop (?:watching|monitoring)\b", t):
+        return None
+    metric = next((m for m, pat in _WATCH_METRIC if re.search(pat, t)), None)
+    return {"metric": metric}
+
+
+def say_unwatch(slots: dict, res: dict) -> str:
+    n = res.get("removed", 0)
+    return "Done, I've stopped watching that." if n else "I wasn't watching anything like that."
+
+
 def say_lock(_: dict, res: dict) -> str:
     return "Locking." if "error" not in res else "I couldn't lock the computer."
 
@@ -366,7 +405,7 @@ class Skill:
         return _LABELS.get(self.name, self.name.replace("_", " "))
 
 
-_LABELS = {"switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+_LABELS = {"watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
            "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
            "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
            "remember": "remember it", "stats": "check the system", "windows": "list your windows",
@@ -495,6 +534,16 @@ SKILLS: list[Skill] = [
         "jump to the browser", "switch to the settings window", "bring me to discord", "focus steam",
         "switch to visual studio code", "show me the spotify window"],
         slots=slots_switch, speak=say_switch),
+    Skill("watch", "watch_metric", [
+        "tell me if the cpu goes above 90 percent", "let me know when memory is over 90",
+        "warn me if disk space drops below 100 gigabytes", "tell me when the battery is under 20 percent",
+        "alert me if cpu stays above 95 for 5 minutes", "keep an eye on memory and tell me if it passes 95",
+        "ping me when ram exceeds 90 percent", "let me know if the battery falls under 15"],
+        slots=slots_watch, speak=say_watch),
+    Skill("unwatch", "unwatch_metric", [
+        "stop watching the cpu", "stop monitoring memory", "cancel the disk space alert",
+        "stop telling me about the battery", "forget about the cpu rule", "stop watching everything"],
+        slots=slots_unwatch, speak=say_unwatch),
     Skill("lock", "lock_computer", [
         "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
         "lock the workstation", "lock windows", "lock up"],
