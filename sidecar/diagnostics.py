@@ -47,8 +47,7 @@ async def run_diagnostics() -> list[dict]:
 
     # STT
     add("Speech Recognition", "ok" if stt._model is not None else "warn",
-        f"faster-whisper {config.get('stt', 'model')}"
-        if stt._model is not None else "not loaded yet (loads on first use)",
+        stt.label if stt._model is not None else "not loaded yet (loads on first use)",
         repairable=True)
 
     # TTS

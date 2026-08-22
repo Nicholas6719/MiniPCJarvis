@@ -67,7 +67,8 @@ DEFAULTS: dict[str, Any] = {
             },
         },
     },
-    "stt": {"model": "base.en", "compute_type": "int8", "device": "cpu"},  # base.en: 3x faster than small.en, same accuracy on commands (tests/stt_ab.py)
+    # Parakeet TDT 0.6B v3 int8: 139 ms / 0.6% WER vs whisper base.en 450 ms / 5.1% (tests/stt_ab2.py)
+    "stt": {"engine": "parakeet", "parakeet_quant": "int8", "model": "base.en", "compute_type": "int8", "device": "cpu"},
     "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
     "speech": {"fillers": True},
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set "Framingham, MA" to pin   # say "Let me see." while the model is still thinking
@@ -126,7 +127,7 @@ class Config:
 
     # Saved configs snapshot every default, so improved defaults never reach an
     # existing install on their own. Each migration runs once (tracked by version).
-    CONFIG_VERSION = 4
+    CONFIG_VERSION = 5
 
     def _migrate(self) -> bool:
         v = int(self.data.get("config_version", 1) or 1)
@@ -143,6 +144,10 @@ class Config:
                 if name not in models:
                     models[name] = entry
                     changed = True
+        if v < 5:
+            self.data.setdefault("stt", {}).setdefault("engine", "parakeet")
+            self.data["stt"].setdefault("parakeet_quant", "int8")
+            changed = True
         if True:
             # built-in model entries are ours to tune: always mirror DEFAULTS (user-added untouched)
             models = self.data.setdefault("llm", {}).setdefault("models", {})
