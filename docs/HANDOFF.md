@@ -163,6 +163,14 @@ but the user's folder was empty; log files diverge.
   in config always mirror DEFAULTS (config.py _migrate).
 - STT bake-off DONE (tests/stt_ab2.py): Parakeet TDT 0.6B v3 int8 139 ms / 0.6% WER beat whisper base.en (450 ms / 5.1%) and Moonshine (86 ms but 'Newt the speakers'). Now default (audio/stt.py, config v5, whisper fallback). Real voice turns: stt ~140-310 ms (was 430-520).
 
+## Shipping paths (2026-08-22 evening)
+- Python-only change: `scripts\quick.ps1` (~4.5 min): gated sidecar build -> hot-swap
+  %LOCALAPPDATA%\JARVIS\sidecar via scheduled task (`scripts\hotswap_sidecar.cmd`, copy of
+  C:\Users\nicho\Documents\jarvis_hotswap.cmd) -> brain/files/voice smoke. `-Full` runs all suites.
+- UI (src/) or Rust (src-tauri/) change: `scripts\release.ps1` (~15 min, full installer).
+- "open youtube/netflix/spotify": known services open as sites in-app when no app exists
+  (tools/builtin.py _KNOWN_SITES).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
