@@ -495,6 +495,27 @@ async def memory_update(memory_id: int, body: dict,
     return {"ok": ok}
 
 
+@app.post("/debug/silence")
+async def debug_silence(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Self-test: keep the speaker quiet for N seconds (turns still run end to end)."""
+    _auth(x_jarvis_token)
+    from audio.io import speaker
+    import time as _t
+    speaker.silent_until = _t.time() + float(body.get("seconds", 600))
+    return {"ok": True, "until": speaker.silent_until}
+
+
+@app.get("/selftest")
+async def selftest_report(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from config import APP_DIR
+    p = APP_DIR / "selftest.json"
+    if not p.exists():
+        return {"ok": None, "results": []}
+    import json as _json
+    return _json.loads(p.read_text("utf-8"))
+
+
 @app.post("/debug/inject_audio")
 async def debug_inject_audio(body: dict, x_jarvis_token: str | None = Header(None)):
     """Dev/test only (JARVIS_DEBUG=1): push float32 16 kHz audio into the mic

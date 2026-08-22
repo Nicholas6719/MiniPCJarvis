@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 
 import numpy as np
@@ -207,7 +208,12 @@ class Speaker:
             self._rate = rate
         return self._stream
 
+    silent_until: float = 0.0   # self-test mode: synthesize but don't play (no 3 AM chatter)
+
     async def play_chunk(self, chunk: np.ndarray, rate: int) -> None:
+        if time.time() < self.silent_until:
+            await asyncio.sleep(len(chunk) / float(rate) * 0.25)   # keep timing roughly real
+            return
         stream = self._ensure(rate)
 
         def _write() -> None:

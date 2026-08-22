@@ -69,6 +69,24 @@ function BrainPanel() {
   );
 }
 
+function SelfTestPanel() {
+  const [r, setR] = useState<any>(null);
+  useEffect(() => { (async () => { try { setR(await api("/selftest")); } catch {} })(); }, []);
+  if (!r || r.ok == null) return null;
+  return (
+    <div className="brain">
+      <span className="panel-title">NIGHTLY SELF-TEST — {r.ok ? "ALL PASSED" : "FAILURES"} · {new Date(r.ts * 1000).toLocaleString()}</span>
+      <div className="brain__grid">
+        {r.results?.map((x: any) => (
+          <div key={x.suite} className={`brain__skill ${x.ok ? "" : "is-fail"}`} title={(x.tail || []).join(" | ")}>
+            <span>{x.suite.replace("_e2e.py", "")}</span><span>{x.ok ? "PASS" : "FAIL"} · {x.seconds}s</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function DiagnosticsView() {
   const [checks, setChecks] = useState<Check[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -123,6 +141,7 @@ export function DiagnosticsView() {
         ))}
       </div>
       <BrainPanel />
+      <SelfTestPanel />
     </div>
   );
 }

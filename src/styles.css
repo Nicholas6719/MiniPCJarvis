@@ -916,3 +916,4 @@ body {
 .sys__procs { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 18px; font-size: 11px; }
 .sys__proc { display: flex; justify-content: space-between; }
 .ghost-btn.is-on { border-color: var(--amber); color: var(--amber); }
+.brain__skill.is-fail { border-color: var(--red); }
