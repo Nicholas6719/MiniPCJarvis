@@ -39,7 +39,7 @@ WAKE_PHRASE = _re.compile(r"^\s*(?:hey|hi|ok|okay|yo)?[,\s]*jarvis[,.!?\s]*", _r
 # explicit requests to go online: the model must not answer from memory
 SEARCH_INTENT = re.compile(
     r"\b(search|look\s*up|google|research|find\s+(?:me\s+)?(?:online|on the web)|"
-    r"what'?s the latest|latest|current|today'?s|right now|news|price of|weather)\b", re.I)
+    r"what'?s the latest|latest|current|today'?s|right now|news|price of)\b", re.I)
 STOP_WORDS = re.compile(r"^\s*(stop|cancel|never\s*mind|nevermind|shut\s*up|quiet|that's\s+enough)\W*$", re.I)
 SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
 

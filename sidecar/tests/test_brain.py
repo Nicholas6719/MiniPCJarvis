@@ -11,7 +11,7 @@ CASES = [
     ("hey jarvis open spotify for me", "open_app"), ("could you launch notepad", "open_app"),
     ("close spotify", "close_app"), ("quit notepad please", "close_app"),
     ("grab a screenshot and save it to my desktop", "screenshot"), ("take a screenshot please", "screenshot"),
-    ("search the web for the best gaming laptop under 1500", "search"), ("look up tomorrow's weather in framingham", "search"),
+    ("search the web for the best gaming laptop under 1500", "search"), ("look up tomorrow's weather in framingham", "weather"),
     ("show me a picture of a worm", "images"), ("show me some photos of saturn", "images"),
     ("what's on my screen right now", "screen"), ("have a look at my screen", "screen"),
     ("remind me in 25 minutes to call dad", "reminder"), ("set a reminder for 6 pm to start dinner", "reminder"),

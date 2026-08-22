@@ -48,8 +48,9 @@ async def lifespan(app: FastAPI):
     task_tools.register_all()
     vision_tools.register_all()
     browser_tools.register_all()
-    from tools import file_tools
+    from tools import file_tools, weather
     file_tools.register_all()
+    weather.register_all()
     scheduler.announce = orchestrator.announce
     scheduler.start()
     from mcp_client import mcp_manager

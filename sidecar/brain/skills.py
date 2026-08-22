@@ -224,6 +224,41 @@ def say_unwatch(slots: dict, res: dict) -> str:
     return "Done, I've stopped watching that." if n else "I wasn't watching anything like that."
 
 
+_WX_PLACE = re.compile(r"\b(?:in|for|at|around)\s+(?!the\b)([a-z][a-z .'-]{2,40}?)(?:\s+(?:right now|today|tomorrow|tonight|this (?:morning|afternoon|evening)|now))?[.!?]*$")
+
+
+def slots_weather(t: str) -> dict | None:
+    if not re.search(r"\b(?:weather|forecast|temperature|rain|raining|snow|snowing|hot|cold|humid|umbrella|degrees)\b", t):
+        return None
+    if re.search(r"\bon\s+(?:mars|the moon|venus|jupiter|saturn|pluto|mercury|neptune|uranus|the sun)\b", t):
+        return None   # astronomy trivia, not a forecast
+    out: dict = {"when": "tomorrow" if re.search(r"\btomorrow\b", t) else "now"}
+    t = re.sub(r"\b(?:tomorrow|today|tonight|right now|now|this (?:morning|afternoon|evening|weekend))\b", " ", t)
+    t = re.sub(r"\b(?:for|in|at|around)\s+(?=(?:for|in|at|around)\b)", "", t)   # "for tomorrow in X" -> "in X"
+    t = re.sub(r"\s+", " ", t).strip()
+    m = _WX_PLACE.search(t)
+    if m:
+        place = m.group(1).strip()
+        if place not in ("my area", "my town", "my city", "here", "home"):
+            out["location"] = place
+    return out
+
+
+def say_weather(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"] + "."
+    loc = res.get("location", "your area").split(",")[0]
+    now = res.get("now", {})
+    if slots.get("when") == "tomorrow" and "tomorrow" in res:
+        d = res["tomorrow"]
+        rain = f", with a {d['rain_chance']} percent chance of rain" if d.get("rain_chance") not in (None, 0) else ""
+        return f"Tomorrow in {loc}: {d['conditions']}, high of {d['high']} and low of {d['low']}{rain}."
+    d = res.get("today", {})
+    feels = f", feels like {now['feels_like']}" if abs(now.get("feels_like", now.get("temp", 0)) - now.get("temp", 0)) >= 3 else ""
+    rain = f" There's a {d['rain_chance']} percent chance of rain today." if d.get("rain_chance", 0) and d["rain_chance"] >= 30 else ""
+    return f"It's {now.get('temp')} degrees and {now.get('conditions')} in {loc}{feels}. Today's high is {d.get('high')}, low {d.get('low')}.{rain}"
+
+
 def say_lock(_: dict, res: dict) -> str:
     return "Locking." if "error" not in res else "I couldn't lock the computer."
 
@@ -405,7 +440,7 @@ class Skill:
         return _LABELS.get(self.name, self.name.replace("_", " "))
 
 
-_LABELS = {"watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+_LABELS = {"weather": "check the weather", "watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
            "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
            "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
            "remember": "remember it", "stats": "check the system", "windows": "list your windows",
@@ -457,7 +492,7 @@ SKILLS: list[Skill] = [
         "save a screenshot to downloads", "take a screenshot called bug report"],
         slots=slots_screenshot, speak=say_screenshot),
     Skill("search", "web_search", [
-        "search the web for the best mini pc", "look up the weather in boston",
+        "search the web for the best mini pc", "look up the population of tokyo",
         "google the latest nvidia drivers", "search for cheap flights to denver",
         "find me reviews of the logitech c920", "search online for python tutorials",
         "look up who won the game last night", "web search for ryzen 8845hs benchmarks",
@@ -517,7 +552,7 @@ SKILLS: list[Skill] = [
     Skill("open_site", "open_url", [
         "open youtube.com", "go to wikipedia.org", "pull up amazon.com", "open the website reddit.com",
         "open example.com and tell me what the page says", "take me to github.com",
-        "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up weather.com"],
+        "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up espn.com"],
         slots=slots_site, speak=say_site, llm_after=True, direct_if=site_direct, speak_first=True),
     Skill("folder", "list_folder", [
         "open my downloads folder", "show me my desktop", "show my documents", "open downloads",
@@ -544,6 +579,13 @@ SKILLS: list[Skill] = [
         "stop watching the cpu", "stop monitoring memory", "cancel the disk space alert",
         "stop telling me about the battery", "forget about the cpu rule", "stop watching everything"],
         slots=slots_unwatch, speak=say_unwatch),
+    Skill("weather", "get_weather", [
+        "what's the weather", "what's the weather like right now", "how's the weather today",
+        "what's the weather in boston", "is it going to rain today", "what's the temperature outside",
+        "do i need an umbrella", "what's the forecast for tomorrow", "how hot is it in phoenix",
+        "is it cold out", "what's the weather like in london right now", "weather for tomorrow in framingham",
+        "will it rain tonight", "is it raining right now", "will it snow tomorrow", "is it going to be hot today"],
+        slots=slots_weather, speak=say_weather),
     Skill("lock", "lock_computer", [
         "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
         "lock the workstation", "lock windows", "lock up"],

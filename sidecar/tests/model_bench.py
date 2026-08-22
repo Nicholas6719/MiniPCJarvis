@@ -10,9 +10,9 @@ import httpx
 sys.path.insert(0, ".")
 from llm.prompts import system_prompt, turn_context  # noqa: E402
 from tools.registry import registry  # noqa: E402
-from tools import builtin, memory_tools, windows_tools, web_tools, task_tools, vision_tools, browser_tools, file_tools  # noqa: E402
+from tools import builtin, memory_tools, windows_tools, web_tools, task_tools, vision_tools, browser_tools, file_tools, weather  # noqa: E402
 
-for m in (builtin, memory_tools, windows_tools, web_tools, task_tools, vision_tools, browser_tools, file_tools):
+for m in (builtin, memory_tools, windows_tools, web_tools, task_tools, vision_tools, browser_tools, file_tools, weather):
     m.register_all()
 TOOLS = registry.schemas()
 
@@ -25,7 +25,7 @@ TOOL_CASES = [
     ("what's on my screen right now", "analyze_screen", []),
     ("turn the volume down to 20", "set_volume", ["20"]),
     ("show me pictures of the northern lights", "show_images", ["northern"]),
-    ("what's the weather in boston right now", "web_search", ["boston"]),
+    ("what's the weather in boston right now", "get_weather", ["boston"]),
     ("open youtube.com", "open_url", ["youtube"]),
     ("take a screenshot and save it to my desktop", "take_screenshot", ["desktop"]),
     ("find the file called budget in my documents", "find_files", ["budget"]),

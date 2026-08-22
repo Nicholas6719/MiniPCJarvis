@@ -53,6 +53,7 @@ _CANON = [
     (r"^(?:no|nope|wrong|not that|that's wrong|that is wrong|that's not)\b.*", "no i meant ACTION"),
     (r"\b(?:tell me|let me know|warn me|alert me|notify me|ping me|keep an eye on)\b.*\b(?:cpu|processor|ram|memory|disk|storage|drive|space|battery)\b.*\b(?:above|over|exceeds|more than|higher than|hits|reaches|below|under|drops|less than|lower than|falls|passes)\b.*", "tell me if METRIC goes above N"),
     (r"\b(?:stop|quit|cancel|forget about)\b.*\b(?:watching|monitoring|alert|alerts|warning|telling me|rule|rules)\b.*", "stop watching METRIC"),
+    (r".*\b(?:weather|forecast|temperature outside|going to rain|raining|snowing|umbrella|hot out|cold out|hot is it|cold is it|will it (?:rain|snow)|is it (?:going to )?(?:rain|snow|be hot|be cold))\b.*", "what's the weather in PLACE"),
     (r"\b(?:remind me|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
     (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
     (r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
