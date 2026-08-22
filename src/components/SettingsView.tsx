@@ -121,6 +121,20 @@ export function SettingsView() {
             <span className="toggle__knob" />
           </button>
         </label>
+        <label className="settings__row settings__row--toggle">
+          <span>Speak while thinking ("Let me see.", "Searching.") so replies feel instant</span>
+          <button className={`toggle ${cfg.speech?.fillers !== false ? "toggle--on" : ""}`}
+                  onClick={() => patch({ speech: { fillers: !(cfg.speech?.fillers !== false) } })}>
+            <span className="toggle__knob" />
+          </button>
+        </label>
+        <label className="settings__row settings__row--toggle">
+          <span>Brain reflexes (answer known requests instantly without the AI model)</span>
+          <button className={`toggle ${cfg.brain?.enabled !== false ? "toggle--on" : ""}`}
+                  onClick={() => patch({ brain: { enabled: !(cfg.brain?.enabled !== false) } })}>
+            <span className="toggle__knob" />
+          </button>
+        </label>
       </section>
 
       <section className="settings__group">
