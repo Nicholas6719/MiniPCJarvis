@@ -31,6 +31,12 @@
 ### Build
 - `scripts/build_sidecar.cmd` gates PyInstaller on compileall + imports
 
+### Afternoon additions
+- Speak-before-thinking fillers; STT base.en (3x faster); announce-then-act for
+  apps/sites; tool-then-LLM composes without tools
+- Teach-by-voice commands and routines, correction learning, lock skill
+- FILES view (browse/find/preview/rename/move/recycle) with sandboxed file tools
+
 ## 0.1.0 — 2026-08-21 (initial build, phases 0–12 in one session)
 
 ### Core

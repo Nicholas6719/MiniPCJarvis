@@ -110,6 +110,23 @@ but the user's folder was empty; log files diverge.
   apps and never spawns `start ""` (that popped a cmd window).
 - Window list excludes Brave processes running JARVIS profiles.
 
+## Afternoon 2026-08-22 (all installed + verified by e2e)
+- Speed: `speech.fillers` ("Let me see." at ~0.35 s; "Searching."/"Opening it." for tool
+  runs), STT base.en (config migration v2), open_app/open_site announce before acting,
+  tool-then-LLM rounds run with tools omitted (model only composes), `must_use_tool`
+  disabled after a pre-run. LLM first token ~2.5-4.5 s; reflex ~0.3 s.
+- Brain phase 2: taught commands (`brain_commands`, "when I say X, do Y and Z" ->
+  `_teach` -> `_compile_steps`), routines (`_routine_turn`), corrections ("no, I meant
+  ..." -> `brain.unlearn(last_match)` then re-run). `lock`, `folder`, `find_file` skills.
+  _CANON order matters: teach/correction first, folder/file before images/search.
+- FILES view: `tools/file_tools.py` (sandboxed roots from config.folders; SHFileOperation
+  recycle/move with undo), `/files*` endpoints, `FilesView.tsx`, events `files` /
+  `file_preview`.
+- Tests to run after every install: brain_e2e, general_e2e, teach_e2e, files_e2e,
+  filler_e2e, voice_ux_e2e (all take PORT TOKEN from jarvis-sidecar.exe's cmdline).
+- NOT yet visually checked in the real HUD: FILES and BROWSER views (built from
+  typed-checked TSX; the agent can't see the user's session). Ask the user.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
