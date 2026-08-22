@@ -51,6 +51,19 @@ def slots_site(t: str) -> dict | None:
     return {"url": m.group(1)} if m else None
 
 
+def say_site(slots: dict, res: dict) -> str:
+    url = str(slots.get("url", "")).replace("https://", "").replace("http://", "").rstrip("/")
+    return f"Opening {url}." if "error" not in res else f"I couldn't open {url}."
+
+
+_SITE_WANTS_ANSWER = re.compile(r"\b(and|then|tell|what|read|summar\w*|say|says|find|look|check|show me)\b")
+
+
+def site_direct(text: str) -> bool:
+    """'open youtube.com' -> just open it; 'open x and tell me ...' -> let the LLM read it."""
+    return not _SITE_WANTS_ANSWER.search(text.lower())
+
+
 def say_media(slots: dict, res: dict) -> str:
     return {"play_pause": "Done.", "next": "Skipping.", "previous": "Going back.",
             "stop": "Stopped."}.get(slots.get("action", ""), "Done.") if "error" not in res else "I couldn't control playback."
@@ -219,6 +232,7 @@ class Skill:
     speak: Callable[[dict, dict], str] = lambda s, r: "Done."
     fixed_args: dict = field(default_factory=dict)
     llm_after: bool = False          # run the tool, then let the LLM compose the answer
+    direct_if: Callable[[str], bool] | None = None   # llm_after skill may still go direct
 
 
 SKILLS: list[Skill] = [
@@ -325,7 +339,7 @@ SKILLS: list[Skill] = [
         "open youtube.com", "go to wikipedia.org", "pull up amazon.com", "open the website reddit.com",
         "open example.com and tell me what the page says", "take me to github.com",
         "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up weather.com"],
-        slots=slots_site, llm_after=True),
+        slots=slots_site, speak=say_site, llm_after=True, direct_if=site_direct),
     Skill("recall", "recall", [
         "what did i tell you about my coffee", "do you remember my favorite color",
         "what do you know about me", "what did i say my dentist's name was",

@@ -281,6 +281,9 @@ export const useStore = create<Store>((set, get) => ({
       case "brain_learned":
         push({ id: evt.id, ts: evt.ts, kind: "reflex", summary: `brain learned: "${evt.text}" → ${evt.skill} (${evt.examples} examples)` });
         break;
+      case "filler":
+        push({ id: evt.id, ts: evt.ts, kind: "speaking", summary: `filler: "${evt.text}"` });
+        break;
       case "proactive":
         push({ id: evt.id, ts: evt.ts, kind: "proactive", summary: `proactive: ${evt.alert}`, detail: evt.text });
         break;

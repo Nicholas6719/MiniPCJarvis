@@ -50,8 +50,9 @@ DEFAULTS: dict[str, Any] = {
             },
         },
     },
-    "stt": {"model": "small.en", "compute_type": "int8", "device": "cpu"},
+    "stt": {"model": "base.en", "compute_type": "int8", "device": "cpu"},  # base.en: 3x faster than small.en, same accuracy on commands (tests/stt_ab.py)
     "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
+    "speech": {"fillers": True},   # say "Let me see." while the model is still thinking
     "audio": {"input_device": None, "output_device": None,
               "sound_cues": True, "boot_sound": True,
               # always prefer the webcam mic when present; onboard mic is the fallback

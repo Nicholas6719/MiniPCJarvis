@@ -500,7 +500,8 @@ class Orchestrator:
                 reflex = await brain.decide(text)
             except Exception:
                 log.exception("brain decide failed - falling back to the LLM")
-        if reflex and not reflex[0].llm_after:
+        if reflex and (not reflex[0].llm_after
+                       or (reflex[0].direct_if is not None and reflex[0].direct_if(text))):
             await self._reflex_turn(text, reflex, t_start)
             return
         # brain thinks this is a plain question -> steer the LLM away from needless tool use
@@ -558,6 +559,10 @@ class Orchestrator:
         self._speak_cancel = asyncio.Event()
         speak_queue: asyncio.Queue[str | None] = asyncio.Queue()
         speaker_task = asyncio.create_task(self._speaker_worker(speak_queue))
+        # speak-before-thinking: if the first token isn't here quickly, say something
+        # human while the model works - perceived latency drops to ~0.3 s
+        self._first_token = asyncio.Event()
+        filler_task = asyncio.create_task(self._filler(speak_queue, reflex))
         full_reply = ""
         try:
             full_reply = await self._llm_with_tools(messages, speak_queue)
@@ -568,6 +573,7 @@ class Orchestrator:
             await bus.emit("error", summary=str(e))
             await speak_queue.put("I hit a problem with that. Give me a moment.")
         finally:
+            filler_task.cancel()
             await speak_queue.put(None)
             try:
                 await speaker_task
@@ -584,6 +590,33 @@ class Orchestrator:
                        breakdown=breakdown)
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
+
+    _FILLERS = ["Let me see.", "One moment.", "Let me think.", "Hmm, let me check.", "Just a second."]
+    _TOOL_FILLERS = {"web_search": ["Searching.", "Let me look that up.", "Checking the web."],
+                     "research": ["Let me dig into that.", "Researching."],
+                     "show_images": ["Finding pictures."],
+                     "open_url": ["Opening it.", "Loading the page."],
+                     "recall": ["Let me think back.", "Let me remember."]}
+
+    async def _filler(self, speak_queue: asyncio.Queue, reflex) -> None:
+        """Say a short human filler if the model hasn't produced a word within ~0.7 s."""
+        if not config.get("speech", "fillers", default=True):
+            return
+        delay = 0.05 if reflex else 0.7   # a known tool run is always slow enough to announce
+        try:
+            await asyncio.wait_for(self._first_token.wait(), timeout=delay)
+            return
+        except asyncio.TimeoutError:
+            pass
+        if self._speak_cancel.is_set():
+            return
+        pool = self._TOOL_FILLERS.get(reflex[0].tool, self._FILLERS) if reflex else self._FILLERS
+        choice = pool[int(time.time() * 10) % len(pool)]
+        if choice == getattr(self, "_last_filler", None):
+            choice = pool[(pool.index(choice) + 1) % len(pool)]
+        self._last_filler = choice
+        await bus.emit("filler", text=choice)
+        await speak_queue.put(choice)
 
     async def _reflex_turn(self, text: str, reflex, t_start: float) -> None:
         """Handle a request JARVIS recognized himself: tool + templated speech, no LLM."""
@@ -658,6 +691,9 @@ class Orchestrator:
                     break
                 if chunk.text:
                     self.metrics.mark("first_token_ms")
+                    ft = getattr(self, "_first_token", None)
+                    if ft is not None:
+                        ft.set()
                     pending += chunk.text
                     round_text += chunk.text
                     full_text += chunk.text
