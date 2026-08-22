@@ -172,11 +172,24 @@ async def audio_devices(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
     import sounddevice as sd
     devs = sd.query_devices()
+    apis = sd.query_hostapis()
+    mme = next((i for i, h in enumerate(apis) if "MME" in h["name"].upper()), 0)
+    # Only shared-mode (MME) entries: the WDM-KS/DirectSound/WASAPI duplicates
+    # Windows exposes would let a user accidentally pick an exclusive-mode path.
+    def _list(kind):
+        seen, out = set(), []
+        for i, d in enumerate(devs):
+            if d[kind] <= 0 or d["hostapi"] != mme:
+                continue
+            nm = d["name"]
+            if nm in seen or nm.startswith("Microsoft Sound Mapper") or nm.startswith("Primary Sound"):
+                continue
+            seen.add(nm)
+            out.append({"id": i, "name": nm})
+        return out
     return {
-        "input": [{"id": i, "name": d["name"]}
-                  for i, d in enumerate(devs) if d["max_input_channels"] > 0],
-        "output": [{"id": i, "name": d["name"]}
-                   for i, d in enumerate(devs) if d["max_output_channels"] > 0],
+        "input": _list("max_input_channels"),
+        "output": _list("max_output_channels"),
         "default_input": sd.default.device[0],
         "default_output": sd.default.device[1],
     }

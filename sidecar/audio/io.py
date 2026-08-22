@@ -34,9 +34,25 @@ def resolve_input_device() -> tuple[int | None, str, bool]:
     """
     explicit = config.get("audio", "input_device")
     devs = sd.query_devices()
+    hostapis = sd.query_hostapis()
+    mme = next((i for i, h in enumerate(hostapis) if "MME" in h["name"].upper()), None)
+    _pats = [str(x).lower() for x in config.get("audio", "preferred_input_names",
+                                                default=["C920", "Webcam", "Logitech"])]
     if explicit is not None:
         try:
-            return int(explicit), devs[int(explicit)]["name"], False
+            chosen = devs[int(explicit)]
+            # NEVER open via WDM-KS/DirectSound: remap to the MME entry of the same
+            # name (shared mode). A WDM-KS open takes the device exclusively and
+            # every other app gets "Device in use".
+            if chosen["hostapi"] != mme:
+                for i, d in enumerate(devs):
+                    if d["name"] == chosen["name"] and d["hostapi"] == mme and d["max_input_channels"] > 0:
+                        log.info("remapped explicit mic choice to shared-mode entry %s", i)
+                        return i, d["name"], any(pat in d["name"].lower() for pat in _pats)
+                # no MME twin: ignore the explicit choice rather than go exclusive
+                log.warning("explicit mic %s is not a shared-mode device — ignoring", explicit)
+            else:
+                return int(explicit), chosen["name"], any(pat in chosen["name"].lower() for pat in _pats)
         except Exception:
             pass
     patterns = [str(x).lower() for x in
