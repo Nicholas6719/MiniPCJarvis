@@ -141,14 +141,40 @@ def _resolve_app(name: str) -> str | None:
     return None
 
 
-def open_application(name: str) -> dict:
+# Well-known services people say by name. No installed app -> open the site inside JARVIS.
+_KNOWN_SITES = {
+    "youtube": "youtube.com", "netflix": "netflix.com", "gmail": "mail.google.com", "google": "google.com",
+    "amazon": "amazon.com", "reddit": "reddit.com", "twitter": "x.com", "x": "x.com", "facebook": "facebook.com",
+    "instagram": "instagram.com", "github": "github.com", "wikipedia": "wikipedia.org", "twitch": "twitch.tv",
+    "hulu": "hulu.com", "disney plus": "disneyplus.com", "disney": "disneyplus.com", "hbo": "max.com", "max": "max.com",
+    "prime video": "primevideo.com", "espn": "espn.com", "spotify": "open.spotify.com", "apple music": "music.apple.com",
+    "chatgpt": "chatgpt.com", "claude": "claude.ai", "linkedin": "linkedin.com", "ebay": "ebay.com",
+    "google maps": "maps.google.com", "maps": "maps.google.com", "google drive": "drive.google.com",
+    "drive": "drive.google.com", "google docs": "docs.google.com", "docs": "docs.google.com",
+    "outlook": "outlook.live.com", "yahoo": "yahoo.com", "bing": "bing.com", "pinterest": "pinterest.com",
+    "tiktok": "tiktok.com", "steam store": "store.steampowered.com", "weather": "weather.com",
+    "paypal": "paypal.com", "venmo": "venmo.com", "zillow": "zillow.com", "imdb": "imdb.com",
+}
+
+
+def site_for(name: str) -> str | None:
+    return _KNOWN_SITES.get(name.strip().lower().removeprefix("the ").strip())
+
+
+async def open_application(name: str) -> dict:
     key = name.strip().lower()
     if re.search(r"^https?://|\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai)\b", key):
         # a website: never hand it to the default browser - stays inside JARVIS
         return {"error": f"'{name}' is a website, not an app. Use open_url to show it inside JARVIS."}
     target = _resolve_app(name)
     if not target:
-        return {"error": f"I can't find an app called '{name}' on this PC."}
+        site = site_for(name)
+        if site:
+            # no app installed by that name but it's a known service: open it inside JARVIS
+            from browser.session import browser
+            r = await browser.goto("https://" + site)
+            return {"opened_site": site, **({"error": r["error"]} if r.get("error") else {})}
+        return {"error": f"I can't find an app or site called '{name}' on this PC."}
     try:
         if target.startswith("shell:AppsFolder"):
             subprocess.Popen(["explorer.exe", target])   # Store app via its AppID, no console

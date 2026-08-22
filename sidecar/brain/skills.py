@@ -365,7 +365,9 @@ def say_mute(slots: dict, res: dict) -> str:
 
 
 def say_open(slots: dict, res: dict) -> str:
-    return f"Opening {slots['name']}." if "error" not in res else f"I couldn't open {slots['name']}."
+    if "error" in res:
+        return f"I couldn't open {slots['name']}."
+    return f"Opening {slots['name']}."
 
 
 def say_close(slots: dict, res: dict) -> str:
