@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-08-22 morning.
+Updated: 2026-08-22 ~10:05.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -80,22 +80,43 @@ but the user's folder was empty; log files diverge.
   `sidecar/tests/voice_ux_e2e.py P T` (needs JARVIS_DEBUG=1 for `/debug/inject_audio`).
   Run with `PYTHONIOENCODING=utf-8`.
 
-## In flight right now (2026-08-22 ~08:00)
-1. Prompt-cache latency fix: DONE in source (static system prompt, `turn_context()`
-   prepended to the latest user message, `cache_prompt`, `--cache-reuse 256`).
-   Baseline before: median first-token 12.5 s. Expect ~2–3 s. NOT yet built/installed.
-2. Image search hidden-window fix + relaunch-on-failure: in source, installer built
-   (07:5x) but NOT yet installed.
-3. TODO: auto-switch back to CONVERSATION when a new user turn starts (store.ts
-   `case "transcript"`: if view is media/research and autoSwitch → view="conversation").
-4. TODO: **Brain layer** (user's top wish): `sidecar/brain/` — embedding kNN intent
-   router over labeled examples (fastembed already bundled), direct execution +
-   templated speech for confident matches (no LLM), self-training from every
-   successful single-tool LLM turn (store utterance→tool/args in SQLite
-   `brain_examples`), slot extraction per skill, telemetry in Activity ("reflex").
-   Then measure latency. Later: export interaction dataset (JSONL) for real LoRA
-   fine-tuning on a rented GPU.
-5. TODO: performance pass (STT small.en ~1.5 s; consider base.en; Kokoro ~1.2 s/sentence).
+## Brain layer (DONE 2026-08-22, installed + verified)
+- `sidecar/brain/skills.py` (skills: seeds, slot extractors, speak templates) and
+  `sidecar/brain/router.py` (bge-small embeddings, canonicalized text -> top-match
+  with ambiguity penalty, threshold 0.82; "general" class = knowledge/creative).
+- Orchestrator: `_converse` -> `brain.decide()` -> `_reflex_turn` (tool + template,
+  ~0.3 s first word) | `llm_after` skills (search/images/open_site/recall) pre-run the
+  tool then one LLM round | general questions: hint (>=0.7) or tools omitted (>=0.82).
+- Self-learning (`_maybe_learn`): single successful known tool turn -> example, but
+  ONLY if the skill's slot extractor can execute the phrasing and the brain isn't sure
+  it's general. Seeds override learned rows. (Without this it learned "spider legs ->
+  search" from dumb LLM turns.)
+- Tests: `sidecar/tests/test_brain.py` (34/34 held-out), `tests/brain_e2e.py P T`,
+  `tests/general_e2e.py P T` (LLM path + no-external-browser check).
+- Endpoints: `/brain`, `/brain/teach`, `/brain/classify`. Diagnostics shows a BRAIN panel.
+
+## Big bugs fixed today (don't reintroduce)
+- `must_use_tool` matched SEARCH_INTENT against the whole user message, which now
+  starts with "[Context - current time...]" -> "current" matched -> EVERY turn forced
+  tool_choice=required (trivia searches, remember_fact whims, slow). Use raw utterance.
+- `` inside bash heredoc patches becomes a BACKSPACE (Brave path became
+  `Applicationrave.exe` -> Playwright fell back to Edge; regexes lost ``). Write patch
+  files with the Write tool, never heredoc Python containing backslashes.
+- PyInstaller bundles modules that don't compile (exit 0!). ALWAYS build the sidecar
+  with `scriptsuild_sidecar.cmd` (compileall + import gate).
+- Everything stays inside JARVIS: `open_url`/`browser_*` use a second hidden Brave
+  profile (`session-browser`) and push screenshots to the BROWSER view; WebPanel result
+  clicks open in-app; `open_application` resolves alias -> Start Menu -> PATH -> Store
+  apps and never spawns `start ""` (that popped a cmd window).
+- Window list excludes Brave processes running JARVIS profiles.
+
+## Next ideas
+1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
+   ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
+   load + screenshot + LLM reading 1500 chars) - trim page text / skip LLM when the
+   user only said "open X".
+2. Dataset export (JSONL of turns) for real LoRA fine-tuning later.
+3. OS-like UI expansion (files, settings panels inside the HUD).
 
 ## User's standing priorities
 Mic must always work (done, verified w/ Wispr) → speed ("quicker = more real") →

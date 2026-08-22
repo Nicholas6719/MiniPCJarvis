@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.2.0 — 2026-08-22 (Brain layer, speed, "never leave JARVIS")
+
+### Brain (JARVIS's own intelligence, no LLM needed)
+- Embedding kNN intent router over canonicalized phrasings (bge-small, 62 ms);
+  22 reflex skills (time, date, volume, mute, apps, sites, screenshots, search,
+  images, screen, reminders, remember/recall, stats, windows, media, clipboard)
+  answer in ~0.3 s with templated speech; 34/34 held-out accuracy
+- Search / images / open-site / recall run the tool first, then one LLM round
+- General knowledge questions detected -> LLM answers directly (tools omitted)
+- Self-learning from clean single-tool LLM turns with sanity filters; seeds win
+- `/brain`, `/brain/teach`, `/brain/classify`; BRAIN panel in Diagnostics;
+  reflex rows in Activity
+
+### Speed
+- Static system prompt + per-turn context in the user message -> KV prompt cache
+  hits (prompt eval ~1 s instead of ~10 s)
+- FIX: search-intent regex matched the context note ("current time") so every
+  turn forced a tool call; now only the user's words count
+
+### Everything inside JARVIS
+- `open_url` / browser tools run in a hidden Brave profile; live page screenshots
+  in a new BROWSER view with URL bar + back; search results open in-app
+- FIX: Brave path typo made Playwright fall back to a visible Edge window
+- `open_application` resolves alias -> Start Menu -> PATH -> Store apps and never
+  spawns a shell (a bad name used to pop a cmd window)
+- Hidden browsers excluded from "what windows are open"
+- Auto-switch back to CONVERSATION when a new turn starts
+
+### Build
+- `scripts/build_sidecar.cmd` gates PyInstaller on compileall + imports
+
 ## 0.1.0 — 2026-08-21 (initial build, phases 0–12 in one session)
 
 ### Core
