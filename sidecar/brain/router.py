@@ -109,6 +109,14 @@ class Brain:
             for text, skill in self.db.execute("SELECT text, skill FROM brain_examples WHERE source='seed'").fetchall():
                 if canon.get(text) != skill:
                     self.db.execute("DELETE FROM brain_examples WHERE text=?", (text,))
+            # seeds are ground truth: a learned row that contradicts a seed is a mislabel
+            for text, skill in self.db.execute("SELECT text, skill FROM brain_examples WHERE source!='seed'").fetchall():
+                if text in canon and canon[text] != skill:
+                    self.db.execute("DELETE FROM brain_examples WHERE text=?", (text,))
+                    log.info("brain: dropped mislabeled learned example %r (%s)", text, skill)
+                elif not self._executable(text, skill):
+                    self.db.execute("DELETE FROM brain_examples WHERE text=?", (text,))
+                    log.info("brain: dropped unusable learned example %r (%s)", text, skill)
             have = {r[0] for r in self.db.execute("SELECT text FROM brain_examples")}
             missing = [(sk, t) for t, sk in canon.items() if t not in have]
             if missing:
@@ -184,10 +192,27 @@ class Brain:
 
     # ---------- learning ----------
 
+    @staticmethod
+    def _executable(text: str, skill: str) -> bool:
+        """A phrasing is only worth learning if the skill could act on it by itself."""
+        sk = SKILL_BY_NAME.get(skill)
+        if sk is None or skill == "general":
+            return False
+        try:
+            return sk.slots(_light(text)) is not None
+        except Exception:
+            return False
+
     async def learn(self, text: str, skill: str, source: str = "learned") -> bool:
         t = _norm(text)
         if not t or skill not in SKILL_BY_NAME or len(t.split()) > 14:
             return False
+        if source != "user":
+            if not self._executable(text, skill):
+                return False  # the LLM used a tool the skill couldn't run from this phrasing
+            best, conf = await self.classify(text)
+            if best is None and getattr(self, "_last", (None, 0))[0] == "general" and conf >= 0.7:
+                return False  # brain is fairly sure this was a plain question; the tool use was a whim
         async with self._lock:
             if t in self._texts:
                 return False
