@@ -100,8 +100,27 @@ class Config:
                 self.data = _merge(DEFAULTS, json.loads(CONFIG_PATH.read_text("utf-8")))
             except Exception:
                 self.data = dict(DEFAULTS)
+            if self._migrate():
+                self.save()
         else:
             self.save()
+
+    # Saved configs snapshot every default, so improved defaults never reach an
+    # existing install on their own. Each migration runs once (tracked by version).
+    CONFIG_VERSION = 2
+
+    def _migrate(self) -> bool:
+        v = int(self.data.get("config_version", 1) or 1)
+        changed = False
+        if v < 2:
+            # STT: base.en is 3x faster than small.en with equal command accuracy (tests/stt_ab.py)
+            if self.data.get("stt", {}).get("model") == "small.en":
+                self.data["stt"]["model"] = "base.en"
+                changed = True
+        if v != self.CONFIG_VERSION:
+            self.data["config_version"] = self.CONFIG_VERSION
+            changed = True
+        return changed
 
     def save(self) -> None:
         CONFIG_PATH.write_text(json.dumps(self.data, indent=2), "utf-8")
