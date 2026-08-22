@@ -505,6 +505,32 @@ async def debug_silence(body: dict, x_jarvis_token: str | None = Header(None)):
     return {"ok": True, "until": speaker.silent_until}
 
 
+@app.get("/brain/export")
+async def brain_export(x_jarvis_token: str | None = Header(None)):
+    """Training dataset: every user turn with the assistant reply and the tools that ran
+    between them (from the audit log), as JSONL in %APPDATA%/JARVIS/dataset.jsonl.
+    This is what a future LoRA fine-tune on a rented GPU would consume."""
+    _auth(x_jarvis_token)
+    import json as _json, sqlite3 as _sq
+    from config import APP_DIR, DB_PATH
+    db = _sq.connect(DB_PATH)
+    turns = db.execute("SELECT ts, role, content FROM transcript ORDER BY id").fetchall()
+    audit = db.execute("SELECT ts, tool, args, status FROM audit_log WHERE status='success' ORDER BY id").fetchall()
+    out = APP_DIR / "dataset.jsonl"
+    n = 0
+    with out.open("w", encoding="utf-8") as f:
+        for i, (ts, role, content) in enumerate(turns):
+            if role != "user":
+                continue
+            reply = next(((t2, c2) for t2, r2, c2 in turns[i + 1:i + 3] if r2 == "assistant"), None)
+            end = reply[0] if reply else ts + 120
+            tools = [{"tool": t, "args": _json.loads(a) if a else {}} for (ta, t, a, st) in audit if ts <= ta <= end]
+            f.write(_json.dumps({"ts": ts, "user": content, "tools": tools,
+                                 "assistant": reply[1] if reply else None}, ensure_ascii=False) + chr(10))
+            n += 1
+    return {"ok": True, "path": str(out), "examples": n}
+
+
 @app.get("/selftest")
 async def selftest_report(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
