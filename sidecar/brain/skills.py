@@ -168,6 +168,23 @@ def say_find(slots: dict, res: dict) -> str:
     return f"I found {n} matches; the closest is {first.get('name')} in your {first.get('where')}."
 
 
+_SWITCH = re.compile(r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to|show me the)\s+(?:the\s+|my\s+)?(.+?)(?:\s+window|\s+app)?[.!?]*$")
+
+
+def slots_switch(t: str) -> dict | None:
+    m = _SWITCH.search(t)
+    if not m:
+        return None
+    name = m.group(1).strip()
+    return {"title": name} if 1 < len(name) <= 40 else None
+
+
+def say_switch(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return f"I don't see a {slots['title']} window open."
+    return f"Switching to {res.get('focused') or slots['title']}."
+
+
 def say_lock(_: dict, res: dict) -> str:
     return "Locking." if "error" not in res else "I couldn't lock the computer."
 
@@ -349,7 +366,7 @@ class Skill:
         return _LABELS.get(self.name, self.name.replace("_", " "))
 
 
-_LABELS = {"folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+_LABELS = {"switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
            "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
            "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
            "remember": "remember it", "stats": "check the system", "windows": "list your windows",
@@ -473,6 +490,11 @@ SKILLS: list[Skill] = [
         "look for a file called notes", "search my documents for taxes", "find files with report in the name",
         "locate the folder called projects", "where's my screenshot from earlier", "find the document named plan"],
         slots=slots_find, speak=say_find),
+    Skill("switch", "focus_window", [
+        "switch to discord", "switch over to chrome", "focus on spotify", "go back to notepad",
+        "jump to the browser", "switch to the settings window", "bring me to discord", "focus steam",
+        "switch to visual studio code", "show me the spotify window"],
+        slots=slots_switch, speak=say_switch),
     Skill("lock", "lock_computer", [
         "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
         "lock the workstation", "lock windows", "lock up"],

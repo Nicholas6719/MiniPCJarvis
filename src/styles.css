@@ -880,3 +880,19 @@ body {
 .files__pvbody { flex: 1; min-height: 0; overflow: auto; }
 .files__img { max-width: 100%; height: auto; display: block; border-radius: 4px; }
 .files__text { font-size: 11px; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; margin: 0; }
+
+.apps { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 8px; font-family: "Share Tech Mono", monospace; }
+.apps__bar { display: flex; align-items: center; gap: 10px; }
+.apps__grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; align-content: start; }
+.apps__tile { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: rgba(0,0,0,0.25); display: flex; flex-direction: column; gap: 4px; }
+.apps__tile.is-active { border-color: var(--cyan); box-shadow: 0 0 12px rgba(0, 229, 255, 0.15); }
+.apps__tile.is-min { opacity: 0.7; }
+.apps__thumb { aspect-ratio: 16 / 10; background: rgba(0,0,0,0.4); border-radius: 4px; overflow: hidden; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.apps__thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.apps__thumb:hover { outline: 1px solid var(--cyan); }
+.apps__placeholder { color: var(--text-dim); font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; }
+.apps__title { font-family: "Rajdhani", sans-serif; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apps__proc { font-size: 10px; color: var(--text-dim); }
+.apps__actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.apps__actions .ghost-btn { font-size: 9px; padding: 2px 6px; }
+.apps__close { color: var(--red); }

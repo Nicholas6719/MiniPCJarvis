@@ -53,6 +53,7 @@ _CANON = [
     (r"^(?:no|nope|wrong|not that|that's wrong|that is wrong|that's not)\b.*", "no i meant ACTION"),
     (r"\b(?:remind me|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
     (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
+    (r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
     (r"\b(?:open|show|browse|go to|list|look at|pull up|what's (?:in|on))\b.*\b(?:desktop|documents|docs|downloads|pictures|photos)\b(?!\s+(?:of|from)\b).*", "open my FOLDER folder"),
     (r"\b(?:find|look for|locate|where is|where's)\b.*\b(?:file|folder|document|resume|screenshot|invoice|report|notes?|photo|picture)s?\b(?!\s+(?:of|from)\b).*", "find the file called NAME"),
     (r".*\b(?:file|folder|document)s?\s+(?:called|named|with|containing)\b.*", "find the file called NAME"),

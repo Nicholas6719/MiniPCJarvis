@@ -353,6 +353,21 @@ async def files_op(body: dict, x_jarvis_token: str | None = Header(None)):
     raise HTTPException(400, "unknown op")
 
 
+@app.get("/windows")
+async def windows_list(thumbs: int = 1, x_jarvis_token: str | None = Header(None)):
+    """Open windows with live thumbnails for the APPS view."""
+    _auth(x_jarvis_token)
+    from tools.window_thumbs import windows_with_thumbs
+    return {"windows": await asyncio.to_thread(windows_with_thumbs, False, bool(thumbs))}
+
+
+@app.post("/windows/act")
+async def windows_act(body: dict, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from tools.window_thumbs import act
+    return await asyncio.to_thread(act, int(body.get("hwnd", 0)), str(body.get("action", "focus")))
+
+
 @app.get("/diagnostics")
 async def diagnostics(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
