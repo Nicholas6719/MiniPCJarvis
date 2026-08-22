@@ -18,6 +18,13 @@ DB_PATH = APP_DIR / "jarvis.db"
 
 DEFAULTS: dict[str, Any] = {
     "general": {"first_run_complete": False},
+    # the user's real folders (Desktop is OneDrive-redirected on this PC)
+    "folders": {
+        "desktop": r"C:\Users\nicho\OneDrive\Desktop",
+        "documents": r"C:\Users\nicho\Documents",
+        "downloads": r"C:\Users\nicho\Downloads",
+        "pictures": r"C:\Users\nicho\Pictures",
+    },
     "llm": {
         "server_binary": r"C:\AI\llama.cpp\llama-server.exe",
         "port": 8033,
@@ -52,7 +59,7 @@ DEFAULTS: dict[str, Any] = {
     # threshold 0.45: "Hey Jarvis" scores ~0.99, bare "Jarvis" 0.46-0.95 by voice,
     # confusables (service/nervous/harvest) 0.00-0.04. Raise if the TV wakes him,
     # lower if bare "Jarvis" gets missed.
-    "wake": {"mode": "push_to_talk", "threshold": 0.45},
+    "wake": {"mode": "both", "threshold": 0.45},
     "conversation": {"window_s": 8},      # follow-up without wake word after a reply
     "interrupt": {"mode": "wake_word"},   # wake_word | any_speech
     "memory": {"enabled": True},

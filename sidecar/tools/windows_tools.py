@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import re
 import datetime
 import logging
 import webbrowser
@@ -9,7 +10,8 @@ import webbrowser
 import win32con
 import win32gui
 
-from config import APP_DIR
+from config import APP_DIR, config
+from pathlib import Path
 from tools.registry import Risk, Tool, registry
 
 log = logging.getLogger("jarvis.tools.windows")
@@ -176,15 +178,44 @@ def _our_windows() -> list[int]:
     return hits
 
 
-def take_screenshot(monitor: int = 0, hide_self: bool = False) -> dict:
+def _resolve_folder(destination: str | None) -> Path:
+    """'desktop' / 'documents' / 'downloads' / 'pictures' / absolute path / default."""
+    if not destination or not destination.strip():
+        return SCREENSHOT_DIR
+    d = destination.strip().lower()
+    if d in ("default", "screenshots", "screenshot folder"):
+        return SCREENSHOT_DIR
+    folders = config.get("folders", default={}) or {}
+    for name, path in folders.items():
+        if name in d:  # "my desktop", "documents folder", "the downloads"
+            return Path(path)
+    p = Path(destination.strip()).expanduser()
+    if p.is_absolute():
+        return p
+    return SCREENSHOT_DIR
+
+
+def take_screenshot(monitor: int = 0, hide_self: bool = False,
+                    destination: str | None = None, filename: str | None = None) -> dict:
     """Capture the screen. hide_self=True minimizes JARVIS's own window first so
-    'look at my screen' sees the user's screen, not the assistant."""
+    'look at my screen' sees the user's screen, not the assistant.
+    destination: default screenshots folder, or desktop/documents/downloads/
+    pictures, or an absolute folder path."""
     import mss
     import mss.tools
     import time as _t
-    SCREENSHOT_DIR.mkdir(exist_ok=True)
+    folder = _resolve_folder(destination)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return {"error": f"cannot use folder {folder}: {e}"}
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = SCREENSHOT_DIR / f"screen-{ts}.png"
+    name = (filename or "").strip()
+    if name:
+        name = re.sub(r"[^\w\- .]", "", name)
+        if not name.lower().endswith(".png"):
+            name += ".png"
+    path = folder / (name or f"screen-{ts}.png")
     hidden = []
     if hide_self:
         for hwnd in _our_windows():
@@ -300,8 +331,14 @@ def register_all() -> None:
         risk=Risk.LOW, handler=set_clipboard))
     registry.register(T(
         name="take_screenshot",
-        description="Capture a screenshot of the screen; returns the saved file path.",
+        description="Capture a screenshot. Saves to the default screenshots folder "
+                    "unless the user names a place: destination 'desktop', "
+                    "'documents', 'downloads', 'pictures', or a folder path. "
+                    "Optional filename.",
         parameters={"type": "object", "properties": {
+            "destination": {"type": "string",
+                            "description": "desktop | documents | downloads | pictures | folder path | default"},
+            "filename": {"type": "string"},
             "monitor": {"type": "integer", "minimum": 0}}, "required": []},
         risk=Risk.LOW, handler=take_screenshot))
     registry.register(T(
