@@ -716,6 +716,8 @@ class Orchestrator:
             sk = SKILL_BY_NAME.get(st.get("skill", ""))
             if sk is None or self._speak_cancel.is_set():
                 continue
+            if said:
+                await bus.emit("assistant_delta", text=" ")
             said.append(await self._exec_skill(sk, st.get("args", {}), queue))
         await self._finish_reflex(text, " ".join(said), t_start, "command", queue, task)
 
@@ -732,13 +734,15 @@ class Orchestrator:
         return steps, None
 
     async def _teach(self, args: dict, queue: asyncio.Queue) -> str:
+        from brain.skills import SKILL_BY_NAME
         phrase, action = args["phrase"], args["action"]
         steps, unknown = await self._compile_steps(action)
         if unknown is not None:
             reply = f"I don't know how to do '{unknown}' on my own yet, so I didn't save that."
         else:
             await brain.teach_command(phrase, steps)
-            names = [st["skill"].replace("_", " ") for st in steps]
+            names = [SKILL_BY_NAME[st["skill"]].label if st["skill"] in SKILL_BY_NAME else st["skill"]
+                     for st in steps]
             what = " and ".join(names) if len(names) <= 2 else ", ".join(names[:-1]) + " and " + names[-1]
             reply = f"Got it. When you say '{phrase}', I'll {what}."
             await bus.emit("brain_learned", text=phrase, skill="command", examples=brain.example_count)

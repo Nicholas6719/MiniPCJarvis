@@ -285,6 +285,20 @@ class Skill:
     direct_if: Callable[[str], bool] | None = None   # llm_after skill may still go direct
     speak_first: bool = False        # announce ("Opening X.") before running the tool
 
+    @property
+    def label(self) -> str:
+        """Human phrase for 'I'll <label>' (teach confirmations)."""
+        return _LABELS.get(self.name, self.name.replace("_", " "))
+
+
+_LABELS = {"volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+           "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
+           "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
+           "remember": "remember it", "stats": "check the system", "windows": "list your windows",
+           "media_pause": "play or pause", "media_next": "skip the track", "media_previous": "go back a track",
+           "clipboard": "read the clipboard", "lock": "lock the computer", "time": "tell the time",
+           "date": "tell the date"}
+
 
 SKILLS: list[Skill] = [
     Skill("time", None, [

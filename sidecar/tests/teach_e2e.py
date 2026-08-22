@@ -38,7 +38,7 @@ async def main():
         ok &= r[0] == "command" and r[1] == ["set_volume", "take_screenshot"]
         await asyncio.sleep(1)
         r = await turn(ws, "no, I meant what time is it")
-        ok &= r[0] == "correction" and ("AM" in r[2] or "PM" in r[2])
+        ok &= r[0] == "time" and ("AM" in r[2] or "PM" in r[2])   # correction re-ran the request
         await asyncio.sleep(1)
         r = await turn(ws, "test mode")   # forgotten by the correction
         ok &= r[0] != "command"
