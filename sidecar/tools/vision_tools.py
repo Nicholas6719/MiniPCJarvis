@@ -28,19 +28,33 @@ async def analyze_screen(question: str = "Describe what is on the screen.",
                  f"the active window is '{fg}'. Open windows: {titles[:10]}. "
                  "Anything else on screen is content INSIDE those windows (a web "
                  "page, a playing video, thumbnails), not separate applications. ")
-    question = (grounding + question + " Describe only what is actually visible, "
-                "briefly, without inventing applications or windows.")
+    question = (grounding + question + " Answer in at most two plain spoken sentences, "
+                "facts only, no preamble, no headings, and never mention these instructions "
+                "or the image itself. Describe only what is actually visible.")
     shot = take_screenshot(monitor, hide_self=True)
     if "error" in shot:
         return shot
     if not await vision.ensure():
         return {"error": "the vision model is not available right now"}
-    img = base64.b64encode(Path(shot["path"]).read_bytes()).decode()
+    img = _downscale(Path(shot["path"]))
     try:
-        answer = await vision.describe(img, question)
+        answer = await vision.describe(img, question, max_tokens=120)
     except Exception as e:
         return {"error": f"vision analysis failed: {e}"}
     return {"screenshot": shot["path"], "analysis": answer}
+
+
+def _downscale(path: Path, max_w: int = 1024) -> str:
+    """Vision encoders tokenize by area: a 1024-px JPEG is ~4x faster than a full
+    2560-px PNG and loses nothing for 'what's on my screen'."""
+    import io
+    from PIL import Image
+    img = Image.open(path).convert("RGB")
+    if img.width > max_w:
+        img = img.resize((max_w, int(img.height * max_w / img.width)))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=72)
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 async def analyze_image(path: str, question: str = "Describe this image.") -> dict:
@@ -51,7 +65,7 @@ async def analyze_image(path: str, question: str = "Describe this image.") -> di
         return {"error": "image too large"}
     if not await vision.ensure():
         return {"error": "the vision model is not available right now"}
-    img = base64.b64encode(p.read_bytes()).decode()
+    img = _downscale(p)
     try:
         answer = await vision.describe(img, question)
     except Exception as e:

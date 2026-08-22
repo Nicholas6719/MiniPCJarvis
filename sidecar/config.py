@@ -48,6 +48,7 @@ DEFAULTS: dict[str, Any] = {
                 "template_kwargs": {"enable_thinking": False},
                 "reasoning_field": "reasoning_content",
                 "gpu_full": True,   # fills the iGPU heap: the vision server must use the CPU
+                "note": "Smarter and quicker for text; vision runs on the CPU and RAM peaks ~96% on a 32 GB PC.",
             },
             "gpt-oss-20b": {
                 "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
