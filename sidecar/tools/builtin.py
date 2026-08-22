@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -63,6 +64,9 @@ def get_system_stats() -> dict:
 
 def open_application(name: str) -> dict:
     key = name.strip().lower()
+    if re.search(r"^https?://|\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai)\b", key):
+        # a website: never hand it to the default browser - stays inside JARVIS
+        return {"error": f"'{name}' is a website, not an app. Use open_url to show it inside JARVIS."}
     target = _APP_ALIASES.get(key, key)
     try:
         if target.startswith("ms-settings"):

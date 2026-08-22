@@ -843,3 +843,14 @@ body {
 .brain__recent { margin-top: 10px; font-size: 11px; color: var(--muted); }
 .brain__recent div { padding: 2px 0; }
 .brain__recent b { color: var(--text); font-weight: 500; }
+
+.browser { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+.browser__bar { display: flex; align-items: center; gap: 8px; }
+.browser__url { flex: 1; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line); color: var(--text); font-family: "Share Tech Mono", monospace; font-size: 12px; padding: 6px 10px; border-radius: 4px; outline: none; }
+.browser__url:focus { border-color: var(--cyan); }
+.browser__title { font-family: "Rajdhani", sans-serif; font-size: 14px; color: var(--text); }
+.browser__action { color: var(--text-dim); font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; }
+.browser__frame { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: rgba(0, 0, 0, 0.3); display: flex; align-items: flex-start; justify-content: center; }
+.browser__frame.is-busy { opacity: 0.6; }
+.browser__shot { width: 100%; height: auto; display: block; }
+.browser__text { max-height: 110px; overflow-y: auto; font-family: "Rajdhani", sans-serif; font-size: 12px; color: var(--text-dim); line-height: 1.35; white-space: pre-wrap; }

@@ -24,11 +24,34 @@ SCREENSHOT_DIR = APP_DIR / "screenshots"
 def _visible_windows() -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
 
+    import win32con, win32process
+    hidden_pids: set[int] = set()
+    try:
+        from search_brave_web import brave_web
+        if brave_web._pid:
+            hidden_pids.add(int(brave_web._pid))
+    except Exception:
+        pass
+
     def cb(hwnd, _):
         if win32gui.IsWindowVisible(hwnd):
             title = win32gui.GetWindowText(hwnd)
-            if title.strip():
-                out.append((hwnd, title))
+            if not title.strip():
+                return True
+            # skip JARVIS's own hidden search browser (tool-window, off-screen)
+            try:
+                if win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOOLWINDOW:
+                    return True
+                if hidden_pids and win32process.GetWindowThreadProcessId(hwnd)[1] in hidden_pids:
+                    return True
+                # our search browser parks off-screen / minimized far away; never list it
+                if title.endswith("- Brave Search - Brave"):
+                    l, t, r, b = win32gui.GetWindowRect(hwnd)
+                    if r < 0 or b < 0 or l < -5000 or t < -5000:
+                        return True
+            except Exception:
+                pass
+            out.append((hwnd, title))
         return True
 
     win32gui.EnumWindows(cb, None)
@@ -235,11 +258,11 @@ def take_screenshot(monitor: int = 0, hide_self: bool = False,
     return {"path": str(path), "width": img.size[0], "height": img.size[1]}
 
 
-def open_url(url: str) -> dict:
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-    webbrowser.open(url)
-    return {"opened": url}
+async def open_url(url: str) -> dict:
+    """Open a page INSIDE JARVIS (hidden browser + HUD web panel). JARVIS never
+    launches the user's browser: the whole experience stays in the app."""
+    from browser.session import browser
+    return await browser.goto(url)
 
 
 def lock_computer() -> dict:
@@ -343,7 +366,8 @@ def register_all() -> None:
         risk=Risk.LOW, handler=take_screenshot))
     registry.register(T(
         name="open_url",
-        description="Open a URL in the default browser.",
+        description="Open a web page inside JARVIS's web panel (same as browser_open). "
+                    "Never opens an external browser.",
         parameters={"type": "object", "properties": {
             "url": {"type": "string"}}, "required": ["url"]},
         risk=Risk.LOW, handler=open_url))

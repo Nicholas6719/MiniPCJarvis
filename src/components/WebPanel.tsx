@@ -1,6 +1,7 @@
 // Live view of JARVIS working the web: query → results → pages read → done.
 // Takes over the right column while web activity is happening.
 import { useStore } from "../state/store";
+import { api } from "../lib/sidecar";
 
 export function WebPanel() {
   const web = useStore((s) => s.web);
@@ -31,7 +32,12 @@ export function WebPanel() {
           const read = web.read[r.url];
           return (
             <a key={i} className={`webpanel__result ${read ? (read.ok ? "is-read" : "is-failed") : ""}`}
-               href={r.url} target="_blank" rel="noreferrer" title={r.url}>
+               href={r.url} title={r.url}
+               onClick={(e) => {
+                 // open inside JARVIS's browser view - never an external browser
+                 e.preventDefault();
+                 api("/browser/open", { method: "POST", body: JSON.stringify({ url: r.url }) }).catch(() => {});
+               }}>
               <span className="webpanel__n">{i + 1}</span>
               <span className="webpanel__body">
                 <span className="webpanel__title">{r.title || r.url}</span>

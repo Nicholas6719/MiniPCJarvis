@@ -39,7 +39,23 @@ def slots_app(t: str) -> dict | None:
     if not m:
         return None
     name = m.group(1).strip()
-    return {"name": name} if name and name not in ("it", "that", "this") else None
+    if not name or name in ("it", "that", "this"):
+        return None
+    if re.search(r"https?://|\b\w+\.(?:com|org|net|io|gov|edu|co|tv|ai)\b", name):
+        return None  # a website, not an app -> the LLM routes it to open_url
+    return {"name": name}
+
+
+def say_media(slots: dict, res: dict) -> str:
+    return {"play_pause": "Done.", "next": "Skipping.", "previous": "Going back.",
+            "stop": "Stopped."}.get(slots.get("action", ""), "Done.") if "error" not in res else "I couldn't control playback."
+
+
+def say_clipboard(_: dict, res: dict) -> str:
+    text = str(res.get("text") or "").strip()
+    if not text:
+        return "Your clipboard is empty."
+    return "Your clipboard has: " + (text[:200] + ("..." if len(text) > 200 else ""))
 
 
 def slots_screenshot(t: str) -> dict | None:
@@ -176,9 +192,10 @@ def say_remember(slots: dict, res: dict) -> str:
 
 
 def say_stats(_: dict, res: dict) -> str:
+    free = float(res.get("disk_c_free_gb", 0) or 0)
+    space = f"{free / 1000:.1f} terabytes" if free >= 1000 else f"{round(free)} gigabytes"
     return (f"CPU is at {round(res.get('cpu_percent', 0))} percent, memory at "
-            f"{round(res.get('ram_percent', 0))} percent with about "
-            f"{round(res.get('disk_c_free_gb', 0))} gigabytes free on C.")
+            f"{round(res.get('ram_percent', 0))} percent, with about {space} free.")
 
 
 def say_windows(_: dict, res: dict) -> str:
@@ -285,6 +302,26 @@ SKILLS: list[Skill] = [
         "what apps are running", "which windows are open right now", "what's open",
         "show me what's open", "what programs are open"],
         speak=say_windows),
+    Skill("media_pause", "media_control", [
+        "pause", "pause the music", "pause playback", "play", "resume the music", "play the music",
+        "pause spotify", "resume playback", "unpause", "pause that", "play pause"],
+        fixed_args={"action": "play_pause"}, speak=say_media),
+    Skill("media_next", "media_control", [
+        "next song", "skip this song", "next track", "skip", "play the next one", "skip this track"],
+        fixed_args={"action": "next"}, speak=say_media),
+    Skill("media_previous", "media_control", [
+        "previous song", "go back a song", "previous track", "play the last song again", "back one track"],
+        fixed_args={"action": "previous"}, speak=say_media),
+    Skill("clipboard", "get_clipboard", [
+        "what's on my clipboard", "read my clipboard", "what did i copy", "what's in the clipboard",
+        "read me what i just copied", "show me my clipboard"],
+        speak=say_clipboard),
+    Skill("recall", "recall", [
+        "what did i tell you about my coffee", "do you remember my favorite color",
+        "what do you know about me", "what did i say my dentist's name was",
+        "remind me what i told you about my car", "do you remember where i park",
+        "what do you remember about my project", "what's my wifi password"],
+        slots=lambda t: {"query": t}, llm_after=True),
 ]
 
 SKILLS.append(Skill("general", None, [
@@ -296,7 +333,14 @@ SKILLS.append(Skill("general", None, [
     "can you help me plan a trip", "translate hello to spanish", "what's a good name for a dog",
     "open the pod bay doors", "what is quantum computing", "who directed the matrix",
     "how old is the universe", "recommend a book", "what's the capital of peru",
-    "compare python and rust", "what happened in 1969"]))
+    "compare python and rust", "what happened in 1969",
+    "how many legs does a spider have", "how many moons does jupiter have", "how far is the moon",
+    "give me a tip for sleeping better", "any advice for a job interview", "tell me a fun fact about space",
+    "what's the tallest mountain", "who wrote hamlet", "what year did world war two end",
+    "how do airplanes fly", "what's the speed of light", "is a tomato a fruit",
+    "what rhymes with orange", "write a short poem", "tell me a story", "what's a synonym for happy",
+    "how do you spell necessary", "what is 15 percent of 80", "how many ounces in a pound",
+    "what does carpe diem mean", "why do cats purr", "how long do elephants live"]))
 
 SKILL_BY_NAME = {s.name: s for s in SKILLS}
 # tools that map to exactly one skill are safe to learn from (set_mute is mute/unmute)

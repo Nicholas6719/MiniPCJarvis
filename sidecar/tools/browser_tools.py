@@ -12,7 +12,7 @@ async def browser_open(url: str) -> dict:
 
 
 async def browser_read() -> dict:
-    return await browser.observe()
+    return await browser.read()
 
 
 async def browser_click(target: str) -> dict:
@@ -34,8 +34,9 @@ async def browser_back() -> dict:
 def register_all() -> None:
     registry.register(Tool(
         name="browser_open",
-        description="Open a URL in JARVIS's own visible browser window. Returns "
-                    "the page title and text so you can verify where you landed.",
+        description="Open a web page inside JARVIS (shown in the HUD's web panel; "
+                    "never in an external browser). Returns the page title and text "
+                    "so you can verify where you landed and answer from it.",
         parameters={"type": "object", "properties": {
             "url": {"type": "string"}}, "required": ["url"]},
         risk=Risk.LOW, handler=browser_open, timeout=30))

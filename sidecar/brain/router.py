@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS brain_examples (
 _CANON = [
     # (pattern, replacement) — applied to seeds AND queries so embeddings encode intent, not objects
     (r"\b(?:remind me|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
-    (r"\b(?:remember|note|keep in mind)\b.*", "remember that FACT"),
+    (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
     (r"\b(?:show|find|pull up|get|display|bring up)\s+(?:me\s+)?(?:a\s+|some\s+|an\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+.+", "show me pictures of THING"),
     (r"\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
     (r"\b(?:volume|turn it|turn the volume|set the volume|set volume|make the volume|change the volume|lower the volume|raise the volume|put the volume)\b.*\d+.*", "set the volume to N percent"),
@@ -165,9 +165,22 @@ class Brain:
                 break
         margin = top - rival
         confidence = top if margin >= 0.06 else top - (0.06 - margin) * 3.0
+        self._last = (best, round(max(0.0, confidence), 3))
         if best == "general":
             return None, round(max(0.0, confidence), 3)
         return best, round(max(0.0, confidence), 3)
+
+    async def general_level(self, text: str) -> str | None:
+        """How sure the brain is that this is a knowledge/creative question the LLM
+        should answer from its own head: "sure" (block tools on the first round),
+        "likely" (hint the model not to search), or None."""
+        threshold = float(config.get("brain", "threshold", default=0.82))
+        soft = float(config.get("brain", "general_hint_threshold", default=0.7))
+        await self.classify(text)
+        best, conf = getattr(self, "_last", (None, 0.0))
+        if best != "general":
+            return None
+        return "sure" if conf >= threshold else ("likely" if conf >= soft else None)
 
     # ---------- learning ----------
 

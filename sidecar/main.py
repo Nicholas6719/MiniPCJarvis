@@ -288,6 +288,24 @@ async def brain_classify(body: dict, x_jarvis_token: str | None = Header(None)):
             "confidence": d[2] if d else conf, "nearest": name}
 
 
+@app.post("/browser/open")
+async def browser_open_ep(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Open a page in JARVIS's in-app browser (HUD url bar / result click)."""
+    _auth(x_jarvis_token)
+    from browser.session import browser
+    url = str(body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "url required")
+    return await browser.goto(url)
+
+
+@app.post("/browser/back")
+async def browser_back_ep(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from browser.session import browser
+    return await browser.back()
+
+
 @app.get("/diagnostics")
 async def diagnostics(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

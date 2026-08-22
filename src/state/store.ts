@@ -28,7 +28,7 @@ export interface Confirmation {
   risk: string;
 }
 
-export type View = "conversation" | "memory" | "research" | "media" | "tasks" | "diagnostics" | "settings";
+export type View = "conversation" | "memory" | "research" | "media" | "browser" | "tasks" | "diagnostics" | "settings";
 export type RightPanel = "activity" | "web";
 
 export interface WebResult { title?: string; url: string; snippet?: string; host?: string }
@@ -43,6 +43,16 @@ export interface WebState {
 export interface MediaState {
   query: string;
   images: { src: string; alt: string; w: number; h: number; page?: string }[];
+  ts: number;
+}
+
+export interface BrowserState {
+  url?: string;
+  title?: string;
+  text?: string;
+  shot?: string | null;
+  action?: string;
+  error?: string;
   ts: number;
 }
 
@@ -68,6 +78,7 @@ interface Store {
   rightPanel: RightPanel;
   web: WebState | null;
   media: MediaState | null;
+  browser: BrowserState | null;
   armedUntil: number;      // epoch seconds; follow-up window open while now < armedUntil
   configVersion: number;   // bumps on config_changed so views can refetch
   autoSwitch: boolean;
@@ -95,6 +106,7 @@ export const useStore = create<Store>((set, get) => ({
   rightPanel: "activity",
   web: null,
   media: null,
+  browser: null,
   armedUntil: 0,
   configVersion: 0,
   autoSwitch: true,
@@ -139,7 +151,7 @@ export const useStore = create<Store>((set, get) => ({
           assistantDraft: "",
           // a new request returns to the conversation; research/media views only
           // take over again if the new turn actually produces that activity
-          view: st.autoSwitch && (st.view === "media" || st.view === "research") ? "conversation" : st.view,
+          view: st.autoSwitch && (st.view === "media" || st.view === "research" || st.view === "browser") ? "conversation" : st.view,
           rightPanel: st.rightPanel === "web" && st.autoSwitch ? "activity" : st.rightPanel,
         }));
         draftId = "";
@@ -245,6 +257,13 @@ export const useStore = create<Store>((set, get) => ({
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `web: ${evt.stage}${evt.query ? ` "${evt.query}"` : ""}` });
         break;
       }
+      case "browser":
+        set((st) => ({
+          browser: { url: evt.url, title: evt.title, text: evt.text, shot: evt.shot, action: evt.action, error: evt.error, ts: evt.ts },
+          view: st.autoSwitch ? "browser" : st.view,
+        }));
+        push({ id: evt.id, ts: evt.ts, kind: "web", summary: `browser: ${evt.action} ${evt.title ? `"${evt.title}"` : evt.url ?? ""}` });
+        break;
       case "images":
         set((st) => ({
           media: { query: evt.query, images: evt.images ?? [], ts: evt.ts },
@@ -255,7 +274,7 @@ export const useStore = create<Store>((set, get) => ({
       case "reflex":
         push({
           id: evt.id, ts: evt.ts, kind: "reflex",
-          summary: `brain: ${evt.skill} (${Math.round((evt.confidence ?? 0) * 100)}%)${evt.mode === "tool_then_llm" ? " → tool, then LLM" : " — no LLM"}`,
+          summary: `brain: ${evt.skill} (${Math.round((evt.confidence ?? 0) * 100)}%)${evt.mode === "tool_then_llm" ? " → tool, then LLM" : evt.mode === "answer_directly" ? " → LLM answers directly (tools off)" : evt.mode === "answer_hint" ? " → LLM answers directly" : " — no LLM"}`,
           detail: evt.args && Object.keys(evt.args).length ? evt.args : undefined,
         });
         break;

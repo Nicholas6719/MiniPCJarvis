@@ -503,6 +503,21 @@ class Orchestrator:
         if reflex and not reflex[0].llm_after:
             await self._reflex_turn(text, reflex, t_start)
             return
+        # brain thinks this is a plain question -> steer the LLM away from needless tool use
+        self._no_tools_first = False
+        general_hint = ""
+        if not reflex and config.get("brain", "enabled", default=True) and not SEARCH_INTENT.search(text):
+            try:
+                level = await brain.general_level(text)
+            except Exception:
+                level = None
+            if level:
+                self._no_tools_first = level == "sure"
+                general_hint = ("[Note: this is a general knowledge or creative question - answer from "
+                                "your own knowledge right away; do not search or use tools for it.]")
+                await bus.emit("reflex", skill="general", tool=None, args={},
+                               confidence=brain._last[1],
+                               mode="answer_directly" if level == "sure" else "answer_hint")
         try:
             mem_hits = await memory.search(text, top_k=4)
         except Exception:
@@ -518,7 +533,8 @@ class Orchestrator:
         # Time + memories ride along inside the latest user message instead.
         messages: list[dict] = [{"role": "system", "content": system_prompt()}]
         messages += self._history[-10:]
-        messages.append({"role": "user", "content": turn_context(mem_ctx) + chr(10) + text})
+        messages.append({"role": "user", "content": turn_context(mem_ctx) + chr(10)
+                         + (general_hint + chr(10) if general_hint else "") + text})
 
         if reflex:
             # brain knew which tool to run; run it now and let the LLM compose the answer
@@ -628,6 +644,8 @@ class Orchestrator:
             cancelled = False
             # first round of an explicit search/lookup request: a tool call is required
             choice = "required" if (must_use_tool and _round == 0) else None
+            if _round == 0 and getattr(self, "_no_tools_first", False) and not must_use_tool:
+                choice = "none"
             async for chunk in local_llm.stream(messages, tools=tools,
                                                 max_tokens=4096, tool_choice=choice):
                 if self._speak_cancel.is_set():
