@@ -277,6 +277,13 @@ async def brain_teach(body: dict, x_jarvis_token: str | None = Header(None)):
     return {"ok": ok, "examples": brain.example_count}
 
 
+@app.post("/brain/forget_command")
+async def brain_forget_command(body: dict, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from brain.router import brain
+    return {"ok": await brain.forget_command(str(body.get("phrase", "")))}
+
+
 @app.post("/brain/classify")
 async def brain_classify(body: dict, x_jarvis_token: str | None = Header(None)):
     """Dry-run: what would the brain do with this text? (no side effects)"""

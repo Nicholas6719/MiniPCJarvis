@@ -64,6 +64,56 @@ def site_direct(text: str) -> bool:
     return not _SITE_WANTS_ANSWER.search(text.lower())
 
 
+_TEACH_HEAD = re.compile(
+    r"^(?:from now on[, ]*|ok[, ]*|okay[, ]*)?(?:when(?:ever)? i say|if i say|teach you(?: that)?(?: when i say)?)\s+",
+    re.I)
+_TEACH_CONNECTOR = re.compile(r"\s*(?:,|\bthen\b|\byou should\b|\byou\b|\bi want you to\b|\bthat means\b|\bit means\b|\bdo\b)\s*", re.I)
+
+
+_ACTION_VERBS = {"mute", "unmute", "open", "close", "launch", "start", "quit", "set", "take", "lock",
+                 "play", "pause", "skip", "search", "show", "remind", "turn", "go", "put", "lower",
+                 "raise", "grab", "screenshot", "remember", "silence", "crank", "fire", "bring", "load"}
+
+
+def slots_teach(t: str) -> dict | None:
+    m = _TEACH_HEAD.search(t)
+    if not m:
+        return None
+    rest = t[m.end():].strip(" ,.!?\"'")
+    # "lights out, mute and open spotify" | "good night then lock the computer"
+    parts = _TEACH_CONNECTOR.split(rest, maxsplit=1)
+    if len(parts) != 2:
+        # no comma/connector survived speech-to-text: split where the action verb starts
+        words = rest.split()
+        idx = next((i for i in range(1, len(words)) if words[i] in _ACTION_VERBS), None)
+        if idx is None:
+            return None
+        parts = [" ".join(words[:idx]), " ".join(words[idx:])]
+    phrase, action = parts[0].strip(" ,\"'"), parts[1].strip(" ,\"'")
+    if len(phrase) < 2 or len(action) < 3:
+        return None
+    return {"phrase": phrase, "action": action}
+
+
+_CORRECTION = re.compile(
+    r"^(?:nope|no no no|not that one|not that|that's not it|that's not what i meant|that is wrong|that's wrong|wrong|no)\b"
+    r"[,.!\s]*(?:i meant|i said|i wanted|i want|actually|do|it's|its)?[,\s]*(?P<rest>.*)$", re.I)
+
+
+def slots_correction(t: str) -> dict | None:
+    m = _CORRECTION.search(t)
+    if not m:
+        return None
+    rest = m.group("rest").strip(" ,.")
+    if re.fullmatch(r"(?:that's wrong|that is wrong|wrong|that|it|no|nope)?", rest):
+        rest = ""
+    return {"rest": rest}
+
+
+def say_lock(_: dict, res: dict) -> str:
+    return "Locking." if "error" not in res else "I couldn't lock the computer."
+
+
 def say_media(slots: dict, res: dict) -> str:
     return {"play_pause": "Done.", "next": "Skipping.", "previous": "Going back.",
             "stop": "Stopped."}.get(slots.get("action", ""), "Done.") if "error" not in res else "I couldn't control playback."
@@ -341,6 +391,20 @@ SKILLS: list[Skill] = [
         "open example.com and tell me what the page says", "take me to github.com",
         "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up weather.com"],
         slots=slots_site, speak=say_site, llm_after=True, direct_if=site_direct, speak_first=True),
+    Skill("lock", "lock_computer", [
+        "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
+        "lock the workstation", "lock windows", "lock up"],
+        speak=say_lock),
+    Skill("teach", None, [
+        "when i say lights out, mute and open spotify", "from now on when i say good night, lock the computer",
+        "teach you a command", "if i say movie time, set the volume to 70 and open netflix.com",
+        "when i say focus mode, mute and close discord", "whenever i say wrap it up, take a screenshot",
+        "when i say bedtime do mute", "teach you that when i say quiet time you mute"],
+        slots=slots_teach),
+    Skill("correction", None, [
+        "no i meant open spotify", "no that's wrong", "not that", "nope i said mute",
+        "that's not what i meant", "wrong, i wanted the volume at fifty", "no no no", "not that one"],
+        slots=slots_correction),
     Skill("recall", "recall", [
         "what did i tell you about my coffee", "do you remember my favorite color",
         "what do you know about me", "what did i say my dentist's name was",

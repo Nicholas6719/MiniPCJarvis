@@ -15,6 +15,7 @@ Latency: embedding ~10 ms, kNN ~0 ms, vs. 2-12 s for an LLM round.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sqlite3
 import time
@@ -33,6 +34,13 @@ CREATE TABLE IF NOT EXISTS brain_examples (
     text TEXT NOT NULL UNIQUE,
     skill TEXT NOT NULL,
     source TEXT NOT NULL DEFAULT 'seed',   -- seed | learned | user
+    embedding BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS brain_commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    phrase TEXT NOT NULL UNIQUE,     -- what the user says ("lights out")
+    steps TEXT NOT NULL,             -- JSON [{"skill":..., "args":{...}}, ...]
     embedding BLOB NOT NULL
 );
 """
@@ -85,6 +93,10 @@ class Brain:
         self._matrix: np.ndarray | None = None
         self._lock = asyncio.Lock()
         self.stats = {"reflex": 0, "llm": 0, "learned": 0}
+        self._cmd_phrases: list[str] = []
+        self._cmd_steps: list[list[dict]] = []
+        self._cmd_matrix: np.ndarray | None = None
+        self.last_match: dict | None = None   # what the last decide() matched (for corrections)
 
     # ---------- embeddings ----------
 
@@ -131,7 +143,13 @@ class Brain:
             self._skills = [r[1] for r in rows]
             self._matrix = (np.frombuffer(b"".join(r[2] for r in rows), dtype=np.float32)
                             .reshape(len(rows), -1)) if rows else None
-            log.info("brain loaded: %d examples across %d skills", len(rows), len(SKILLS))
+            crows = self.db.execute("SELECT phrase, steps, embedding FROM brain_commands").fetchall()
+            self._cmd_phrases = [r[0] for r in crows]
+            self._cmd_steps = [json.loads(r[1]) for r in crows]
+            self._cmd_matrix = (np.frombuffer(b"".join(r[2] for r in crows), dtype=np.float32)
+                                .reshape(len(crows), -1)) if crows else None
+            log.info("brain loaded: %d examples across %d skills, %d custom commands",
+                     len(rows), len(SKILLS), len(crows))
 
     @property
     def example_count(self) -> int:
@@ -151,6 +169,7 @@ class Brain:
             "stats": dict(self.stats),
             "threshold": float(config.get("brain", "threshold", default=0.82)),
             "recent": [{"ts": r[0], "text": r[1], "skill": r[2], "source": r[3]} for r in recent],
+            "commands": self.commands(),
         }
 
     # ---------- classification ----------
@@ -174,6 +193,11 @@ class Brain:
                 break
         margin = top - rival
         confidence = top if margin >= 0.06 else top - (0.06 - margin) * 3.0
+        src = self.db.execute("SELECT source FROM brain_examples WHERE text=?",
+                              (self._texts[order[0]],)).fetchone()
+        self.last_match = {"text": self._texts[order[0]], "skill": best,
+                           "source": src[0] if src else "seed", "query": text,
+                           "confidence": round(max(0.0, confidence), 3)}
         self._last = (best, round(max(0.0, confidence), 3))
         if best == "general":
             return None, round(max(0.0, confidence), 3)
@@ -231,6 +255,74 @@ class Brain:
 
     def learned_from_tool(self, tool_name: str) -> str | None:
         return TOOL_TO_SKILL.get(tool_name)
+
+    # ---------- custom commands (taught by voice) ----------
+
+    async def match_command(self, text: str) -> list[dict] | None:
+        """A phrase the user taught ("lights out") -> its steps. Near-exact match only."""
+        if self._cmd_matrix is None:
+            return None
+        q = (await asyncio.to_thread(self._embed, [_light(text)]))[0]
+        sims = self._cmd_matrix @ q
+        i = int(np.argmax(sims))
+        if float(sims[i]) >= 0.92:
+            self.last_match = {"text": self._cmd_phrases[i], "skill": "command",
+                               "source": "user", "query": text, "confidence": float(sims[i])}
+            return self._cmd_steps[i]
+        return None
+
+    async def teach_command(self, phrase: str, steps: list[dict]) -> None:
+        phrase = _light(phrase)
+        async with self._lock:
+            v = (await asyncio.to_thread(self._embed, [phrase]))[0]
+            self.db.execute("INSERT OR REPLACE INTO brain_commands (ts, phrase, steps, embedding) VALUES (?,?,?,?)",
+                            (time.time(), phrase, json.dumps(steps), v.tobytes()))
+            self.db.commit()
+            if phrase in self._cmd_phrases:
+                i = self._cmd_phrases.index(phrase)
+                self._cmd_steps[i] = steps
+                self._cmd_matrix[i] = v
+            else:
+                self._cmd_phrases.append(phrase)
+                self._cmd_steps.append(steps)
+                self._cmd_matrix = v[None, :] if self._cmd_matrix is None else np.vstack([self._cmd_matrix, v])
+        log.info("brain taught command %r -> %s", phrase, steps)
+
+    async def forget_command(self, phrase: str) -> bool:
+        phrase = _light(phrase)
+        async with self._lock:
+            if phrase not in self._cmd_phrases:
+                return False
+            i = self._cmd_phrases.index(phrase)
+            self.db.execute("DELETE FROM brain_commands WHERE phrase=?", (phrase,))
+            self.db.commit()
+            self._cmd_phrases.pop(i); self._cmd_steps.pop(i)
+            self._cmd_matrix = np.delete(self._cmd_matrix, i, axis=0) if len(self._cmd_phrases) else None
+        return True
+
+    async def unlearn(self, match: dict | None) -> str | None:
+        """Correction: the last reflex was wrong. Drop the learned example (or taught
+        command) that caused it. Seeds are never dropped; they return None."""
+        if not match:
+            return None
+        if match.get("skill") == "command":
+            await self.forget_command(match["text"])
+            return "command"
+        if match.get("source") in ("learned", "user"):
+            async with self._lock:
+                t = match["text"]
+                if t in self._texts:
+                    i = self._texts.index(t)
+                    self.db.execute("DELETE FROM brain_examples WHERE text=?", (t,))
+                    self.db.commit()
+                    self._texts.pop(i); self._skills.pop(i)
+                    self._matrix = np.delete(self._matrix, i, axis=0) if self._texts else None
+                    log.info("brain unlearned %r (%s)", t, match["skill"])
+                    return match["skill"]
+        return None
+
+    def commands(self) -> list[dict]:
+        return [{"phrase": p, "steps": st} for p, st in zip(self._cmd_phrases, self._cmd_steps)]
 
     # ---------- decision ----------
 

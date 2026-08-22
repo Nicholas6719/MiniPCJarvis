@@ -497,6 +497,10 @@ class Orchestrator:
         reflex = None
         if config.get("brain", "enabled", default=True):
             try:
+                steps = await brain.match_command(text)
+                if steps:
+                    await self._routine_turn(text, steps, t_start)
+                    return
                 reflex = await brain.decide(text)
             except Exception:
                 log.exception("brain decide failed - falling back to the LLM")
@@ -560,7 +564,9 @@ class Orchestrator:
                  "function": {"name": skill.tool, "arguments": json.dumps(args)}}]})
             if isinstance(result, dict) and result.get("ok"):
                 result = {**result, "note": "Answer the user from these results now, in one or two "
-                                            "spoken sentences. Only call another tool if they are empty."}
+                                            "spoken sentences."}
+                # the work is done: the model composes the answer, no more tools this turn
+                self._no_tools_first = True
             messages.append({"role": "tool", "tool_call_id": call_id,
                              "content": json.dumps(result, default=str)})
         else:
@@ -606,7 +612,7 @@ class Orchestrator:
         """Say a short human filler if the model hasn't produced a word within ~0.7 s."""
         if not config.get("speech", "fillers", default=True):
             return
-        delay = 0.05 if reflex else 0.7   # a known tool run is always slow enough to announce
+        delay = 0.05 if reflex else 0.35  # an LLM first token is never faster than ~2 s anyway
         try:
             await asyncio.wait_for(self._first_token.wait(), timeout=delay)
             return
@@ -622,16 +628,10 @@ class Orchestrator:
         await bus.emit("filler", text=choice)
         await speak_queue.put(choice)
 
-    async def _reflex_turn(self, text: str, reflex, t_start: float) -> None:
-        """Handle a request JARVIS recognized himself: tool + templated speech, no LLM."""
-        skill, args, conf = reflex
-        brain.stats["reflex"] += 1
-        await bus.emit("reflex", skill=skill.name, tool=skill.tool, args=args,
-                       confidence=conf, mode="direct")
+    async def _exec_skill(self, skill, args: dict, queue: asyncio.Queue) -> str:
+        """Run one reflex skill (tool + templated speech) and return what was said."""
+        from brain.skills import SKILL_BY_NAME  # noqa: F401  (kept local: skills import nothing heavy)
         res: dict = {}
-        self._speak_cancel = asyncio.Event()
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
-        task = asyncio.create_task(self._speaker_worker(queue))
         reply = ""
         if skill.speak_first and skill.tool:
             # announce the action immediately ("Opening youtube.com."), then do it
@@ -660,21 +660,115 @@ class Orchestrator:
             self.metrics.mark("first_token_ms")
             await bus.emit("assistant_delta", text=reply)
             await queue.put(clean_for_speech(reply))
+        return reply
+
+    async def _finish_reflex(self, text: str, reply: str, t_start: float, label: str,
+                             queue: asyncio.Queue, task: asyncio.Task) -> None:
         await queue.put(None)
         try:
             await task
         except asyncio.CancelledError:
             pass
-        self._history.append({"role": "user", "content": text})
-        self._history.append({"role": "assistant", "content": reply})
-        self._history = self._history[-20:]
-        memory.log_turn("assistant", reply)
+        if reply:
+            self._history.append({"role": "user", "content": text})
+            self._history.append({"role": "assistant", "content": reply})
+            self._history = self._history[-20:]
+            memory.log_turn("assistant", reply)
         breakdown = self.metrics.finish()
-        breakdown["reflex"] = skill.name
+        breakdown["reflex"] = label
         await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
-                       breakdown=breakdown, reflex=skill.name)
+                       breakdown=breakdown, reflex=label)
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
+
+    async def _reflex_turn(self, text: str, reflex, t_start: float) -> None:
+        """Handle a request JARVIS recognized himself: tool + templated speech, no LLM."""
+        skill, args, conf = reflex
+        brain.stats["reflex"] += 1
+        await bus.emit("reflex", skill=skill.name, tool=skill.tool, args=args,
+                       confidence=conf, mode="direct")
+        self._speak_cancel = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        task = asyncio.create_task(self._speaker_worker(queue))
+        if skill.name == "teach":
+            reply = await self._teach(args, queue)
+        elif skill.name == "correction":
+            reply = await self._correct(args, queue, t_start)
+            if reply is None:
+                return  # the correction re-ran as a fresh turn, which finished itself
+        else:
+            self._last_reflex = dict(brain.last_match or {})
+            reply = await self._exec_skill(skill, args, queue)
+        await self._finish_reflex(text, reply, t_start, skill.name, queue, task)
+
+    async def _routine_turn(self, text: str, steps: list[dict], t_start: float) -> None:
+        """A phrase the user taught: run its steps in order, one spoken line each."""
+        from brain.skills import SKILL_BY_NAME
+        brain.stats["reflex"] += 1
+        await bus.emit("reflex", skill="command", tool=None, args={"steps": steps},
+                       confidence=1.0, mode="routine")
+        self._last_reflex = dict(brain.last_match or {})
+        self._speak_cancel = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        task = asyncio.create_task(self._speaker_worker(queue))
+        said = []
+        for st in steps:
+            sk = SKILL_BY_NAME.get(st.get("skill", ""))
+            if sk is None or self._speak_cancel.is_set():
+                continue
+            said.append(await self._exec_skill(sk, st.get("args", {}), queue))
+        await self._finish_reflex(text, " ".join(said), t_start, "command", queue, task)
+
+    async def _compile_steps(self, action: str) -> tuple[list[dict], str | None]:
+        """'mute and open spotify' -> [{skill, args}, ...]; returns (steps, unknown part)."""
+        parts = [p.strip(" ,.") for p in re.split(r"\s*(?:,\s*|\band then\b|\bthen\b|\band\b)\s*", action) if p.strip(" ,.")]
+        steps: list[dict] = []
+        for part in parts:
+            d = await brain.decide(part)
+            if not d or d[0].name in ("teach", "correction") or (
+                    d[0].llm_after and not (d[0].direct_if and d[0].direct_if(part))):
+                return steps, part
+            steps.append({"skill": d[0].name, "args": d[1]})
+        return steps, None
+
+    async def _teach(self, args: dict, queue: asyncio.Queue) -> str:
+        phrase, action = args["phrase"], args["action"]
+        steps, unknown = await self._compile_steps(action)
+        if unknown is not None:
+            reply = f"I don't know how to do '{unknown}' on my own yet, so I didn't save that."
+        else:
+            await brain.teach_command(phrase, steps)
+            names = [st["skill"].replace("_", " ") for st in steps]
+            what = " and ".join(names) if len(names) <= 2 else ", ".join(names[:-1]) + " and " + names[-1]
+            reply = f"Got it. When you say '{phrase}', I'll {what}."
+            await bus.emit("brain_learned", text=phrase, skill="command", examples=brain.example_count)
+        self.metrics.mark("first_token_ms")
+        await bus.emit("assistant_delta", text=reply)
+        await queue.put(clean_for_speech(reply))
+        return reply
+
+    async def _correct(self, args: dict, queue: asyncio.Queue, t_start: float) -> str | None:
+        """'No, I meant X' right after a reflex: un-learn what misfired, then do X."""
+        last = getattr(self, "_last_reflex", None)
+        dropped = await brain.unlearn(last)
+        self._last_reflex = None
+        if dropped:
+            await bus.emit("brain_learned", text=f"forgot: {last.get('text')}", skill=dropped,
+                           examples=brain.example_count)
+        rest = (args.get("rest") or "").strip()
+        if rest:
+            ack = "Sorry."
+            await bus.emit("assistant_delta", text=ack + " ")
+            await queue.put(ack)
+            await queue.put(None)
+            # run the corrected request as a normal turn (LLM if the brain isn't sure)
+            await self._converse(rest, t_start)
+            return None
+        reply = "Sorry about that. What did you want?"
+        self.metrics.mark("first_token_ms")
+        await bus.emit("assistant_delta", text=reply)
+        await queue.put(clean_for_speech(reply))
+        return reply
 
     async def _llm_with_tools(self, messages: list[dict],
                               speak_queue: asyncio.Queue) -> str:

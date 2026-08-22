@@ -14,6 +14,7 @@ interface BrainStatus {
   stats: { reflex: number; llm: number; learned: number };
   threshold: number;
   recent: { ts: number; text: string; skill: string; source: string }[];
+  commands: { phrase: string; steps: { skill: string; args: any }[] }[];
 }
 
 function BrainPanel() {
@@ -43,6 +44,20 @@ function BrainPanel() {
           </div>
         ))}
       </div>
+      {b.commands?.length > 0 && (
+        <div className="brain__recent">
+          <div className="brain__sub">TAUGHT COMMANDS — say "when I say X, do Y"</div>
+          {b.commands.map((c) => (
+            <div key={c.phrase}>
+              <b>"{c.phrase}"</b> → {c.steps.map((s) => s.skill.replace("_", " ")).join(", then ")}
+              <button className="ghost-btn brain__forget"
+                      onClick={async () => { try { await api("/brain/forget_command", { method: "POST", body: JSON.stringify({ phrase: c.phrase }) }); setB(await api("/brain")); } catch {} }}>
+                FORGET
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {b.recent.length > 0 && (
         <div className="brain__recent">
           {b.recent.slice(0, 8).map((r) => (
