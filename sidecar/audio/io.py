@@ -94,9 +94,6 @@ class Microphone:
             return
         self._loop = asyncio.get_running_loop()
         device, name, preferred = resolve_input_device()
-        self.device_name = name
-        self.using_preferred = preferred
-        log.info("microphone: %s%s", name, " (preferred webcam mic)" if preferred else "")
 
         def _cb(indata, frames, t, status):
             if status:
@@ -107,10 +104,24 @@ class Microphone:
             except RuntimeError:
                 pass
 
-        self._stream = sd.InputStream(
-            samplerate=MIC_RATE, channels=1, dtype="float32",
-            blocksize=MIC_BLOCK, device=device, callback=_cb)
-        self._stream.start()
+        def _open(dev):
+            st = sd.InputStream(samplerate=MIC_RATE, channels=1, dtype="float32",
+                                blocksize=MIC_BLOCK, device=dev, callback=_cb)
+            st.start()
+            return st
+
+        try:
+            self._stream = _open(device)
+            api = (sd.query_hostapis()[sd.query_devices()[device]["hostapi"]]["name"]
+                   if device is not None else "default")
+            self.device_name, self.using_preferred = name, preferred
+            log.info("microphone: %s via %s%s", name, api,
+                     " (preferred webcam mic)" if preferred else "")
+        except Exception as e:
+            # never leave the assistant deaf: fall back to the system default
+            log.warning("could not open %s (%s) — falling back to system default", name, e)
+            self._stream = _open(None)
+            self.device_name, self.using_preferred = "system default", False
         log.info("microphone started")
 
     def _put(self, block: np.ndarray) -> None:
