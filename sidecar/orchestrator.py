@@ -646,8 +646,10 @@ class Orchestrator:
             choice = "required" if (must_use_tool and _round == 0) else None
             if _round == 0 and getattr(self, "_no_tools_first", False) and not must_use_tool:
                 choice = "none"
-            async for chunk in local_llm.stream(messages, tools=tools,
-                                                max_tokens=4096, tool_choice=choice):
+            # "none" isn't honoured reliably by llama-server's template: omit the tools instead
+            round_tools = None if choice == "none" else tools
+            async for chunk in local_llm.stream(messages, tools=round_tools, max_tokens=4096,
+                                                tool_choice=None if choice == "none" else choice):
                 if self._speak_cancel.is_set():
                     # user interrupted: stop generating AND stop streaming to the UI
                     cancelled = True

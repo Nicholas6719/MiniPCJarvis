@@ -13,6 +13,7 @@ CASES = [
     "give me one tip for sleeping better",
     "what's the weather in boston right now",   # must search
     "how many legs does a spider have",
+    "open example.com and tell me what the page says",   # must stay inside JARVIS
 ]
 
 
@@ -34,10 +35,29 @@ async def one(ws, text):
           f"total={round(time.time() - t0, 1)}s | {reply.strip()[:60]}")
 
 
+def visible_browser_windows() -> list[str]:
+    """Any on-screen Brave/Edge/Chrome window = JARVIS escaped the app. Must be empty
+    (windows the user already had open before the test are reported too, so read it)."""
+    import win32gui
+    out = []
+    def cb(h, _):
+        t = win32gui.GetWindowText(h)
+        if win32gui.IsWindowVisible(h) and t.endswith((" - Brave", "Microsoft Edge", " - Google Chrome")):
+            l, tp, r, b = win32gui.GetWindowRect(h)
+            if r > 0 and b > 0:
+                out.append(t[:60])
+        return True
+    win32gui.EnumWindows(cb, None)
+    return out
+
+
 async def main():
+    before = visible_browser_windows()
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={tok}", max_size=None) as ws:
         for t in CASES:
             await one(ws, t)
             await asyncio.sleep(1.5)
+    after = [w for w in visible_browser_windows() if w not in before]
+    print("NEW visible browser windows:", after or "none (good)")
 
 asyncio.run(main())

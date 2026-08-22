@@ -156,7 +156,8 @@ def _hide_windows_of_pid(pid: int) -> int:
 
 
 class BraveWebSearch:
-    def __init__(self) -> None:
+    def __init__(self, profile_name: str = "browser-profile") -> None:
+        self._profile_name = profile_name
         self._pw = None
         self._ctx = None
         self._pid: int | None = None
@@ -179,7 +180,7 @@ class BraveWebSearch:
         from config import APP_DIR
         if self._pw is None:
             self._pw = await async_playwright().start()
-        profile = str(APP_DIR / "browser-profile")
+        profile = str(APP_DIR / self._profile_name)
         _kill_stale_profile_users(profile)
         self._ctx = await self._pw.chromium.launch_persistent_context(
             profile, executable_path=_brave_path(), headless=False,
@@ -194,7 +195,7 @@ class BraveWebSearch:
             for pr in sorted(psutil.process_iter(["name", "cmdline", "create_time"]),
                              key=lambda x: x.info["create_time"] or 0, reverse=True):
                 if (pr.info["name"] or "").lower() == "brave.exe" and any(
-                        "browser-profile" in (a or "") for a in (pr.info["cmdline"] or [])):
+                        profile.lower() in (a or "").lower() for a in (pr.info["cmdline"] or [])):
                     self._pid = pr.pid
                     break
         except Exception:
@@ -217,6 +218,8 @@ class BraveWebSearch:
             async with self._lock:
                 ctx = await self._ensure()
                 page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            await page.bring_to_front()
+                await page.bring_to_front()
                 await page.goto("https://search.brave.com/", wait_until="domcontentloaded",
                                 timeout=20000)
                 self._hide()
@@ -257,6 +260,7 @@ class BraveWebSearch:
             self._last = time.time()
             ctx = await self._ensure()
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            await page.bring_to_front()
             await page.goto(f"https://search.brave.com/search?q={quote_plus(query)}&source=web",
                             wait_until="domcontentloaded", timeout=25000)
             self._hide()
@@ -274,6 +278,7 @@ class BraveWebSearch:
             self._last = time.time()
             ctx = await self._ensure()
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+            await page.bring_to_front()
             # Chromium won't lazy-load images in a hidden window: show it
             # off-screen (invisible, no taskbar button) just for this load.
             if self._pid:
@@ -309,4 +314,5 @@ class BraveWebSearch:
         self._pw = None
 
 
-brave_web = BraveWebSearch()
+brave_web = BraveWebSearch()                      # web + image search tab
+brave_session = BraveWebSearch("session-browser")  # JARVIS's interactive in-app browser

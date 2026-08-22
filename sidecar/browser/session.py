@@ -30,17 +30,17 @@ class BrowserSession:
     async def _ensure(self):
         if self._page is not None and not self._page.is_closed():
             return self._page
-        from search_brave_web import brave_web
-        if not brave_web.available:
+        from search_brave_web import brave_session
+        if not brave_session.available:
             raise RuntimeError("Brave browser is not installed; JARVIS's in-app browser needs it")
-        ctx = await brave_web._ensure()
-        self._page = await ctx.new_page()
+        ctx = await brave_session._ensure()
+        self._page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         await self._page.set_viewport_size({"width": SHOT_W, "height": SHOT_H})
         return self._page
 
     def _pid(self) -> int | None:
-        from search_brave_web import brave_web
-        return brave_web._pid
+        from search_brave_web import brave_session
+        return brave_session._pid
 
     def _show(self) -> None:
         from search_brave_web import _show_windows_of_pid_offscreen
@@ -85,6 +85,9 @@ class BrowserSession:
         renders), then publish what happened to the HUD and hide again."""
         async with self._lock:
             page = await self._ensure()
+            import time
+            from search_brave_web import brave_session
+            brave_session._last = time.time()   # keep the idle reaper away while in use
             self._show()
             try:
                 obs = await fn(page)
@@ -173,12 +176,9 @@ class BrowserSession:
         return await self._act("back", fn)
 
     async def close(self) -> None:
-        try:
-            if self._page is not None and not self._page.is_closed():
-                await self._page.close()
-        except Exception:
-            pass
+        from search_brave_web import brave_session
         self._page = None
+        await brave_session.close()
 
 
 browser = BrowserSession()
