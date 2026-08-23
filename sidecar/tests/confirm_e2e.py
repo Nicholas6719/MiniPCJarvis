@@ -71,9 +71,7 @@ async def main():
         await wait_idle()
         ev = await run(ws, "restart the computer", answer="what time is it")
         rec("unrelated speech does NOT approve (still asked, PC still on)", ev["confirm"] == "power_action", f"confirm={ev['confirm']}")
-        if ev["confirm"]:
-            httpx.post(BASE + "/text", headers=H, json={"text": "no"}, timeout=15)
-        await wait_idle()
+        await wait_idle()   # that question times out / resolves on its own; never answer it late
         ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin")
         rec("recycling a file needs NO confirmation now", ev["confirm"] is None and not exists(), f"confirm={ev['confirm']} exists={exists()} | {ev['reply'][:60]}")
 

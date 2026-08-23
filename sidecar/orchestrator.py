@@ -228,6 +228,17 @@ class Orchestrator:
                             break
                     except Exception:
                         continue
+                if not present and mic.using_preferred:
+                    # the endpoint query flakes (157 false alarms in one log). Frames still
+                    # flowing = the mic is obviously there; and demand two misses in a row.
+                    if mic.last_frame_at and time.time() - mic.last_frame_at < 3:
+                        misses = 0
+                        continue
+                    misses = getattr(self, "_dev_misses", 0) + 1
+                    self._dev_misses = misses
+                    if misses < 2:
+                        continue
+                self._dev_misses = 0
                 if present != mic.using_preferred:
                     log.info("audio device change: webcam mic %s",
                              "connected" if present else "disconnected")
