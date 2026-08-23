@@ -205,6 +205,19 @@ but the user's folder was empty; log files diverge.
   First boot after a hot-swap can take ~60 s extra (AV scanning fresh files) - not a bug.
 - Test hygiene: every harness must wait_idle before its first turn.
 
+## Ambient HUD (2026-08-23 afternoon) - the UI model now
+- Default = ambient: orb + last exchange + quiet input. No nav, no activity log.
+- A panel surfaces only when JARVIS uses it (web/media/files/browser/research events set
+  ambient=false + panelUntil). On turn_done, panelUntil = now + ui.panel_hold_s (12 s);
+  App.tsx ticks every 500 ms and collapses when idle, not pinned, cursor not inside.
+- Tab bar appears when the mouse is near the top edge (y<60) or when pinned. Clicking a
+  tab pins. PIN/PINNED button next to the tabs.
+- Voice: "show me the files tab" / "show the tabs" / "pin that" / "unpin" / "hide
+  everything" -> brain skill "ui" -> bus event "ui" -> store.
+- Search results take the CENTER (one thing at a time); the transcript is a tab.
+  Activity log only shows beside Diagnostics. Compact last exchange sits under the orb.
+- Agent workflow for UI work: /debug/view + /debug/hud.png, shots in Documents/hud_shots.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
