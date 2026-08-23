@@ -50,6 +50,8 @@ class Tool:
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        self.confirm_hook = None       # async (tool, args) -> None : ask out loud
+        self.confirm_done_hook = None  # async () -> None            : question answered
         # confirmation_id -> future resolved by the UI's answer
         self._pending: dict[str, asyncio.Future] = {}
         self._audit_db = None
@@ -84,6 +86,16 @@ class ToolRegistry:
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
+    @property
+    def has_pending(self) -> bool:
+        return bool(self._pending)
+
+    def resolve_latest(self, approved: bool) -> bool:
+        """Answer the newest pending confirmation (used by the voice yes/no path)."""
+        if not self._pending:
+            return False
+        return self.resolve_confirmation(next(reversed(self._pending)), approved)
+
     def resolve_confirmation(self, confirm_id: str, approved: bool) -> bool:
         fut = self._pending.pop(confirm_id, None)
         if fut and not fut.done():
@@ -112,16 +124,22 @@ class ToolRegistry:
             await bus.emit("confirmation_required", confirm_id=confirm_id,
                            call_id=call_id, tool=name, args=args, risk=tool.risk.value)
             try:
+                if self.confirm_hook:      # speak the question; listen for a spoken yes/no
+                    await self.confirm_hook(name, args)
                 approved = await asyncio.wait_for(fut, timeout=120)
             except asyncio.TimeoutError:
                 self._pending.pop(confirm_id, None)
                 await bus.emit("tool_call", call_id=call_id, tool=name,
                                status="denied", detail="confirmation timed out")
-                return {"ok": False, "error": "user did not confirm in time"}
+                return {"ok": False, "error": "user did not confirm in time",
+                        "unconfirmed": True}
+            finally:
+                if self.confirm_done_hook:
+                    await self.confirm_done_hook()
             if not approved:
                 await bus.emit("tool_call", call_id=call_id, tool=name, status="denied")
                 self._audit(name, args, tool.risk.value, "denied", confirmed=False)
-                return {"ok": False, "error": "user declined the action"}
+                return {"ok": False, "error": "user declined the action", "declined": True}
             self._audit(name, args, tool.risk.value, "confirmed", confirmed=True)
 
         t0 = time.time()

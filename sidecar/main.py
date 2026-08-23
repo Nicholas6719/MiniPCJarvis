@@ -593,6 +593,9 @@ async def text_input(body: dict, x_jarvis_token: str | None = Header(None)):
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "text required")
+    from tools.registry import registry as _registry
+    if _registry.has_pending and await orchestrator.try_voice_confirmation(text):
+        return {"ok": True, "answered_confirmation": True}
     if orchestrator.sm.state not in (State.IDLE, State.INTERRUPTED):
         return {"ok": False, "error": "busy"}
     asyncio.create_task(orchestrator.run_text_turn(text))

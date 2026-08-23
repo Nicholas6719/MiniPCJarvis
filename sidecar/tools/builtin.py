@@ -408,7 +408,7 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "Application name"}},
             "required": ["name"]},
-        risk=Risk.MEDIUM, handler=close_application))
+        risk=Risk.LOW, handler=close_application))
     registry.register(Tool(
         name="web_search",
         description="Search the web for current information. Returns titles, URLs and snippets.",

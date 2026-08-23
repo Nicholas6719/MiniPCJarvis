@@ -40,6 +40,24 @@ WAKE_PHRASE = _re.compile(r"^\s*(?:hey|hi|ok|okay|yo)?[,\s]*jarvis[,.!?\s]*", _r
 SEARCH_INTENT = re.compile(
     r"\b(search|look\s*up|google|research|find\s+(?:me\s+)?(?:online|on the web)|"
     r"what'?s the latest|latest|current|today'?s|right now|news|price of)\b", re.I)
+# Confirmations may be answered out loud. Deliberately strict: only a short, bare
+# affirmation counts, so speech from a video or a passing sentence can never approve
+# a risk-gated action.
+YES_WORDS = re.compile(r"^\s*(?:yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|please do|confirm|"
+                       r"affirmative|that's right|correct)\s*[.!]?\s*$", re.I)
+NO_WORDS = re.compile(r"^\s*(?:no|nope|nah|cancel|stop|don't|do not|never\s*mind|negative|"
+                      r"forget it|not now)\s*[.!]?\s*$", re.I)
+CONFIRM_PHRASE = {
+    "close_application": lambda a: f"Close {a.get('name', 'that app')}?",
+    "open_application": lambda a: f"Open {a.get('name', 'that app')}?",
+    "move_file": lambda a: f"Move {a.get('path', 'that file')}?",
+    "delete_file": lambda a: f"Send {a.get('path', 'that file')} to the recycle bin?",
+    "rename_file": lambda a: f"Rename it to {a.get('new_name', 'that')}?",
+    "power_action": lambda a: f"{a.get('action', 'that').capitalize()} the computer?",
+    "lock_computer": lambda a: "Lock the computer?",
+    "browser_submit": lambda a: "Submit that form?",
+}
+
 STOP_WORDS = re.compile(r"^\s*(stop|cancel|never\s*mind|nevermind|shut\s*up|quiet|that's\s+enough)\W*$", re.I)
 SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
 
@@ -134,6 +152,8 @@ class Orchestrator:
     # ---------- lifecycle ----------
 
     async def start(self) -> None:
+        registry.confirm_hook = self.ask_confirmation
+        registry.confirm_done_hook = self.confirmation_answered
         await self.sm.to(State.STARTING)
         await bus.emit("boot", summary="initializing subsystems")
         ok = await llama.ensure()
@@ -309,7 +329,7 @@ class Orchestrator:
                 block = await q.get()
                 preroll.append(block)
                 mode = config.get("wake", "mode", default="push_to_talk")
-                if mode not in ("wake_word", "both") or self.sm.state != State.IDLE:
+                if mode not in ("wake_word", "both") or self.sm.state not in (State.IDLE, State.WAITING):
                     consec = 0
                     continue
                 # follow-up window: speech alone is enough
@@ -463,6 +483,14 @@ class Orchestrator:
             await self.sm.to(State.IDLE, force=True)
 
     async def _run_turn(self, audio: np.ndarray) -> None:
+        if registry.has_pending:          # answering a question, not starting a turn
+            spoken = (await stt.transcribe(audio) or "").strip()
+            spoken = WAKE_PHRASE.sub("", spoken, count=1).strip()
+            await bus.emit("transcript", role="user", text=spoken, source="confirm")
+            if await self.try_voice_confirmation(spoken):
+                return
+            log.info("heard %r while waiting on a confirmation - ignoring", spoken[:40])
+            return
         await self.sm.to(State.PROCESSING)
         t_start = time.time()
         self.metrics.begin()
@@ -642,7 +670,11 @@ class Orchestrator:
         if skill.tool:
             await self.sm.to(State.EXECUTING, force=True)
             out = await registry.execute(skill.tool, args)
-            res = out.get("result") if out.get("ok") else {"error": out.get("error", "failed")}
+            if out.get("ok"):
+                res = out.get("result")
+            else:
+                res = {k: v for k, v in out.items() if k != "ok"} or {"error": "failed"}
+                res.setdefault("error", "failed")
             if not isinstance(res, dict):
                 res = {"value": res}
         if skill.speak_first and skill.tool:
@@ -680,6 +712,47 @@ class Orchestrator:
                        breakdown=breakdown, reflex=label)
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
+
+    async def ask_confirmation(self, tool: str, args: dict) -> None:
+        """A risk-gated tool is waiting on the user: say so out loud and show WAITING."""
+        await self.sm.to(State.WAITING, force=True)
+        phrase = CONFIRM_PHRASE.get(tool, lambda a: f"Should I run {tool.replace('_', ' ')}?")(args or {})
+        try:
+            await self.speak_line(phrase + " Say yes or no.")
+        except Exception:
+            log.exception("could not speak the confirmation question")
+
+    async def confirmation_answered(self) -> None:
+        if self.sm.state == State.WAITING:
+            await self.sm.to(State.EXECUTING, force=True)
+
+    async def speak_line(self, line: str) -> None:
+        """Speak one line immediately (outside the normal turn queue)."""
+        cancel = self._speak_cancel if self._speak_cancel is not None else asyncio.Event()
+        await bus.emit("assistant_delta", text=line + " ")
+        async for chunk in tts.synthesize_stream(clean_for_speech(line), cancel):
+            if cancel.is_set():
+                break
+            await speaker.play_chunk(chunk, tts.sample_rate)
+
+    async def try_voice_confirmation(self, text: str) -> bool:
+        """If a confirmation is pending and the user just said a bare yes/no, answer it."""
+        if not registry.has_pending or not text:
+            return False
+        if YES_WORDS.match(text):
+            approved = True
+        elif NO_WORDS.match(text):
+            approved = False
+        else:
+            return False
+        registry.resolve_latest(approved)
+        log.info("confirmation answered by voice: %s", "yes" if approved else "no")
+        await bus.emit("confirmation_answered", approved=approved, source="voice")
+        try:
+            await self.speak_line("Okay." if approved else "Cancelled.")
+        except Exception:
+            pass
+        return True
 
     async def _reflex_turn(self, text: str, reflex, t_start: float) -> None:
         """Handle a request JARVIS recognized himself: tool + templated speech, no LLM."""
@@ -904,6 +977,7 @@ class Orchestrator:
                     await self.sm.to(State.SPEAKING, force=True)
                     spoke = True
                 await bus.emit("speaking", text=sentence)
+                self._saying_own_name = "jarvis" in sentence.lower()
                 async for chunk in tts.synthesize_stream(sentence, self._speak_cancel):
                     if self._speak_cancel.is_set():
                         break
@@ -913,6 +987,12 @@ class Orchestrator:
                     break  # interrupted — drop any remaining queued sentences
         finally:
             barge_task.cancel()
+            self._saying_own_name = False
+            # own-name echo can linger in the wake model's window: reset before idle listening
+            try:
+                wake.reset()
+            except Exception:
+                pass
 
     async def _barge_in_watch(self) -> None:
         """While speaking, watch for the user cutting in.
@@ -941,6 +1021,11 @@ class Orchestrator:
                 else:
                     score = await asyncio.to_thread(wake.feed, block)
                     fired = score >= wake.threshold
+                    if fired and getattr(self, "_saying_own_name", False):
+                        # that was him saying "Jarvis", bleeding from the speakers
+                        log.info("ignored own name in speech (score %.2f)", score)
+                        wake.reset()
+                        fired = False
                 if fired:
                     log.info("barge-in detected (%s)", mode)
                     self._speak_cancel.set()

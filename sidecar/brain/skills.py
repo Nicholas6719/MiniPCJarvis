@@ -372,6 +372,10 @@ def say_open(slots: dict, res: dict) -> str:
 
 def say_close(slots: dict, res: dict) -> str:
     name = slots["name"]
+    if res.get("declined"):
+        return "Alright, leaving it open."
+    if res.get("unconfirmed"):
+        return f"I needed a yes before closing {name}, so I left it alone."
     if "asked_to_close" in res:
         return f"I asked {name} to close, but it's still up - it may be waiting on you to save."
     if "error" in res:
