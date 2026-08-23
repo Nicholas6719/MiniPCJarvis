@@ -170,9 +170,9 @@ async def open_application(name: str) -> dict:
     if not target:
         site = site_for(name)
         if site:
-            # no app installed by that name but it's a known service: open it inside JARVIS
-            from browser.session import browser
-            r = await browser.goto("https://" + site)
+            # no app installed by that name but it's a known service: open it for the user
+            from tools.windows_tools import open_url
+            r = open_url("https://" + site)
             return {"opened_site": site, **({"error": r["error"]} if r.get("error") else {})}
         return {"error": f"I can't find an app or site called '{name}' on this PC."}
     try:
@@ -205,18 +205,39 @@ def close_application(name: str) -> dict:
     from tools.windows_tools import _visible_windows
 
     key = name.strip().lower().removesuffix(".exe")
+    for junk in (" browser", " app", " application", " window", "the "):
+        key = key.replace(junk, "").strip()
     exe = _APP_ALIASES.get(key, key + ".exe").removesuffix(".exe") + ".exe"
-    stem = exe.removesuffix(".exe")
+    stem = exe.removesuffix(".exe").lower()
+    words = [w for w in stem.replace("-", " ").split() if len(w) > 2] or [stem]
+
+    # JARVIS's own hidden browsers are never "the user's Brave"
+    protected: set[int] = set()
+    for pr in psutil.process_iter(["name", "cmdline"]):
+        try:
+            cl = " ".join(pr.info["cmdline"] or []).lower()
+            if "jarvis" in cl and ("browser-profile" in cl or "session-browser" in cl):
+                protected.add(pr.pid)
+        except Exception:
+            continue
+
+    def proc_matches(pname: str) -> bool:
+        pn = pname.lower().removesuffix(".exe")
+        return pn == stem or any(pn == w or pn.startswith(w) for w in words)
+
+    pids = {pr.pid for pr in psutil.process_iter(["name"])
+            if proc_matches(pr.info["name"] or "") and pr.pid not in protected}
     windows = _visible_windows()
-    pids = _pids_for(exe)
     targets = []                       # (hwnd, pid) windows we will ask to close
     for hwnd, title in windows:
         try:
             wpid = win32process.GetWindowThreadProcessId(hwnd)[1]
         except Exception:
             continue
+        if wpid in protected:
+            continue
         tl = title.lower()
-        if wpid in pids or key in tl or stem in tl:
+        if wpid in pids or any(w in tl for w in words):
             targets.append((hwnd, wpid))
     if not pids and not targets:
         return {"error": f"no running process matched {name}"}

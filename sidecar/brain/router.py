@@ -56,6 +56,8 @@ _CANON = [
     (r".*\b(?:weather|forecast|temperature outside|going to rain|raining|snowing|umbrella|hot out|cold out|hot is it|cold is it|will it (?:rain|snow)|is it (?:going to )?(?:rain|snow|be hot|be cold))\b.*", "what's the weather in PLACE"),
     (r"\b(?:remind me|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
     (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
+    (r".*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*\b(?:and tell|tell me|read|summar\w*|what does|what's on|what is on|look at|check)\b.*", "read the website SITE and tell me"),
+    (r".*\b(?:read|summar\w*|what does|what's on|look at|check)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "read the website SITE and tell me"),
     (r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
     (r"\b(?:open|show|browse|go to|list|look at|pull up|what's (?:in|on))\b.*\b(?:desktop|documents|docs|downloads|pictures|photos)\b(?!\s+(?:of|from)\b).*", "open my FOLDER folder"),
     (r"\b(?:find|look for|locate|where is|where's)\b.*\b(?:file|folder|document|resume|screenshot|invoice|report|notes?|photo|picture)s?\b(?!\s+(?:of|from)\b).*", "find the file called NAME"),

@@ -34,9 +34,9 @@ async def browser_back() -> dict:
 def register_all() -> None:
     registry.register(Tool(
         name="browser_open",
-        description="Open a web page inside JARVIS (shown in the HUD's web panel; "
-                    "never in an external browser). Returns the page title and text "
-                    "so you can verify where you landed and answer from it.",
+        description="Load a page in JARVIS's own hidden browser to READ it (shown in the "
+                    "HUD's BROWSER view). Returns the page title and text so you can answer "
+                    "from it. For opening a site for the user to use, call open_url instead.",
         parameters={"type": "object", "properties": {
             "url": {"type": "string"}}, "required": ["url"]},
         risk=Risk.LOW, handler=browser_open, timeout=30))

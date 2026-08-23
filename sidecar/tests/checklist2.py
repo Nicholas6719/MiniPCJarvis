@@ -3,6 +3,7 @@ external-window audit, RAM after vision reap.  Run: python tests/checklist2.py P
 import asyncio, json, os, sys, time
 import numpy as np
 import httpx, psutil, websockets
+sys.path.insert(0, ".")
 
 port, tok = sys.argv[1], sys.argv[2]
 H = {"X-Jarvis-Token": tok}
@@ -71,8 +72,11 @@ async def main():
                 nav = (e.get("url"), e.get("title"), bool(e.get("shot")))
             if e.get("kind") == "turn_done":
                 break
-        rec("'open youtube' navigates the in-app browser", nav and "youtube" in (nav[0] or "").lower(), nav)
-        rec("in-app page sends a live screenshot to the HUD", nav and nav[2], f"shot={nav and nav[2]}")
+        await asyncio.sleep(4)
+        from tools.windows_tools import _visible_windows as _vw
+        user_br = [t for _, t in _vw() if t.endswith(" - Brave")]
+        rec("'open youtube' opens in the USER's browser", any("youtube" in t.lower() for t in user_br), user_br)
+        rec("...and not in JARVIS's hidden browser", nav is None, nav)
 
         # ---------- barge-in interrupt (name-only) ----------
         httpx.post(BASE + "/text", headers=H, json={"text": "explain how a jet engine works in detail"}, timeout=15)
@@ -119,7 +123,7 @@ async def main():
 
     # ---------- audits ----------
     new_win = [w for w in external_browser_windows() if w not in before_windows]
-    rec("nothing escaped to an external browser", not new_win, new_win or "none (good)")
+    rec("only the user-requested site opened externally", all("youtube" in w.lower() for w in new_win), new_win or "none")
 
     print("  waiting 100 s for the vision server to reap...")
     time.sleep(100)

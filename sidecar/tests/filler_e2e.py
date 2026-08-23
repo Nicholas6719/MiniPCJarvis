@@ -29,7 +29,7 @@ async def one(ws, text):
 async def main():
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={tok}", max_size=None) as ws:
         for t in ["why is the sky blue", "search the web for the tallest building in the world",
-                  "open youtube.com", "open netflix", "what time is it"]:
+                  "open example.com and tell me what the page says", "what time is it"]:
             await one(ws, t)
             await asyncio.sleep(1.5)
 

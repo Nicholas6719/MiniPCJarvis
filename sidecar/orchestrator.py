@@ -633,7 +633,7 @@ class Orchestrator:
     _TOOL_FILLERS = {"web_search": ["Searching.", "Let me look that up.", "Checking the web."],
                      "research": ["Let me dig into that.", "Researching."],
                      "show_images": ["Finding pictures."],
-                     "open_url": ["Opening it.", "Loading the page."],
+                     "browser_open": ["Let me read that page.", "Loading the page."],
                      "recall": ["Let me think back.", "Let me remember."]}
 
     async def _filler(self, speak_queue: asyncio.Queue, reflex) -> None:

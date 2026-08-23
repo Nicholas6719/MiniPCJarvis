@@ -263,11 +263,18 @@ def take_screenshot(monitor: int = 0, hide_self: bool = False,
     return {"path": str(path), "width": img.size[0], "height": img.size[1]}
 
 
-async def open_url(url: str) -> dict:
-    """Open a page INSIDE JARVIS (hidden browser + HUD web panel). JARVIS never
-    launches the user's browser: the whole experience stays in the app."""
-    from browser.session import browser
-    return await browser.goto(url)
+def open_url(url: str) -> dict:
+    """Open a website for the USER, in their own default browser (Brave). This is for
+    things the user wants to use - YouTube, Netflix, a shop. JARVIS's hidden browser is
+    only for his own reading (browser_open / fetch_page / web_search)."""
+    import os
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        os.startfile(url)
+        return {"opened": url, "where": "your browser"}
+    except Exception as e:
+        return {"error": f"could not open {url}: {e}"}
 
 
 def lock_computer() -> dict:
@@ -371,8 +378,9 @@ def register_all() -> None:
         risk=Risk.LOW, handler=take_screenshot))
     registry.register(T(
         name="open_url",
-        description="Open a web page inside JARVIS's web panel (same as browser_open). "
-                    "Never opens an external browser.",
+        description="Open a website in the USER's own browser so they can use it (YouTube, "
+                    "Netflix, shopping...). To read or inspect a page yourself, use browser_open "
+                    "or fetch_page instead - never this.",
         parameters={"type": "object", "properties": {
             "url": {"type": "string"}}, "required": ["url"]},
         risk=Risk.LOW, handler=open_url))

@@ -53,7 +53,7 @@ def slots_site(t: str) -> dict | None:
 
 def say_site(slots: dict, res: dict) -> str:
     url = str(slots.get("url", "")).replace("https://", "").replace("http://", "").rstrip("/")
-    return f"Opening {url}." if "error" not in res else f"I couldn't open {url}."
+    return f"Opening {url} in your browser." if "error" not in res else f"I couldn't open {url}."
 
 
 _SITE_WANTS_ANSWER = re.compile(r"\b(and|then|tell|what|read|summar\w*|say|says|find|look|check|show me)\b")
@@ -451,7 +451,7 @@ class Skill:
         return _LABELS.get(self.name, self.name.replace("_", " "))
 
 
-_LABELS = {"weather": "check the weather", "watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+_LABELS = {"read_site": "read the site", "weather": "check the weather", "watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
            "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
            "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
            "remember": "remember it", "stats": "check the system", "windows": "list your windows",
@@ -562,9 +562,15 @@ SKILLS: list[Skill] = [
         speak=say_clipboard),
     Skill("open_site", "open_url", [
         "open youtube.com", "go to wikipedia.org", "pull up amazon.com", "open the website reddit.com",
-        "open example.com and tell me what the page says", "take me to github.com",
-        "open up netflix.com", "go to the website espn.com", "load bbc.com", "bring up espn.com"],
-        slots=slots_site, speak=say_site, llm_after=True, direct_if=site_direct, speak_first=True),
+        "take me to github.com", "open up netflix.com", "go to the website espn.com", "load bbc.com",
+        "bring up espn.com", "open twitch.tv for me"],
+        slots=slots_site, speak=say_site, speak_first=True),
+    Skill("read_site", "browser_open", [
+        "open example.com and tell me what the page says", "read me what's on wikipedia.org",
+        "go to bbc.com and summarize the headlines", "what does example.com say",
+        "look at reddit.com and tell me what's trending", "check espn.com and tell me the scores",
+        "read the page at python.org", "pull up github.com and tell me what you see"],
+        slots=slots_site, llm_after=True),
     Skill("folder", "list_folder", [
         "open my downloads folder", "show me my desktop", "show my documents", "open downloads",
         "what's in my downloads", "show me my pictures", "open the documents folder", "what's on my desktop",
