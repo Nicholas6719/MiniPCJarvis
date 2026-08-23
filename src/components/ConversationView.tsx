@@ -43,7 +43,7 @@ export function ConversationView() {
         {transcript.some((m) => m.id.startsWith("hist-")) && (
           <div className="convo__session" />
         )}
-        {transcript.filter((m) => !m.id.startsWith("hist-")).map((t) => (
+        {transcript.filter((m) => !m.id.startsWith("hist-") && m.text && m.text.trim()).map((t) => (
           <div key={t.id + t.ts} className={`convo__msg convo__msg--${t.role}`}>
             <span className="convo__who">{t.role === "user" ? "YOU" : "JARVIS"}</span>
             <p>{t.text}</p>

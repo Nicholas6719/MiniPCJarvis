@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useStore } from "../state/store";
 import { api } from "../lib/sidecar";
 
-export function AmbientView() {
+export function AmbientView({ compact = false }: { compact?: boolean }) {
   const transcript = useStore((s) => s.transcript);
   const draft = useStore((s) => s.assistantDraft);
   const doing = useStore((s) => s.doing);
   const [input, setInput] = useState("");
 
-  const live = transcript.filter((m) => !m.id.startsWith("hist-"));
+  const live = transcript.filter((m) => !m.id.startsWith("hist-") && m.text && m.text.trim());
   const lastUser = [...live].reverse().find((m) => m.role === "user");
   const lastJarvis = draft ? null : [...live].reverse().find((m) => m.role === "assistant" && (!lastUser || m.ts >= lastUser.ts));
 
@@ -22,7 +22,7 @@ export function AmbientView() {
   };
 
   return (
-    <div className="ambient">
+    <div className={`ambient ${compact ? "ambient--compact" : ""}`}>
       <div className="ambient__exchange">
         {lastUser && <div className="ambient__you">{lastUser.text}</div>}
         {(draft || lastJarvis) && (
@@ -31,9 +31,9 @@ export function AmbientView() {
         {!lastUser && !draft && <div className="ambient__hint">say "hey Jarvis", press Ctrl+Shift+J, or type</div>}
       </div>
       {doing && <div className="ambient__doing">{doing}</div>}
-      <input className="ambient__input" value={input} placeholder=""
+      {!compact && <input className="ambient__input" value={input} placeholder=""
              onChange={(e) => setInput(e.target.value)}
-             onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+             onKeyDown={(e) => { if (e.key === "Enter") send(); }} />}
     </div>
   );
 }

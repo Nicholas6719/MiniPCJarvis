@@ -141,11 +141,12 @@ export default function App() {
           <button className="hud__corebtn" onClick={micClick} title="Toggle listening (Ctrl+Shift+J)">
             <JarvisCore state={state} wakeMode={wakeMode} armedUntil={armedUntil} />
           </button>
+          {!ambient && <div className="hud__sidechat"><AmbientView compact /></div>}
         </section>
         {ambient && <section className="hud__ambient"><AmbientView /></section>}
         {!ambient && (
         <section className="hud__center" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-          {view === "conversation" && <ConversationView />}
+          {view === "conversation" && (rightPanel === "web" && !pinned ? <WebPanel /> : <ConversationView />)}
           {view === "research" && <ResearchView />}
           {view === "media" && <MediaView />}
           {view === "browser" && <BrowserView />}
@@ -158,7 +159,7 @@ export default function App() {
           {view === "settings" && <SettingsView />}
         </section>
         )}
-        {!ambient && rightPanel === "web" && (
+        {!ambient && rightPanel === "web" && (pinned || view !== "conversation") && (
           <section className="hud__right" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
             <WebPanel />
           </section>
