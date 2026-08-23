@@ -335,6 +335,9 @@ export const useStore = create<Store>((set, get) => ({
       case "wake":
         push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
         break;
+      case "set_view":   // debug/remote: switch the HUD view (used by UI self-tests)
+        set({ view: evt.view as View });
+        break;
       case "config_changed":
         push({ id: evt.id, ts: evt.ts, kind: "config", summary: `settings applied: ${(evt.applied ?? []).join(", ") || "saved"}` });
         set((st) => ({ configVersion: st.configVersion + 1 }));

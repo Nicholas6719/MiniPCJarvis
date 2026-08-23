@@ -99,3 +99,35 @@ def act(hwnd: int, action: str) -> dict:
         win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
         return {"closed": title}
     return {"error": f"unknown action {action}"}
+
+
+def capture_window_png(title_exact: str) -> bytes | None:
+    """Full-size PNG of a top-level window by exact title (PrintWindow, works even if
+    another window covers it)."""
+    import io
+    hwnd = win32gui.FindWindow(None, title_exact)
+    if not hwnd:
+        return None
+    l, t, r, b = win32gui.GetWindowRect(hwnd)
+    w, h = r - l, b - t
+    if w < 50 or h < 50:
+        return None
+    hwnd_dc = win32gui.GetWindowDC(hwnd)
+    mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+    save_dc = mfc_dc.CreateCompatibleDC()
+    bmp = win32ui.CreateBitmap()
+    try:
+        bmp.CreateCompatibleBitmap(mfc_dc, w, h)
+        save_dc.SelectObject(bmp)
+        if not ctypes.windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), PW_RENDERFULLCONTENT):
+            return None
+        info = bmp.GetInfo()
+        from PIL import Image
+        img = Image.frombuffer("RGB", (info["bmWidth"], info["bmHeight"]), bmp.GetBitmapBits(True), "raw", "BGRX", 0, 1)
+        buf = io.BytesIO(); img.save(buf, "PNG")
+        return buf.getvalue()
+    finally:
+        try:
+            win32gui.DeleteObject(bmp.GetHandle()); save_dc.DeleteDC(); mfc_dc.DeleteDC(); win32gui.ReleaseDC(hwnd, hwnd_dc)
+        except Exception:
+            pass

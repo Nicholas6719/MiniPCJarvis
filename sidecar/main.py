@@ -532,6 +532,27 @@ async def brain_export(x_jarvis_token: str | None = Header(None)):
     return {"ok": True, "path": str(out), "examples": n}
 
 
+@app.post("/debug/view")
+async def debug_view(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test: switch the HUD to a view (conversation|files|apps|system|browser|...)."""
+    _auth(x_jarvis_token)
+    await bus.emit("set_view", view=str(body.get("view", "conversation")))
+    return {"ok": True}
+
+
+@app.get("/debug/hud.png")
+async def debug_hud_png(x_jarvis_token: str | None = Header(None)):
+    """Dev/test: full-resolution capture of the JARVIS window itself (PrintWindow), so
+    the agent can look at the HUD without the user's screen."""
+    _auth(x_jarvis_token)
+    from fastapi.responses import Response
+    from tools.window_thumbs import capture_window_png
+    png = await asyncio.to_thread(capture_window_png, "JARVIS")
+    if not png:
+        raise HTTPException(404, "JARVIS window not found")
+    return Response(content=png, media_type="image/png")
+
+
 @app.get("/selftest")
 async def selftest_report(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
