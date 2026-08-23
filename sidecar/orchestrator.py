@@ -35,7 +35,7 @@ from tools.registry import registry
 
 log = logging.getLogger("jarvis.orchestrator")
 
-WAKE_PHRASE = _re.compile(r"^\s*(?:hey|hi|ok|okay|yo)?[,\s]*jarvis[,.!?\s]*", _re.I)
+WAKE_PHRASE = _re.compile(r"^\s*(?:hey|hi|ok|okay|yo)?[,\s]*(?:jarvis|jarves|jarvus|jovis|jervis|javis|jarvi)[,.!?\s]*", _re.I)
 # explicit requests to go online: the model must not answer from memory
 SEARCH_INTENT = re.compile(
     r"\b(search|look\s*up|google|research|find\s+(?:me\s+)?(?:online|on the web)|"
