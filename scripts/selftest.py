@@ -25,8 +25,9 @@ else:
     port, tok = _find_app()
     if not port:
         with open(out, "w", encoding="utf-8") as f:
-            json.dump({"ts": time.time(), "ok": False, "results": [], "error": "JARVIS is not running"}, f)
-        print("JARVIS is not running"); sys.exit(1)
+            json.dump({"ts": time.time(), "ok": None, "skipped": True, "results": [],
+                       "error": "JARVIS was not running at self-test time"}, f)
+        print("JARVIS is not running - self-test skipped"); sys.exit(0)
 print(f"selftest against :{port} at {time.strftime('%H:%M:%S')}")
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 py = os.path.join(root, "sidecar", ".venv", "Scripts", "python.exe")

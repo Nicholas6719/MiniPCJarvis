@@ -185,20 +185,82 @@ async def open_application(name: str) -> dict:
         return {"error": f"could not launch {name}: {e}"}
 
 
+def _pids_for(exe: str) -> set[int]:
+    return {p.pid for p in psutil.process_iter(["name"]) if (p.info["name"] or "").lower() == exe.lower()}
+
+
 def close_application(name: str) -> dict:
+    """Close an app the way clicking its X does: post WM_CLOSE to its windows (so it can
+    prompt to save), then fall back to terminate() only for windowless leftovers.
+
+    Store/packaged apps (Notepad, Calculator, Paint) REFUSE terminate() with AccessDenied -
+    the old kill-only path reported them as 'not running'. Their visible window also belongs
+    to ApplicationFrameHost, so match by window title too. Never hard-kill something that
+    still has a window: that loses unsaved work with no prompt.
+    """
+    import time as _time
+    import win32con
+    import win32gui
+    import win32process
+    from tools.windows_tools import _visible_windows
+
     key = name.strip().lower().removesuffix(".exe")
     exe = _APP_ALIASES.get(key, key + ".exe").removesuffix(".exe") + ".exe"
-    killed = 0
-    for p in psutil.process_iter(["name"]):
+    stem = exe.removesuffix(".exe")
+    windows = _visible_windows()
+    pids = _pids_for(exe)
+    targets = []                       # (hwnd, pid) windows we will ask to close
+    for hwnd, title in windows:
         try:
-            if p.info["name"] and p.info["name"].lower() == exe.lower():
-                p.terminate()
-                killed += 1
+            wpid = win32process.GetWindowThreadProcessId(hwnd)[1]
+        except Exception:
+            continue
+        tl = title.lower()
+        if wpid in pids or key in tl or stem in tl:
+            targets.append((hwnd, wpid))
+    if not pids and not targets:
+        return {"error": f"no running process matched {name}"}
+
+    asked = 0
+    for hwnd, _wpid in targets:
+        try:
+            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+            asked += 1
+        except Exception:
+            pass
+
+    watched = pids | {w for _h, w in targets}
+    deadline = _time.time() + (3.0 if asked else 0.0)
+    while _time.time() < deadline and any(_window_alive(h) for h, _ in targets):
+        _time.sleep(0.2)
+    gone_windows = not any(_window_alive(h) for h, _ in targets)
+    if gone_windows and not any(psutil.pid_exists(p) for p in pids):
+        return {"closed": name, "processes": len(watched)}
+
+    killed = 0
+    for pid in list(pids):             # windowless leftovers only
+        if any(w == pid and _window_alive(h) for h, w in targets):
+            continue
+        try:
+            psutil.Process(pid).terminate()
+            killed += 1
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-    if killed == 0:
-        return {"error": f"no running process matched {name}"}
-    return {"closed": name, "processes": killed}
+    _time.sleep(0.4)
+    if gone_windows:
+        return {"closed": name, "processes": max(1, killed)}
+    if asked:
+        return {"asked_to_close": name,
+                "note": "still open - it is probably asking whether to save"}
+    return {"error": f"could not close {name} (protected process)"}
+
+
+def _window_alive(hwnd: int) -> bool:
+    import win32gui
+    try:
+        return bool(win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd))
+    except Exception:
+        return False
 
 
 async def _ddg_search(query: str, count: int) -> dict:

@@ -371,7 +371,12 @@ def say_open(slots: dict, res: dict) -> str:
 
 
 def say_close(slots: dict, res: dict) -> str:
-    return f"Closing {slots['name']}." if "error" not in res else f"{slots['name'].capitalize()} doesn't seem to be running."
+    name = slots["name"]
+    if "asked_to_close" in res:
+        return f"I asked {name} to close, but it's still up - it may be waiting on you to save."
+    if "error" in res:
+        return f"{name.capitalize()} doesn't seem to be running."
+    return f"Closing {name}."
 
 
 def say_screenshot(slots: dict, res: dict) -> str:
