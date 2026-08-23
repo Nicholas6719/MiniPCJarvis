@@ -22,7 +22,11 @@ CASES = [
 
 async def one(ws, text, want):
     t0 = time.time()
-    r = httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=10).json()
+    for _ in range(60):              # wait out a busy app instead of aborting the suite
+        r = httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=10).json()
+        if r.get("ok"):
+            break
+        await asyncio.sleep(1)
     assert r.get("ok"), r
     reflex = None; first = None; reply = ""; done = None
     while time.time() - t0 < 120:

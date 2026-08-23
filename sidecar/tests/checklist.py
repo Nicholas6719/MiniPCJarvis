@@ -30,6 +30,18 @@ class Turn:
         self.ws = ws
 
     async def __call__(self, text, timeout=180):
+        while True:                      # drain stale events from earlier turns/suites
+            try:
+                await asyncio.wait_for(self.ws.recv(), timeout=0.3)
+            except asyncio.TimeoutError:
+                break
+        for _ in range(90):              # never start while he is busy
+            try:
+                if httpx.get(BASE + "/health", timeout=5).json().get("state") in ("idle", "interrupted"):
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(1)
         t0 = time.time()
         httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=15)
         ev = {"reflex": None, "mode": None, "tools": [], "reply": "", "filler": None,
