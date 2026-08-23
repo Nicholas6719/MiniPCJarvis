@@ -500,7 +500,23 @@ class Orchestrator:
             await bus.emit("transcript", role="user", text=spoken, source="confirm")
             if await self.try_voice_confirmation(spoken):
                 return
-            log.info("heard %r while waiting on a confirmation - ignoring", spoken[:40])
+            # anything else = "no, and here's what I actually want": decline, then carry on
+            log.info("heard %r while waiting on a confirmation - treating as no", spoken[:40])
+            registry.resolve_latest(False)
+            await bus.emit("confirmation_answered", approved=False, source="implicit")
+            for _ in range(50):          # let the declined turn wind down (<= 5 s)
+                if self.sm.state in (State.IDLE, State.INTERRUPTED):
+                    break
+                await asyncio.sleep(0.1)
+            if not spoken or STOP_WORDS.match(spoken):
+                return
+            await self.sm.to(State.PROCESSING, force=True)
+            self.metrics.begin()
+            await bus.emit("transcript", role="user", text=spoken)
+            try:
+                await self._converse(spoken, time.time())
+            finally:
+                self._arm_conversation()
             return
         await self.sm.to(State.PROCESSING)
         t_start = time.time()

@@ -126,7 +126,7 @@ class ToolRegistry:
             try:
                 if self.confirm_hook:      # speak the question; listen for a spoken yes/no
                     await self.confirm_hook(name, args)
-                approved = await asyncio.wait_for(fut, timeout=120)
+                approved = await asyncio.wait_for(fut, timeout=30)
             except asyncio.TimeoutError:
                 self._pending.pop(confirm_id, None)
                 await bus.emit("tool_call", call_id=call_id, tool=name,

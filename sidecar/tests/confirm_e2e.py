@@ -70,8 +70,8 @@ async def main():
         rec("spoken 'no' declines and he stops asking", "leaving it" in ev["reply"].lower() and "?" not in ev["reply"].split("Say yes or no.")[-1], ev["reply"][-90:])
         await wait_idle()
         ev = await run(ws, "restart the computer", answer="what time is it")
-        rec("unrelated speech does NOT approve (still asked, PC still on)", ev["confirm"] == "power_action", f"confirm={ev['confirm']}")
-        await wait_idle()   # that question times out / resolves on its own; never answer it late
+        rec("unrelated speech = implicit no, and he answers it instead", ev["confirm"] == "power_action" and (":" in ev["reply"] or "am" in ev["reply"].lower() or "pm" in ev["reply"].lower()), f"confirm={ev['confirm']} | {ev['reply'][-60:]}")
+        await wait_idle()
         ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin")
         rec("recycling a file needs NO confirmation now", ev["confirm"] is None and not exists(), f"confirm={ev['confirm']} exists={exists()} | {ev['reply'][:60]}")
 
