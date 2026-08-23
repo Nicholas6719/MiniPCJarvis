@@ -940,6 +940,12 @@ class Orchestrator:
                 await self.sm.to(state, force=True)
                 result = await registry.execute(tc["name"], tc["arguments"])
                 used_tools.append((tc["name"], bool(result.get("ok"))))
+                if result.get("declined") or result.get("unconfirmed"):
+                    # the user said no (or nothing): acknowledge and stop - never re-ask
+                    line = "Alright, leaving it." if result.get("declined") else "I didn't get a yes, so I left it alone."
+                    await bus.emit("assistant_delta", text=line)
+                    await speak_queue.put(clean_for_speech(line))
+                    return (full_text + " " + line).strip()
                 messages.append({
                     "role": "tool", "tool_call_id": tc["id"],
                     "content": json.dumps(result, default=str),
