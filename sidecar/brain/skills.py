@@ -400,6 +400,11 @@ def say_screen(_: dict, res: dict) -> str:
     return res.get("analysis") or "I couldn't get a look at the screen."
 
 
+def screen_direct(text: str) -> bool:
+    """Vision answers are final text (speak as-is); OCR results need the LLM to compose."""
+    return False
+
+
 def say_reminder(slots: dict, res: dict) -> str:
     if "error" in res:
         return "I couldn't set that reminder."
@@ -521,7 +526,7 @@ SKILLS: list[Skill] = [
         "what do you see on my screen", "describe my screen", "what am i looking at",
         "can you see my screen", "what's on the screen right now", "look at this",
         "tell me what you see on screen", "what's wrong with this screen"],
-        speak=say_screen),
+        speak=say_screen, llm_after=True),
     Skill("reminder", "set_reminder", [
         "remind me in 10 minutes to stretch", "set a reminder for 5 pm to call mom",
         "remind me in an hour to check the oven", "remind me at 9 to take my meds",

@@ -91,7 +91,7 @@ body {
 .hud__main {
   flex: 1;
   display: grid;
-  grid-template-columns: 300px 1fr 320px;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
   gap: 14px;
   padding: 14px 22px 18px;
   min-height: 0;
@@ -110,6 +110,8 @@ body {
 }
 
 .hud__center, .hud__right {
+  min-width: 0;
+  overflow: hidden;
   background: var(--bg-panel);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -334,7 +336,7 @@ body {
 }
 
 /* nav */
-.hud__nav { margin-left: auto; display: flex; gap: 4px; }
+.hud__nav { margin-left: auto; display: flex; gap: 2px; flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; max-width: 70%; }
 
 .hud__navbtn {
   background: none;
@@ -343,8 +345,8 @@ body {
   color: var(--text-dim);
   font-family: inherit;
   font-size: 11px;
-  letter-spacing: 0.22em;
-  padding: 6px 14px;
+  letter-spacing: 0.18em;
+  padding: 6px 10px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -862,10 +864,10 @@ body {
 .files__bar .browser__url { flex: 1; }
 .files__crumb { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text); }
 .files__count { color: var(--text-dim); font-size: 11px; margin-left: auto; }
-.files__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.1fr 1fr; gap: 10px; }
+.files__body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 10px; }
 .files__list { overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; background: rgba(0,0,0,0.25); }
 .files__list.is-busy { opacity: 0.6; }
-.files__row { display: grid; grid-template-columns: 22px 1fr 70px 120px; gap: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
+.files__row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 58px 96px; gap: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.04); align-items: center; }
 .files__row:hover { background: rgba(0, 229, 255, 0.06); }
 .files__row.is-selected { background: rgba(0, 229, 255, 0.12); }
 .files__icon { color: var(--cyan); text-align: center; }
@@ -917,3 +919,5 @@ body {
 .sys__proc { display: flex; justify-content: space-between; }
 .ghost-btn.is-on { border-color: var(--amber); color: var(--amber); }
 .brain__skill.is-fail { border-color: var(--red); }
+.hud__sub { display: none; }
+@media (min-width: 1500px) { .hud__sub { display: inline; } }

@@ -8,11 +8,21 @@ for pkg in ["faster_whisper", "piper", "fastembed", "onnxruntime", "tokenizers",
             "openwakeword", "trafilatura", "pycaw", "comtypes",
             "kokoro_onnx", "playwright", "mcp",
             "espeakng_loader", "phonemizer", "num2words", "cssselect", "lxml",
-            "onnx_asr"]:
+            "onnx_asr", "winocr"]:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
     hiddenimports += h
+
+# winrt is a namespace package split across many wheels: collect each one we use
+for pkg in ["winrt.runtime", "winrt.windows.foundation", "winrt.windows.foundation.collections",
+            "winrt.windows.globalization", "winrt.windows.graphics.imaging", "winrt.windows.media.ocr",
+            "winrt.windows.storage.streams", "winrt._winrt_windows_media_ocr"]:
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d; binaries += b; hiddenimports += h
+    except Exception as e:
+        print("collect skipped", pkg, e)
 
 hiddenimports += [
     "uvicorn.logging", "uvicorn.loops", "uvicorn.loops.auto",

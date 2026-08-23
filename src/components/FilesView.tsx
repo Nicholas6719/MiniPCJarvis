@@ -15,7 +15,7 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 function fmtDate(ts?: number): string {
-  return ts ? new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  return ts ? new Date(ts * 1000).toLocaleDateString([], { month: "short", day: "numeric" }) + " " + new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(" ", "") : "";
 }
 const ICON: Record<string, string> = { folder: "▰", image: "▣", text: "≡", pdf: "▤", video: "▶", audio: "♪", archive: "▥", document: "▤" };
 

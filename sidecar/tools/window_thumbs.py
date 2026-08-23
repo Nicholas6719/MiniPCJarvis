@@ -71,11 +71,18 @@ def windows_with_thumbs(include_self: bool = False, thumbs: bool = True) -> list
     from tools.windows_tools import _visible_windows
     out = []
     fg = win32gui.GetForegroundWindow()
-    for hwnd, title in _visible_windows():
+    seen_titles: set[str] = set()
+    wins = _visible_windows()
+    # Store apps show twice (ApplicationFrameHost frame + the app's own window): keep one
+    for hwnd, title in wins:
         if not include_self and title == "JARVIS":
             continue
+        proc = _process_name(hwnd)
+        if title in seen_titles or (proc == "ApplicationFrameHost" and any(t == title and h != hwnd for h, t in wins)):
+            continue
+        seen_titles.add(title)
         out.append({
-            "hwnd": hwnd, "title": title, "process": _process_name(hwnd),
+            "hwnd": hwnd, "title": title, "process": proc,
             "minimized": bool(win32gui.IsIconic(hwnd)), "active": hwnd == fg,
             "thumb": _thumb(hwnd) if thumbs else None,
         })

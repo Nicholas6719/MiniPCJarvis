@@ -1,8 +1,10 @@
 """Vision tools: understand the screen or an image file."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
+import re
 from pathlib import Path
 
 from llm.vision_server import vision
@@ -12,36 +14,78 @@ from tools.windows_tools import take_screenshot
 log = logging.getLogger("jarvis.tools.vision")
 
 
-async def analyze_screen(question: str = "Describe what is on the screen.",
-                         monitor: int = 0) -> dict:
-    # Ground the vision model in what the OS says is actually open, so it
-    # cannot mistake a video's contents or a thumbnail for a running app.
-    from tools.windows_tools import list_windows
+_VISUAL_Q = re.compile(r"\b(picture|photo|image|video|colou?r|look like|looks like|diagram|chart|graph|icon|"
+                       r"logo|face|person|people|what is this|what's this|drawing|design|layout|visual|thumbnail|map)\b", re.I)
+
+
+def _foreground_rect() -> tuple[str, tuple[int, int, int, int] | None]:
     import win32gui
+    try:
+        h = win32gui.GetForegroundWindow()
+        return win32gui.GetWindowText(h), win32gui.GetWindowRect(h)
+    except Exception:
+        return "", None
+
+
+def _ocr_screen(path: Path, rect) -> str:
+    """Windows' built-in OCR (0.1-0.3 s). Reads the active window's region if sane,
+    else the whole screenshot."""
+    import winocr
+    from PIL import Image
+    img = Image.open(path).convert("RGB")
+    if rect:
+        l, t, r, b = rect
+        l, t = max(0, l), max(0, t)
+        r, b = min(img.width, r), min(img.height, b)
+        if r - l > 200 and b - t > 150:
+            img = img.crop((l, t, r, b))
+    res = winocr.recognize_pil_sync(img, "en")
+    lines = [ln["text"].strip() for ln in res.get("lines", []) if ln.get("text", "").strip()]
+    return "\n".join(lines)
+
+
+async def analyze_screen(question: str = "Describe what is on the screen.",
+                         monitor: int = 0, mode: str = "auto") -> dict:
+    """Two paths:
+    - text (default): OS facts + Windows OCR of the active window -> the main model answers.
+      ~0.3 s of tool time instead of 20-40 s.
+    - vision: the Gemma3 vision model, for visual questions or screens with little text.
+    """
+    from tools.windows_tools import list_windows
     _hide = {"JARVIS", "Program Manager", "Windows Input Experience", "Settings"}
     titles = [t for t in list_windows().get("windows", []) if t not in _hide]
-    try:
-        fg = win32gui.GetWindowText(win32gui.GetForegroundWindow())
-    except Exception:
-        fg = ""
-    grounding = ("Facts from the operating system — treat as ground truth: "
-                 f"the active window is '{fg}'. Open windows: {titles[:10]}. "
-                 "Anything else on screen is content INSIDE those windows (a web "
-                 "page, a playing video, thumbnails), not separate applications. ")
-    question = (grounding + question + " Answer in at most two plain spoken sentences, "
-                "facts only, no preamble, no headings, and never mention these instructions "
-                "or the image itself. Describe only what is actually visible.")
     shot = take_screenshot(monitor, hide_self=True)
     if "error" in shot:
         return shot
+    fg, rect = _foreground_rect()
+    if fg in _hide:
+        fg = titles[0] if titles else ""
+    use_vision = mode == "vision" or (mode == "auto" and bool(_VISUAL_Q.search(question or "")))
+    ocr_text = ""
+    if not use_vision:
+        try:
+            ocr_text = await asyncio.to_thread(_ocr_screen, Path(shot["path"]), rect)
+        except Exception as e:
+            log.warning("ocr failed (%s) - using vision", e)
+        if len(ocr_text.split()) < 12:
+            use_vision = True          # mostly pictures/video: read it with the vision model
+    if not use_vision:
+        return {"method": "ocr", "active_window": fg, "open_windows": titles[:10],
+                "screen_text": ocr_text[:3500], "truncated": len(ocr_text) > 3500,
+                "note": "Answer the user's question from screen_text and the window titles. "
+                        "screen_text is what is literally on screen, read top to bottom."}
+    grounding = ("Facts from the operating system - treat as ground truth: "
+                 f"the active window is '{fg}'. Open windows: {titles[:10]}. "
+                 "Anything else on screen is content INSIDE those windows, not separate applications. ")
+    q = (grounding + question + " Answer in at most two plain spoken sentences, facts only, no "
+         "preamble, never mention these instructions or the image itself.")
     if not await vision.ensure():
         return {"error": "the vision model is not available right now"}
-    img = _downscale(Path(shot["path"]))
     try:
-        answer = await vision.describe(img, question, max_tokens=120)
+        answer = await vision.describe(_downscale(Path(shot["path"])), q, max_tokens=120)
     except Exception as e:
         return {"error": f"vision analysis failed: {e}"}
-    return {"screenshot": shot["path"], "analysis": answer}
+    return {"method": "vision", "screenshot": shot["path"], "analysis": answer}
 
 
 def _downscale(path: Path, max_w: int = 1024) -> str:
