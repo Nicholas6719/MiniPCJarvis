@@ -171,6 +171,7 @@ class Orchestrator:
         await audio_boot
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
         self._device_task = asyncio.create_task(self._device_watch())
+        asyncio.create_task(self._warm_prompts())
         if config.get("audio", "boot_sound", default=True):
             asyncio.create_task(self.play_sound("boot"))
         await self.sm.to(State.IDLE)
@@ -262,6 +263,20 @@ class Orchestrator:
             if await llama.ensure():
                 await self.sm.to(State.IDLE, force=True)
                 await bus.emit("boot", summary="language model recovered")
+
+    async def _warm_prompts(self) -> None:
+        """Pay the prompt-cache cost for both prefix variants (with tools / without) in the
+        background at boot, so the user's first real question isn't the slow one (~12 s)."""
+        sysmsg = {"role": "system", "content": system_prompt()}
+        user = {"role": "user", "content": turn_context("") + chr(10) + "hi"}
+        for tools in (registry.schemas(), None):
+            try:
+                async for _ in local_llm.stream([sysmsg, user], tools=tools, max_tokens=1):
+                    pass
+            except Exception as e:
+                log.info("prompt warm skipped: %s", e)
+                return
+        log.info("prompt cache warmed (tools + no-tools prefixes)")
 
     async def _audio_boot(self) -> None:
         """Warm STT/TTS/wake and open the mic; start the listening loops. Failures

@@ -71,7 +71,7 @@ async def analyze_screen(question: str = "Describe what is on the screen.",
             use_vision = True          # mostly pictures/video: read it with the vision model
     if not use_vision:
         return {"method": "ocr", "active_window": fg, "open_windows": titles[:10],
-                "screen_text": ocr_text[:3500], "truncated": len(ocr_text) > 3500,
+                "screen_text": ocr_text[:2500], "truncated": len(ocr_text) > 2500,
                 "note": "Answer the user's question from screen_text and the window titles. "
                         "screen_text is what is literally on screen, read top to bottom."}
     grounding = ("Facts from the operating system - treat as ground truth: "
