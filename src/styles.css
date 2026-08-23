@@ -959,3 +959,6 @@ body {
 .ambient--compact .ambient__jarvis { font-size: 14px; line-height: 1.4; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
 .hud--panel .webpanel { padding: 16px 18px; }
 .hud--panel .hud__center .webpanel__result { padding: 10px 12px; }
+/* the orb's labels hang 52px below it (absolute): give the side chat room in panel mode */
+.hud--panel .hud__sidechat { margin-top: 48px; }
+.hud--panel .core__sublabel { display: none; }
