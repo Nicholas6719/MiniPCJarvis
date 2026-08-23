@@ -25,7 +25,7 @@ class State(str, enum.Enum):
 
 _ALLOWED: dict[State, set[State]] = {
     State.OFFLINE: {State.STARTING},
-    State.STARTING: {State.IDLE, State.ERROR},
+    State.STARTING: {State.IDLE, State.ERROR, State.PROCESSING, State.LISTENING, State.SPEAKING, State.EXECUTING},
     State.IDLE: {State.LISTENING, State.SLEEPING, State.ERROR, State.THINKING},
     State.LISTENING: {State.PROCESSING, State.IDLE, State.ERROR},
     State.PROCESSING: {State.THINKING, State.IDLE, State.ERROR},

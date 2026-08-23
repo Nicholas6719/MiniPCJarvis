@@ -156,27 +156,19 @@ class Orchestrator:
         registry.confirm_done_hook = self.confirmation_answered
         await self.sm.to(State.STARTING)
         await bus.emit("boot", summary="initializing subsystems")
+        # Ears and voice don't depend on the language model: warm them WHILE it loads
+        # (20-60 s) so the wake word is live from the first seconds, not the first minute.
+        self._llm_ready = False
+        audio_boot = asyncio.create_task(self._audio_boot())
         ok = await llama.ensure()
+        self._llm_ready = ok
         if not ok:
             await self.sm.to(State.ERROR, force=True)
             await bus.emit("boot_error", summary="language model failed to start — retrying")
             asyncio.create_task(self._llm_retry_loop())
+            await audio_boot
             return
-        # warmups are optional at boot — any failure degrades, never wedges
-        for label, warm in (("speech recognition", stt.warmup),
-                            ("voice synthesis", tts.warmup)):
-            try:
-                await warm()
-            except Exception as e:
-                log.error("%s warmup failed (continuing): %s", label, e)
-                await bus.emit("boot", summary=f"{label} degraded: {e}")
-        try:
-            mic.start()
-        except Exception as e:
-            log.error("microphone unavailable: %s", e)
-            await bus.emit("boot", summary="microphone unavailable")
-        self._loop_task = asyncio.create_task(self._listen_loop())
-        self._wake_task = asyncio.create_task(self._wake_loop())
+        await audio_boot
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
         self._device_task = asyncio.create_task(self._device_watch())
         if config.get("audio", "boot_sound", default=True):
@@ -271,6 +263,28 @@ class Orchestrator:
                 await self.sm.to(State.IDLE, force=True)
                 await bus.emit("boot", summary="language model recovered")
 
+    async def _audio_boot(self) -> None:
+        """Warm STT/TTS/wake and open the mic; start the listening loops. Failures
+        degrade (logged + announced), never wedge the boot."""
+        async def _wake_warm():
+            await asyncio.to_thread(wake.warmup)
+        for label, warm in (("wake word", _wake_warm),
+                            ("speech recognition", stt.warmup),
+                            ("voice synthesis", tts.warmup)):
+            try:
+                await warm()
+            except Exception as e:
+                log.error("%s warmup failed (continuing): %s", label, e)
+                await bus.emit("boot", summary=f"{label} degraded: {e}")
+        try:
+            mic.start()
+        except Exception as e:
+            log.error("microphone unavailable: %s", e)
+            await bus.emit("boot", summary="microphone unavailable")
+        self._loop_task = asyncio.create_task(self._listen_loop())
+        self._wake_task = asyncio.create_task(self._wake_loop())
+        await bus.emit("boot", summary="ears ready")
+
     async def _llm_retry_loop(self) -> None:
         """Self-healing: keep retrying LLM startup with backoff (e.g. after OOM)."""
         delay = 15
@@ -340,7 +354,7 @@ class Orchestrator:
                 block = await q.get()
                 preroll.append(block)
                 mode = config.get("wake", "mode", default="push_to_talk")
-                if mode not in ("wake_word", "both") or self.sm.state not in (State.IDLE, State.WAITING):
+                if mode not in ("wake_word", "both") or self.sm.state not in (State.IDLE, State.WAITING, State.STARTING):
                     consec = 0
                     continue
                 # follow-up window: speech alone is enough
@@ -562,6 +576,17 @@ class Orchestrator:
         if reflex and (not reflex[0].llm_after
                        or (reflex[0].direct_if is not None and reflex[0].direct_if(text))):
             await self._reflex_turn(text, reflex, t_start)
+            return
+        if not getattr(self, "_llm_ready", True):
+            line = "My language model is still loading. Give me a few more seconds and ask again."
+            await bus.emit("assistant_delta", text=line)
+            try:
+                await self.speak_line(line)
+            except Exception:
+                pass
+            await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000), breakdown={})
+            if self.sm.state not in (State.ERROR, State.STARTING):
+                await self.sm.to(State.IDLE, force=True)
             return
         # brain thinks this is a plain question -> steer the LLM away from needless tool use
         self._no_tools_first = False
