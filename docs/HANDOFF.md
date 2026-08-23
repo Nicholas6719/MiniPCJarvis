@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-08-22 ~10:05.
+Updated: 2026-08-23.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -104,7 +104,9 @@ but the user's folder was empty; log files diverge.
   files with the Write tool, never heredoc Python containing backslashes.
 - PyInstaller bundles modules that don't compile (exit 0!). ALWAYS build the sidecar
   with `scriptsuild_sidecar.cmd` (compileall + import gate).
-- Everything stays inside JARVIS: `open_url`/`browser_*` use a second hidden Brave
+- (SUPERSEDED 2026-08-23) `open_url` now opens the USER's real browser (per user request);
+  JARVIS's hidden Brave is only for his own reading (browser_open/fetch_page/web_search). The next line describes the OLD policy:
+  - Historically: `open_url`/`browser_*` used a second hidden Brave
   profile (`session-browser`) and push screenshots to the BROWSER view; WebPanel result
   clicks open in-app; `open_application` resolves alias -> Start Menu -> PATH -> Store
   apps and never spawns `start ""` (that popped a cmd window).

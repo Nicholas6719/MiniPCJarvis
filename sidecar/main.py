@@ -653,7 +653,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--token", default="")
     args = parser.parse_args()
-    SESSION_TOKEN = args.token
+    # never run with auth disabled: an empty token would make every endpoint (file ops,
+    # power, browser) open on loopback. If none was supplied, mint one — a manual caller
+    # then has to read it from this process's command line, which is the intended bar.
+    import secrets as _secrets
+    SESSION_TOKEN = args.token or _secrets.token_hex(16)
 
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

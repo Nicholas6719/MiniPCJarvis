@@ -5,7 +5,6 @@ import ctypes
 import re
 import datetime
 import logging
-import webbrowser
 
 import win32con
 import win32gui
@@ -223,7 +222,7 @@ def _resolve_folder(destination: str | None) -> Path:
     return SCREENSHOT_DIR
 
 
-def take_screenshot(monitor: int = 0, hide_self: bool = False,
+def take_screenshot(monitor: int = 0, hide_self: bool = True,
                     destination: str | None = None, filename: str | None = None) -> dict:
     """Capture the screen. hide_self=True minimizes JARVIS's own window first so
     'look at my screen' sees the user's screen, not the assistant.
@@ -374,7 +373,8 @@ def register_all() -> None:
             "destination": {"type": "string",
                             "description": "desktop | documents | downloads | pictures | folder path | default"},
             "filename": {"type": "string"},
-            "monitor": {"type": "integer", "minimum": 0}}, "required": []},
+            "monitor": {"type": "integer", "minimum": 0},
+            "hide_self": {"type": "boolean", "description": "hide the JARVIS window from the shot (default true)"}}, "required": []},
         risk=Risk.LOW, handler=take_screenshot))
     registry.register(T(
         name="open_url",

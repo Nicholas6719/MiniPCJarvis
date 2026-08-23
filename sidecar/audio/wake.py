@@ -33,7 +33,7 @@ class WakeWord:
 
     @property
     def threshold(self) -> float:
-        return float(config.get("wake", "threshold", default=0.5))
+        return float(config.get("wake", "threshold", default=0.45))
 
     def reset(self) -> None:
         self._buf = np.zeros(0, dtype=np.float32)

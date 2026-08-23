@@ -36,7 +36,9 @@ class EventBus:
             clients = list(self._clients)
         for ws in clients:
             try:
-                await ws.send_text(payload)
+                # bounded: a UI client that stops reading must not stall the voice
+                # pipeline (emit is inline in the turn path, once per token/sentence)
+                await asyncio.wait_for(ws.send_text(payload), timeout=2.0)
             except Exception:
                 await self.detach(ws)
         log.debug("event %s %s", kind, data.get("summary", ""))

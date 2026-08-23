@@ -81,6 +81,16 @@ class PiperTTS:
             if not task.done():
                 cancel_was_set = cancel.is_set()
                 cancel.set()
+                # DRAIN WHILE WAITING: the producer may be blocked in queue.put() on the
+                # bounded queue. Awaiting the task before draining would deadlock (producer
+                # waits for a slot, we wait for the producer). Keep pulling until it's done.
+                while not task.done():
+                    try:
+                        await asyncio.wait_for(queue.get(), timeout=0.1)
+                    except asyncio.TimeoutError:
+                        pass
+                    except Exception:
+                        break
                 await task
                 if not cancel_was_set:
                     cancel.clear()

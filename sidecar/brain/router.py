@@ -71,7 +71,7 @@ _CANON = [
     (r"\b(?:volume|turn it|turn the volume|set the volume|set volume|make the volume|change the volume|lower the volume|raise the volume|put the volume)\b.*\d+.*", "set the volume to N percent"),
     (r"\b(?:open|go to|pull up|take me to|load|bring up|open up)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "open the website SITE"),
     (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|pod bay|desktop|documents|docs|downloads|pictures|photos)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
-    (r"\b(?:close|quit|exit|kill|shut down|shut)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
+    (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
     (r"\d+", "N"),
 ]
 

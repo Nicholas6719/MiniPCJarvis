@@ -134,6 +134,10 @@ class ToolRegistry:
                 return {"ok": False, "error": "user did not confirm in time",
                         "unconfirmed": True}
             finally:
+                # always drop the pending future — otherwise a CancelledError (turn
+                # interrupted while waiting) leaves it in _pending forever, and every
+                # later utterance is misrouted as an answer to a dead question.
+                self._pending.pop(confirm_id, None)
                 if self.confirm_done_hook:
                     await self.confirm_done_hook()
             if not approved:

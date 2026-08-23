@@ -56,7 +56,7 @@ def _resolve(path: str | None, must_exist: bool = True) -> Path | None:
     for root in rs.values():
         cand = root / raw
         if cand.exists():
-            return cand
+            return _inside(cand, rs)   # a relative path can contain '..': must stay in-bounds
     return None if must_exist else _inside(rs.get("documents", next(iter(rs.values()))) / raw, rs)
 
 

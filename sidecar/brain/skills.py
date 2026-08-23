@@ -19,13 +19,29 @@ _NUM_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "
               "eighty": 80, "ninety": 90, "hundred": 100, "half": 50, "max": 100, "full": 100}
 
 
+_ONES = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+         "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+         "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+         "eighteen": 18, "nineteen": 19}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+         "seventy": 70, "eighty": 80, "ninety": 90}
+_WORD_ALIAS = {"half": 50, "max": 100, "maximum": 100, "full": 100, "hundred": 100}
+
+
 def _number(text: str) -> int | None:
     m = re.search(r"\b(\d{1,3})\b", text)
     if m:
         return int(m.group(1))
-    for w, n in _NUM_WORDS.items():
-        if re.search(rf"\b{w}\b", text):
-            return n
+    toks = re.findall(r"[a-z]+", text.lower())
+    # combine an adjacent tens + ones ("twenty five" -> 25); else take the first number word
+    for i, w in enumerate(toks):
+        if w in _TENS:
+            nxt = toks[i + 1] if i + 1 < len(toks) else ""
+            return _TENS[w] + (_ONES[nxt] if nxt in _ONES and _ONES[nxt] < 10 else 0)
+        if w in _ONES:
+            return _ONES[w]
+        if w in _WORD_ALIAS:
+            return _WORD_ALIAS[w]
     return None
 
 
@@ -34,12 +50,20 @@ def slots_volume(t: str) -> dict | None:
     return {"percent": max(0, min(100, n))} if n is not None else None
 
 
+_NOT_AN_APP = {"it", "that", "this", "the pc", "the computer", "computer", "pc", "everything",
+               "all windows", "all the windows", "all", "the window", "windows", "down the pc",
+               "down the computer", "up", "down", "the tab", "this tab", "the browser"}
+
+
 def slots_app(t: str) -> dict | None:
-    m = re.search(r"\b(?:open|launch|start|run|fire up|bring up|put on|close|quit|exit|kill|shut)\s+(?:up\s+)?(?:the\s+|my\s+)?([a-z0-9 .+#-]{2,40}?)(?:\s+(?:for me|please|now|app|application))*[.!?]*$", t)
+    m = re.search(r"\b(?:open|launch|start|run|fire up|bring up|put on|close|quit|exit|kill)\s+(?:up\s+)?(?:the\s+|my\s+)?([a-z0-9 .+#-]{2,40}?)(?:\s+(?:for me|please|now|app|application))*[.!?]*$", t)
     if not m:
         return None
     name = m.group(1).strip()
-    if not name or name in ("it", "that", "this"):
+    if not name or name in _NOT_AN_APP:
+        return None
+    # a bare generic word or a phrase that reads like a sentence, not an app name
+    if name.startswith(("down ", "off ", "the ", "all ")) or len(name.split()) > 3:
         return None
     if re.search(r"https?://|\b\w+\.(?:com|org|net|io|gov|edu|co|tv|ai)\b", name):
         return None  # a website, not an app -> the LLM routes it to open_url
@@ -96,7 +120,7 @@ def slots_teach(t: str) -> dict | None:
 
 
 _CORRECTION = re.compile(
-    r"^(?:nope|no no no|not that one|not that|that's not it|that's not what i meant|that is wrong|that's wrong|wrong|no)\b"
+    r"^(?:nope|no no no|not that one|not that|that's not it|that's not what i meant|that is wrong|that's wrong|wrong|no)\b(?!\s+(?:thanks?|thank you))"
     r"[,.!\s]*(?:i meant|i said|i wanted|i want|actually|do|it's|its)?[,\s]*(?P<rest>.*)$", re.I)
 
 
@@ -349,11 +373,16 @@ def slots_reminder(t: str) -> dict | None:
             return None
         h, mi = int(m.group(1)), int(m.group(2) or 0)
         ap = (m.group(3) or "").replace(".", "")
+        evening = bool(re.search(r"\b(tonight|this evening|this afternoon)\b", t))
         if ap == "pm" and h < 12:
             h += 12
-        if ap == "am" and h == 12:
+        elif ap == "am" and h == 12:
             h = 0
+        elif not ap and evening and 1 <= h <= 11:
+            h += 12                       # "at 9 tonight" -> 21:00
         out["at_time"] = f"{h:02d}:{mi:02d}"
+        if re.search(r"\btomorrow\b", t):
+            out["date"] = (dt.date.today() + dt.timedelta(days=1)).isoformat()
     m = re.search(r"\b(?:to|that)\s+(.+?)(?:\s+(?:in|at|for|by)\s+\d\S*.*)?[.!?]*$", t)
     text = m.group(1).strip() if m else ""
     text = re.sub(r"^(?:remind me to|remind me|to)\s+", "", text).strip()

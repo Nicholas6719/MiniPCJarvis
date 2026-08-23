@@ -84,7 +84,8 @@ async def get_weather(location: str = "", when: str = "now") -> dict:
         "location": label, "units": "F" if unit == "fahrenheit" else "C",
         "now": {"temp": round(cur.get("temperature_2m", 0)), "feels_like": round(cur.get("apparent_temperature", 0)),
                 "conditions": _CODES.get(cur.get("weather_code", -1), "unsettled"),
-                "humidity": cur.get("relative_humidity_2m"), "wind_mph": round(cur.get("wind_speed_10m", 0))},
+                "humidity": cur.get("relative_humidity_2m"), "wind": round(cur.get("wind_speed_10m", 0)),
+                "wind_unit": "mph" if unit == "fahrenheit" else "km/h"},
         "today" if idx == 0 else "tomorrow": {
             "high": round(day["temperature_2m_max"][idx]), "low": round(day["temperature_2m_min"][idx]),
             "conditions": _CODES.get(day["weather_code"][idx], "unsettled"),

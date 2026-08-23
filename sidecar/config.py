@@ -27,7 +27,6 @@ DEFAULTS: dict[str, Any] = {
     },
     "llm": {
         "server_binary": r"C:\AI\llama.cpp\llama-server.exe",
-        "port": 8033,
         # other local apps (Houston) may already serve the same model — reuse it
         "adopt_ports": [8080],
         "context": 16384,
@@ -72,7 +71,7 @@ DEFAULTS: dict[str, Any] = {
     "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
     "speech": {"fillers": True},
     "ui": {"panel_hold_s": 12},     # seconds a panel stays after a turn before the HUD goes ambient
-    "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set "Framingham, MA" to pin   # say "Let me see." while the model is still thinking
+    "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin   # say "Let me see." while the model is still thinking
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,
               "sound_cues": True, "boot_sound": True,
@@ -82,10 +81,13 @@ DEFAULTS: dict[str, Any] = {
     # confusables (service/nervous/harvest) 0.00-0.04. Raise if the TV wakes him,
     # lower if bare "Jarvis" gets missed.
     "wake": {"mode": "both", "threshold": 0.45},
+    "vision": {
+        "model": r"C:\AI\models\gemma-3-4b-it-q4_0.gguf",
+        "mmproj": r"C:\AI\models\gemma-3-4b-it-mmproj.gguf",
+        "device": "auto",   # auto | cpu ; forced to cpu when the active LLM fills the iGPU
+    },
     "conversation": {"window_s": 8},      # follow-up without wake word after a reply
     "interrupt": {"mode": "wake_word"},   # wake_word | any_speech
-    "memory": {"enabled": True},
-    "search": {"provider": "brave"},
     # MCP plugin servers: {"name": {"command": "...", "args": [...], "risk": "medium"}}
     "mcp": {"servers": {}},
     "proactive": {
@@ -138,13 +140,7 @@ class Config:
             if self.data.get("stt", {}).get("model") == "small.en":
                 self.data["stt"]["model"] = "base.en"
                 changed = True
-        if v < 3:
-            # new model entries become available without touching the active choice
-            models = self.data.setdefault("llm", {}).setdefault("models", {})
-            for name, entry in DEFAULTS["llm"]["models"].items():
-                if name not in models:
-                    models[name] = entry
-                    changed = True
+        # (the old v<3 "add missing models" step is covered by the unconditional mirror below)
         if v < 5:
             self.data.setdefault("stt", {}).setdefault("engine", "parakeet")
             self.data["stt"].setdefault("parakeet_quant", "int8")

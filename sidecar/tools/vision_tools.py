@@ -125,7 +125,10 @@ def register_all() -> None:
                     "visible, or to read visible content.",
         parameters={"type": "object", "properties": {
             "question": {"type": "string"},
-            "monitor": {"type": "integer", "minimum": 0}},
+            "monitor": {"type": "integer", "minimum": 0},
+            "mode": {"type": "string", "enum": ["auto", "text", "vision"],
+                     "description": "auto (default) reads text via OCR and uses the vision model only "
+                                    "for visual questions; force 'vision' to describe images/colors/layout"}},
             "required": []},
         risk=Risk.LOW, handler=analyze_screen, timeout=180))
     registry.register(Tool(

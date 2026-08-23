@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 — 2026-08-23
+
+### UX
+- Ambient HUD: orb-only by default; panels surface on use and fade back after a hold; voice tab control
+- "Open X" (YouTube/Netflix/site) now opens the USER's real browser; JARVIS's hidden browser is for his own reading only
+- Open/close apps and recycle/move/rename files no longer ask for confirmation (reversible); only shutdown/restart do — asked aloud, answerable by voice
+
+### Speed / models
+- STT: Parakeet TDT 0.6B v3 (int8) default; Gemma 4 26B-A4B selectable; OCR-first "what's on my screen"
+- Ears warm in parallel with the LLM at boot; prompt cache pre-warmed
+
+### Audit fixes (2026-08-23)
+- Security: file-tool path-traversal escape closed; auth can no longer be disabled by an empty token
+- Correctness: number words parsed in order ("twenty five"=25, was 5); "shut down the pc" no longer hijacked by close-app; "close X" can't fan out to unrelated windows; reminders honor "tomorrow"
+- Robustness: LLM recovery restores service; mic self-heal no longer mutes the speaker; Piper cancel deadlock fixed; confirmation future leak fixed; stalled UI client can't freeze the voice pipeline
+
 ## 0.2.0 — 2026-08-22 (Brain layer, speed, "never leave JARVIS")
 
 ### Brain (JARVIS's own intelligence, no LLM needed)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import os
 import re
 import subprocess
@@ -164,9 +165,11 @@ def site_for(name: str) -> str | None:
 async def open_application(name: str) -> dict:
     key = name.strip().lower()
     if re.search(r"^https?://|\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai)\b", key):
-        # a website: never hand it to the default browser - stays inside JARVIS
-        return {"error": f"'{name}' is a website, not an app. Use open_url to show it inside JARVIS."}
-    target = _resolve_app(name)
+        # a website, not an app: caller should use open_url (opens the user's browser)
+        return {"error": f"'{name}' is a website, not an app. Use open_url to open it in the browser."}
+    # _resolve_app does Start-Menu rglob + a PowerShell Get-StartApps (up to ~15 s on first
+    # use). It's sync, so run it off the event loop or it freezes audio/wake/TTS.
+    target = await asyncio.to_thread(_resolve_app, name)
     if not target:
         site = site_for(name)
         if site:
@@ -209,7 +212,12 @@ def close_application(name: str) -> dict:
         key = key.replace(junk, "").strip()
     exe = _APP_ALIASES.get(key, key + ".exe").removesuffix(".exe") + ".exe"
     stem = exe.removesuffix(".exe").lower()
-    words = [w for w in stem.replace("-", " ").split() if len(w) > 2] or [stem]
+    # only match on real name words; drop stopwords so "close all windows"/"close the tab"
+    # can never fan out to every window on the desktop
+    _STOP = {"the", "all", "this", "that", "app", "window", "windows", "tab", "down", "up", "my", "a"}
+    words = [w for w in stem.replace("-", " ").split() if len(w) >= 3 and w not in _STOP]
+    if not words:
+        return {"error": f"'{name}' isn't a specific app I can close"}
 
     # JARVIS's own hidden browsers are never "the user's Brave"
     protected: set[int] = set()
@@ -222,8 +230,10 @@ def close_application(name: str) -> dict:
             continue
 
     def proc_matches(pname: str) -> bool:
+        # exact stem/word match only. A prefix match ("steam".startswith) would also
+        # kill steamwebhelper / edgeupdate / notepad++updater — collateral damage.
         pn = pname.lower().removesuffix(".exe")
-        return pn == stem or any(pn == w or pn.startswith(w) for w in words)
+        return pn == stem or pn in words
 
     pids = {pr.pid for pr in psutil.process_iter(["name"])
             if proc_matches(pr.info["name"] or "") and pr.pid not in protected}
@@ -237,7 +247,8 @@ def close_application(name: str) -> dict:
         if wpid in protected:
             continue
         tl = title.lower()
-        if wpid in pids or any(w in tl for w in words):
+        title_words = set(re.findall(r"[a-z0-9]+", tl))
+        if wpid in pids or any(w in title_words for w in words):
             targets.append((hwnd, wpid))
     if not pids and not targets:
         return {"error": f"no running process matched {name}"}

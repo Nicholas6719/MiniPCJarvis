@@ -22,3 +22,6 @@ mcp>=1.0
 cssselect>=1.2
 num2words>=0.5
 pefile>=2023.2
+onnx-asr>=0.6
+winocr>=0.0.15
+lxml>=5.0

@@ -298,19 +298,22 @@ class BraveWebSearch:
             return imgs[:count]
 
     async def close(self) -> None:
-        try:
-            if self._ctx:
-                await self._ctx.close()
-        except Exception:
-            pass
-        self._ctx = None
-        self._pid = None
-        try:
-            if self._pw:
-                await self._pw.stop()
-        except Exception:
-            pass
-        self._pw = None
+        # serialize with search/images/warmup: the idle reaper and retry _reset()
+        # must not tear down a context that an in-flight request is holding.
+        async with self._lock:
+            try:
+                if self._ctx:
+                    await self._ctx.close()
+            except Exception:
+                pass
+            self._ctx = None
+            self._pid = None
+            try:
+                if self._pw:
+                    await self._pw.stop()
+            except Exception:
+                pass
+            self._pw = None
 
 
 brave_web = BraveWebSearch()                      # web + image search tab

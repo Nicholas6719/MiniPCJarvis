@@ -31,7 +31,7 @@ hiddenimports += [
     "uvicorn.lifespan", "uvicorn.lifespan.on",
     "sounddevice", "_sounddevice_data",
     "win32gui", "win32con", "win32clipboard", "win32api", "win32ui", "win32process",
-    "mss", "webbrowser",
+    "mss",
 ]
 
 a = Analysis(

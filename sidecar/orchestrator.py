@@ -200,6 +200,7 @@ class Orchestrator:
                         and self.sm.state in (State.IDLE, State.SLEEPING)):
                     log.warning("microphone went silent — reopening")
                     mic.stop()
+                    _spk.close()          # refresh_devices() terminates PortAudio; drop the stale output stream too
                     refresh_devices()
                     mic.start()
                     await bus.emit("boot", summary=f"microphone recovered: {mic.device_name}")
@@ -308,15 +309,21 @@ class Orchestrator:
             delay = min(delay * 2, 120)
             log.info("retrying llama-server startup")
             if await llama.ensure():
+                self._llm_ready = True
                 await bus.emit("boot", summary="language model recovered")
-                await stt.warmup()
+                # audio may already be up (ears warm in parallel at boot); (re)start anything
+                # that died, and never let one warmup exception kill self-healing.
                 try:
-                    await tts.warmup()
-                except FileNotFoundError:
-                    pass
-                mic.start()
-                if self._loop_task is None or self._loop_task.done():
-                    self._loop_task = asyncio.create_task(self._listen_loop())
+                    if self._loop_task is None or self._loop_task.done():
+                        await self._audio_boot()
+                    else:
+                        await self._warm_prompts()
+                except Exception:
+                    log.exception("post-recovery warmup failed (continuing)")
+                if self._watchdog_task is None or self._watchdog_task.done():
+                    self._watchdog_task = asyncio.create_task(self._llm_watchdog())
+                if getattr(self, "_device_task", None) is None or self._device_task.done():
+                    self._device_task = asyncio.create_task(self._device_watch())
                 await self.sm.to(State.IDLE, force=True)
                 return
 
@@ -402,6 +409,10 @@ class Orchestrator:
             mic.unsubscribe(q)
 
     async def shutdown(self) -> None:
+        for _t in (self._wake_task, self._loop_task, self._watchdog_task,
+                   getattr(self, "_device_task", None), getattr(self, "_turn_task", None)):
+            if _t is not None and not _t.done():
+                _t.cancel()
         if self._wake_task:
             self._wake_task.cancel()
         if self._loop_task:
@@ -844,6 +855,7 @@ class Orchestrator:
                 return  # the correction re-ran as a fresh turn, which finished itself
         else:
             self._last_reflex = dict(brain.last_match or {})
+            self._last_reflex_at = time.time()
             reply = await self._exec_skill(skill, args, queue)
         await self._finish_reflex(text, reply, t_start, skill.name, queue, task)
 
@@ -854,6 +866,7 @@ class Orchestrator:
         await bus.emit("reflex", skill="command", tool=None, args={"steps": steps},
                        confidence=1.0, mode="routine")
         self._last_reflex = dict(brain.last_match or {})
+        self._last_reflex_at = time.time()
         self._speak_cancel = asyncio.Event()
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         task = asyncio.create_task(self._speaker_worker(queue))
@@ -900,7 +913,10 @@ class Orchestrator:
     async def _correct(self, args: dict, queue: asyncio.Queue, t_start: float) -> str | None:
         """'No, I meant X' right after a reflex: un-learn what misfired, then do X."""
         last = getattr(self, "_last_reflex", None)
-        dropped = await brain.unlearn(last)
+        # only un-learn if a reflex actually fired in the last ~40 s; a stray "no ..."
+        # out of nowhere must not silently delete a learned example
+        recent = (time.time() - getattr(self, "_last_reflex_at", 0)) < 40
+        dropped = await brain.unlearn(last) if recent else None
         self._last_reflex = None
         if dropped:
             await bus.emit("brain_learned", text=f"forgot: {last.get('text')}", skill=dropped,
