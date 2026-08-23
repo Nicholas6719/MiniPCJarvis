@@ -186,6 +186,25 @@ but the user's folder was empty; log files diverge.
 - Test hygiene: suites must wait_idle before starting (a "Hey Jarvis" during speech is a
   barge-in, not a wake); drain websocket between turns.
 
+## 2026-08-23 afternoon (user away) - all installed + verified
+- Agent can SEE the HUD now: POST /debug/view {"view":...} then GET /debug/hud.png
+  (PrintWindow capture of the JARVIS window). Shots in C:\Users\nicho\Documents\hud_shots.
+  Layout fixes from that review: nav wraps (SETTINGS was pushed off), center column
+  minmax(0,1fr) (FILES overflowed into the activity column), filename column wider,
+  Store apps deduped in APPS.
+- "what's on my screen" is OCR-first: Windows OCR (winocr, 0.1-0.3 s) of the active
+  window + OS facts -> main model answers; vision model only for visual questions or
+  <12 words of text. First word ~5 s (was 22-40 s of silence); total is mostly speech.
+  winrt packages are collected individually in the .spec (namespace package).
+- Boot: ears (wake/STT/TTS/mic) warm in parallel with the LLM -> live ~6 s after launch;
+  reflexes work while the model loads; both prompt-cache prefixes pre-warmed at boot so
+  the first real question is ~3 s, not ~12 s.
+- Hot-swap hazard found+fixed: JARVIS's own children (hidden Brave, its llama-server,
+  orphaned Brave helpers) pin DLLs in the sidecar folder -> robocopy partial (exit 9).
+  hotswap_sidecar.cmd now stops them first and REFUSES to launch on exit >= 8.
+  First boot after a hot-swap can take ~60 s extra (AV scanning fresh files) - not a bug.
+- Test hygiene: every harness must wait_idle before its first turn.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
