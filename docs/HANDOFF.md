@@ -171,6 +171,21 @@ but the user's folder was empty; log files diverge.
 - "open youtube/netflix/spotify": known services open as sites in-app when no app exists
   (tools/builtin.py _KNOWN_SITES).
 
+## 2026-08-23 morning: full checklist run + fixes (all deployed via quick.ps1)
+- tests/checklist.py (55 items) + checklist2.py (10) + confirm_e2e/bargein_e2e/selfwake_e2e.
+- USER RULES (do not regress): "open X" = user's REAL browser (open_url / known sites);
+  JARVIS's hidden browser only for his own reading (read_site skill -> browser_open).
+  Open/close apps, recycle/move/rename files, lock: NO confirmation. Only shutdown/
+  restart (power_action) and browser_submit confirm - asked ALOUD, answered by voice
+  (strict bare yes/no); any other speech = implicit no + runs that request; 30 s timeout.
+- Fixed: close_application (Store apps refuse terminate -> WM_CLOSE by title, protects
+  JARVIS's hidden Brave, honest replies); self-wake on own name (_saying_own_name guard);
+  barge-in deaf after early filler (watcher no longer gated on SPEAKING state); false
+  "webcam mic disconnected" restarts (157/log) -> frames-flowing + two-miss rule;
+  wake-word homophones stripped (Jovis); nightly self-test skips when app closed.
+- Test hygiene: suites must wait_idle before starting (a "Hey Jarvis" during speech is a
+  barge-in, not a wake); drain websocket between turns.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

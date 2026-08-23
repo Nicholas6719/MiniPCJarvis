@@ -48,6 +48,7 @@ async def main():
     lt = asyncio.create_task(listen())
     await asyncio.sleep(1)
     async with httpx.AsyncClient(timeout=120) as c:
+        await wait_idle(c)   # never start while he is still talking from a previous test
         await inject(c, phrase("Hey Jarvis, what time is it?"))
         await wait_idle(c)
         n1 = len(events)

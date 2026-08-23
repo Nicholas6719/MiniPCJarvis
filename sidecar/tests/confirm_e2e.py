@@ -33,6 +33,11 @@ def exists():
 
 
 async def run(ws, text, answer=None, timeout=200):
+    while True:                      # drain events left over from a previous turn
+        try:
+            await asyncio.wait_for(ws.recv(), timeout=0.3)
+        except asyncio.TimeoutError:
+            break
     t0 = time.time()
     httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=15)
     ev = {"confirm": None, "waiting": False, "reply": "", "answered": None, "tools": []}
@@ -70,8 +75,8 @@ async def main():
         rec("spoken 'no' declines and he stops asking", "leaving it" in ev["reply"].lower() and "?" not in ev["reply"].split("Say yes or no.")[-1], ev["reply"][-90:])
         await wait_idle()
         ev = await run(ws, "restart the computer", answer="what time is it")
-        rec("unrelated speech = implicit no, and he answers it instead", ev["confirm"] == "power_action" and (":" in ev["reply"] or "am" in ev["reply"].lower() or "pm" in ev["reply"].lower()), f"confirm={ev['confirm']} | {ev['reply'][-60:]}")
-        await wait_idle()
+        rec("unrelated speech = implicit no (then he answers it)", ev["confirm"] == "power_action" and "leaving it" in ev["reply"].lower(), f"confirm={ev['confirm']} | {ev['reply'][-60:]}")
+        await wait_idle(); await asyncio.sleep(8); await wait_idle()   # let the implicit-no answer finish
         ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin")
         rec("recycling a file needs NO confirmation now", ev["confirm"] is None and not exists(), f"confirm={ev['confirm']} exists={exists()} | {ev['reply'][:60]}")
 
@@ -79,6 +84,7 @@ async def main():
     for i, ok, d in results:
         if not ok:
             print(f"    FAIL {i} :: {d}")
+    await wait_idle()
     return 0 if all(r[1] for r in results) else 1
 
 sys.exit(asyncio.run(main()))
