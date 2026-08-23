@@ -1,5 +1,5 @@
 """Barge-in: saying 'Jarvis' while he speaks must stop him. Run: python tests/bargein_e2e.py PORT TOKEN [rounds]"""
-import asyncio, json, os, sys, time
+import asyncio, base64, json, os, sys, time
 import numpy as np, httpx, websockets
 
 port, tok = sys.argv[1], sys.argv[2]
@@ -42,7 +42,7 @@ async def main():
                     spoke_at = time.time()
                     await asyncio.sleep(2.0)
                     httpx.post(BASE + "/debug/inject_audio", headers=H, timeout=30,
-                               json={"audio": clip.tolist(), "rate": 16000})
+                               json={"audio_b64": base64.b64encode(clip.tobytes()).decode()})
                     injected_at = time.time()
                 elif k == "interrupted":
                     interrupted = round(time.time() - injected_at, 2) if injected_at else -1

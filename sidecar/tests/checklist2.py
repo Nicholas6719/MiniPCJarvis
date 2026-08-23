@@ -1,6 +1,6 @@
 """Checklist part 2: barge-in interrupt, in-app navigation proof, close-through-the-app,
 external-window audit, RAM after vision reap.  Run: python tests/checklist2.py PORT TOKEN"""
-import asyncio, json, os, sys, time
+import asyncio, base64, json, os, sys, time
 import numpy as np
 import httpx, psutil, websockets
 sys.path.insert(0, ".")
@@ -88,7 +88,7 @@ async def main():
                 spoke_at = time.time()
                 await asyncio.sleep(1.2)
                 httpx.post(BASE + "/debug/inject_audio", headers=H, timeout=30,
-                           json={"audio": say("Jarvis").tolist(), "rate": 16000})
+                           json={"audio_b64": base64.b64encode(say("Hey Jarvis").tobytes()).decode()})
             elif k == "interrupted":
                 interrupted = True
             elif k == "assistant_delta" and interrupted:

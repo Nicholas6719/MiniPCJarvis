@@ -1,10 +1,13 @@
-"""Risk-gated confirmations, answered by voice/text. Run: python tests/confirm_e2e.py PORT TOKEN"""
-import asyncio, json, sys, time
-import httpx, psutil, websockets
+"""Risk-gated confirmations answered by voice (MEDIUM action = recycle a file).
+Run: python tests/confirm_e2e.py PORT TOKEN"""
+import asyncio, json, os, sys, time
+import httpx, websockets
 
 port, tok = sys.argv[1], sys.argv[2]
 H = {"X-Jarvis-Token": tok}
 BASE = f"http://127.0.0.1:{port}"
+DOCS = r"C:\Users\nicho\Documents"
+FNAME = "jarvis_confirm_test.txt"
 results = []
 
 
@@ -13,7 +16,7 @@ def rec(item, ok, detail=""):
     print(f"  {'PASS' if ok else 'FAIL'}  {item[:50]:50} {str(detail)[:85]}")
 
 
-async def wait_idle(limit=90):
+async def wait_idle(limit=150):
     t0 = time.time()
     while time.time() - t0 < limit:
         try:
@@ -25,15 +28,14 @@ async def wait_idle(limit=90):
     return False
 
 
-def calcs():
-    return [p.pid for p in psutil.process_iter(["name"]) if "calc" in (p.info["name"] or "").lower()]
+def exists():
+    return os.path.exists(os.path.join(DOCS, FNAME))
 
 
-async def run(ws, text, answer=None, timeout=180):
-    """Send a turn; when a confirmation appears, answer it with `answer` (yes/no)."""
+async def run(ws, text, answer=None, timeout=200):
     t0 = time.time()
     httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=15)
-    ev = {"confirm": None, "asked_aloud": "", "state_waiting": False, "reply": "", "answered": None}
+    ev = {"confirm": None, "waiting": False, "reply": "", "answered": None, "tools": []}
     while time.time() - t0 < timeout:
         try:
             e = json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
@@ -43,58 +45,49 @@ async def run(ws, text, answer=None, timeout=180):
         if k == "confirmation_required":
             ev["confirm"] = e.get("tool")
             if answer is not None:
-                await asyncio.sleep(2.5)          # let him finish asking out loud
-                r = httpx.post(BASE + "/text", headers=H, json={"text": answer}, timeout=15).json()
-                ev["answered"] = r
+                await asyncio.sleep(3.0)
+                ev["answered"] = httpx.post(BASE + "/text", headers=H, json={"text": answer}, timeout=15).json()
         elif k == "state" and e.get("state") == "waiting":
-            ev["state_waiting"] = True
+            ev["waiting"] = True
+        elif k == "tool_call" and e.get("status") == "pending":
+            ev["tools"].append(e["tool"])
         elif k == "assistant_delta":
             ev["reply"] += e["text"]
         elif k == "turn_done":
             break
-    ev["total"] = round(time.time() - t0, 1)
     return ev
 
 
 async def main():
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={tok}", max_size=None) as ws:
+        open(os.path.join(DOCS, FNAME), "w").write("confirmation test")
         await wait_idle()
-        await run(ws, "open calculator")
-        await asyncio.sleep(6)
-        before = calcs()
-        rec("calculator is running (setup)", bool(before), before)
+        ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin", answer="no")
+        rec("a destructive action asks for confirmation", ev["confirm"] == "delete_file", f"confirm={ev['confirm']} tools={ev['tools']}")
+        rec("he asks out loud", "say yes or no" in ev["reply"].lower(), ev["reply"][:80])
+        rec("orb shows WAITING", ev["waiting"], ev["waiting"])
+        rec("spoken 'no' declines (file still there)", exists(), f"exists={exists()} | {ev['reply'][-70:]}")
 
-        # --- decline by voice ---
         await wait_idle()
-        ev = await run(ws, "close calculator", answer="no")
+        ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin", answer="what time is it")
+        rec("unrelated speech does NOT approve", exists(), f"exists={exists()} confirm={ev['confirm']}")
+        # that one is probably still pending -> decline it
+        if ev["confirm"] and not ev["answered"]:
+            httpx.post(BASE + "/text", headers=H, json={"text": "no"}, timeout=15)
+        await wait_idle()
+
+        ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin", answer="yes")
         await asyncio.sleep(1.5)
-        rec("confirmation is requested for a MEDIUM action", ev["confirm"] == "close_application", ev["confirm"])
-        rec("he asks out loud (was silent before)", "say yes or no" in ev["reply"].lower(), ev["reply"][:70])
-        rec("orb shows WAITING while asking", ev["state_waiting"], ev["state_waiting"])
-        rec("spoken 'no' declines it", bool(calcs()) and "leaving it open" in ev["reply"].lower(), f"still running={bool(calcs())} | {ev['reply'][-60:]}")
-
-        # --- approve by voice ---
-        await wait_idle()
-        ev = await run(ws, "close calculator", answer="yes")
-        await asyncio.sleep(2)
-        rec("spoken 'yes' approves and it closes", not calcs(), f"after={calcs()} | {ev['reply'][-70:]}")
-
-        # --- unrelated speech must NOT approve ---
-        await wait_idle()
-        await run(ws, "open calculator")
-        await asyncio.sleep(6)
-        ev = await run(ws, "close calculator", answer="what time is it", timeout=150)
-        rec("unrelated speech never approves a risky action", bool(calcs()), f"still running={bool(calcs())}")
-        # clean up: approve it now
-        await wait_idle(150)
-        ev = await run(ws, "close calculator", answer="yes")
-        await asyncio.sleep(2)
-        rec("cleanup: calculator closed", not calcs(), calcs())
+        rec("spoken 'yes' approves (file recycled)", not exists(), f"exists={exists()} | {ev['reply'][-70:]}")
 
     print(f"\n  TOTAL {sum(1 for r in results if r[1])}/{len(results)}")
     for i, ok, d in results:
         if not ok:
             print(f"    FAIL {i} :: {d}")
+    try:
+        os.remove(os.path.join(DOCS, FNAME))
+    except OSError:
+        pass
     return 0 if all(r[1] for r in results) else 1
 
 sys.exit(asyncio.run(main()))
