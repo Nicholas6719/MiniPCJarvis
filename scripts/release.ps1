@@ -51,6 +51,9 @@ while ((Get-Date) -lt $deadline) {
 }
 if (-not $port) { & $log "APP DID NOT COME UP"; exit 1 }
 [IO.File]::WriteAllText('C:\Users\nicho\Documents\jarvis_real.txt', "$port $tok")
+# the wake model loads lazily after boot: the voice suite is a false failure before it's up
+$deadline = (Get-Date).AddSeconds(120)
+while ((Get-Date) -lt $deadline) { try { $dg = Invoke-RestMethod "http://127.0.0.1:$port/diagnostics" -Headers @{'X-Jarvis-Token'=$tok} -TimeoutSec 20; if (($dg.checks | Where-Object name -eq 'Wake Word').status -eq 'ok') { break } } catch {}; Start-Sleep 5 }
 Start-Sleep 15
 & $log "app up on :$port"
 

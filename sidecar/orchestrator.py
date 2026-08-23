@@ -973,7 +973,7 @@ class Orchestrator:
                     break
                 if self._speak_cancel.is_set():
                     continue
-                if not spoke:
+                if not spoke or self.sm.state != State.SPEAKING:
                     await self.sm.to(State.SPEAKING, force=True)
                     spoke = True
                 await bus.emit("speaking", text=sentence)
@@ -1008,7 +1008,7 @@ class Orchestrator:
         try:
             while True:
                 block = await q.get()
-                if self.sm.state != State.SPEAKING:
+                if self._speak_cancel.is_set():
                     consec = 0
                     continue
                 mode = config.get("interrupt", "mode", default="wake_word")
