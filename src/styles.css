@@ -921,3 +921,32 @@ body {
 .brain__skill.is-fail { border-color: var(--red); }
 .hud__sub { display: none; }
 @media (min-width: 1500px) { .hud__sub { display: inline; } }
+
+
+/* ---------- ambient HUD ---------- */
+.hud__header { transition: opacity 0.25s; }
+.hud__nav { transition: opacity 0.25s, transform 0.25s; opacity: 0; transform: translateY(-6px); pointer-events: none; }
+.hud--nav .hud__nav { opacity: 1; transform: none; pointer-events: auto; }
+.hud__pin { margin-left: 10px; border-color: var(--line); }
+.hud__header { border-bottom-color: transparent; }
+.hud--panel .hud__header { border-bottom-color: var(--line); }
+
+.hud--ambient .hud__main { grid-template-columns: 1fr; place-items: center; }
+.hud--ambient .hud__left { width: 100%; }
+.hud--panel .hud__main { grid-template-columns: 300px minmax(0, 1fr); }
+.hud--panel .hud__main:has(.hud__right) { grid-template-columns: 300px minmax(0, 1fr) 320px; }
+
+.hud__ambient { width: min(720px, 86vw); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.ambient { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.ambient__exchange { display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; }
+.ambient__you { font-family: "Rajdhani", sans-serif; font-size: 15px; color: var(--text-dim); }
+.ambient__jarvis { font-family: "Rajdhani", sans-serif; font-size: 19px; line-height: 1.45; color: var(--text); max-width: 680px; }
+.ambient__hint { font-family: "Share Tech Mono", monospace; font-size: 11px; letter-spacing: 0.18em; color: var(--text-dim); text-transform: uppercase; }
+.ambient__doing { font-family: "Share Tech Mono", monospace; font-size: 11px; letter-spacing: 0.22em; color: var(--cyan); text-transform: uppercase; animation: blink 1.4s steps(1) infinite; }
+.ambient__input { width: min(520px, 80vw); background: transparent; border: none; border-bottom: 1px solid var(--line); color: var(--text); font-family: "Rajdhani", sans-serif; font-size: 15px; padding: 6px 4px; text-align: center; outline: none; opacity: 0.55; transition: opacity 0.2s, border-color 0.2s; }
+.ambient__input:focus { opacity: 1; border-bottom-color: var(--cyan); }
+
+/* the orb is the centerpiece in ambient mode */
+.hud--ambient .hud__corebtn { padding: 10px 30px 0; }
+.hud__center, .hud__right { animation: panelIn 0.28s ease-out; }
+@keyframes panelIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

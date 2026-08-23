@@ -259,6 +259,32 @@ def say_weather(slots: dict, res: dict) -> str:
     return f"It's {now.get('temp')} degrees and {now.get('conditions')} in {loc}{feels}. Today's high is {d.get('high')}, low {d.get('low')}.{rain}"
 
 
+_UI_VIEWS = {"files": "files", "file": "files", "apps": "apps", "app": "apps", "windows": "apps", "system": "system",
+             "browser": "browser", "web": "browser", "memory": "memory", "memories": "memory", "tasks": "tasks",
+             "reminders": "tasks", "diagnostics": "diagnostics", "settings": "settings", "conversation": "conversation",
+             "chat": "conversation", "media": "media", "pictures": "media", "research": "research"}
+
+
+def slots_ui(t: str) -> dict | None:
+    if re.search(r"\b(?:hide|close|clear|dismiss)\b.*\b(?:everything|all|the panels?|the tabs?|that|this|it)\b|^(?:hide|dismiss)\b", t):
+        return {"action": "hide"}
+    if re.search(r"\b(?:pin|keep)\b.*\b(?:that|this|it|the panel|the tab|open|up)\b", t):
+        return {"action": "pin"}
+    if re.search(r"\bunpin\b|\bstop pinning\b|\blet it (?:go|fade)\b", t):
+        return {"action": "unpin"}
+    if re.search(r"\b(?:show|bring up|pull up|open|display)\b.*\b(?:tabs|menu|navigation|nav|the bar|panels|hidden)\b", t):
+        return {"action": "tabs"}
+    m = re.search(r"\b(?:show|bring up|pull up|open|go to|display|switch to)\b\s+(?:me\s+)?(?:the\s+|my\s+)?([a-z]+)\s*(?:tab|panel|view|screen)\b", t)
+    if m and m.group(1) in _UI_VIEWS:
+        return {"action": "show", "view": _UI_VIEWS[m.group(1)]}
+    return None
+
+
+def say_ui(slots: dict, res: dict) -> str:
+    a = slots.get("action")
+    return {"hide": "Done.", "pin": "Pinned.", "unpin": "Unpinned.", "tabs": "Here are the tabs."}.get(a, "Here you go.")
+
+
 def say_lock(_: dict, res: dict) -> str:
     return "Locking." if "error" not in res else "I couldn't lock the computer."
 
@@ -456,7 +482,7 @@ class Skill:
         return _LABELS.get(self.name, self.name.replace("_", " "))
 
 
-_LABELS = {"read_site": "read the site", "weather": "check the weather", "watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+_LABELS = {"ui": "change the view", "read_site": "read the site", "weather": "check the weather", "watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
            "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
            "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
            "remember": "remember it", "stats": "check the system", "windows": "list your windows",
@@ -608,6 +634,12 @@ SKILLS: list[Skill] = [
         "is it cold out", "what's the weather like in london right now", "weather for tomorrow in framingham",
         "will it rain tonight", "is it raining right now", "will it snow tomorrow", "is it going to be hot today"],
         slots=slots_weather, speak=say_weather),
+    Skill("ui", None, [
+        "show me the files tab", "show the apps tab", "bring up the system panel", "open the settings tab",
+        "show me the tabs", "show the hidden tabs", "bring up the menu", "pin that", "keep that panel up",
+        "unpin it", "hide everything", "clear the panels", "dismiss that", "show the browser tab",
+        "pull up the diagnostics panel", "show me the memory tab", "go to the tasks tab"],
+        slots=slots_ui, speak=say_ui),
     Skill("lock", "lock_computer", [
         "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
         "lock the workstation", "lock windows", "lock up"],

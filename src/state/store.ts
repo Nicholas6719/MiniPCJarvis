@@ -97,6 +97,14 @@ interface Store {
   armedUntil: number;      // epoch seconds; follow-up window open while now < armedUntil
   configVersion: number;   // bumps on config_changed so views can refetch
   autoSwitch: boolean;
+  // ---- ambient HUD: panels surface when used, fade back after the turn ----
+  ambient: boolean;        // true = only orb + last exchange on screen
+  pinned: boolean;         // user pinned the current panel (stays until unpinned)
+  panelUntil: number;      // epoch ms; after this (and idle) the HUD returns to ambient
+  navVisible: boolean;     // tab bar revealed (mouse at top edge / pinned / voice)
+  hovering: boolean;       // mouse is inside the panel: never auto-hide under the cursor
+  doing: string;           // one-line "what I'm doing" shown under the orb during a turn
+  holdMs: number;          // how long a panel stays after a turn (Settings)
   transcript: TranscriptEntry[];
   activity: ActivityEntry[];
   confirmation: Confirmation | null;
@@ -111,6 +119,12 @@ interface Store {
   setWakeMode: (m: string) => void;
   setRightPanel: (p: RightPanel) => void;
   setFilePreview: (p: FilePreview | null) => void;
+  surface: (v: View, opts?: { pin?: boolean; hold?: number }) => void;
+  collapse: () => void;
+  setPinned: (b: boolean) => void;
+  setNavVisible: (b: boolean) => void;
+  setHovering: (b: boolean) => void;
+  setHoldMs: (n: number) => void;
 }
 
 let draftId = "";
@@ -128,6 +142,13 @@ export const useStore = create<Store>((set, get) => ({
   armedUntil: 0,
   configVersion: 0,
   autoSwitch: true,
+  ambient: true,
+  pinned: false,
+  panelUntil: 0,
+  navVisible: false,
+  hovering: false,
+  doing: "",
+  holdMs: 12000,
   transcript: [],
   activity: [],
   confirmation: null,
@@ -138,7 +159,18 @@ export const useStore = create<Store>((set, get) => ({
   setWakeMode: (m) => set({ wakeMode: m }),
   setRightPanel: (p) => set({ rightPanel: p }),
   setFilePreview: (p) => set({ filePreview: p }),
-  setView: (v) => set({ view: v }),
+  // a click on a tab is an explicit request: show it and pin it
+  setView: (v) => set({ view: v, ambient: false, pinned: true, navVisible: true }),
+  surface: (v, opts) => set((st) => ({
+    view: v, ambient: false,
+    pinned: opts?.pin ?? st.pinned,
+    panelUntil: Date.now() + (opts?.hold ?? 10 * 60 * 1000),   // held until the turn ends
+  })),
+  collapse: () => set({ ambient: true, pinned: false, navVisible: false, view: "conversation", rightPanel: "activity", panelUntil: 0 }),
+  setPinned: (b) => set({ pinned: b }),
+  setNavVisible: (b) => set({ navVisible: b }),
+  setHovering: (b) => set({ hovering: b }),
+  setHoldMs: (n) => set({ holdMs: n }),
   setAutoSwitch: (b) => set({ autoSwitch: b }),
   clearConfirmation: () => set({ confirmation: null }),
   hydrateTranscript: (rows) =>
@@ -168,10 +200,7 @@ export const useStore = create<Store>((set, get) => ({
             { id: evt.id, role: "user", text: evt.text, ts: evt.ts },
           ],
           assistantDraft: "",
-          // a new request returns to the conversation; research/media views only
-          // take over again if the new turn actually produces that activity
-          view: st.autoSwitch && (st.view === "media" || st.view === "research" || st.view === "browser" || st.view === "files") ? "conversation" : st.view,
-          rightPanel: st.rightPanel === "web" && st.autoSwitch ? "activity" : st.rightPanel,
+          doing: "",
         }));
         draftId = "";
         break;
@@ -202,9 +231,11 @@ export const useStore = create<Store>((set, get) => ({
         }
         draftId = "";
         push({ id: evt.id, ts: evt.ts, kind: "turn", summary: `turn complete (${evt.latency_ms} ms)` });
+        set((st) => ({ doing: "", panelUntil: st.ambient ? 0 : Date.now() + st.holdMs }));
         break;
       }
       case "tool_call":
+        if (evt.status === "pending") set({ doing: `${String(evt.tool).replace(/_/g, " ")}…` });
         push({
           id: evt.id, ts: evt.ts, kind: "tool", status: evt.status,
           summary: `${evt.tool} — ${evt.status}${evt.latency_ms ? ` (${evt.latency_ms} ms)` : ""}`,
@@ -255,6 +286,8 @@ export const useStore = create<Store>((set, get) => ({
             web,
             // dynamic view switching: research activity pulls up the research view
             view: st.autoSwitch ? "research" : st.view,
+            ambient: st.autoSwitch ? false : st.ambient,
+            panelUntil: Date.now() + 10 * 60 * 1000,
           };
         });
         break;
@@ -271,7 +304,7 @@ export const useStore = create<Store>((set, get) => ({
             next.stage = "reading";
           }
           if (evt.error) next.error = evt.error;
-          return { web: next, rightPanel: "web" };
+          return { web: next, rightPanel: "web", ambient: false, panelUntil: Date.now() + 10 * 60 * 1000 };
         });
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `web: ${evt.stage}${evt.query ? ` "${evt.query}"` : ""}` });
         break;
@@ -280,6 +313,7 @@ export const useStore = create<Store>((set, get) => ({
         set((st) => ({
           browser: { url: evt.url, title: evt.title, text: evt.text, shot: evt.shot, action: evt.action, error: evt.error, ts: evt.ts },
           view: st.autoSwitch ? "browser" : st.view,
+          ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000,
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `browser: ${evt.action} ${evt.title ? `"${evt.title}"` : evt.url ?? ""}` });
         break;
@@ -287,22 +321,26 @@ export const useStore = create<Store>((set, get) => ({
         set((st) => ({
           files: { path: evt.path, label: evt.label, parent: evt.parent, count: evt.count, entries: evt.entries ?? [], roots: evt.roots ?? {}, query: evt.query, ts: evt.ts },
           view: st.autoSwitch ? "files" : st.view,
+          ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000,
         }));
         push({ id: evt.id, ts: evt.ts, kind: "files", summary: `files: ${evt.label} (${evt.count})` });
         break;
       case "file_preview":
         set((st) => ({ filePreview: { path: evt.path, name: evt.name, type: evt.type, text: evt.text, data: evt.data, size: evt.size },
-                       view: st.autoSwitch ? "files" : st.view }));
+                       view: st.autoSwitch ? "files" : st.view,
+                       ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000 }));
         push({ id: evt.id, ts: evt.ts, kind: "files", summary: `preview: ${evt.name}` });
         break;
       case "images":
         set((st) => ({
           media: { query: evt.query, images: evt.images ?? [], ts: evt.ts },
           view: st.autoSwitch ? "media" : st.view,
+          ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000,
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
         break;
       case "reflex":
+        if (evt.skill && evt.skill !== "general") set({ doing: String(evt.skill).replace(/_/g, " ") });
         push({
           id: evt.id, ts: evt.ts, kind: "reflex",
           summary: `brain: ${evt.skill} (${Math.round((evt.confidence ?? 0) * 100)}%)${evt.mode === "tool_then_llm" ? " → tool, then LLM" : evt.mode === "answer_directly" ? " → LLM answers directly (tools off)" : evt.mode === "answer_hint" ? " → LLM answers directly" : " — no LLM"}`,
@@ -336,8 +374,17 @@ export const useStore = create<Store>((set, get) => ({
         push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
         break;
       case "set_view":   // debug/remote: switch the HUD view (used by UI self-tests)
-        set({ view: evt.view as View });
+        set({ view: evt.view as View, ambient: false, pinned: true, navVisible: true });
         break;
+      case "ui": {       // voice: "show the files tab" / "show me the tabs" / "pin that" / "hide everything"
+        const a = evt.action;
+        if (a === "show" && evt.view) set({ view: evt.view as View, ambient: false, pinned: true, navVisible: true });
+        else if (a === "tabs") set((st) => ({ navVisible: true, ambient: false, panelUntil: Date.now() + st.holdMs * 2 }));
+        else if (a === "pin") set({ pinned: true, ambient: false });
+        else if (a === "unpin") set((st) => ({ pinned: false, panelUntil: Date.now() + st.holdMs }));
+        else if (a === "hide") set({ ambient: true, pinned: false, navVisible: false, view: "conversation", rightPanel: "activity", panelUntil: 0 });
+        break;
+      }
       case "config_changed":
         push({ id: evt.id, ts: evt.ts, kind: "config", summary: `settings applied: ${(evt.applied ?? []).join(", ") || "saved"}` });
         set((st) => ({ configVersion: st.configVersion + 1 }));

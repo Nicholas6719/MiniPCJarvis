@@ -121,6 +121,11 @@ export function SettingsView() {
             <span className="toggle__knob" />
           </button>
         </label>
+        <label className="settings__row">
+          <span>Panels fade back to the orb after (seconds)</span>
+          <input type="number" min={3} max={120} value={cfg.ui?.panel_hold_s ?? 12}
+                 onChange={(e) => patch({ ui: { panel_hold_s: Number(e.target.value) } })} />
+        </label>
         <label className="settings__row settings__row--toggle">
           <span>Speak while thinking ("Let me see.", "Searching.") so replies feel instant</span>
           <button className={`toggle ${cfg.speech?.fillers !== false ? "toggle--on" : ""}`}

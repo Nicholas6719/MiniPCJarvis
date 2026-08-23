@@ -830,7 +830,13 @@ class Orchestrator:
         self._speak_cancel = asyncio.Event()
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         task = asyncio.create_task(self._speaker_worker(queue))
-        if skill.name == "teach":
+        if skill.name == "ui":
+            await bus.emit("ui", **args)
+            reply = skill.speak(args, {})
+            self.metrics.mark("first_token_ms")
+            await bus.emit("assistant_delta", text=reply)
+            await queue.put(clean_for_speech(reply))
+        elif skill.name == "teach":
             reply = await self._teach(args, queue)
         elif skill.name == "correction":
             reply = await self._correct(args, queue, t_start)
