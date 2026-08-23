@@ -59,35 +59,28 @@ async def run(ws, text, answer=None, timeout=200):
 
 
 async def main():
+    """Only shutdown/restart still confirm. We NEVER answer yes here."""
+    open(os.path.join(DOCS, FNAME), "w").write("confirmation test")
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={tok}", max_size=None) as ws:
-        open(os.path.join(DOCS, FNAME), "w").write("confirmation test")
         await wait_idle()
-        ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin", answer="no")
-        rec("a destructive action asks for confirmation", ev["confirm"] == "delete_file", f"confirm={ev['confirm']} tools={ev['tools']}")
+        ev = await run(ws, "restart the computer", answer="no")
+        rec("shutdown/restart asks for confirmation", ev["confirm"] == "power_action", f"confirm={ev['confirm']} tools={ev['tools']}")
         rec("he asks out loud", "say yes or no" in ev["reply"].lower(), ev["reply"][:80])
         rec("orb shows WAITING", ev["waiting"], ev["waiting"])
-        rec("spoken 'no' declines (file still there)", exists(), f"exists={exists()} | {ev['reply'][-70:]}")
-
+        rec("spoken 'no' declines and he stops asking", "leaving it" in ev["reply"].lower() and "?" not in ev["reply"].split("Say yes or no.")[-1], ev["reply"][-90:])
         await wait_idle()
-        ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin", answer="what time is it")
-        rec("unrelated speech does NOT approve", exists(), f"exists={exists()} confirm={ev['confirm']}")
-        # that one is probably still pending -> decline it
-        if ev["confirm"] and not ev["answered"]:
+        ev = await run(ws, "restart the computer", answer="what time is it")
+        rec("unrelated speech does NOT approve (still asked, PC still on)", ev["confirm"] == "power_action", f"confirm={ev['confirm']}")
+        if ev["confirm"]:
             httpx.post(BASE + "/text", headers=H, json={"text": "no"}, timeout=15)
         await wait_idle()
+        ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin")
+        rec("recycling a file needs NO confirmation now", ev["confirm"] is None and not exists(), f"confirm={ev['confirm']} exists={exists()} | {ev['reply'][:60]}")
 
-        ev = await run(ws, f"send the file {FNAME} in my documents to the recycle bin", answer="yes")
-        await asyncio.sleep(1.5)
-        rec("spoken 'yes' approves (file recycled)", not exists(), f"exists={exists()} | {ev['reply'][-70:]}")
-
-    print(f"\n  TOTAL {sum(1 for r in results if r[1])}/{len(results)}")
+    print(f"  TOTAL {sum(1 for r in results if r[1])}/{len(results)}")
     for i, ok, d in results:
         if not ok:
             print(f"    FAIL {i} :: {d}")
-    try:
-        os.remove(os.path.join(DOCS, FNAME))
-    except OSError:
-        pass
     return 0 if all(r[1] for r in results) else 1
 
 sys.exit(asyncio.run(main()))

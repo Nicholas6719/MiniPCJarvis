@@ -2,7 +2,7 @@
 Desktop / Documents / Downloads / Pictures without leaving the HUD.
 
 Everything is sandboxed to those roots (from config "folders"). Deletes go to the
-Recycle Bin (undoable). Write operations are MEDIUM risk -> confirmation gated."""
+Recycle Bin (undoable). Everything is reversible (Recycle Bin / move back), so nothing asks for confirmation."""
 from __future__ import annotations
 
 import base64
@@ -302,18 +302,18 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "path": {"type": "string"}, "destination": {"type": "string"}},
             "required": ["path", "destination"]},
-        risk=Risk.MEDIUM, handler=move_file, timeout=60))
+        risk=Risk.LOW, handler=move_file, timeout=60))
     registry.register(Tool(
         name="rename_file",
         description="Rename a file or folder (keeps the extension if none is given).",
         parameters={"type": "object", "properties": {
             "path": {"type": "string"}, "new_name": {"type": "string"}}, "required": ["path", "new_name"]},
-        risk=Risk.MEDIUM, handler=rename_file, timeout=20))
+        risk=Risk.LOW, handler=rename_file, timeout=20))
     registry.register(Tool(
         name="delete_file",
         description="Send a file or folder to the Recycle Bin (undoable).",
         parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-        risk=Risk.MEDIUM, handler=delete_file, timeout=60))
+        risk=Risk.LOW, handler=delete_file, timeout=60))
     registry.register(Tool(
         name="open_with_windows",
         description="Open a file in its default Windows application (only when the user explicitly "

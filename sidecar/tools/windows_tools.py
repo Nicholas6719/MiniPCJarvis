@@ -327,7 +327,7 @@ def register_all() -> None:
         description="Close a window by (partial) title match (sends a normal close request).",
         parameters={"type": "object", "properties": {
             "title": {"type": "string"}}, "required": ["title"]},
-        risk=Risk.MEDIUM, handler=close_window))
+        risk=Risk.LOW, handler=close_window))
     registry.register(T(
         name="get_volume",
         description="Get the current system volume and mute state.",
@@ -388,7 +388,7 @@ def register_all() -> None:
         name="lock_computer",
         description="Lock the Windows session immediately.",
         parameters={"type": "object", "properties": {}, "required": []},
-        risk=Risk.MEDIUM, handler=lock_computer))
+        risk=Risk.LOW, handler=lock_computer))
     registry.register(T(
         name="power_action",
         description="Sleep, shut down, or restart the computer.",
