@@ -246,6 +246,30 @@ but the user's folder was empty; log files diverge.
 - Brain misfires fixed: "what time is it in london" (was local time), "open budget.xlsx"
   (was app launch), "search my documents" (was a web search).
 
+- PERSONA ("he barely says sir"). Measured the real thing rather than guessing: pulled
+  the four Iron Man/Avengers screenplays, 97 JARVIS lines — 37% carry "sir", median line
+  is 7 words, and it sits either at the FRONT of something he raises himself ("Sir, the
+  city is taking fire.") or the END of an acknowledgement ("Very good, sir."). Two causes:
+  the system prompt said to use it "sparingly", and the REFLEX PATH NEVER TOUCHES THE LLM,
+  so no prompt change could ever have fixed the fast path. Fix is `polish()` in
+  `brain/skills.py` — the single point every spoken reflex line passes through
+  (`orchestrator._exec_skill`). Rules: film-matching rate, never twice in a line, never two
+  lines running, front-loaded for alerts/announcements, long reports left alone, and
+  "I couldn't ..." softened to "I'm afraid I couldn't ..." ~half the time. Config knob:
+  `persona.honorific` / `persona.honorific_rate` (0.55 config = ~35% observed, because the
+  never-two-running latch suppresses roughly a third of draws — do not read the config
+  number as the output rate). Guarded by `tests/test_persona.py` in the build gate.
+- TTS PHRASE CACHE. Re-synthesising "Muted." cost ~500 ms EVERY time. `TTSRouter` now
+  caches by exact text (engine+voice+rate keyed, cleared on `reload()`), warmed in the
+  background 20 s after boot from `WARM_PHRASES` (fillers, fixed acks, round volume
+  values, plus their ", sir." variants). Live: first_audio 617 ms -> 32 ms, total turn
+  2.9 s -> 1.0 s. Time/date/stats lines vary by nature and stay uncached.
+- BRAIN 65 ms -> 42 ms per decision. (1) One turn embedded the same text up to three
+  times (`match_command`, `classify`, `general_level`) — now an LRU in `_embed`.
+  (2) fastembed pinned to ONE thread: measured 39 ms vs 57 ms default vs 80 ms on eight.
+  A single short phrase is too little work to fan across cores, and it leaves the CPU to
+  llama-server. Knob: `brain.embed_threads`.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
