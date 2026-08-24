@@ -289,18 +289,31 @@ but the user's folder was empty; log files diverge.
   hundred four" both transcribe to "204"), so compare synthesized DURATION against both
   spellings and require the correct one to be closer.
 - SAMPLING was never sent to llama-server, so its chat defaults (temp 0.8, top_p 0.95)
-  applied. Now explicit and configurable (`llm.sampling`, per-model, and per-call for
-  benchmarks). HONEST FINDING: temperature does NOT measurably change factual accuracy
-  here — measured 60/60 vs 59/60 through the real pipeline, and the single real error was
-  at the LOW temperature. The gain is run-to-run CONSISTENCY (same question, same answer),
-  which was the actual complaint. Creative requests (`CREATIVE_INTENT` in orchestrator)
-  get their own higher temperature so precision on facts doesn't make his jokes and poems
-  bland. `tests/accuracy_bench.py` (fast, via `/debug/llm_probe`) sweeps settings;
-  `tests/temp_ab.py` A/Bs through the real pipeline.
-  BENCHMARK TRAP, cost me a whole run: asking the same question several times IN A ROW
-  proves nothing — the first answer lands in the conversation history and the model just
-  repeats it, so every setting scores 100%. Ask each question ONCE inside a long run of
-  different questions, and repeat the whole sequence.
+  applied — creative-writing sampling on an assistant whose job is mostly stating facts.
+  Now explicit and configurable (`llm.sampling`, per-model, and per-call for benchmarks).
+  Measured, 20 verifiable questions x 4 runs, word-for-word (`tests/accuracy_bench.py`):
+
+      temp 0.8   accuracy  99%   consistency   5%
+      temp 0.15  accuracy 100%   consistency  45%
+      temp 0.0   accuracy 100%   consistency  85%
+
+  HONEST FINDING: temperature does NOT measurably change factual ACCURACY here — an
+  interleaved A/B through the real pipeline scored 60/60 at 0.8 vs 59/60 at 0.15, and the
+  one genuine error was at the LOW temperature. What it changes is run-to-run CONSISTENCY,
+  which was the actual complaint. Hence greedy (0.0) for facts, with `CREATIVE_INTENT` in
+  orchestrator routing jokes/poems/brainstorms to 0.85. Checked after the change: no
+  repetition loops on long answers, tool turns fine, 4/4 distinct haiku, 3/3 distinct jokes.
+  BENCHMARK TRAP, cost a whole run: asking the same question several times IN A ROW proves
+  nothing — the first answer lands in the conversation history and the model just repeats
+  it, so every setting scores 100%. Ask each question ONCE inside a long run of different
+  questions and repeat the whole sequence (`tests/temp_ab.py` does it correctly).
+- BACKGROUND WORK MUST YIELD TO HIM. The TTS phrase warm (78 syntheses, from 20 s after
+  boot) originally ran unsynchronised against live turns on a single Kokoro ONNX session.
+  A release-time voice test caught it: a reply arrived so late it landed in the NEXT
+  test's window, failing BARE JARVIS. Synthesis is now serialized (cache hits skip the
+  lock, so warmed phrases stay instant) and the warm loop waits on `tts.idle`, an Event
+  the speaker task clears while talking. If you add any other background model work,
+  gate it the same way — the symptom looks like a flaky test, not a latency bug.
 - NAME GATE: `tests/check_names.py` (pyflakes) now runs FIRST in the build. `compileall`
   only checks syntax, so a name imported inside one function and used in another compiles
   fine and NameErrors at runtime — that shipped once as `without_honorific`, and the
