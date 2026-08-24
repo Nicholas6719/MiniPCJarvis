@@ -177,6 +177,7 @@ class Orchestrator:
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
         self._device_task = asyncio.create_task(self._device_watch())
         asyncio.create_task(self._warm_prompts())
+        asyncio.create_task(tts.warm_phrases())
         if config.get("audio", "boot_sound", default=True):
             asyncio.create_task(self.play_sound("boot"))
         await self.sm.to(State.IDLE)
@@ -335,6 +336,8 @@ class Orchestrator:
     # ---------- proactive announcements ----------
 
     async def announce(self, text: str) -> None:
+        from brain.skills import honorific as _hon
+        text = _hon(text, kind="alert")
         """Speak proactively (reminders etc). Only interrupts IDLE; otherwise
         the message still reaches the user via the event stream/transcript."""
         await bus.emit("announcement", text=text)
@@ -744,9 +747,10 @@ class Orchestrator:
         from brain.skills import SKILL_BY_NAME  # noqa: F401  (kept local: skills import nothing heavy)
         res: dict = {}
         reply = ""
+        from brain.skills import polish
         if skill.speak_first and skill.tool:
             # announce the action immediately ("Opening youtube.com."), then do it
-            reply = skill.speak(args, {})
+            reply = polish(skill.speak(args, {}))
             self.metrics.mark("first_token_ms")
             await bus.emit("assistant_delta", text=reply)
             await queue.put(clean_for_speech(reply))
@@ -768,10 +772,10 @@ class Orchestrator:
                 await queue.put(clean_for_speech(extra))
         else:
             try:
-                reply = skill.speak(args, res)
+                reply = polish(skill.speak(args, res))
             except Exception:
                 log.exception("reflex speak template failed")
-                reply = "Done." if "error" not in res else "That didn't work."
+                reply = "Done." if "error" not in res else "I'm afraid that didn't work."
             self.metrics.mark("first_token_ms")
             await bus.emit("assistant_delta", text=reply)
             await queue.put(clean_for_speech(reply))

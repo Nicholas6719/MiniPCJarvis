@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+from collections import OrderedDict
 import time
 
 import numpy as np
@@ -104,6 +105,7 @@ class Brain:
         self.db.executescript(_SCHEMA)
         self.db.commit()
         self._embedder = None
+        self._vec_cache: "OrderedDict[str, np.ndarray]" = OrderedDict()
         self._texts: list[str] = []
         self._skills: list[str] = []
         self._matrix: np.ndarray | None = None
@@ -117,11 +119,29 @@ class Brain:
     # ---------- embeddings ----------
 
     def _embed(self, texts: list[str]) -> np.ndarray:
+        """Embed a batch. Single texts are cached: one spoken turn asks for the same
+        vector up to three times (custom-command match, classify, general_level), and
+        the embedding is essentially the whole cost of a brain decision."""
+        if len(texts) == 1:
+            hit = self._vec_cache.get(texts[0])
+            if hit is not None:
+                self._vec_cache.move_to_end(texts[0])
+                return hit
         if self._embedder is None:
             from fastembed import TextEmbedding
-            self._embedder = TextEmbedding("BAAI/bge-small-en-v1.5")
+            # One short phrase is far too little work to be worth fanning across cores:
+            # measured 39 ms single-threaded vs 57 ms default vs 80 ms on 8 threads.
+            # It also leaves the CPU to llama-server, which needs it far more.
+            threads = int(config.get("brain", "embed_threads", default=1))
+            self._embedder = TextEmbedding("BAAI/bge-small-en-v1.5",
+                                           threads=threads if threads > 0 else None)
         vecs = np.array(list(self._embedder.embed(texts)), dtype=np.float32)
         vecs /= (np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-9)
+        if len(texts) == 1:
+            self._vec_cache[texts[0]] = vecs
+            self._vec_cache.move_to_end(texts[0])
+            while len(self._vec_cache) > 256:
+                self._vec_cache.popitem(last=False)
         return vecs
 
     # ---------- lifecycle ----------

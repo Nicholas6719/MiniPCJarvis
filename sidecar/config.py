@@ -70,6 +70,9 @@ DEFAULTS: dict[str, Any] = {
     "stt": {"engine": "parakeet", "parakeet_quant": "int8", "model": "base.en", "compute_type": "int8", "device": "cpu"},
     "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
     "speech": {"fillers": True},
+    # ~1 line in 3 carries the honorific, matching JARVIS's actual dialogue (see
+    # brain/skills.py honorific()). Set honorific "" to switch it off entirely.
+    "persona": {"honorific": "sir", "honorific_rate": 0.55},
     "confirm": {"by_voice": True},   # answer shutdown/restart confirmations by saying yes/no
     "ui": {"panel_hold_s": 12},     # seconds a panel stays after a turn before the HUD goes ambient
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin

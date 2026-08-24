@@ -7,9 +7,67 @@ If the extractor can't find what it needs, the request falls through to the LLM.
 from __future__ import annotations
 
 import datetime as dt
+import random
 import re
 from dataclasses import dataclass, field
 from typing import Callable
+
+# ---------- persona ----------
+
+_last_honorific = [False]     # never two lines running
+
+
+_REGRET = re.compile(r"^I (?:couldn't|could not|can't|cannot)\b")
+
+
+def polish(line: str, kind: str = "ack") -> str:
+    """The single place every spoken reflex line gets its voice.
+
+    Bad news in the films is almost never blunt — it is softened first ("I'm afraid
+    the suit isn't ready, sir"), so a flat "I couldn't open Spotify" gets the same
+    treatment about half the time, and leans harder on the honorific when it does.
+    """
+    line = (line or "").strip()
+    if _REGRET.search(line):
+        if random.random() < 0.5:
+            line = "I'm afraid " + line   # the pattern always starts with the pronoun
+        return honorific(line, kind, rate=0.5)
+    return honorific(line, kind)
+
+
+def honorific(line: str, kind: str = "ack", rate: float | None = None) -> str:
+    """Address him the way JARVIS actually does.
+
+    Measured over 97 JARVIS lines from the films: 37% carry "sir", almost always either
+    opening something he raises himself ("Sir, the city is taking fire.") or closing an
+    acknowledgement ("Very good, sir."). Reflex replies never went through the language
+    model, which is why he had effectively stopped saying it at all.
+    """
+    from config import config
+    word = str(config.get("persona", "honorific", default="sir")).strip()
+    if rate is None:
+        rate = float(config.get("persona", "honorific_rate", default=0.55))
+    line = (line or "").strip()
+    if not word or rate <= 0 or not line:
+        return line
+    if re.search(rf"\b{re.escape(word)}\b", line, re.I):
+        _last_honorific[0] = True         # already addressed him; don't do it again next line
+        return line
+    if len(line) > 120 or line.count(".") > 2:
+        _last_honorific[0] = False        # long report: an honorific reads as clutter
+        return line
+    if _last_honorific[0] or random.random() >= rate:
+        _last_honorific[0] = False
+        return line
+    _last_honorific[0] = True
+    if kind == "alert":
+        return f"{word.capitalize()}, {line[0].lower()}{line[1:]}"
+    if line.endswith(("?", "!")):
+        return f"{line[:-1]}, {word}{line[-1]}"
+    if line.endswith("."):
+        return f"{line[:-1]}, {word}."
+    return f"{line}, {word}."
+
 
 # ---------- slot extractors ----------
 

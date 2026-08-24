@@ -6,6 +6,7 @@ Both are local/offline and expose the same interface:
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 import logging
 from pathlib import Path
 
@@ -151,12 +152,59 @@ class KokoroTTS:
             yield audio[i:i + step]
 
 
+# Lines JARVIS says constantly. Synthesising one costs ~0.4-0.7 s every single time,
+# which is most of the gap between "he decided" and "he started talking".
+WARM_PHRASES = [
+    "Yes?", "Done.", "Muted.", "Unmuted.", "Noted.", "Locking.", "Cancelled.", "Okay.",
+    "Skipping.", "Going back.", "Stopped.", "Very good, sir.", "Right away, sir.",
+    "Let me see.", "One moment.", "Let me think.", "Hmm, let me check.", "Just a second.",
+    "Searching.", "Let me look that up.", "Checking the web.", "Let me dig into that.",
+    "Researching.", "Finding pictures.", "Opening it.", "Loading the page.",
+    "Let me read that page.", "Let me think back.", "Let me remember.",
+    "Done, sir.", "Noted, sir.", "Muted, sir.", "Okay, sir.",
+    "Unmuted, sir.", "Locking, sir.", "Stopped, sir.",
+] + [f"Volume set to {n} percent{tail}" for n in range(0, 101, 5) for tail in (".", ", sir.")]
+
+
 class TTSRouter:
-    """Selects the engine from config; falls back Kokoro -> Piper."""
+    """Selects the engine from config; falls back Kokoro -> Piper.
+
+    Caches synthesized audio by exact text: JARVIS repeats himself constantly
+    ("Muted.", "One moment.", "Yes?"), and a cache hit turns a ~0.5 s synth into a
+    memcpy — the difference between a reflex that feels instant and one that lags.
+    """
+
+    CACHE_MAX = 160
 
     def __init__(self) -> None:
         self.kokoro = KokoroTTS()
         self.piper = PiperTTS()
+        self._cache: "OrderedDict[tuple, list]" = OrderedDict()
+
+    def _key(self, text: str) -> tuple:
+        return (config.get("tts", "engine", default="kokoro"),
+                str(config.get("tts", "voice", default="bm_george")),
+                float(config.get("tts", "rate", default=1.0)),
+                text.strip())
+
+    async def warm_phrases(self) -> None:
+        """Pre-synthesize the fixed lines in the background after boot."""
+        import asyncio as _a
+        await _a.sleep(20)         # let the model server and the ears finish booting first
+        for phrase in WARM_PHRASES:
+            if self._key(phrase) in self._cache:
+                continue
+            try:
+                cancel = _a.Event()
+                async for _ in self.synthesize_stream(phrase, cancel):
+                    pass
+            except Exception as e:
+                log.debug("phrase warm failed for %r: %s", phrase, e)
+                return
+            # deliberately unhurried: this is background polish, and a real turn
+            # arriving mid-warm must not have to queue behind it
+            await _a.sleep(0.3)
+        log.info("tts cache warmed (%d phrases)", len(self._cache))
 
     def _active(self):
         engine = config.get("tts", "engine", default="kokoro")
@@ -175,6 +223,7 @@ class TTSRouter:
     def reload(self) -> None:
         self.kokoro.reload()
         self.piper.reload()
+        self._cache.clear()          # voice/engine changed: cached audio is stale
 
     async def warmup(self) -> None:
         try:
@@ -185,11 +234,27 @@ class TTSRouter:
 
     async def synthesize_stream(self, text: str, cancel: asyncio.Event):
         active = self._active()
+        key = self._key(text)
+        hit = self._cache.get(key)
+        if hit is not None:
+            self._cache.move_to_end(key)
+            for chunk in hit:
+                if cancel.is_set():
+                    return
+                yield chunk
+            return
+        collected: list = []
         try:
             produced = False
             async for chunk in active.synthesize_stream(text, cancel):
                 produced = True
+                collected.append(chunk)
                 yield chunk
+            if produced and not cancel.is_set() and len(text) <= 60:
+                self._cache[key] = collected
+                self._cache.move_to_end(key)
+                while len(self._cache) > self.CACHE_MAX:
+                    self._cache.popitem(last=False)
             if produced or cancel.is_set():
                 return
         except Exception as e:
