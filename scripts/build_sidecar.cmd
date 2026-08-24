@@ -9,6 +9,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\speech_symbols.py || (echo SPEECH TEST FAILED & exit /b 1)
 .venv\Scripts\pyinstaller jarvis-sidecar.spec --noconfirm --distpath dist --workpath build > "%TEMP%\pyi.log" 2>&1 || (echo PYINSTALLER FAILED & exit /b 1)
 echo SIDECAR BUILD OK
 

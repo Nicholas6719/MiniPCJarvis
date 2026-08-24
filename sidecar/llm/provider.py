@@ -38,6 +38,7 @@ class LocalLLM:
         tools: list[dict] | None = None,
         max_tokens: int = 1024,
         tool_choice: str | None = None,
+        sampling: dict | None = None,
     ) -> AsyncIterator[Chunk]:
         model_name = llama.model_name or config.get("llm", "active_model")
         mcfg = config.get("llm", "models", default={}).get(model_name, {})
@@ -47,6 +48,13 @@ class LocalLLM:
             "stream": True,
             "cache_prompt": True,   # reuse the KV cache for the shared prefix
         }
+        # Send sampling explicitly. Omitting it silently accepted llama-server's
+        # creative-writing defaults, which made simple factual answers vary run to run.
+        body.update(config.get("llm", "sampling", default={}) or {})
+        if mcfg.get("sampling"):
+            body.update(mcfg["sampling"])       # per-model override
+        if sampling:
+            body.update(sampling)               # per-call override (benchmarks)
         tk = mcfg.get("template_kwargs")
         if tk:
             body["chat_template_kwargs"] = tk

@@ -583,6 +583,24 @@ async def debug_confirm_test(x_jarvis_token: str | None = Header(None)):
     return {"ok": True}
 
 
+@app.post("/debug/llm_probe")
+async def debug_llm_probe(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): ask the model one question with no tools and
+    arbitrary sampling, so accuracy can be swept without a rebuild per setting."""
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from llm.prompts import system_prompt, turn_context
+    from llm.provider import local_llm
+    msgs = [{"role": "system", "content": system_prompt()},
+            {"role": "user", "content": turn_context("") + chr(10) + str(body.get("text", ""))}]
+    out = ""
+    async for chunk in local_llm.stream(msgs, max_tokens=int(body.get("max_tokens", 256)),
+                                        sampling=body.get("sampling") or None):
+        out += chunk.text or ""
+    return {"reply": out.strip()}
+
+
 @app.get("/selftest")
 async def selftest_report(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

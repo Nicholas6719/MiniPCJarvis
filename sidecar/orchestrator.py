@@ -64,6 +64,15 @@ CONFIRM_PHRASE = {
     "browser_submit": lambda a: "Submit that form?",
 }
 
+# Facts want one right answer every time; a haiku wants a different one each time. The
+# configured temperature is deliberately low (see config llm.sampling), which is correct
+# for the ~90% of turns that are questions and commands, and deadening for the rest.
+CREATIVE_INTENT = re.compile(
+    r"\b(write|compose|make up|come up with|invent|brainstorm|imagine|pretend|"
+    r"poem|poetry|haiku|limerick|sonnet|story|tale|joke|pun|riddle|song|lyrics|rap|"
+    r"slogan|tagline|caption|nickname|name ideas?|ideas for|be creative|surprise me)\b", re.I)
+CREATIVE_TEMPERATURE = 0.85
+
 STOP_WORDS = re.compile(r"^\s*(stop|cancel|never\s*mind|nevermind|shut\s*up|quiet|that's\s+enough)\W*$", re.I)
 SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
 # A bare "Sir." arrives when the model writes the honorific as its own sentence. It is
@@ -826,7 +835,7 @@ class Orchestrator:
             answer = await self._listen_yes_no()
             if answer is None:
                 if attempt == 0 and registry.has_pending:
-                    await self.speak_line("Sorry, I didn't catch that. Yes or no?")
+                    await self.speak_line("I didn't catch that. Yes or no?")
                     continue
                 return  # give up on voice; the UI modal / 30 s timeout takes over
             if not registry.has_pending:
@@ -1043,8 +1052,11 @@ class Orchestrator:
                 choice = "none"
             # "none" isn't honoured reliably by llama-server's template: omit the tools instead
             round_tools = None if choice == "none" else tools
+            sampling = ({"temperature": CREATIVE_TEMPERATURE}
+                        if CREATIVE_INTENT.search(raw_user or "") else None)
             async for chunk in local_llm.stream(messages, tools=round_tools, max_tokens=4096,
-                                                tool_choice=None if choice == "none" else choice):
+                                                tool_choice=None if choice == "none" else choice,
+                                                sampling=sampling):
                 if self._speak_cancel.is_set():
                     # user interrupted: stop generating AND stop streaming to the UI
                     cancelled = True
@@ -1086,7 +1098,7 @@ class Orchestrator:
                     continue
                 if not full_text.strip():
                     # never end a turn in silence
-                    fallback = "Sorry, I lost my train of thought. Ask me again?"
+                    fallback = "I'm afraid I lost that. Would you say it again?"
                     await bus.emit("assistant_delta", text=fallback)
                     await speak_queue.put(clean_for_speech(fallback))
                     return fallback

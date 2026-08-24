@@ -18,8 +18,41 @@ _UNIX_PATH = re.compile(r"(?<![\w/])/(?:[\w.-]+/)+[\w.-]*")
 _URL = re.compile(r"https?://([^/\s]+)[^\s]*")
 _YEAR = re.compile(r"\b(1[1-9]\d{2}|20\d{2})\b")
 _SLASH = re.compile(r"(?<=\w)/(?=\w)")
+# Kokoro simply does not voice "." between digits: "1.7 terabytes" comes out as
+# "one seven terabytes". Verified by synthesizing and transcribing it back
+# (tests/speech_symbols.py). JARVIS reports free disk space on every status
+# question, so he was mis-stating it out loud constantly.
+_DECIMAL = re.compile(r"(?<=\d)\.(?=\d)")
+# "2:04 PM" is voiced "two hundred four PM" — measured against known spellings, the
+# clock reading is 2.05 s and "two hundred four" is 2.03 s while "two oh four" is 1.88 s.
+# Every time from :01 to :09 was wrong, and "what time is it" is the most common thing
+# he is ever asked. Minutes of 10 or more already read correctly, so they are left alone.
+_CLOCK = re.compile(r"\b(\d{1,2}):([0-5]\d)(\s*[ap]\.?m\.?)?", re.I)
+
+
+def _clock_words(m: re.Match) -> str:
+    hour, minute, meridiem = m.group(1), m.group(2), m.group(3) or ""
+    if minute == "00":
+        # "six o'clock PM" is not something anyone says; with AM/PM the hour stands alone
+        return f"{hour}{meridiem}" if meridiem else f"{hour} o'clock"
+    if minute[0] == "0":
+        return f"{hour} oh {minute[1]}{meridiem}"
+    return m.group(0)
+# "$40" is voiced "dollar forty" — right words, wrong order.
+_MONEY = re.compile(r"([$£€])\s?(\d[\d,]*(?:\.\d+)?)")
+_CURRENCY = {"$": ("dollar", "dollars"), "£": ("pound", "pounds"), "€": ("euro", "euros")}
+_DEGREE_UNIT = re.compile(r"°\s?([CF])\b")
+_DEGREE = re.compile(r"°")
+
+
+def _money_words(m: re.Match) -> str:
+    one, many = _CURRENCY[m.group(1)]
+    amount = m.group(2)
+    return f"{amount} {one if amount in ('1', '1.00') else many}"
+
 _LEFTOVER = re.compile(r"[*_`#\|~^<>{}\[\]]")
 _WS = re.compile(r"[ \t]+")
+_SPACE_PUNCT = re.compile(r"\s+([,.;:!?])")   # "45 degrees ." after symbol expansion
 
 
 def _year_words(m: re.Match) -> str:
@@ -42,7 +75,13 @@ def clean_for_speech(text: str) -> str:
     t = _WIN_PATH.sub(lambda m: "the saved location" + ("." if m.group(0).endswith(".") else ""), t)
     t = _UNIX_PATH.sub("the saved location", t)
     t = _SLASH.sub(" ", t)                        # and/or -> and or, km/h -> km h
+    t = _MONEY.sub(_money_words, t)               # $40 -> 40 dollars
+    t = _DEGREE_UNIT.sub(lambda m: " degrees " + ("Celsius" if m.group(1) == "C" else "Fahrenheit"), t)
+    t = _DEGREE.sub(" degrees ", t)
+    t = _CLOCK.sub(_clock_words, t)               # 2:04 -> 2 oh 4 (before the decimal rule)
+    t = _DECIMAL.sub(" point ", t)                # 1.7 -> 1 point 7 (must run AFTER money)
     t = _YEAR.sub(_year_words, t)                 # 1946 -> nineteen forty-six
     t = _LEFTOVER.sub(" ", t)
-    t = _WS.sub(" ", t).strip()
+    t = _WS.sub(" ", t)
+    t = _SPACE_PUNCT.sub(r"\1", t).strip()
     return t

@@ -31,6 +31,12 @@ DEFAULTS: dict[str, Any] = {
         "adopt_ports": [8080],
         "context": 16384,
         "active_model": "gpt-oss-20b",
+        # Sampling was never sent, so llama-server's chat defaults applied (temp 0.8,
+        # top_p 0.95). That is creative-writing sampling on a factual voice assistant:
+        # "how many bones in the human body" answered 206 on one run and "fifty-two" on
+        # the next. Measured with tests/accuracy_bench.py -- see docs/HANDOFF.md.
+        "sampling": {"temperature": 0.15, "top_p": 0.9, "top_k": 40, "min_p": 0.05,
+                     "repeat_penalty": 1.05},
         "models": {
             # Google's QAT q4_0 (near-bf16 quality). MoE 26B/3.8B-active: ~25 t/s on the
             # 780M, first token ~0.8 s warm, native tool calling, thinking off for voice.
