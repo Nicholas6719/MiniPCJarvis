@@ -137,3 +137,30 @@
   color: var(--text-dim);
   opacity: 0.85;
 }
+
+
+/* ---------- idle is the state the orb spends 99% of its life in ----------
+   Spinning three rings + scaling two gradient layers costs real CPU forever. While
+   nothing is happening, freeze the rings and breathe with OPACITY only (a compositor
+   property: no repaint, no re-raster). Every active state keeps the full motion. */
+@keyframes softPulse {
+  0%, 100% { opacity: var(--idle-lo, 0.55); }
+  50%      { opacity: var(--idle-hi, 0.95); }
+}
+.core--idle .core__ring--outer,
+.core--idle .core__ring--mid,
+.core--idle .core__ring--inner,
+.core--sleeping .core__ring--outer,
+.core--sleeping .core__ring--mid,
+.core--sleeping .core__ring--inner { animation: none; }
+
+.core--idle .core__nucleus,
+.core--sleeping .core__nucleus {
+  animation: softPulse 7s ease-in-out infinite;
+  --idle-lo: 0.86; --idle-hi: 1;
+}
+.core--idle .core__halo,
+.core--sleeping .core__halo {
+  animation: softPulse 9s ease-in-out infinite;
+  --idle-lo: calc(var(--core-glow) * 0.6); --idle-hi: var(--core-glow);
+}

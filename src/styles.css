@@ -115,7 +115,7 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--line);
   border-radius: 10px;
-  backdrop-filter: blur(10px);
+  /* backdrop-filter removed: it forced a full-panel re-blur on every streamed token */
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -982,3 +982,6 @@ body {
 .hud__grid { will-change: auto; contain: strict; }
 /* long lists own their own layer so streaming text doesn't repaint the whole HUD */
 .activity, .files__list, .convo__scroll, .browser__frame, .apps__grid { contain: content; }
+
+/* panels sit on an opaque-enough ground that they no longer need a live blur */
+.hud__center, .hud__right { background: rgba(8, 18, 28, 0.92); }
