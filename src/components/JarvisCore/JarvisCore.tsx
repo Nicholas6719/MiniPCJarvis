@@ -36,6 +36,16 @@ export function JarvisCore({ state, wakeMode = "push_to_talk", armedUntil = 0 }:
     return () => clearInterval(t);
   }, [state, armedUntil, now]);
 
+  // A running CSS animation keeps the compositor at 60 fps forever. After a stretch of
+  // real idle, settle the orb completely still; any state change wakes it instantly.
+  const [calm, setCalm] = useState(false);
+  useEffect(() => {
+    setCalm(false);
+    if (state !== "idle" && state !== "sleeping") return;
+    const t = setTimeout(() => setCalm(true), 20000);
+    return () => clearTimeout(t);
+  }, [state]);
+
   const armed = state === "idle" && armedUntil > now;
   const remaining = Math.max(0, Math.ceil(armedUntil - now));
 
@@ -60,7 +70,7 @@ export function JarvisCore({ state, wakeMode = "push_to_talk", armedUntil = 0 }:
   }
 
   return (
-    <div className={`core core--${state} ${modeClass}`}>
+    <div className={`core core--${state} ${modeClass} ${calm && !armed ? "core--calm" : ""}`}>
       <div className="core__halo" />
       <div className="core__ring core__ring--outer" />
       <div className="core__ring core__ring--mid" />

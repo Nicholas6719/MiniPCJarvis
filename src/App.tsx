@@ -59,8 +59,18 @@ export default function App() {
   useEffect(() => {
     const sync = () => document.body.classList.toggle("is-hidden", document.hidden);
     sync();
+    // leaving the window doesn't fire mouseleave on the panel: clear the hover latch,
+    // otherwise the HUD stays expanded forever after an alt-tab
+    const blur = () => { useStore.getState().setHovering(false); document.body.classList.add("is-hidden"); };
+    const focus = () => document.body.classList.toggle("is-hidden", document.hidden);
     document.addEventListener("visibilitychange", sync);
-    return () => document.removeEventListener("visibilitychange", sync);
+    window.addEventListener("blur", blur);
+    window.addEventListener("focus", focus);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("blur", blur);
+      window.removeEventListener("focus", focus);
+    };
   }, []);
 
   // fade back to ambient once the turn is over, the hold has elapsed, nothing is pinned,
@@ -69,7 +79,9 @@ export default function App() {
     const t = setInterval(() => {
       const st = useStore.getState();
       if (st.ambient || st.pinned || st.hovering) return;
-      if (st.state !== "idle") return;
+      // "busy" states must not freeze a panel on screen forever (error/sleeping never
+      // return to idle on their own)
+      if (!["idle", "error", "sleeping", "offline"].includes(st.state)) return;
       if (st.panelUntil && Date.now() > st.panelUntil) st.collapse();
     }, 500);
     return () => clearInterval(t);

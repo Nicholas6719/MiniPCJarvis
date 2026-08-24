@@ -164,3 +164,13 @@
   animation: softPulse 9s ease-in-out infinite;
   --idle-lo: calc(var(--core-glow) * 0.6); --idle-hi: var(--core-glow);
 }
+
+
+/* Settled: nothing is happening and nothing has happened for a while. No animation at
+   all, so the compositor can finally sleep (this is the difference between an idle HUD
+   costing ~27% of a core and ~0%). Fades back the instant anything changes. */
+.core--calm .core__halo,
+.core--calm .core__ring,
+.core--calm .core__nucleus { animation: none; }
+.core--calm .core__halo { opacity: calc(var(--core-glow) * 0.75); transition: opacity 1.2s ease-out; }
+.core--calm .core__nucleus { opacity: 0.92; transition: opacity 1.2s ease-out; }

@@ -67,6 +67,8 @@ def slots_app(t: str) -> dict | None:
         return None
     if re.search(r"https?://|\b\w+\.(?:com|org|net|io|gov|edu|co|tv|ai)\b", name):
         return None  # a website, not an app -> the LLM routes it to open_url
+    if re.search(r"\.(?:xlsx?|docx?|pptx?|pdf|txt|md|csv|png|jpe?g|gif|mp[34]|zip|json|log)$", name):
+        return None  # a document -> the LLM finds/opens the file instead of launching an app
     return {"name": name}
 
 
@@ -178,6 +180,9 @@ def slots_find(t: str) -> dict | None:
     if m.group(2):
         out["folder"] = m.group(2)
     return out
+
+
+_FOLDER_ONLY = re.compile(r"^(?:my\s+|the\s+)?(?:desktop|documents?|downloads?|pictures?|files?|folders?)$")
 
 
 def say_find(slots: dict, res: dict) -> str:
@@ -345,6 +350,8 @@ _QUERY_LEAD = re.compile(
 def slots_search(t: str) -> dict | None:
     q = _QUERY_LEAD.sub("", t.strip(), count=1).strip(" .?!")
     q = re.sub(r"\b(please|for me)\b", "", q).strip(" .?!")
+    if _FOLDER_ONLY.match(q):
+        return None   # "search my documents" means the user's files, not the web
     return {"query": q} if len(q) >= 3 and q != t.strip() else None
 
 
@@ -520,17 +527,27 @@ _LABELS = {"ui": "change the view", "read_site": "read the site", "weather": "ch
            "date": "tell the date"}
 
 
+_ELSEWHERE = re.compile(r"\bin\s+(?!the\s+(?:morning|afternoon|evening)\b)[a-z][a-z .'-]{2,}$|"
+                       r"\b(?:time\s?zone|utc|gmt|est|pst|cst)\b")
+
+
+def slots_clock(t: str) -> dict | None:
+    """Local time only. 'what time is it in london' is a different question - let the
+    model answer that one rather than confidently speaking the wrong clock."""
+    return None if _ELSEWHERE.search(t) else {}
+
+
 SKILLS: list[Skill] = [
     Skill("time", None, [
         "what time is it", "what's the time", "tell me the time", "do you have the time",
         "current time", "time check", "what time is it right now", "got the time",
         "what's the clock say", "time please", "whats the time now", "hey what time is it"],
-        speak=say_time),
+        slots=slots_clock, speak=say_time),
     Skill("date", None, [
         "what's the date", "what day is it", "what is today's date", "what day is it today",
         "what's today", "date please", "which day is it", "what day of the week is it",
         "what is the date today", "tell me the date", "what's the day today"],
-        speak=say_date),
+        slots=slots_clock, speak=say_date),
     Skill("volume_set", "set_volume", [
         "set the volume to 50 percent", "volume 30", "turn the volume to 40",
         "set volume at 70 percent", "make the volume 20", "change the volume to 80",
