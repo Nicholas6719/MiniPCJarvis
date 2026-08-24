@@ -220,6 +220,32 @@ but the user's folder was empty; log files diverge.
   Activity log only shows beside Diagnostics. Compact last exchange sits under the orb.
 - Agent workflow for UI work: /debug/view + /debug/hud.png, shots in Documents/hud_shots.
 
+## 2026-08-24 (user away) - voice confirm, secrets, speed, HUD
+- VOICE CONFIRM: `ask_confirmation` speaks the question AND listens (`_listen_yes_no`),
+  resolving the pending future before registry.execute waits on it. 2 attempts, then the
+  UI/30 s timeout takes over. config `confirm.by_voice`. Test: tests/voiceconfirm_e2e.py
+  drives a DEBUG-ONLY no-op tool (`/debug/confirm_test`) - NEVER test with power_action.
+  Gotcha found: Parakeet v3 is MULTILINGUAL and renders a curt "No." as "Não", so the
+  cancel list carries drift variants. Rule: liberal on cancel, strict on approve.
+- SECRETS: sidecar token now arrives on stdin (`--token-stdin`, written by Rust);
+  llama-server key via `LLAMA_API_KEY` env. Neither is in argv any more. Because the
+  harnesses used to scrape argv, a DEBUG-ONLY `%APPDATA%\JARVIS\session.token` file is
+  written when JARVIS_DEBUG=1; release/quick scripts fall back to it.
+- SCREEN QUESTIONS 18.8 s -> 8.8 s: OCR text condensed (dedupe/junk-strip/cap 1400 chars,
+  was 3394) + capture 0.71 -> 0.48 s. Prompt eval was the whole cost.
+- HUD IDLE CPU 41.7% of a core -> 0.8% (total 47.7% -> 8.1%). Three causes, all measured
+  with py-spy + TotalProcessorTime: (1) the nucleus scaled every frame while carrying a
+  90 px box-shadow -> full repaint; glow moved to a static sibling `.core__glow`.
+  (2) any running CSS animation pins the compositor at 60 fps -> `.core--calm` after 20 s
+  idle removes all animation (JarvisCore.tsx). (3) SYSTEM snapshot walked 260 processes
+  with cpu_percent every 5 s (64% of sidecar CPU when that tab was open) -> cached
+  top-by-memory, non-blocking cpu_percent, cached wifi: 1.60 s -> 0.034 s.
+- HUD LOOK: icon-first tabs (active tab keeps its name, tooltip otherwise), no live
+  backdrop blur, streamed tokens batched to one store commit per frame, background tabs
+  stop polling when `document.hidden`.
+- Brain misfires fixed: "what time is it in london" (was local time), "open budget.xlsx"
+  (was app launch), "search my documents" (was a web search).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

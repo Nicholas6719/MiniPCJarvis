@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 — 2026-08-24
+
+### Voice
+- Shutdown/restart confirmations can be answered out loud ("yes" / "no"); anything else
+  is treated as a decline. Cancel words tolerate the STT's multilingual drift.
+
+### Performance
+- Idle HUD CPU cut ~50x (41.7% of a core -> 0.8%): static glow layer, no animation once
+  settled, no live panel blur, batched streaming renders, polling only while visible
+- "What's on my screen" 18.8 s -> 8.8 s (condensed OCR, faster capture)
+- SYSTEM panel snapshot 1.60 s -> 0.034 s
+
+### Look
+- Icon-first tab bar; the active tab keeps its name
+
+### Security
+- Session token and llama-server key are no longer visible on any process command line
+
 ## 0.3.0 — 2026-08-23
 
 ### UX
