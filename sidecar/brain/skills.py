@@ -27,12 +27,48 @@ def polish(line: str, kind: str = "ack") -> str:
     the suit isn't ready, sir"), so a flat "I couldn't open Spotify" gets the same
     treatment about half the time, and leans harder on the honorific when it does.
     """
+    from config import config
     line = (line or "").strip()
     if _REGRET.search(line):
         if random.random() < 0.5:
             line = "I'm afraid " + line   # the pattern always starts with the pronoun
-        return honorific(line, kind, rate=0.5)
+        # bad news leans on the honorific harder than a routine acknowledgement does,
+        # so this tracks the configured rate rather than fixing its own number
+        base = float(config.get("persona", "honorific_rate", default=0.55))
+        return honorific(line, kind, rate=min(0.95, base * 1.5))
     return honorific(line, kind)
+
+
+def want_honorific(rate: float | None = None) -> bool:
+    """Decide whether THIS reply should carry the honorific.
+
+    The frequency decision lives here, not in the language model — asked to manage its
+    own rate the model either ignored it (11%) or ran away with it (60%, seven replies
+    in a row). Deciding here and telling it plainly for the turn gives the reflex path
+    and the LLM path one shared rhythm, including "never two lines running".
+    """
+    from config import config
+    if rate is None:
+        rate = float(config.get("persona", "honorific_rate", default=0.55))
+    if _last_honorific[0] or random.random() >= rate:
+        _last_honorific[0] = False
+        return False
+    _last_honorific[0] = True
+    return True
+
+
+def without_honorific(line: str) -> str:
+    """Strip the honorific out of a reply before it goes back into the model's context.
+
+    Left in, it snowballs: the model sees three replies ending in "sir", concludes that
+    is the register, and then ends every single reply that way (measured 60% and climbing,
+    with seven back-to-back runs). It cannot hold "don't use it twice running" on its own.
+    Scrubbing its own history breaks the feedback loop at the source, so each turn is
+    decided fresh from the prompt — and nothing the user sees or hears is changed.
+    """
+    line = re.sub(r",\s*sir\b", "", line or "", flags=re.I)
+    line = re.sub(r"^sir,\s*", "", line, flags=re.I).strip()
+    return line[:1].upper() + line[1:] if line else line
 
 
 def honorific(line: str, kind: str = "ack", rate: float | None = None) -> str:

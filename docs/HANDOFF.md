@@ -259,6 +259,28 @@ but the user's folder was empty; log files diverge.
   `persona.honorific` / `persona.honorific_rate` (0.55 config = ~35% observed, because the
   never-two-running latch suppresses roughly a third of draws — do not read the config
   number as the output rate). Guarded by `tests/test_persona.py` in the build gate.
+- PERSONA ON THE LLM PATH is a SEPARATE mechanism from the reflex path, and the frequency
+  is deliberately NOT set by the prompt. Measured on the real install: asked to pace itself
+  the model either ignored it (11%) or read its own prior replies, decided "sir" was the
+  register, and ended EVERY reply that way (60%, seven back-to-back). Wording alone swung
+  it 0% -> 60%. Two fixes together: (1) `orchestrator` strips the honorific from the
+  ASSISTANT HISTORY it feeds back (`without_honorific`) so nothing self-reinforces —
+  nothing shown or spoken changes; (2) `want_honorific()` makes the per-turn decision in
+  code (sharing the reflex latch, so "never two running" spans both paths) and
+  `turn_context()` states it plainly for that turn. Result: 33-44% across runs, no
+  back-to-back, no doubles. The prompt now only sets PLACEMENT — if you touch it,
+  RE-MEASURE, it is extremely wording-sensitive. `BARE_HONORIFIC` in orchestrator drops a
+  lone "Sir." sentence (the model occasionally writes it as its own sentence, which the
+  splitter would otherwise send to TTS as a clipped one-word clip).
+- NAME GATE: `tests/check_names.py` (pyflakes) now runs FIRST in the build. `compileall`
+  only checks syntax, so a name imported inside one function and used in another compiles
+  fine and NameErrors at runtime — that shipped once as `without_honorific`, and the
+  symptom was nasty: the reflex spoke its line, the turn died right after, `turn_done`
+  never fired, and the app hung mid-turn. pyflakes catches it in about a second.
+- BRAIN MISFIRE fixed: "what does cpu stand for" / "what is a cpu" answered with a
+  system-stats report — they sat within 0.05 of the "what's the cpu at" seed. Canon rules
+  now normalise definitional questions to a general form. The "what is a/an X" rule
+  deliberately excludes "the": "what's THE time"/"THE date" are live readings.
 - TTS PHRASE CACHE. Re-synthesising "Muted." cost ~500 ms EVERY time. `TTSRouter` now
   caches by exact text (engine+voice+rate keyed, cleared on `reload()`), warmed in the
   background 20 s after boot from `WARM_PHRASES` (fillers, fixed acks, round volume

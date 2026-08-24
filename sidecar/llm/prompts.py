@@ -5,7 +5,7 @@ import datetime
 import platform
 
 
-def turn_context(memory_context: str = "") -> str:
+def turn_context(memory_context: str = "", honorific: bool | None = None) -> str:
     """Per-turn facts. Kept OUT of the system prompt so the large, tool-laden
     prompt prefix stays byte-identical across turns and llama.cpp reuses its
     KV cache — this alone cuts first-token latency from ~12 s to ~2-3 s."""
@@ -13,17 +13,35 @@ def turn_context(memory_context: str = "") -> str:
     mem = ""
     if memory_context:
         mem = "\nRelevant things you remember about the user:\n" + memory_context
-    return "[Context - current time: " + now + "." + mem + "]"
+    # The honorific's frequency is decided for us (brain.skills.want_honorific) and
+    # stated per turn, because the model cannot pace it itself — see system_prompt.
+    hint = ""
+    if honorific is True:
+        # "at the end of a sentence" made it write "Blade Runner 2049. Sir." — a lone
+        # "Sir." is its own sentence to the splitter and lands as a clipped second clip.
+        hint = ("\nFor this reply: address him as \"sir\" exactly once, attached to the final "
+                "sentence after a comma (\"..., sir.\") — never as a sentence of its own.")
+    elif honorific is False:
+        hint = "\nFor this reply: do not use \"sir\" at all."
+    return "[Context - current time: " + now + "." + mem + hint + "]"
 
 
 def system_prompt(memory_context: str = "") -> str:
     # must stay static across turns (see turn_context)
+    #
+    # On the honorific: this prompt deliberately does NOT set the frequency, because the
+    # model cannot pace it. Asked to, it either ignored the instruction (11%) or read its
+    # own recent replies, decided "sir" was the register, and ended EVERY reply that way
+    # (60%, seven back-to-back). Wording alone swung it 0% -> 60%. So frequency is decided
+    # in code (brain.skills.want_honorific) and stated per turn in turn_context(), and the
+    # orchestrator strips the honorific from the history it feeds back
+    # (brain.skills.without_honorific) so nothing compounds. The prompt only sets PLACEMENT.
     mem = ""
     return f"""You are JARVIS, an intelligent personal AI assistant living inside the user's Windows PC. You are inspired by the calm, capable, quietly witty AI of the Iron Man films — but you are your own system.
 
 Personality: intelligent, calm, precise, quietly witty. Confident, never eager. You are a butler-engineer, not a chatbot: you report, you comply, you occasionally allow yourself a dry remark.
 
-Address: call him "sir". Measured from JARVIS's actual dialogue, roughly one reply in three carries it — not every line (that grates), not once an hour (that is not him). Where it goes matters:
+Address: call him "sir". HOW OFTEN is not yours to choose — each turn's [Context] note tells you whether this particular reply uses it. Follow that note exactly. What is yours to choose is where it sits:
 - Opening a report, an alert, or anything you raise yourself: "Sir, the disk is nearly full."
 - Closing an acknowledgement or a completed action: "Volume at forty percent, sir." / "Very good, sir."
 - Never twice in one reply, and never in the middle of a sentence.

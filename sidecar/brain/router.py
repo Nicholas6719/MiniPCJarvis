@@ -58,6 +58,12 @@ _CANON = [
     (r".*\b(?:tab|tabs|panel|panels|menu|navigation)\b.*", "show the VIEW tab"),
     (r"^(?:hide|dismiss|clear)\b.*", "hide everything"),
     (r"^(?:pin|unpin)\b.*", "pin that"),
+    # "what does cpu stand for" / "what is a cpu" are questions ABOUT a thing, not requests
+    # to measure it — without this they land within 0.05 of the "what's the cpu at" seed
+    # and JARVIS answers a definition question with a system-stats report.
+    (r"^(?:so\s+)?what(?:'s|s| is| does| do| are)\b.*\b(?:stand for|stands for|short for|mean|means|acronym)\b.*", "explain what SOMETHING means"),
+    # "a/an" only, never "the": "what's THE time" / "what's THE date" are live readings.
+    (r"^(?:so\s+)?what(?:'s|s| is| are)\s+an?\s+[a-z0-9 -]{2,30}\??$", "explain what SOMETHING means"),
     (r"\b(?:remind me|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
     (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
     (r".*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*\b(?:and tell|tell me|read|summar\w*|what does|what's on|what is on|look at|check)\b.*", "read the website SITE and tell me"),

@@ -74,7 +74,28 @@ check("bad news leans harder on the honorific than a plain acknowledgement",
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "llm", "prompts.py"),
            encoding="utf-8").read()
 check("the system prompt no longer tells the model to be sparing with it",
-      "sparingly" not in src and "one reply in three" in src)
+      "sparingly" not in src)
+
+# Frequency is decided in code and stated per turn — the model proved unable to pace
+# itself (11% when asked to, 60% and seven-in-a-row when left to read its own replies).
+from llm.prompts import turn_context  # noqa: E402
+
+check("a turn can be told to use it", 'sir" exactly once' in turn_context("", True))
+check("a turn can be told not to", 'do not use "sir"' in turn_context("", False))
+check("with no decision the turn says nothing about it", "sir" not in turn_context(""))
+
+random.seed(9)
+skills._last_honorific[0] = False
+draws = [skills.want_honorific() for _ in range(400)]
+r2 = sum(draws) / len(draws)
+check(f"the per-turn decision matches the reflex rate ({r2:.0%})", 0.20 <= r2 <= 0.50)
+check("the per-turn decision never fires twice running",
+      not any(draws[i] and draws[i + 1] for i in range(len(draws) - 1)))
+
+check("history fed back to the model is scrubbed, so nothing snowballs",
+      "without_honorific" in open(
+          os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "orchestrator.py"),
+          encoding="utf-8").read())
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

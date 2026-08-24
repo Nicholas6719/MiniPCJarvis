@@ -27,6 +27,7 @@ import re as _re
 from config import config
 from events import bus
 from llm.llama_server import llama
+from brain.skills import want_honorific
 from llm.prompts import system_prompt, turn_context
 from llm.provider import local_llm
 from memory.store import memory
@@ -65,6 +66,10 @@ CONFIRM_PHRASE = {
 
 STOP_WORDS = re.compile(r"^\s*(stop|cancel|never\s*mind|nevermind|shut\s*up|quiet|that's\s+enough)\W*$", re.I)
 SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
+# A bare "Sir." arrives when the model writes the honorific as its own sentence. It is
+# already too late to attach it to the line before (that one has been spoken), so speak
+# nothing rather than a clipped one-word clip.
+BARE_HONORIFIC = re.compile(r"^\W*sir\W*$", re.I)
 
 MAX_UTTERANCE_S = 30
 SILENCE_END_S = 0.9          # end of speech after this much silence
@@ -660,7 +665,7 @@ class Orchestrator:
         # Time + memories ride along inside the latest user message instead.
         messages: list[dict] = [{"role": "system", "content": system_prompt()}]
         messages += self._history[-10:]
-        messages.append({"role": "user", "content": turn_context(mem_ctx) + chr(10)
+        messages.append({"role": "user", "content": turn_context(mem_ctx, want_honorific()) + chr(10)
                          + (general_hint + chr(10) if general_hint else "") + text})
 
         if reflex:
@@ -705,8 +710,9 @@ class Orchestrator:
                 pass
 
         if full_reply:
+            from brain.skills import without_honorific
             self._history.append({"role": "user", "content": text})
-            self._history.append({"role": "assistant", "content": full_reply})
+            self._history.append({"role": "assistant", "content": without_honorific(full_reply)})
             self._history = self._history[-20:]
             memory.log_turn("assistant", full_reply)
         breakdown = self.metrics.finish()
@@ -789,8 +795,9 @@ class Orchestrator:
         except asyncio.CancelledError:
             pass
         if reply:
+            from brain.skills import without_honorific
             self._history.append({"role": "user", "content": text})
-            self._history.append({"role": "assistant", "content": reply})
+            self._history.append({"role": "assistant", "content": without_honorific(reply)})
             self._history = self._history[-20:]
             memory.log_turn("assistant", reply)
         breakdown = self.metrics.finish()
@@ -1058,14 +1065,14 @@ class Orchestrator:
                             break
                         sentence = pending[: m.end()].strip()
                         pending = pending[m.end():]
-                        if sentence:
+                        if sentence and not BARE_HONORIFIC.match(sentence):
                             await speak_queue.put(clean_for_speech(sentence))
                 if chunk.done:
                     tool_calls = chunk.tool_calls
                     break
             if cancelled:
                 return full_text
-            if pending.strip():
+            if pending.strip() and not BARE_HONORIFIC.match(pending.strip()):
                 await speak_queue.put(clean_for_speech(pending.strip()))
 
             if not tool_calls:

@@ -21,6 +21,11 @@ CASES = [
     ("what's the difference between ram and vram", None), ("who directed spider-man homecoming", None),
     ("open the pod bay doors", None), ("what should i have for dinner", None), ("how much does a tesla cost", None),
     ("what's the weather like on mars", None), ("can you explain how wake words work", None),
+    # definitions, not measurements — these used to land on the system-stats reflex
+    ("what does cpu stand for", None), ("what is a cpu", None), ("what does ram mean", None),
+    ("what is a solid state drive", None),
+    # ...while the live readings that look similar must still be reflexes
+    ("what's the time", "time"), ("what's the date", "date"), ("what's the cpu at", "stats"),
 ]
 
 async def main() -> int:

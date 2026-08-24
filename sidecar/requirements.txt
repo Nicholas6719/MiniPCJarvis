@@ -25,3 +25,7 @@ pefile>=2023.2
 onnx-asr>=0.6
 winocr>=0.0.15
 lxml>=5.0
+
+# build-time only (gates, not bundled)
+pyinstaller
+pyflakes

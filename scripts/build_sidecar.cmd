@@ -5,6 +5,7 @@ cd /d "%~dp0..\sidecar"
 .venv\Scripts\python.exe -m compileall -q . -x "\.venv|build|dist" || (echo COMPILE FAILED & exit /b 1)
 .venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'.'); import main, orchestrator, brain.router, search_brave_web, browser.session" || (echo IMPORT FAILED & exit /b 1)
 set PYTHONIOENCODING=utf-8
+.venv\Scripts\python.exe tests\check_names.py || (echo NAME CHECK FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)
