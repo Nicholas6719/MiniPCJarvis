@@ -32,11 +32,17 @@ DEFAULTS: dict[str, Any] = {
         "context": 16384,
         "active_model": "gpt-oss-20b",
         # Sampling was never sent, so llama-server's chat defaults applied (temp 0.8,
-        # top_p 0.95). That is creative-writing sampling on a factual voice assistant:
-        # "how many bones in the human body" answered 206 on one run and "fifty-two" on
-        # the next. Measured with tests/accuracy_bench.py -- see docs/HANDOFF.md.
-        "sampling": {"temperature": 0.15, "top_p": 0.9, "top_k": 40, "min_p": 0.05,
-                     "repeat_penalty": 1.05},
+        # top_p 0.95) -- creative-writing sampling on an assistant whose job is mostly to
+        # state facts. Measured over 20 verifiable questions x 4 runs, word-for-word
+        # (tests/accuracy_bench.py): accuracy barely moves (99% -> 100%) but run-to-run
+        # CONSISTENCY does, and that was the actual complaint -- the same question giving a
+        # different answer each time:
+        #     temp 0.8   accuracy  99%   consistency   5%
+        #     temp 0.15  accuracy 100%   consistency  45%
+        #     temp 0.0   accuracy 100%   consistency  85%
+        # Greedy for facts; CREATIVE_INTENT in orchestrator raises it for anything that
+        # should vary (jokes, poems, brainstorms). repeat_penalty is the loop guard.
+        "sampling": {"temperature": 0.0, "repeat_penalty": 1.05},
         "models": {
             # Google's QAT q4_0 (near-bf16 quality). MoE 26B/3.8B-active: ~25 t/s on the
             # 780M, first token ~0.8 s warm, native tool calling, thinking off for voice.

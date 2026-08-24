@@ -235,7 +235,10 @@ export const useStore = create<Store>((set, get) => ({
       }
       case "turn_done": {
         flushDelta(set);
-        const draft = get().assistantDraft;
+        // The streamed deltas are raw model output; turn_done carries the same reply with
+        // markdown removed. He is told never to emit any, but "*Jaws*" still slipped
+        // through to the transcript. Fall back to the draft for older sidecars.
+        const draft = (evt.text as string | undefined)?.trim() || get().assistantDraft;
         // attach the synthesized answer to a finished research run
         set((st) => {
           const runs = [...st.researchRuns];

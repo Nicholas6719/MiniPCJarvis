@@ -180,6 +180,12 @@ class TTSRouter:
         self.kokoro = KokoroTTS()
         self.piper = PiperTTS()
         self._cache: "OrderedDict[tuple, list]" = OrderedDict()
+        # Kokoro is one ONNX session; two concurrent create() calls are not something to
+        # rely on, and the background phrase warm made that a real possibility.
+        self._synth_lock = asyncio.Lock()
+        # Cleared while JARVIS is actually answering, so warming never competes with him.
+        self.idle = asyncio.Event()
+        self.idle.set()
 
     def _key(self, text: str) -> tuple:
         return (config.get("tts", "engine", default="kokoro"),
@@ -188,10 +194,16 @@ class TTSRouter:
                 text.strip())
 
     async def warm_phrases(self) -> None:
-        """Pre-synthesize the fixed lines in the background after boot."""
+        """Pre-synthesize the fixed lines in the background, only while he is idle.
+
+        This is background polish and must never cost a real turn anything. It waits for
+        the idle gate before every phrase, so a question arriving mid-warm queues behind
+        at most one in-flight phrase instead of the whole list.
+        """
         import asyncio as _a
         await _a.sleep(20)         # let the model server and the ears finish booting first
         for phrase in WARM_PHRASES:
+            await self.idle.wait()
             if self._key(phrase) in self._cache:
                 continue
             try:
@@ -201,8 +213,6 @@ class TTSRouter:
             except Exception as e:
                 log.debug("phrase warm failed for %r: %s", phrase, e)
                 return
-            # deliberately unhurried: this is background polish, and a real turn
-            # arriving mid-warm must not have to queue behind it
             await _a.sleep(0.3)
         log.info("tts cache warmed (%d phrases)", len(self._cache))
 
@@ -246,10 +256,11 @@ class TTSRouter:
         collected: list = []
         try:
             produced = False
-            async for chunk in active.synthesize_stream(text, cancel):
-                produced = True
-                collected.append(chunk)
-                yield chunk
+            async with self._synth_lock:      # one synthesis at a time (cache hits skip this)
+                async for chunk in active.synthesize_stream(text, cancel):
+                    produced = True
+                    collected.append(chunk)
+                    yield chunk
             if produced and not cancel.is_set() and len(text) <= 60:
                 self._cache[key] = collected
                 self._cache.move_to_end(key)

@@ -63,6 +63,22 @@ def _year_words(m: re.Match) -> str:
         return m.group(0)
 
 
+def strip_markdown(text: str) -> str:
+    """Markdown removed, everything else untouched — for the transcript on screen.
+
+    The model is told never to use markdown and mostly obeys, but it still slips out
+    ("Steven Spielberg directed *Jaws*"). Speech never suffered, because clean_for_speech
+    strips it; the HUD showed the raw asterisks. This deliberately does NOT apply the
+    spoken transforms — nobody wants to read "1 point 7 terabytes".
+    """
+    t = _MD_LINK.sub(r"\1", text or "")
+    t = _MD_CODE.sub(r"\1", t)
+    t = _MD_BOLD.sub(lambda m: m.group(1) or m.group(2), t)
+    t = _MD_ITALIC.sub(lambda m: m.group(1) or m.group(2), t)
+    t = _MD_HEADER.sub("", t)
+    return _WS.sub(" ", t).strip()
+
+
 def clean_for_speech(text: str) -> str:
     t = text
     t = _MD_LINK.sub(r"\1", t)

@@ -272,6 +272,35 @@ but the user's folder was empty; log files diverge.
   RE-MEASURE, it is extremely wording-sensitive. `BARE_HONORIFIC` in orchestrator drops a
   lone "Sir." sentence (the model occasionally writes it as its own sentence, which the
   splitter would otherwise send to TTS as a clipped one-word clip).
+- WHAT HE ACTUALLY SAYS != what `clean_for_speech` returns. Verify pronunciation by
+  synthesizing with the real TTS and transcribing back with the real STT
+  (`tests/speech_symbols.py`, now in the build gate). Reading the cleaned text catches
+  none of this. Found and fixed this way:
+  - **Clock times**: "It's 2:04 PM" was voiced "two hundred four PM". Every time from
+    :01 to :09 was wrong, and "what time is it" is the most common thing he is asked.
+    Minutes of 10+ already read correctly and are LEFT ALONE — don't "fix" them.
+  - **Decimals**: Kokoro does not sound "." between digits at all. "1.7 terabytes" came
+    out "one seven terabytes", and he reports free disk space on every status question.
+  - **Currency**: "$40" was voiced "dollar forty" (right words, wrong order).
+  - **Degrees**: "32°F" dropped the unit ("32 degrees F").
+  Curly quotes, em-dashes, non-breaking hyphens, ellipses and % were all checked and
+  Kokoro handles them fine — deliberately left alone.
+  TECHNIQUE NOTE: clock times can't be checked by transcription ("two oh four" and "two
+  hundred four" both transcribe to "204"), so compare synthesized DURATION against both
+  spellings and require the correct one to be closer.
+- SAMPLING was never sent to llama-server, so its chat defaults (temp 0.8, top_p 0.95)
+  applied. Now explicit and configurable (`llm.sampling`, per-model, and per-call for
+  benchmarks). HONEST FINDING: temperature does NOT measurably change factual accuracy
+  here — measured 60/60 vs 59/60 through the real pipeline, and the single real error was
+  at the LOW temperature. The gain is run-to-run CONSISTENCY (same question, same answer),
+  which was the actual complaint. Creative requests (`CREATIVE_INTENT` in orchestrator)
+  get their own higher temperature so precision on facts doesn't make his jokes and poems
+  bland. `tests/accuracy_bench.py` (fast, via `/debug/llm_probe`) sweeps settings;
+  `tests/temp_ab.py` A/Bs through the real pipeline.
+  BENCHMARK TRAP, cost me a whole run: asking the same question several times IN A ROW
+  proves nothing — the first answer lands in the conversation history and the model just
+  repeats it, so every setting scores 100%. Ask each question ONCE inside a long run of
+  different questions, and repeat the whole sequence.
 - NAME GATE: `tests/check_names.py` (pyflakes) now runs FIRST in the build. `compileall`
   only checks syntax, so a name imported inside one function and used in another compiles
   fine and NameErrors at runtime — that shipped once as `without_honorific`, and the

@@ -45,6 +45,15 @@ CASES = [
 ]
 
 
+def norm(s: str) -> str:
+    """The model writes non-breaking hyphens and curly quotes; a matcher that trips over
+    those reports failures that are its own fault, not the model's."""
+    for ch, plain in (("‑", "-"), ("‐", "-"), ("–", "-"), ("—", "-"),
+                      ("’", "'"), (" ", " ")):
+        s = s.replace(ch, plain)
+    return s
+
+
 async def ask(client, text, sampling):
     body = {"text": text, "max_tokens": 200}
     if sampling:
@@ -65,9 +74,10 @@ async def run(sampling, label):
                     answers.append(await ask(client, q, sampling))
                 except Exception as e:
                     answers.append(f"<error {e}>")
-            hits = [bool(re.search(pat, a, re.I)) for a in answers]
+            hits = [bool(re.search(pat, norm(a), re.I)) for a in answers]
             correct += sum(hits)
-            if len(set(hits)) == 1:
+            keys = {norm(x).lower().strip(" .") for x in answers}
+            if len(keys) == 1:
                 consistent += 1
             if not all(hits):
                 misses.append((q, [a[:60] for a, h in zip(answers, hits) if not h]))

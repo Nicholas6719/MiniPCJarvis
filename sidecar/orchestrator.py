@@ -20,7 +20,7 @@ from audio.tts import tts
 from audio.vad import StreamingVAD
 from audio.wake import wake
 from audio.sounds import PALETTE
-from audio.speech_text import clean_for_speech
+from audio.speech_text import clean_for_speech, strip_markdown
 from brain.router import brain
 import collections
 import re as _re
@@ -725,8 +725,9 @@ class Orchestrator:
             self._history = self._history[-20:]
             memory.log_turn("assistant", full_reply)
         breakdown = self.metrics.finish()
+        # the transcript takes the markdown-free text; the streamed deltas are raw
         await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
-                       breakdown=breakdown)
+                       breakdown=breakdown, text=strip_markdown(full_reply or ""))
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
 
@@ -812,7 +813,7 @@ class Orchestrator:
         breakdown = self.metrics.finish()
         breakdown["reflex"] = label
         await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
-                       breakdown=breakdown, reflex=label)
+                       breakdown=breakdown, reflex=label, text=strip_markdown(reply or ""))
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
 
@@ -1153,6 +1154,7 @@ class Orchestrator:
         """Consumes sentences, synthesizes and plays them; watches for barge-in."""
         barge_task = asyncio.create_task(self._barge_in_watch())
         spoke = False
+        tts.idle.clear()      # hold off the background phrase warm until he has finished
         try:
             while True:
                 sentence = await queue.get()
@@ -1173,6 +1175,7 @@ class Orchestrator:
                 if self._speak_cancel.is_set():
                     break  # interrupted — drop any remaining queued sentences
         finally:
+            tts.idle.set()
             barge_task.cancel()
             self._saying_own_name = False
             # own-name echo can linger in the wake model's window: reset before idle listening
