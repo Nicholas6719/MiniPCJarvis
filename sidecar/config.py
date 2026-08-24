@@ -70,8 +70,9 @@ DEFAULTS: dict[str, Any] = {
     "stt": {"engine": "parakeet", "parakeet_quant": "int8", "model": "base.en", "compute_type": "int8", "device": "cpu"},
     "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
     "speech": {"fillers": True},
+    "confirm": {"by_voice": True},   # answer shutdown/restart confirmations by saying yes/no
     "ui": {"panel_hold_s": 12},     # seconds a panel stays after a turn before the HUD goes ambient
-    "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin   # say "Let me see." while the model is still thinking
+    "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,
               "sound_cues": True, "boot_sound": True,

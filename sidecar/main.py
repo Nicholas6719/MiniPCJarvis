@@ -6,6 +6,7 @@ Usage: python main.py --port 8790 --token <session-token>
 from __future__ import annotations
 
 import argparse
+import os
 import asyncio
 import logging
 import sys
@@ -51,6 +52,15 @@ async def lifespan(app: FastAPI):
     from tools import file_tools, weather
     file_tools.register_all()
     weather.register_all()
+    if os.environ.get("JARVIS_DEBUG") == "1":
+        from tools.registry import Risk, Tool, registry as _reg
+
+        async def _debug_confirm() -> dict:
+            return {"ok": True, "did": "nothing (test)"}
+        _reg.register(Tool(name="_debug_confirm",
+                           description="test-only confirmation-gated no-op",
+                           parameters={"type": "object", "properties": {}, "required": []},
+                           risk=Risk.MEDIUM, handler=_debug_confirm))
     scheduler.announce = orchestrator.announce
     scheduler.start()
     from mcp_client import mcp_manager
@@ -551,6 +561,26 @@ async def debug_hud_png(x_jarvis_token: str | None = Header(None)):
     if not png:
         raise HTTPException(404, "JARVIS window not found")
     return Response(content=png, media_type="image/png")
+
+
+@app.post("/debug/confirm_test")
+async def debug_confirm_test(x_jarvis_token: str | None = Header(None)):
+    """Dev/test only: fire a MEDIUM-risk no-op so the voice yes/no confirmation flow can be
+    exercised without touching power state. Returns immediately; watch the event stream."""
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from tools.registry import registry
+
+    async def _run():
+        await orchestrator.sm.to(State.EXECUTING, force=True)
+        try:
+            await registry.execute("_debug_confirm", {})
+        finally:
+            if orchestrator.sm.state != State.ERROR:
+                await orchestrator.sm.to(State.IDLE, force=True)
+    asyncio.create_task(_run())
+    return {"ok": True}
 
 
 @app.get("/selftest")

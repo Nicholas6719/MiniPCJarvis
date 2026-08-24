@@ -792,13 +792,77 @@ class Orchestrator:
             await self.sm.to(State.IDLE, force=True)
 
     async def ask_confirmation(self, tool: str, args: dict) -> None:
-        """A risk-gated tool is waiting on the user: say so out loud and show WAITING."""
+        """A risk-gated tool is waiting on the user: ask out loud AND listen for a spoken
+        yes/no here (this hook is awaited before registry.execute waits on the future, so
+        resolving it now unblocks the tool). Falls back to the on-screen confirm if voice
+        is off or unclear."""
         await self.sm.to(State.WAITING, force=True)
         phrase = CONFIRM_PHRASE.get(tool, lambda a: f"Should I run {tool.replace('_', ' ')}?")(args or {})
         try:
             await self.speak_line(phrase + " Say yes or no.")
         except Exception:
             log.exception("could not speak the confirmation question")
+
+        mode = config.get("wake", "mode", default="both")
+        if mode not in ("wake_word", "both") or not config.get("confirm", "by_voice", default=True):
+            return  # push-to-talk only, or voice-confirm disabled -> UI/text answers it
+        for attempt in range(2):
+            answer = await self._listen_yes_no()
+            if answer is None:
+                if attempt == 0 and registry.has_pending:
+                    await self.speak_line("Sorry, I didn't catch that. Yes or no?")
+                    continue
+                return  # give up on voice; the UI modal / 30 s timeout takes over
+            if not registry.has_pending:
+                return  # already answered elsewhere
+            registry.resolve_latest(answer == "yes")
+            log.info("confirmation answered by voice: %s", answer)
+            await bus.emit("confirmation_answered", approved=(answer == "yes"), source="voice")
+            try:
+                await self.speak_line("Okay." if answer == "yes" else "Cancelled.")
+            except Exception:
+                pass
+            return
+
+    async def _listen_yes_no(self, timeout: float = 8.0) -> str | None:
+        """Capture one short utterance and classify it as 'yes'/'no' (or None). Runs during
+        WAITING, when no other task is consuming the mic."""
+        from audio.vad import StreamingVAD
+        vad = StreamingVAD(threshold=0.6)
+        q = mic.subscribe()
+        buf: list = []
+        speech = 0
+        last_speech: float | None = None
+        t0 = time.time()
+        try:
+            mic.drain_queue(q)
+            while time.time() - t0 < timeout:
+                try:
+                    block = await asyncio.wait_for(q.get(), timeout=0.4)
+                except asyncio.TimeoutError:
+                    if last_speech and time.time() - last_speech > 0.7 and speech >= MIN_SPEECH_FRAMES:
+                        break
+                    continue
+                buf.append(block)
+                probs = vad.feed(block)
+                if any(p >= vad.threshold for p in probs):
+                    speech += sum(1 for p in probs if p >= vad.threshold)
+                    last_speech = time.time()
+                elif last_speech and time.time() - last_speech > 0.7 and speech >= MIN_SPEECH_FRAMES:
+                    break
+        finally:
+            mic.unsubscribe(q)
+        if speech < MIN_SPEECH_FRAMES or not buf:
+            return None
+        import numpy as _np
+        text = (await stt.transcribe(_np.concatenate(buf)) or "").strip()
+        text = WAKE_PHRASE.sub("", text, count=1).strip()
+        log.info("yes/no heard: %r", text[:40])
+        if YES_WORDS.match(text):
+            return "yes"
+        if NO_WORDS.match(text):
+            return "no"
+        return None
 
     async def confirmation_answered(self) -> None:
         if self.sm.state == State.WAITING:
