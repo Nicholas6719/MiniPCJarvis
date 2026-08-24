@@ -128,6 +128,18 @@ interface Store {
 }
 
 let draftId = "";
+let pendingDelta = "";
+let deltaFlush = 0;
+
+function flushDelta(set: any) {
+  if (deltaFlush) {
+    cancelAnimationFrame(deltaFlush);
+    deltaFlush = 0;
+  }
+  const chunk = pendingDelta;
+  pendingDelta = "";
+  if (chunk) set((st: any) => ({ assistantDraft: st.assistantDraft + chunk }));
+}
 
 export const useStore = create<Store>((set, get) => ({
   state: "offline",
@@ -187,13 +199,14 @@ export const useStore = create<Store>((set, get) => ({
 
   onEvent: (evt) => {
     const push = (a: ActivityEntry) =>
-      set((st) => ({ activity: [...st.activity.slice(-199), a] }));
+      set((st) => ({ activity: [...st.activity.slice(-119), a] }));
 
     switch (evt.kind) {
       case "state":
         set({ state: evt.state, ...(evt.state !== "idle" ? { armedUntil: 0 } : {}) });
         break;
       case "transcript":
+        flushDelta(set);
         set((st) => ({
           transcript: [
             ...st.transcript,
@@ -206,10 +219,22 @@ export const useStore = create<Store>((set, get) => ({
         break;
       case "assistant_delta": {
         if (!draftId) draftId = evt.id;
-        set((st) => ({ assistantDraft: st.assistantDraft + evt.text }));
+        // Tokens arrive faster than the screen refreshes. Buffer them and commit once per
+        // frame: same text, a fraction of the React renders (this is what made streaming
+        // answers feel heavy while a panel was open).
+        pendingDelta += evt.text;
+        if (!deltaFlush) {
+          deltaFlush = requestAnimationFrame(() => {
+            deltaFlush = 0;
+            const chunk = pendingDelta;
+            pendingDelta = "";
+            if (chunk) set((st) => ({ assistantDraft: st.assistantDraft + chunk }));
+          });
+        }
         break;
       }
       case "turn_done": {
+        flushDelta(set);
         const draft = get().assistantDraft;
         // attach the synthesized answer to a finished research run
         set((st) => {
@@ -252,6 +277,7 @@ export const useStore = create<Store>((set, get) => ({
         push({ id: evt.id, ts: evt.ts, kind: "confirm", summary: `confirmation: ${evt.tool}` });
         break;
       case "interrupted":
+        flushDelta(set);
         set({ assistantDraft: "" });
         push({ id: evt.id, ts: evt.ts, kind: "interrupt", summary: "interrupted" });
         break;

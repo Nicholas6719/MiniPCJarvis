@@ -32,8 +32,8 @@ export function StatusBar() {
       }
     };
     load();
-    const t = setInterval(load, 5000);
-    const c = setInterval(() => setClock(new Date()), 1000);
+    const t = setInterval(() => { if (!document.hidden) load(); }, 5000);
+    const c = setInterval(() => { if (!document.hidden) setClock(new Date()); }, 1000);
     return () => {
       clearInterval(t);
       clearInterval(c);

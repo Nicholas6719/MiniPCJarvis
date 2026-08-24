@@ -20,18 +20,20 @@ import { AmbientView } from "./components/AmbientView";
 import { useStore, View } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
 
-const VIEWS: { id: View; label: string }[] = [
-  { id: "conversation", label: "CONVERSATION" },
-  { id: "research", label: "RESEARCH" },
-  { id: "media", label: "MEDIA" },
-  { id: "browser", label: "BROWSER" },
-  { id: "files", label: "FILES" },
-  { id: "apps", label: "APPS" },
-  { id: "system", label: "SYSTEM" },
-  { id: "memory", label: "MEMORY" },
-  { id: "tasks", label: "TASKS" },
-  { id: "diagnostics", label: "DIAGNOSTICS" },
-  { id: "settings", label: "SETTINGS" },
+// Icon-first tabs: the glyph is the control, the name is the tooltip (and is shown for
+// whichever tab is active, so you never have to guess what you are looking at).
+const VIEWS: { id: View; label: string; icon: string }[] = [
+  { id: "conversation", label: "CONVERSATION", icon: "◈" },
+  { id: "research", label: "RESEARCH", icon: "◎" },
+  { id: "media", label: "MEDIA", icon: "▣" },
+  { id: "browser", label: "BROWSER", icon: "◐" },
+  { id: "files", label: "FILES", icon: "▤" },
+  { id: "apps", label: "APPS", icon: "▦" },
+  { id: "system", label: "SYSTEM", icon: "◍" },
+  { id: "memory", label: "MEMORY", icon: "❖" },
+  { id: "tasks", label: "TASKS", icon: "◔" },
+  { id: "diagnostics", label: "DIAGNOSTICS", icon: "⌁" },
+  { id: "settings", label: "SETTINGS", icon: "⚙" },
 ];
 
 export default function App() {
@@ -125,9 +127,12 @@ export default function App() {
         <nav className="hud__nav">
           {VIEWS.map((v) => (
             <button key={v.id}
-                    className={`hud__navbtn ${view === v.id ? "is-active" : ""}`}
+                    title={v.label}
+                    aria-label={v.label}
+                    className={`hud__navbtn hud__navicon ${view === v.id ? "is-active" : ""}`}
                     onClick={() => setView(v.id)}>
-              {v.label}
+              <span className="hud__glyph">{v.icon}</span>
+              {view === v.id && <span className="hud__navname">{v.label}</span>}
             </button>
           ))}
           {!ambient && (

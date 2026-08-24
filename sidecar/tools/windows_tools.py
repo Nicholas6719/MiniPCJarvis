@@ -250,7 +250,7 @@ def take_screenshot(monitor: int = 0, hide_self: bool = True,
                 win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
                 hidden.append(hwnd)
         if hidden:
-            _t.sleep(0.45)  # let the desktop repaint
+            _t.sleep(0.28)  # let the desktop repaint
     try:
         with mss.mss() as sct:
             mon = sct.monitors[monitor] if monitor < len(sct.monitors) else sct.monitors[0]

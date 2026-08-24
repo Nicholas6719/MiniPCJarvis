@@ -41,7 +41,32 @@ def _ocr_screen(path: Path, rect) -> str:
             img = img.crop((l, t, r, b))
     res = winocr.recognize_pil_sync(img, "en")
     lines = [ln["text"].strip() for ln in res.get("lines", []) if ln.get("text", "").strip()]
-    return "\n".join(lines)
+    return _condense(lines)
+
+
+_JUNK = re.compile(r"^[\W_]{1,3}$")
+
+
+def _condense(lines: list[str], max_chars: int = 1400) -> str:
+    """Screen text is mostly chrome: dedupe, drop 1-2 char noise, and cap. Prompt eval is
+    the dominant cost of a screen question (~1 s per 400 tokens on this box), so half the
+    text is roughly half the wait — and the top of a window carries the identifying text."""
+    seen: set[str] = set()
+    out: list[str] = []
+    total = 0
+    for ln in lines:
+        if _JUNK.match(ln) or len(ln) < 2:
+            continue
+        key = ln.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ln)
+        total += len(ln) + 1
+        if total >= max_chars:
+            out.append("...")
+            break
+    return "\n".join(out)
 
 
 async def analyze_screen(question: str = "Describe what is on the screen.",
@@ -71,7 +96,7 @@ async def analyze_screen(question: str = "Describe what is on the screen.",
             use_vision = True          # mostly pictures/video: read it with the vision model
     if not use_vision:
         return {"method": "ocr", "active_window": fg, "open_windows": titles[:10],
-                "screen_text": ocr_text[:2500], "truncated": len(ocr_text) > 2500,
+                "screen_text": ocr_text, "truncated": ocr_text.endswith("..."),
                 "note": "Answer the user's question from screen_text and the window titles. "
                         "screen_text is what is literally on screen, read top to bottom."}
     grounding = ("Facts from the operating system - treat as ground truth: "

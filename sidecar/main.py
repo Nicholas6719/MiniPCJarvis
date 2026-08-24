@@ -695,6 +695,14 @@ def main() -> None:
     # then has to read it from this process's command line, which is the intended bar.
     import secrets as _secrets
     SESSION_TOKEN = args.token or _secrets.token_hex(16)
+    # Debug builds only: publish the token so the test harnesses can authenticate
+    # (production keeps it in memory - it is never on the command line or on disk).
+    if os.environ.get("JARVIS_DEBUG") == "1":
+        try:
+            from config import APP_DIR
+            (APP_DIR / "session.token").write_text(SESSION_TOKEN, "utf-8")
+        except Exception:
+            pass
 
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

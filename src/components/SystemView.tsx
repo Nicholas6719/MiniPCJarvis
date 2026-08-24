@@ -35,7 +35,7 @@ export function SystemView() {
   const load = async () => {
     try { const r = await api("/system"); setS(r); if (r.volume?.volume_percent != null) setVol(r.volume.volume_percent); } catch {}
   };
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(() => { if (!document.hidden) load(); }, 5000); return () => clearInterval(t); }, []);
 
   const post = async (path: string, body: any) => {
     setBusy(true);

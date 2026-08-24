@@ -30,6 +30,7 @@ while ((Get-Date) -lt $deadline) {
     if ($p) {
         $port = [regex]::Match($p.CommandLine, '--port (\d+)').Groups[1].Value
         $tok = [regex]::Match($p.CommandLine, '--token ([0-9a-f]+)').Groups[1].Value
+        if (-not $tok) { $tf = "$env:APPDATA\JARVIS\session.token"; if (Test-Path $tf) { $tok = (Get-Content $tf -Raw).Trim() } }
         try { $h = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 3; if ($h.state -eq 'idle') { break } } catch {}
     }
     Start-Sleep 3

@@ -14,7 +14,8 @@ export function AppsView() {
   };
   useEffect(() => {
     load();
-    const t = setInterval(load, 4000);
+    // only poll while this tab is actually on screen (and the window is focused)
+    const t = setInterval(() => { if (!document.hidden) load(); }, 4000);
     return () => clearInterval(t);
   }, []);
 

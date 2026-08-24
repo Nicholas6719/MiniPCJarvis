@@ -22,7 +22,7 @@ function BrainPanel() {
   useEffect(() => {
     const load = async () => { try { setB(await api("/brain")); } catch {} };
     load();
-    const t = setInterval(load, 10000);
+    const t = setInterval(() => { if (!document.hidden) load(); }, 10000);
     return () => clearInterval(t);
   }, []);
   if (!b) return null;
@@ -104,7 +104,7 @@ export function DiagnosticsView() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000);
+    const t = setInterval(() => { if (!document.hidden) load(); }, 15000);
     return () => clearInterval(t);
   }, []);
 

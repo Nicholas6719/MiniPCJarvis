@@ -962,3 +962,23 @@ body {
 /* the orb's labels hang 52px below it (absolute): give the side chat room in panel mode */
 .hud--panel .hud__sidechat { margin-top: 48px; }
 .hud--panel .core__sublabel { display: none; }
+
+
+/* ---------- icon tabs ---------- */
+.hud__navicon { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; line-height: 1; }
+.hud__glyph { font-size: 15px; line-height: 1; }
+.hud__navname { font-size: 9px; letter-spacing: 0.18em; }
+.hud__navicon.is-active { background: rgba(39, 199, 255, 0.10); }
+.hud__navicon:not(.is-active):hover { background: rgba(255, 255, 255, 0.05); }
+
+/* ---------- snappier: shorter transitions, no layout-thrash animations ---------- */
+.hud__nav { transition: opacity 0.14s ease-out, transform 0.14s ease-out; }
+.hud__center, .hud__right { animation: panelIn 0.16s ease-out; }
+@keyframes panelIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.hud__navbtn { transition: color 0.12s, background 0.12s, border-color 0.12s; }
+.ambient__input { transition: opacity 0.12s, border-color 0.12s; }
+
+/* the background grid is decorative: keep it off the compositor's critical path */
+.hud__grid { will-change: auto; contain: strict; }
+/* long lists own their own layer so streaming text doesn't repaint the whole HUD */
+.activity, .files__list, .convo__scroll, .browser__frame, .apps__grid { contain: content; }
