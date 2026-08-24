@@ -682,7 +682,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--token", default="")
+    parser.add_argument("--token-stdin", action="store_true",
+                        help="read the session token from stdin (keeps it out of argv)")
     args = parser.parse_args()
+    if args.token_stdin and not args.token:
+        try:
+            args.token = (sys.stdin.readline() or "").strip()
+        except Exception:
+            args.token = ""
     # never run with auth disabled: an empty token would make every endpoint (file ops,
     # power, browser) open on loopback. If none was supplied, mint one — a manual caller
     # then has to read it from this process's command line, which is the intended bar.

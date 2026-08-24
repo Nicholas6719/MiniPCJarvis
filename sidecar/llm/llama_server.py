@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import logging
+import os
 import subprocess
 from ctypes import wintypes
 from pathlib import Path
@@ -197,17 +198,20 @@ class LlamaServer:
             binary, "-m", model_path,
             "-c", str(mcfg.get("context") or config.get("llm", "context", default=16384)),
             "--host", "127.0.0.1", "--port", str(self.port),
-            "--api-key", self.api_key,
             "--log-file", str(LOG_DIR / "llama-server.log"),
             *mcfg.get("args", []),
         ]
         if mcfg.get("mmproj") and Path(mcfg["mmproj"]).exists():
             args += ["--mmproj", mcfg["mmproj"]]
         log.info("starting llama-server: %s", model_name)
+        # the API key goes in the child's ENVIRONMENT, never on its command line:
+        # any local process can read another process's argv (WMI/Win32_Process).
+        env = {**os.environ, "LLAMA_API_KEY": self.api_key}
         self.proc = subprocess.Popen(
             args,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         _job.assign(self.proc.pid)

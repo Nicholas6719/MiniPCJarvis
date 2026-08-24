@@ -65,10 +65,12 @@ impl Sidecar {
     ) -> Result<Child, String> {
         let mut cmd = sidecar_command(resource_dir.clone())
             .ok_or("sidecar runtime not found".to_string())?;
+        // The token is written to the child's stdin, never passed as an argument:
+        // any local process can read another process's command line on Windows.
         cmd.arg("--port")
             .arg(info.port.to_string())
-            .arg("--token")
-            .arg(&info.token)
+            .arg("--token-stdin")
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         #[cfg(windows)]
@@ -77,7 +79,14 @@ impl Sidecar {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        cmd.spawn().map_err(|e| format!("sidecar spawn: {e}"))
+        let mut child = cmd.spawn().map_err(|e| format!("sidecar spawn: {e}"))?;
+        // hand over the token, then close the pipe so the child's read returns
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = writeln!(stdin, "{}", info.token);
+            let _ = stdin.flush();
+        }
+        Ok(child)
     }
 
     pub fn start(resource_dir: Option<PathBuf>) -> Result<Self, String> {
