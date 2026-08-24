@@ -43,10 +43,15 @@ SEARCH_INTENT = re.compile(
 # Confirmations may be answered out loud. Deliberately strict: only a short, bare
 # affirmation counts, so speech from a video or a passing sentence can never approve
 # a risk-gated action.
-YES_WORDS = re.compile(r"^\s*(?:yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|please do|confirm|"
-                       r"affirmative|that's right|correct)\s*[.!]?\s*$", re.I)
-NO_WORDS = re.compile(r"^\s*(?:no|nope|nah|cancel|stop|don't|do not|never\s*mind|negative|"
-                      r"forget it|not now)\s*[.!]?\s*$", re.I)
+# Asymmetric on purpose: be LIBERAL about what cancels and CONSERVATIVE about what
+# approves. Parakeet v3 is multilingual and drifts on ultra-short utterances (English
+# "No." is transcribed "Não"), so the cancel list carries the common variants; the
+# approve list stays English-only so a mis-heard word can never green-light a restart.
+YES_WORDS = re.compile(r"^\s*(?:yes|yes please|yeah|yep|yup|sure|ok|okay|do it|go ahead|please do|"
+                       r"confirm|confirmed|affirmative|that's right|correct)\s*[.!]?\s*$", re.I)
+NO_WORDS = re.compile(r"^\s*(?:no|no thanks|no thank you|nope|nah|naw|cancel|stop|don't|do not|"
+                      r"never\s*mind|negative|forget it|not now|n[aã]o|nein|non|nyet|nej|no way)"
+                      r"\s*[.!,]?\s*$", re.I)
 CONFIRM_PHRASE = {
     "close_application": lambda a: f"Close {a.get('name', 'that app')}?",
     "open_application": lambda a: f"Open {a.get('name', 'that app')}?",
@@ -828,7 +833,7 @@ class Orchestrator:
         """Capture one short utterance and classify it as 'yes'/'no' (or None). Runs during
         WAITING, when no other task is consuming the mic."""
         from audio.vad import StreamingVAD
-        vad = StreamingVAD(threshold=0.6)
+        vad = StreamingVAD(threshold=0.5)   # "no." is ~0.4 s: don't miss it
         q = mic.subscribe()
         buf: list = []
         speech = 0
@@ -852,7 +857,7 @@ class Orchestrator:
                     break
         finally:
             mic.unsubscribe(q)
-        if speech < MIN_SPEECH_FRAMES or not buf:
+        if speech < 2 or not buf:      # a one-word answer can be 2 frames
             return None
         import numpy as _np
         text = (await stt.transcribe(_np.concatenate(buf)) or "").strip()
