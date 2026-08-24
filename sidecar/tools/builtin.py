@@ -41,6 +41,9 @@ _APP_ALIASES = {
 }
 
 
+psutil.cpu_percent(interval=None)   # prime the counter so callers never have to block
+
+
 def get_system_stats() -> dict:
     vm = psutil.virtual_memory()
     disk = psutil.disk_usage("C:\\")
@@ -52,7 +55,8 @@ def get_system_stats() -> dict:
     except Exception:
         pass
     return {
-        "cpu_percent": psutil.cpu_percent(interval=0.3),
+        # interval=None -> average since the previous call (primed above): no 0.3 s block
+        "cpu_percent": psutil.cpu_percent(interval=None),
         "ram_used_gb": round(vm.used / 1e9, 1),
         "ram_total_gb": round(vm.total / 1e9, 1),
         "ram_percent": vm.percent,

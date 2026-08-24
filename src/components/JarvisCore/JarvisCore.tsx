@@ -65,6 +65,7 @@ export function JarvisCore({ state, wakeMode = "push_to_talk", armedUntil = 0 }:
       <div className="core__ring core__ring--outer" />
       <div className="core__ring core__ring--mid" />
       <div className="core__ring core__ring--inner" />
+      <div className="core__glow" />
       <div className="core__nucleus" />
       <div className="core__label">{label}</div>
       {sub && <div className="core__sublabel">{sub}</div>}

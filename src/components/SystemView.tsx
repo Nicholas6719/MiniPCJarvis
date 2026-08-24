@@ -9,7 +9,7 @@ interface Snap {
   battery: { percent: number; plugged: boolean } | null;
   network: { ssid: string | null; signal: number | null; state: string; ip: string | null; sent_mb: number; recv_mb: number };
   uptime_s: number;
-  processes: { name: string; cpu: number; mem_mb: number }[];
+  processes: { name: string; mem_mb: number }[];
 }
 
 function uptime(s: number): string {

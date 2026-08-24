@@ -55,6 +55,14 @@ export default function App() {
 
   useEffect(() => connectEvents(onEvent), [onEvent]);
 
+  // don't animate a window nobody is looking at
+  useEffect(() => {
+    const sync = () => document.body.classList.toggle("is-hidden", document.hidden);
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, []);
+
   // fade back to ambient once the turn is over, the hold has elapsed, nothing is pinned,
   // and the cursor isn't inside the panel
   useEffect(() => {
