@@ -351,7 +351,15 @@ export const useStore = create<Store>((set, get) => ({
             next.stage = "reading";
           }
           if (evt.error) next.error = evt.error;
-          return { web: next, rightPanel: "web", ambient: false, panelUntil: Date.now() + 10 * 60 * 1000 };
+          return {
+            web: next, rightPanel: "web", ambient: false,
+            // Claim the main panel, the way files and media do. Without this the view
+            // stayed on whatever the LAST turn opened — asking for research while the
+            // files panel was up left the files there and squeezed the results into a
+            // narrow strip beside them. Research runs keep their own view.
+            view: st.autoSwitch ? (st.view === "research" ? "research" : "conversation") : st.view,
+            panelUntil: Date.now() + 10 * 60 * 1000,
+          };
         });
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `web: ${evt.stage}${evt.query ? ` "${evt.query}"` : ""}` });
         break;
