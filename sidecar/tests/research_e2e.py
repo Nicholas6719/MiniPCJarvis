@@ -49,6 +49,7 @@ async def run(ws, text):
         return {"text": text, "error": f"refused: {r}", "reply": "", "tools": [],
                 "errors": [], "secs": 0, "first": None}
     reply, tools, errors, first = "", [], [], None
+    sources = []          # everything the tools actually put in front of the model
     while time.time() - t0 < 300:
         try:
             e = json.loads(await asyncio.wait_for(ws.recv(), timeout=300))
@@ -65,9 +66,15 @@ async def run(ws, text):
             errors.append(f"{e.get('tool')}: {str(e.get('result'))[:90]}")
         elif k == "error":
             errors.append(str(e.get("summary"))[:120])
+        elif k == "web" and e.get("results"):
+            for it in e["results"]:
+                sources.append(f"{it.get('title','')} {it.get('snippet','')}")
+        elif k == "browser" and (e.get("text") or e.get("title")):
+            sources.append(f"{e.get('title','')} {(e.get('text') or '')[:4000]}")
         elif k == "turn_done":
             break
     return {"text": text, "reply": reply.strip(), "tools": tools, "errors": errors,
+            "sources": " ".join(sources).lower(),
             "secs": round(time.time() - t0, 1), "first": round(first, 1) if first else None}
 
 
@@ -117,8 +124,22 @@ async def main() -> int:
     live = search.get("status") == "ok"
     if not live:
         for r in results:
-            # answered a live-data question with no live data available
-            r["fabricated"] = r["needs_live"] and r["substantive"]
+            # Not "did it answer a live question" — that unfairly condemned a correct,
+            # sourced answer ("Strix Halo debuted January 2025 with RDNA 3.5", which was
+            # straight off the headline Hacker News returned). The real question is
+            # whether the claim is GROUNDED in what the tools actually returned. Take the
+            # distinctive tokens of the reply — model numbers, product names, years — and
+            # require at least one to appear in the sources.
+            if not (r["needs_live"] and r["substantive"]):
+                continue
+            claims = set(re.findall(r"\b(?:[A-Z][a-zA-Z]{2,}|\d{4}|[A-Za-z]+\s?\d{3,4}[A-Za-z+]*)\b",
+                                    r["reply"]))
+            claims = {c.lower() for c in claims
+                      if c.lower() not in {"the", "afraid", "live", "search", "web", "sir",
+                                           "next", "total", "solar", "boston", "amd", "intel"}}
+            grounded = any(c in r["sources"] for c in claims) if claims else False
+            r["fabricated"] = not grounded
+            r["grounded"] = grounded
     answered = sum(1 for r in results if r["substantive"])
     honest = sum(1 for r in results if r["honest"])
     fabricated = [r["text"] for r in results if r["fabricated"]]

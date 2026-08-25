@@ -106,10 +106,11 @@ async def run_diagnostics() -> list[dict]:
         add("Web Search", "error",
             f"last search returned nothing ({last.get('provider') or 'all providers blocked'})"
             + (" — add a Brave Search API key in Settings" if not secrets.get("brave_api_key") else ""))
-    elif last.get("ts") and last.get("results") and last.get("provider") == "wikipedia":
+    elif (last.get("ts") and last.get("results")
+          and last.get("provider") and "brave" not in str(last.get("provider"))):
         add("Web Search", "warn",
-            "Wikipedia only — live web search is bot-blocked. No current prices, news or "
-            "releases. Add a Brave Search API key in Settings.")
+            f"limited — {last.get('provider')} only (general web search is bot-blocked). "
+            "No current prices or availability. Add a Brave Search API key in Settings.")
     elif last.get("ts") and last.get("results"):
         add("Web Search", "ok", f"{last['results']} results via {last.get('provider')}")
     elif secrets.get("brave_api_key"):

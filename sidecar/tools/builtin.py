@@ -399,6 +399,105 @@ def _note_search(out: dict) -> dict:
     return out
 
 
+async def _hn_search(query: str, count: int) -> list[dict]:
+    """Hacker News via the Algolia API — official, keyless, and the results are links to
+    the real articles (Tom's Hardware, Chips and Cheese, vendor pages), which fetch_page
+    can then read. This is what makes tech questions answerable without a search key."""
+    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": WIKI_UA}) as c:
+        r = await c.get("https://hn.algolia.com/api/v1/search",
+                        params={"query": query, "tags": "story", "hitsPerPage": count})
+        r.raise_for_status()
+        out = []
+        for h in r.json().get("hits", []):
+            url = h.get("url") or f"https://news.ycombinator.com/item?id={h.get('objectID')}"
+            out.append({"title": h.get("title") or "", "url": url,
+                        "snippet": (h.get("story_text") or "")[:240]
+                                   or f"{h.get('points', 0)} points, {h.get('num_comments', 0)} comments"
+                                      f" — discussed {(h.get('created_at') or '')[:10]}",
+                        "host": "news.ycombinator.com"})
+        return [o for o in out if o["title"]]
+
+
+async def _stackexchange_search(query: str, count: int) -> list[dict]:
+    """Stack Exchange's public API — keyless at low volume, and unbeatable for the
+    "does hardware X support Y" questions that a manual never answers plainly."""
+    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": WIKI_UA}) as c:
+        out = []
+        for site in ("superuser", "stackoverflow"):
+            try:
+                r = await c.get("https://api.stackexchange.com/2.3/search/advanced",
+                                params={"order": "desc", "sort": "relevance", "q": query,
+                                        "site": site, "pagesize": count, "filter": "default"})
+                if r.status_code != 200:
+                    continue
+                import html as _html
+                for i in r.json().get("items", []):
+                    # the API returns HTML-escaped titles ("Freeze on 9950X3D &amp; ...")
+                    out.append({"title": _html.unescape(i.get("title", "")),
+                                "url": i.get("link", ""),
+                                "snippet": f"{i.get('score', 0)} votes"
+                                           + (", answered" if i.get("is_answered") else ", unanswered"),
+                                "host": f"{site}.com"})
+            except Exception:
+                continue
+            if out:
+                break
+        return out
+
+
+async def _keyless_search(query: str, count: int) -> dict:
+    """Everything still open to a program, merged.
+
+    General web search is bot-blocked, but these three are documented public APIs that
+    are meant to be called. Between them they cover most of what he actually asks:
+    encyclopedic facts, hardware/tech news, and "does X support Y".
+    """
+    import asyncio as _a
+    # Keyword indexes match terms, not sentences: "latest news about AMD Strix Halo"
+    # scored nothing on Hacker News while "AMD Strix Halo" returned Tom's Hardware and
+    # Chips and Cheese. Strip the framing and search the subject.
+    terms = re.sub(
+        r"^\s*(?:please\s+)?(?:can you\s+)?(?:search(?:\s+the\s+web)?(?:\s+for)?|look\s+up|"
+        r"find\s+(?:out|me)?|research|tell me about|what(?:'s| is| are)|show me|get me)\s+",
+        "", query, flags=re.I)
+    terms = re.sub(r"\b(?:the\s+)?(?:latest|current|recent|newest|today'?s)\s+"
+                   r"(?:news|price|prices|info|information|updates?)\s+(?:on|about|for|of)\s+",
+                   "", terms, flags=re.I).strip() or query
+    jobs = {
+        "wikipedia": _wikipedia_search(query, count),
+        "hackernews": _hn_search(terms, count),
+        "stackexchange": _stackexchange_search(terms, count),
+    }
+    done = await _a.gather(*jobs.values(), return_exceptions=True)
+    lanes, used = [], []
+    for name, res in zip(jobs.keys(), done):
+        if isinstance(res, Exception):
+            log.warning("%s search failed: %s", name, str(res)[:80])
+            continue
+        items = res.get("results", []) if isinstance(res, dict) else res
+        if items:
+            used.append(name)
+            lanes.append(items)
+    # Round-robin, not concatenate. Wikipedia always returns five articles for anything,
+    # so appending buried the Hacker News hits — the ones that actually answered "latest
+    # news about Strix Halo" — below the fold where the model never read them.
+    merged, seen = [], set()
+    for i in range(max((len(x) for x in lanes), default=0)):
+        for lane in lanes:
+            if i < len(lane) and lane[i].get("url") and lane[i]["url"] not in seen:
+                seen.add(lane[i]["url"])
+                merged.append(lane[i])
+    if not merged:
+        return {}
+    return {"query": query, "results": merged[: count * 2], "provider": "+".join(used),
+            "note": ("NO GENERAL WEB SEARCH. These come from Wikipedia, Hacker News and "
+                     "Stack Exchange only. They are real sources and you may use and cite "
+                     "them, and you may open one with fetch_page to read it. They will NOT "
+                     "contain today's prices, stock or availability. If they do not answer "
+                     "the question, say live web search is unavailable and that a Brave "
+                     "Search API key is needed in Settings — never answer from memory.")}
+
+
 async def web_search(query: str, count: int = 5) -> dict:
     return _note_search(await _web_search(query, count))
 
@@ -428,12 +527,12 @@ async def _web_search(query: str, count: int = 5) -> dict:
         except Exception as e:
             log.warning("ddg search failed: %s", e)
         try:
-            wiki = await _wikipedia_search(query, count)
-            if wiki.get("results"):
-                await bus.emit("web", stage="results", query=query, results=wiki["results"])
-                return wiki
+            keyless = await _keyless_search(query, count)
+            if keyless.get("results"):
+                await bus.emit("web", stage="results", query=query, results=keyless["results"])
+                return keyless
         except Exception as e:
-            log.warning("wikipedia search failed: %s", e)
+            log.warning("keyless search failed: %s", e)
         # Every keyless route is bot-blocked. Say so plainly instead of returning an empty
         # list, which the model reads as "nothing exists" and reports as "I couldn't find
         # reliable information" — leaving nobody any idea that search is simply switched off.
