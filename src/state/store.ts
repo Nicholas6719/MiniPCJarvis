@@ -137,8 +137,12 @@ const MANUAL_HOLD_MS = 45000;
 // files tab" by voice, and the debug/self-test hook) used to set pinned:true, and the
 // collapse timer skips anything pinned — so the HUD never found its way back to the orb.
 // Only the PIN button pins now; everything else gets a timed hold.
+//
+// It also no longer forces the tab strip open. Panels surface themselves when JARVIS uses
+// them and fade back to the orb on their own, so the tabs are not how you get anywhere —
+// they only appear when you deliberately reach for the top edge.
 const showView = (v: View) => ({
-  view: v, ambient: false, pinned: false, navVisible: true,
+  view: v, ambient: false, pinned: false,
   panelUntil: Date.now() + MANUAL_HOLD_MS,
 });
 
