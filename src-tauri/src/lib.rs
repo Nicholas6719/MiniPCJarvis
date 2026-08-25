@@ -128,6 +128,9 @@ pub fn run() {
                 .with_handler(move |app, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
                         if let Some(win) = app.get_webview_window("main") {
+                            // show() alone leaves a MINIMIZED window in the taskbar, which
+                            // is exactly the state sleep mode puts him in.
+                            let _ = win.unminimize();
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -158,6 +161,7 @@ pub fn run() {
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.unminimize();
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -177,6 +181,7 @@ pub fn run() {
                     use tauri::tray::TrayIconEvent;
                     if let TrayIconEvent::DoubleClick { .. } = event {
                         if let Some(win) = tray.app_handle().get_webview_window("main") {
+                            let _ = win.unminimize();
                             let _ = win.show();
                             let _ = win.set_focus();
                         }

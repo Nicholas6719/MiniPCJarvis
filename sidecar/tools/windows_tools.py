@@ -20,6 +20,30 @@ SCREENSHOT_DIR = APP_DIR / "screenshots"
 
 # ---------- window management ----------
 
+DWMWA_CLOAKED = 14
+
+
+def _is_cloaked(hwnd: int) -> bool:
+    """True for a window DWM is hiding even though IsWindowVisible says otherwise.
+
+    Windows 11 keeps the frame of a closed UWP app (Settings, Calculator, Store, Mail)
+    alive and suspended. IsWindowVisible still reports True for it, so JARVIS insisted
+    "you have Settings open" when it had been closed for hours — twice over, since these
+    apps own both an ApplicationFrameWindow and a CoreWindow. Cloaking is the only
+    reliable way to tell. This also excludes windows sitting on another virtual desktop,
+    which is right for "what do I have open" — they are not on screen and switching to
+    one would yank the desktop out from under him.
+    """
+    import ctypes.wintypes as wt
+    value = ctypes.c_int(0)
+    try:
+        res = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+            wt.HWND(hwnd), DWMWA_CLOAKED, ctypes.byref(value), ctypes.sizeof(value))
+    except Exception:
+        return False
+    return res == 0 and value.value != 0
+
+
 def _visible_windows() -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
 
@@ -43,6 +67,8 @@ def _visible_windows() -> list[tuple[int, str]]:
             title = win32gui.GetWindowText(hwnd)
             if not title.strip():
                 return True
+            if _is_cloaked(hwnd):
+                return True   # closed UWP app, or another virtual desktop
             # skip JARVIS's own hidden search browser (tool-window, off-screen)
             try:
                 if win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOOLWINDOW:
@@ -276,6 +302,46 @@ def open_url(url: str) -> dict:
         return {"error": f"could not open {url}: {e}"}
 
 
+def enter_sleep_mode() -> dict:
+    """Put JARVIS himself out of the way: minimise his own window(s).
+
+    Not the same thing as power_action("sleep"), which suspends the PC. The ears stay
+    open the whole time — the mic loop lives in this process, not in the window — so the
+    wake word still brings him back.
+    """
+    n = 0
+    for hwnd in _our_windows():
+        try:
+            if not win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                n += 1
+        except Exception:
+            continue
+    return {"sleeping": True, "minimized": n}
+
+
+def exit_sleep_mode() -> dict:
+    """Bring him back and put him in front, from minimised or merely buried."""
+    found = 0
+    for hwnd in _our_windows():
+        try:
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            else:
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+            # Windows refuses SetForegroundWindow to a process without input focus;
+            # the synthetic ALT press is the standard nudge that grants it.
+            ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, 0, 0)
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            finally:
+                ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+            found += 1
+        except Exception:
+            continue
+    return {"sleeping": False, "restored": found}
+
+
 def lock_computer() -> dict:
     ctypes.windll.user32.LockWorkStation()
     return {"locked": True}
@@ -384,6 +450,21 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "url": {"type": "string"}}, "required": ["url"]},
         risk=Risk.LOW, handler=open_url))
+    registry.register(T(
+        name="enter_sleep_mode",
+        description="Dismiss JARVIS himself: minimise his window and stand by for the wake "
+                    "word. ONLY for an explicit dismissal addressed to you - 'go to sleep', "
+                    "'sleep mode', \"that's all for now\", 'stand down'. NEVER call this "
+                    "merely because sleep was mentioned: a question ABOUT sleep, bedtime or "
+                    "insomnia is a question to answer, not an instruction to go away. NOT for "
+                    "suspending the PC - that is power_action('sleep').",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.SAFE, handler=enter_sleep_mode))
+    registry.register(T(
+        name="exit_sleep_mode",
+        description="Bring the JARVIS window back and put it in front.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.SAFE, handler=exit_sleep_mode))
     registry.register(T(
         name="lock_computer",
         description="Lock the Windows session immediately.",

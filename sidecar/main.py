@@ -129,6 +129,8 @@ async def set_secret(body: dict, x_jarvis_token: str | None = Header(None)):
 @app.post("/listen/toggle")
 async def listen_toggle(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
+    # the hotkey and the tray both land here: reaching for him ends sleep too
+    await orchestrator.wake_if_sleeping()
     await orchestrator.toggle_listen()
     return {"ok": True, "state": orchestrator.sm.state.value}
 
@@ -671,6 +673,9 @@ async def text_input(body: dict, x_jarvis_token: str | None = Header(None)):
             if orchestrator.sm.state in (State.IDLE, State.INTERRUPTED):
                 break
             await asyncio.sleep(0.1)
+    # typing to him is as deliberate as saying his name: it ends sleep rather than
+    # bouncing off it. Without this, sleep mode also silently disabled the text box.
+    await orchestrator.wake_if_sleeping()
     if orchestrator.sm.state not in (State.IDLE, State.INTERRUPTED):
         return {"ok": False, "error": "busy"}
     asyncio.create_task(orchestrator.run_text_turn(text))

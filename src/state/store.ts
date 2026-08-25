@@ -127,6 +127,12 @@ interface Store {
   setHoldMs: (n: number) => void;
 }
 
+// How long a tab you opened yourself stays before the HUD settles back to the orb.
+// Longer than the post-turn hold (holdMs, 12 s) because you opened this one to read it.
+// The timer only runs while idle and while the cursor is outside the panel, so it never
+// closes something you are actively looking at.
+const MANUAL_HOLD_MS = 45000;
+
 let draftId = "";
 let pendingDelta = "";
 let deltaFlush = 0;
@@ -171,8 +177,14 @@ export const useStore = create<Store>((set, get) => ({
   setWakeMode: (m) => set({ wakeMode: m }),
   setRightPanel: (p) => set({ rightPanel: p }),
   setFilePreview: (p) => set({ filePreview: p }),
-  // a click on a tab is an explicit request: show it and pin it
-  setView: (v) => set({ view: v, ambient: false, pinned: true, navVisible: true }),
+  // A click on a tab used to PIN it, and the collapse timer skips anything pinned — so a
+  // tab you opened stayed on screen forever and the HUD never went back to the orb.
+  // It gets a longer hold than a panel JARVIS opened mid-turn (you asked for this one,
+  // so you get time to read it), but it does time out. The PIN button still overrides.
+  setView: (v) => set({
+    view: v, ambient: false, pinned: false, navVisible: true,
+    panelUntil: Date.now() + MANUAL_HOLD_MS,
+  }),
   surface: (v, opts) => set((st) => ({
     view: v, ambient: false,
     pinned: opts?.pin ?? st.pinned,

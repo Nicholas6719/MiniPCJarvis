@@ -146,7 +146,11 @@ def slots_volume(t: str) -> dict | None:
 
 _NOT_AN_APP = {"it", "that", "this", "the pc", "the computer", "computer", "pc", "everything",
                "all windows", "all the windows", "all", "the window", "windows", "down the pc",
-               "down the computer", "up", "down", "the tab", "this tab", "the browser"}
+               "down the computer", "up", "down", "the tab", "this tab", "the browser",
+               # "run along" is a dismissal, not a request to launch an app called "along";
+               # the launch verbs are common English words and catch these by accident.
+               "along", "over", "away", "off", "out", "back", "ahead", "again", "late",
+               "yourself", "himself", "jarvis", "there", "here", "now", "quiet", "dark"}
 
 
 def slots_app(t: str) -> dict | None:
@@ -406,6 +410,26 @@ def slots_ui(t: str) -> dict | None:
 def say_ui(slots: dict, res: dict) -> str:
     a = slots.get("action")
     return {"hide": "Done.", "pin": "Pinned.", "unpin": "Unpinned.", "tabs": "Here are the tabs."}.get(a, "Here you go.")
+
+
+_PC_NOT_JARVIS = re.compile(r"\b(computer|pc|laptop|machine|desktop|workstation|windows|system)\b", re.I)
+
+
+# "what time should i go to bed" is a question, not an order to stand down.
+_SLEEP_QUESTION = re.compile(
+    r"^\s*(?:what|when|how|why|where|which|should|do|does|did|can|could|is|are|tell me|give me)\b", re.I)
+
+
+def slots_sleep(t: str) -> dict | None:
+    """'go to sleep' is him; 'put the COMPUTER to sleep' is the machine (power_action),
+    and 'how many hours should I sleep' is a question about sleep, not a dismissal."""
+    if _PC_NOT_JARVIS.search(t) or _SLEEP_QUESTION.search(t):
+        return None
+    return {}
+
+
+def say_sleep(slots: dict, res: dict) -> str:
+    return "Standing by." if "error" not in res else "I couldn't step aside."
 
 
 def say_lock(_: dict, res: dict) -> str:
@@ -780,6 +804,32 @@ SKILLS: list[Skill] = [
         "unpin it", "hide everything", "clear the panels", "dismiss that", "show the browser tab",
         "pull up the diagnostics panel", "show me the memory tab", "go to the tasks tab"],
         slots=slots_ui, speak=say_ui),
+    Skill("sleep", "enter_sleep_mode", [
+        # He gets dismissed in a lot of different moods, so the seeds cover the clusters:
+        # explicit sleep, "we're finished", military stand-down, goodbyes, and get-lost.
+        "go to sleep", "enter sleep mode", "sleep mode", "go to sleep mode",
+        "activate sleep mode", "time to sleep",
+        "that's all for now", "that will be all", "that's all", "nothing else for now",
+        "that's everything for now", "that's it for now", "we're finished",
+        "i'm finished for now", "i'm set for now",
+        "that's enough for now", "nothing further",
+        "stand down", "stand by", "dismissed", "you're dismissed", "you can go now",
+        "take a break", "you can rest", "get some rest", "take a rest",
+        "goodnight jarvis", "good night jarvis", "night jarvis",
+        "see you later", "talk to you later", "catch you later", "bye for now",
+        "minimize yourself", "hide yourself", "make yourself scarce",
+        "get out of the way", "go away for now", "i'm done for now",
+        "out of the way please", "step out of the way", "leave me alone for now",
+        "i don't need you at the moment", "go quiet for now", "go dormant",
+        "power down", "shut yourself down for now",
+        "that's all i need", "that's all i needed", "that's all i wanted",
+        "take five", "take ten", "leave me be", "leave me to it",
+        "out of sight", "later jarvis", "see you jarvis", "adios jarvis",
+        "go to standby", "standby mode", "enter standby", "back to standby",
+        "you're off duty", "off duty", "take the night off", "clock out",
+        "i'm good for now", "i'm done talking", "we can stop here", "that's a wrap",
+        "run along", "off you go", "tuck yourself away", "hold off for now"],
+        slots=slots_sleep, speak=say_sleep, speak_first=True),
     Skill("lock", "lock_computer", [
         "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
         "lock the workstation", "lock windows", "lock up"],

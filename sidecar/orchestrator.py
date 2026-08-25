@@ -140,6 +140,24 @@ class Orchestrator:
 
     # ---------- sound cues ----------
 
+    async def _wake_from_sleep(self) -> None:
+        """Come back to the front. Win32 rather than a window message, because the webview
+        is throttled while minimised and must not be on the critical path for waking."""
+        try:
+            from tools.windows_tools import exit_sleep_mode
+            await asyncio.to_thread(exit_sleep_mode)
+            await bus.emit("awake", summary="back from sleep")
+        except Exception:
+            log.exception("could not come back from sleep")
+
+    async def wake_if_sleeping(self) -> bool:
+        """Any deliberate approach — hotkey, tray, a typed turn — also ends sleep."""
+        if self.sm.state != State.SLEEPING:
+            return False
+        await self._wake_from_sleep()
+        await self.sm.to(State.IDLE, force=True)
+        return True
+
     async def play_sound(self, name: str) -> None:
         if not config.get("audio", "sound_cues", default=True):
             return
@@ -376,7 +394,7 @@ class Orchestrator:
     # ---------- wake word ----------
 
     async def _wake_loop(self) -> None:
-        """Always-listening detector, active while IDLE.
+        """Always-listening detector, active while IDLE and while SLEEPING.
 
         - keeps a rolling pre-roll so the words spoken *during* wake-word
           detection ("hey jarvis what time is it") are not lost
@@ -398,7 +416,11 @@ class Orchestrator:
                 block = await q.get()
                 preroll.append(block)
                 mode = config.get("wake", "mode", default="push_to_talk")
-                if mode not in ("wake_word", "both") or self.sm.state not in (State.IDLE, State.WAITING, State.STARTING):
+                # SLEEPING MUST be in this list. Without it the detector is never fed
+                # while he is asleep, and the wake word — the whole point of sleep mode —
+                # cannot bring him back.
+                if mode not in ("wake_word", "both") or self.sm.state not in (
+                        State.IDLE, State.WAITING, State.STARTING, State.SLEEPING):
                     consec = 0
                     continue
                 # follow-up window: speech alone is enough
@@ -418,6 +440,11 @@ class Orchestrator:
                 if score >= wake.threshold and time.time() - last_fire > 2.0:
                     last_fire = time.time()
                     log.info("wake word detected (%.2f)", score)
+                    if self.sm.state == State.SLEEPING:
+                        # must also LEAVE the sleeping state, not just raise the window —
+                        # the capture/turn path only runs from IDLE, so restoring the
+                        # window alone left him awake-looking but deaf.
+                        await self.wake_if_sleeping()
                     await bus.emit("wake", score=round(score, 2))
                     wake.reset()
                     self._preroll = np.concatenate(list(preroll))
@@ -815,7 +842,14 @@ class Orchestrator:
         await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
                        breakdown=breakdown, reflex=label, text=strip_markdown(reply or ""))
         if self.sm.state != State.ERROR:
-            await self.sm.to(State.IDLE, force=True)
+            # "go to sleep" ends in SLEEPING, not IDLE: no follow-up window, nothing but
+            # the wake word gets his attention again.
+            if label == "sleep":
+                self._armed_until = 0.0
+                await self.sm.to(State.SLEEPING, force=True)
+                await bus.emit("conversation", armed=False)
+            else:
+                await self.sm.to(State.IDLE, force=True)
 
     async def ask_confirmation(self, tool: str, args: dict) -> None:
         """A risk-gated tool is waiting on the user: ask out loud AND listen for a spoken

@@ -67,6 +67,9 @@ export function JarvisCore({ state, wakeMode = "push_to_talk", armedUntil = 0 }:
       label = "STANDING BY";
       sub = "ctrl+shift+j to talk";
     }
+  } else if (state === "sleeping") {
+    // He is minimised and out of the way; say how to get him back.
+    sub = wakeMode === "push_to_talk" ? "ctrl+shift+j to wake" : '"jarvis" · or ctrl+shift+j';
   }
 
   return (

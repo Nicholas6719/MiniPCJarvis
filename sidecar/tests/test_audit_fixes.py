@@ -50,5 +50,50 @@ from tools.builtin import close_application  # noqa: E402
 res = close_application("all windows")
 check("close 'all windows' refuses", "error" in res, res)
 
+# Windows 11 keeps the frame of a CLOSED UWP app (Settings, Calculator, Store) alive and
+# suspended; IsWindowVisible still says True, so JARVIS insisted "you have Settings open"
+# for hours after it was closed - twice over, since these apps own two windows each.
+# DWM cloaking is the only reliable signal.
+from tools.windows_tools import _is_cloaked, _visible_windows  # noqa: E402
+import win32gui as _wg  # noqa: E402
+
+_titles = [t for _, t in _visible_windows()]
+_cloaked_any = []
+
+
+def _scan(h, _):
+    if _wg.IsWindowVisible(h) and _wg.GetWindowText(h).strip() and _is_cloaked(h):
+        _cloaked_any.append(_wg.GetWindowText(h))
+    return True
+
+
+_wg.EnumWindows(_scan, None)
+check("cloaked (closed UWP / other-desktop) windows are not reported",
+      not any(t in _titles for t in _cloaked_any))
+check("real windows are still reported", "JARVIS" in _titles or len(_titles) > 0)
+
+# Re-teaching a phrase that already exists writes a row into the command matrix. That
+# matrix is loaded with np.frombuffer, which hands back a READ-ONLY view, so the write
+# raised "assignment destination is read-only" and killed the whole turn - the reflex
+# fired, then the turn died and turn_done never arrived.
+import asyncio as _asyncio  # noqa: E402
+from brain.router import brain as _brain  # noqa: E402
+
+
+async def _reteach():
+    await _brain.load()
+    steps = [{"skill": "volume_set", "args": {"percent": 35}}]
+    await _brain.teach_command("audit selftest phrase", steps)
+    await _brain.teach_command("audit selftest phrase", steps)   # the one that used to die
+    await _brain.forget_command("audit selftest phrase")
+    return True
+
+
+try:
+    check("re-teaching an existing command doesn't hit a read-only matrix",
+          _asyncio.run(_reteach()))
+except Exception as _e:
+    check(f"re-teaching an existing command doesn't hit a read-only matrix ({_e})", False)
+
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)

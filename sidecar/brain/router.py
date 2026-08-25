@@ -56,7 +56,9 @@ _CANON = [
     (r"\b(?:stop|quit|cancel|forget about)\b.*\b(?:watching|monitoring|alert|alerts|warning|telling me|rule|rules)\b.*", "stop watching METRIC"),
     (r".*\b(?:weather|forecast|temperature outside|going to rain|raining|snowing|umbrella|hot out|cold out|hot is it|cold is it|will it (?:rain|snow)|is it (?:going to )?(?:rain|snow|be hot|be cold))\b.*", "what's the weather in PLACE"),
     (r".*\b(?:tab|tabs|panel|panels|menu|navigation)\b.*", "show the VIEW tab"),
-    (r"^(?:hide|dismiss|clear)\b.*", "hide everything"),
+    # "hide the panels" is a UI request; "hide YOURSELF" is a dismissal — without the
+    # exclusion this rewrote it to "hide everything" and it hit the UI skill at 1.00.
+    (r"^(?:hide|dismiss|clear)\b(?!\s+(?:yourself|himself|jarvis))\b.*", "hide everything"),
     (r"^(?:pin|unpin)\b.*", "pin that"),
     # "what does cpu stand for" / "what is a cpu" are questions ABOUT a thing, not requests
     # to measure it — without this they land within 0.05 of the "what's the cpu at" seed
@@ -64,7 +66,7 @@ _CANON = [
     (r"^(?:so\s+)?what(?:'s|s| is| does| do| are)\b.*\b(?:stand for|stands for|short for|mean|means|acronym)\b.*", "explain what SOMETHING means"),
     # "a/an" only, never "the": "what's THE time" / "what's THE date" are live readings.
     (r"^(?:so\s+)?what(?:'s|s| is| are)\s+an?\s+[a-z0-9 -]{2,30}\??$", "explain what SOMETHING means"),
-    (r"\b(?:remind me|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
+    (r"\b(?:remind me(?!\s+(?:what|who|where|when|which|how)\b)|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
     (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
     (r".*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*\b(?:and tell|tell me|read|summar\w*|what does|what's on|what is on|look at|check)\b.*", "read the website SITE and tell me"),
     (r".*\b(?:read|summar\w*|what does|what's on|look at|check)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "read the website SITE and tell me"),
@@ -77,7 +79,9 @@ _CANON = [
     (r"\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
     (r"\b(?:volume|turn it|turn the volume|set the volume|set volume|make the volume|change the volume|lower the volume|raise the volume|put the volume)\b.*\d+.*", "set the volume to N percent"),
     (r"\b(?:open|go to|pull up|take me to|load|bring up|open up)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "open the website SITE"),
-    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|pod bay|desktop|documents|docs|downloads|pictures|photos)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
+    # The launch verbs are ordinary English words, so the exclusions matter: "run along"
+    # and "off you go" are dismissals, not a request to open an app called "along".
+    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
     (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
     (r"\d+", "N"),
 ]
@@ -183,13 +187,17 @@ class Brain:
             rows = self.db.execute("SELECT text, skill, embedding FROM brain_examples").fetchall()
             self._texts = [r[0] for r in rows]
             self._skills = [r[1] for r in rows]
+            # .copy(): np.frombuffer returns a READ-ONLY view over the bytes, and both of
+            # these matrices are written in place later (re-teaching a phrase assigns a
+            # row). Without it, teaching a command that already existed died with
+            # "assignment destination is read-only" and took the whole turn with it.
             self._matrix = (np.frombuffer(b"".join(r[2] for r in rows), dtype=np.float32)
-                            .reshape(len(rows), -1)) if rows else None
+                            .reshape(len(rows), -1).copy()) if rows else None
             crows = self.db.execute("SELECT phrase, steps, embedding FROM brain_commands").fetchall()
             self._cmd_phrases = [r[0] for r in crows]
             self._cmd_steps = [json.loads(r[1]) for r in crows]
             self._cmd_matrix = (np.frombuffer(b"".join(r[2] for r in crows), dtype=np.float32)
-                                .reshape(len(crows), -1)) if crows else None
+                                .reshape(len(crows), -1).copy()) if crows else None
             log.info("brain loaded: %d examples across %d skills, %d custom commands",
                      len(rows), len(SKILLS), len(crows))
 
