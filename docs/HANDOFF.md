@@ -314,6 +314,39 @@ but the user's folder was empty; log files diverge.
   lock, so warmed phrases stay instant) and the warm loop waits on `tts.idle`, an Event
   the speaker task clears while talking. If you add any other background model work,
   gate it the same way — the symptom looks like a flaky test, not a latency bug.
+- SLEEP MODE (`sleep` skill -> `enter_sleep_mode`). "go to sleep" / "that's all for now"
+  minimises him; the wake word, hotkey, tray, or typing brings him back. Uses Win32, NOT a
+  window message, because the webview is throttled while minimised and must not be on the
+  critical path for waking. IT SHIPPED BROKEN TWICE — check both when touching it:
+  1. The wake loop gate must include `State.SLEEPING`. It didn't, so the detector was
+     never fed while asleep: a ONE-WAY DOOR where nothing woke him and every later turn
+     returned "busy".
+  2. Waking must also LEAVE the SLEEPING state (`wake_if_sleeping`), not just raise the
+     window — the turn machinery only runs from IDLE, so he looked awake and was deaf.
+  `tests/sleep_e2e.py` (in the release suite) covers the coming-back half specifically.
+  `tests/sleep_coverage.py` measures phrasings: 51/51 seeded, 23/25 held-out, 13/13
+  negatives ("put the COMPUTER to sleep" is power_action; a question about sleep is a
+  question).
+- SEED CLASHES — `tests/seed_collisions.py`, in the build gate. Seeds are canonicalised
+  before embedding, so a seed can silently become a DIFFERENT sentence and take over
+  another skill. Adding "no more for now" to sleep turned into "no i meant ACTION" and
+  stole voice corrections outright. `router.load()` resolves clashes with `setdefault`
+  (first skill in SKILLS wins), so this never fails loudly on its own. It also surfaced a
+  pre-existing one: recall's "remind me what i told you..." was being stolen by reminder.
+  When a new seed doesn't work, check what it canonicalises to before adding more seeds.
+- PHANTOM WINDOWS. Windows 11 keeps the frame of a CLOSED UWP app (Settings, Calculator,
+  Store) alive and suspended, and `IsWindowVisible` still returns True — he insisted
+  Settings was open for hours, twice over (these apps own both an ApplicationFrameWindow
+  and a CoreWindow). `_is_cloaked()` (DWM `DWMWA_CLOAKED`) is the only reliable signal.
+  This also excludes other virtual desktops, which is intended.
+- `np.frombuffer` RETURNS A READ-ONLY VIEW. Both brain matrices are loaded that way and
+  written in place later, so re-teaching an existing command died with "assignment
+  destination is read-only" — after the reflex had fired, so `turn_done` never arrived and
+  clients hung. `.copy()` on both. Only reachable once a taught command survived a restart.
+- HUD RETURNS TO THE ORB on a 45 s timer. All three ways of opening a view (tab click,
+  the voice "show me the X tab" path, the debug hook) set `pinned:true`, and the collapse
+  timer skips pinned panels — so a view stayed up forever. They share `showView()` now.
+  Fixing only `setView` is NOT enough; the voice path is the one that actually happens.
 - NAME GATE: `tests/check_names.py` (pyflakes) now runs FIRST in the build. `compileall`
   only checks syntax, so a name imported inside one function and used in another compiles
   fine and NameErrors at runtime — that shipped once as `without_honorific`, and the
