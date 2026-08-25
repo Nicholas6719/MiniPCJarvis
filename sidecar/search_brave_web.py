@@ -209,6 +209,7 @@ class BraveWebSearch:
         self._last = 0.0
         self._engine: str | None = None
         self._attached = False          # True when driving a Brave we did not launch
+        self._own_browser = False       # True only for a scratch profile we own outright
         self._page = None               # JARVIS's own tab
         self._reaper: asyncio.Task | None = None
 
@@ -241,8 +242,31 @@ class BraveWebSearch:
             return self._ctx
         except Exception:
             pass
-        profile = _real_profile() or str(APP_DIR / self._profile_name)
-        own = profile != _real_profile()
+        real = _real_profile()
+        if real:
+            # Launch Brave OURSELVES, detached, and only ever attach to it.
+            # Playwright kills whatever it launched when it stops, so a launched browser
+            # meant his Brave died with the sidecar — tabs and all. Spawning it outside
+            # Playwright's lifecycle makes "JARVIS started it" and "he started it"
+            # the same case: attach, work in our own tab, never own the process.
+            await self._spawn_brave(real)
+            for _ in range(40):
+                try:
+                    browser = await self._pw.chromium.connect_over_cdp(
+                        f"http://127.0.0.1:{self.CDP_PORT}", timeout=2000)
+                    self._ctx = (browser.contexts[0] if browser.contexts
+                                 else await browser.new_context())
+                    self._attached = True
+                    self._own_browser = False
+                    self._find_pid(real)
+                    return self._ctx
+                except Exception:
+                    await asyncio.sleep(0.5)
+            raise RuntimeError("Brave did not come up with remote debugging enabled")
+
+        profile = str(APP_DIR / self._profile_name)
+        own = True
+        self._own_browser = own
         if own:
             # only ever kill Brave for a scratch profile of ours, never for his
             _kill_stale_profile_users(profile)
@@ -285,6 +309,50 @@ class BraveWebSearch:
         if self._reaper is None or self._reaper.done():
             self._reaper = asyncio.create_task(self._reap())
         return self._ctx
+
+    async def _spawn_brave(self, profile: str) -> None:
+        """Start his Brave minimised with debugging open, unless it is already running.
+
+        Chromium is single-instance per profile: if he opens Brave from his shortcut
+        afterwards, that window joins THIS process, so JARVIS keeps working and he keeps
+        browsing in one browser. Verified — the shortcut adds no second instance and the
+        debug port stays live.
+        """
+        import subprocess
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=2) as c:
+                if (await c.get(f"http://127.0.0.1:{self.CDP_PORT}/json/version")).status_code == 200:
+                    return                                   # already up and driveable
+        except Exception:
+            pass
+        si = None
+        try:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 7                               # SW_SHOWMINNOACTIVE
+        except Exception:
+            si = None
+        subprocess.Popen(
+            [_brave_path(), f"--remote-debugging-port={self.CDP_PORT}",
+             f"--user-data-dir={profile}", "--profile-directory=Default",
+             "--no-first-run", "--no-default-browser-check"],
+            startupinfo=si, close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        log.info("started his Brave minimised with remote debugging")
+
+    def _find_pid(self, profile: str) -> None:
+        try:
+            import psutil
+            for pr in sorted(psutil.process_iter(["name", "cmdline", "create_time"]),
+                             key=lambda x: x.info["create_time"] or 0):
+                if ((pr.info["name"] or "").lower() == "brave.exe"
+                        and any("--remote-debugging-port" in (a or "")
+                                for a in (pr.info["cmdline"] or []))):
+                    self._pid = pr.pid
+                    return
+        except Exception:
+            pass
 
     async def _tab(self, ctx):
         """JARVIS's own tab in his Brave.
@@ -335,10 +403,10 @@ class BraveWebSearch:
         try:
             async with self._lock:
                 ctx = await self._ensure()
-                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-                await page.bring_to_front()
-                await page.goto("https://search.brave.com/", wait_until="domcontentloaded",
-                                timeout=20000)
+                # No bring_to_front and no navigation: warming exists to pay the browser
+                # start-up cost early, and he must never have a window jump in front of
+                # him at boot because of it.
+                await self._tab(ctx)
                 self._hide()
                 self._last = time.time()
             log.info("search browser warmed up")
@@ -346,10 +414,26 @@ class BraveWebSearch:
             log.warning("search browser warmup failed: %s", e)
 
     async def _reap(self) -> None:
+        """Tidy away OUR tab when it has gone cold. Never the browser.
+
+        This used to call close(), which closed the whole context — his Brave, his tabs,
+        his work, fifteen minutes after JARVIS last searched. Harmless when it was a
+        throwaway profile; unforgivable now that it is his own browser.
+        """
         while self._ctx is not None:
             await asyncio.sleep(60)
-            if time.time() - self._last > IDLE_CLOSE_S:
-                await self.close()
+            if time.time() - self._last <= IDLE_CLOSE_S:
+                continue
+            if self._own_browser:
+                await self.close()          # our own scratch instance: fine to shut down
+                return
+            try:
+                if self._page and not self._page.is_closed():
+                    await self._page.close()
+                    log.info("closed JARVIS's idle search tab (his browser left alone)")
+                self._page = None
+            except Exception:
+                pass
 
     async def _reset(self) -> None:
         """Browser died or was killed: drop the dead handles, relaunch next call."""
@@ -416,9 +500,10 @@ class BraveWebSearch:
             ctx = await self._ensure()
             page = await self._tab(ctx)
             # Brave's image search challenges automation the same way its web search does;
-            # DuckDuckGo's serves normally from his profile. No bring_to_front — the window
-            # only needs to be un-minimised for a moment so Chromium lazy-loads the images.
-            if self._pid:
+            # DuckDuckGo's serves normally from his profile. No bring_to_front.
+            # The off-screen trick is ONLY for a scratch browser of ours — doing it to his
+            # Brave would fling his window to -32000 and strip it off the taskbar.
+            if self._pid and self._own_browser:
                 _show_windows_of_pid_offscreen(self._pid)
             await page.goto(f"https://duckduckgo.com/?iax=images&ia=images&q={quote_plus(query)}",
                             wait_until="domcontentloaded", timeout=25000)
@@ -441,10 +526,12 @@ class BraveWebSearch:
         # must not tear down a context that an in-flight request is holding.
         async with self._lock:
             try:
-                if self._ctx and not self._attached:
-                    await self._ctx.close()      # ours to close
+                if self._ctx and self._own_browser and not self._attached:
+                    await self._ctx.close()      # a scratch profile we launched: ours to close
                 elif self._page and not self._page.is_closed():
-                    await self._page.close()     # his browser: only our own tab goes
+                    # his Brave: our tab goes, his browser and his tabs stay exactly as
+                    # they are — including when JARVIS itself is shutting down
+                    await self._page.close()
             except Exception:
                 pass
             self._ctx = None
@@ -452,6 +539,8 @@ class BraveWebSearch:
             self._attached = False
             self._pid = None
             try:
+                # Attached, not launched: stopping the driver just disconnects. His Brave
+                # keeps running with every tab exactly where he left it.
                 if self._pw:
                     await self._pw.stop()
             except Exception:

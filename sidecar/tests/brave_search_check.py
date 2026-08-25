@@ -16,6 +16,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from search_brave_web import _real_profile, brave_web  # noqa: E402
 
 QUERIES = sys.argv[1:] or ["amd strix halo review", "best mini pc 2026", "rtx 5090 price"]
+def brave_pids():
+    import psutil
+    return {p.pid for p in psutil.process_iter(["name"])
+            if (p.info["name"] or "").lower() == "brave.exe"}
+
+
 fails = []
 
 
@@ -51,7 +57,20 @@ async def main() -> int:
             and any(profile in (a or "").lower() for a in (p.info["cmdline"] or []))]
     check("it is driving his own Brave profile, not a scratch one", bool(ours))
 
+    # HIS browser must survive JARVIS letting go of it. The idle reaper used to call
+    # close() on the whole context, and main.py closes it on shutdown — which, now that
+    # it is his own Brave, meant closing his browser and his tabs out from under him.
+    his_tab = await brave_web._ctx.new_page()
+    await his_tab.goto("https://example.com", wait_until="domcontentloaded", timeout=25000)
     await brave_web.close()
+    await asyncio.sleep(2)
+    still_running = bool(brave_pids())
+    check("his Brave is still running after JARVIS lets go", still_running)
+    try:
+        check("and his own tab is untouched", not his_tab.is_closed())
+    except Exception:
+        check("and his own tab is untouched", False)
+
     print("\n" + ("BRAVE SEARCH: PASS" if not fails else f"BRAVE SEARCH: FAIL {fails}"))
     sys.stdout.flush()
     os._exit(1 if fails else 0)
