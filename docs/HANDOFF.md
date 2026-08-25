@@ -386,6 +386,23 @@ but the user's folder was empty; log files diverge.
   pattern silently matches nothing. It happened three times in one session. Use the Write
   tool for patch scripts.
 
+## JARVIS's browsing is INVISIBLE; what he asks for is VISIBLE
+Two opposite requirements sharing one browser, and both are easy to break:
+- **Research/search/fetch**: no window, ever. It runs in the background and he reads it in
+  the JARVIS panel. Chromium ignores STARTUPINFO show flags and re-shows its window on
+  every tab creation and navigation, so hiding once at launch does NOT hold — spawn with
+  `--window-position=-32000,-32000` on the command line (no visible frame at all) and
+  re-hide after `_tab()` and after every `goto`.
+- **`open_url` ("open YouTube")**: must land in a window he can SEE. Chromium is
+  single-instance per profile, so `os.startfile` hands the URL to the hidden instance and
+  the tab opens inside the hidden window — it looks like nothing happened. Use an explicit
+  `--new-window` with a position, then foreground it.
+- Telling the two apart cannot use the pid — same process. `_HIDDEN_HWNDS` tracks which
+  windows JARVIS hid; `hidden_hwnds()` is how open_url finds "the one I opened for him".
+- `_we_spawned` gates ALL window manipulation. If HE opened Brave, JARVIS touches nothing
+  and its work is just a background tab in his window.
+Guarded end to end by `tests/brave_search_check.py`.
+
 ## HIS browser, not ours — the rule that governs all of this
 JARVIS **attaches** to Brave, it never owns it. It spawns Brave detached (minimised,
 `--remote-debugging-port`) and connects over CDP, so "JARVIS started it" and "he started
