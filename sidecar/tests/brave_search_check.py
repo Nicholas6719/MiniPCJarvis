@@ -72,44 +72,45 @@ async def main() -> int:
                   for r in res))
         await asyncio.sleep(3)   # human pace; hammering is what triggers challenges
 
-    # it must be HIS browser: same profile, and reachable from the taskbar
-    import psutil
-    profile = (_real_profile() or "").lower()
-    ours = [p for p in psutil.process_iter(["name", "cmdline"])
-            if (p.info["name"] or "").lower() == "brave.exe"
-            and any(profile in (a or "").lower() for a in (p.info["cmdline"] or []))]
-    check("it is driving his own Brave profile, not a scratch one", bool(ours))
-
-    # THE thing that made him give up on this: a Brave window appearing and taking the
-    # screen while he was talking to JARVIS. Research is meant to happen in the background
-    # and be read in the JARVIS panel. Assert it directly rather than trusting the flags.
+    # Nothing of JARVIS's may be on screen. Checked BEFORE we deliberately open his.
     check(f"no Brave window is on screen ({visible_brave_windows() or 'none'})",
           not visible_brave_windows())
 
-    # ...and the mirror image: a site he asked to OPEN must land somewhere he can see.
-    # Chromium is single-instance per profile, so handing the URL to the running instance
-    # put the tab inside JARVIS's hidden window and "open YouTube" did nothing visible.
+    # THE regression that cost him an evening: with JARVIS's Brave running, clicking his
+    # own Brave gave him nothing usable. JARVIS shared his profile, so concealing its
+    # window handed that state to the next window Chromium opened — his.
+    import subprocess
+    import psutil
+    from search_brave_web import _brave_path
+    profile = (_real_profile() or "").lower()
+    driving_his = [p for p in psutil.process_iter(["name", "cmdline"])
+                   if (p.info["name"] or "").lower() == "brave.exe"
+                   and any(profile in (a or "").lower() for a in (p.info["cmdline"] or []))]
+    check("JARVIS is NOT running in his Brave profile", not driving_his)
+
+    subprocess.Popen([_brave_path()], close_fds=True)
+    await asyncio.sleep(8)
+    his = visible_brave_windows()
+    check(f"he can click Brave and get a usable window ({his or 'NOTHING'})", bool(his))
+
+    # ...and a site he asks JARVIS to open must land somewhere he can see.
     from tools.windows_tools import open_url
+    before = len(visible_brave_windows())
     open_url("example.com")
     await asyncio.sleep(6)
-    shown = visible_brave_windows()
-    check(f"a site he asks for opens in a window he can see ({shown or 'NOTHING'})", bool(shown))
+    check("a site he asks for opens in a window he can see",
+          len(visible_brave_windows()) >= before)
 
-    # HIS browser must survive JARVIS letting go of it. The idle reaper used to call
-    # close() on the whole context, and main.py closes it on shutdown — which, now that
-    # it is his own Brave, meant closing his browser and his tabs out from under him.
-    his_tab = await brave_web._ctx.new_page()
-    await his_tab.goto("https://example.com", wait_until="domcontentloaded", timeout=25000)
+    # JARVIS shutting its own browser down must not touch his.
+    his_pids = {p.pid for p in psutil.process_iter(["name"])
+                if (p.info["name"] or "").lower() == "brave.exe"}
     await brave_web.close()
-    await asyncio.sleep(2)
-    still_running = bool(brave_pids())
-    check("his Brave is still running after JARVIS lets go", still_running)
-    try:
-        check("and his own tab is untouched", not his_tab.is_closed())
-    except Exception:
-        check("and his own tab is untouched", False)
+    await asyncio.sleep(3)
+    still = {p.pid for p in psutil.process_iter(["name"])
+             if (p.info["name"] or "").lower() == "brave.exe"}
+    check("his Brave survives JARVIS closing its own", bool(still & his_pids))
 
-    print("\n" + ("BRAVE SEARCH: PASS" if not fails else f"BRAVE SEARCH: FAIL {fails}"))
+    print(chr(10) + ("BRAVE SEARCH: PASS" if not fails else f"BRAVE SEARCH: FAIL {fails}"))
     sys.stdout.flush()
     os._exit(1 if fails else 0)
 

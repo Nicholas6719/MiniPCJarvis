@@ -1,17 +1,13 @@
-"""Keyless web + image search driven through the user's OWN Brave browser.
+"""Keyless web + image search in a hidden Brave of JARVIS's own.
 
-His real profile, with his history and logins — not a scratch one. That is both what he
-asked for and what makes it work: a blank profile is precisely what bot detection looks
-for, and the old throwaway-profile version was getting a CAPTCHA and zero results on
-every single query, which the model then relayed as "I couldn't find anything".
+Separate profile, separate window, off-screen and off the taskbar. HIS Brave is never
+touched, never driven and never shares a process with this — so he can click Brave and
+use it normally at any time, whatever JARVIS is doing.
 
-The window is MINIMISED, never hidden: JARVIS searches in the background while he works,
-and the moment he wants to see it he clicks Brave in the taskbar and the page is there.
-JARVIS keeps its own tab so it can never navigate away from whatever he is reading.
-
-Engines: Google, then DuckDuckGo. Brave Search is deliberately not used — it challenges
-automated queries even from his own profile (measured: the first query fine, every one
-after it "Verifying you're not a bot"). No API key, no account.
+The CAPTCHA that made search useless was BRAVE SEARCH, not automation and not the profile.
+Measured from a brand new throwaway profile: Brave Search and Google both challenge,
+DuckDuckGo serves normally and returns ten good results. So DuckDuckGo is the engine.
+No API key, no account, nothing of his to break.
 """
 from __future__ import annotations
 
@@ -94,10 +90,13 @@ def _real_profile() -> str | None:
 # query fine, every one after that "Verifying you're not a bot"). Google and DuckDuckGo
 # serve normally in the same browser, so those are what we use. Order matters: Google
 # first, DuckDuckGo as the fallback.
+# DuckDuckGo first: it is the one that serves a fresh profile without a challenge.
+# Google is kept only as a long shot — it usually challenges a scratch profile, which
+# costs one page load and then falls through.
 _ENGINES = [
-    ("google", "https://www.google.com/search?q=", "google.com", "#search h3, #rso h3"),
     ("duckduckgo", "https://duckduckgo.com/?q=", "duckduckgo.com",
      '[data-testid="result-title-a"], article h2'),
+    ("google", "https://www.google.com/search?q=", "google.com", "#search h3, #rso h3"),
 ]
 
 _CHALLENGE = ("not a bot", "unusual traffic", "are you human", "captcha",
@@ -222,6 +221,7 @@ class BraveWebSearch:
         self._attached = False          # True when driving a Brave we did not launch
         self._own_browser = False       # True only for a scratch profile we own outright
         self._we_spawned = False        # True when JARVIS started Brave (so ours to hide)
+        self._our_hwnd: int | None = None   # JARVIS's OWN Brave window, the only one we touch
         self._page = None               # JARVIS's own tab
         self._reaper: asyncio.Task | None = None
 
@@ -242,49 +242,21 @@ class BraveWebSearch:
         from config import APP_DIR
         if self._pw is None:
             self._pw = await async_playwright().start()
-        # If a Brave is already up with debugging open — usually one JARVIS started
-        # earlier — attach to it instead of trying to launch a second one on the same
-        # profile, which Chromium refuses outright.
-        try:
-            browser = await self._pw.chromium.connect_over_cdp(
-                f"http://127.0.0.1:{self.CDP_PORT}", timeout=2500)
-            self._ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-            self._attached = True
-            log.info("attached to the running Brave over CDP")
-            return self._ctx
-        except Exception:
-            pass
-        real = _real_profile()
-        if real:
-            # Launch Brave OURSELVES, detached, and only ever attach to it.
-            # Playwright kills whatever it launched when it stops, so a launched browser
-            # meant his Brave died with the sidecar — tabs and all. Spawning it outside
-            # Playwright's lifecycle makes "JARVIS started it" and "he started it"
-            # the same case: attach, work in our own tab, never own the process.
-            await self._spawn_brave(real)
-            for _ in range(40):
-                try:
-                    browser = await self._pw.chromium.connect_over_cdp(
-                        f"http://127.0.0.1:{self.CDP_PORT}", timeout=2000)
-                    self._ctx = (browser.contexts[0] if browser.contexts
-                                 else await browser.new_context())
-                    self._attached = True
-                    self._own_browser = False
-                    self._find_pid(real)
-                    return self._ctx
-                except Exception:
-                    await asyncio.sleep(0.5)
-            raise RuntimeError("Brave did not come up with remote debugging enabled")
-
+        # No CDP attach. It could latch onto HIS Brave if that ever had debugging open,
+        # and driving his browser is exactly what must never happen again.
+        # Deliberately NOT his profile. Sharing his Brave meant sharing its windows, and
+        # Chromium hands the state of the last window to the next one — so concealing
+        # JARVIS's window kept making HIS open minimised or off-screen, and he could not
+        # use his own browser. A separate instance cannot do that to him.
         profile = str(APP_DIR / self._profile_name)
         own = True
         self._own_browser = own
+        self._attached = False
+        self._we_spawned = True
         if own:
             # only ever kill Brave for a scratch profile of ours, never for his
             _kill_stale_profile_users(profile)
-        args = ["--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
-                # so a later sidecar restart can attach instead of fighting for the profile
-                f"--remote-debugging-port={self.CDP_PORT}"]
+        args = ["--no-first-run", "--no-default-browser-check", "--window-size=1280,900"]
         if not own:
             args.append("--profile-directory=Default")
         else:
@@ -349,8 +321,7 @@ class BraveWebSearch:
         subprocess.Popen(
             [_brave_path(), f"--remote-debugging-port={self.CDP_PORT}",
              f"--user-data-dir={profile}", "--profile-directory=Default",
-             "--no-first-run", "--no-default-browser-check",
-             "--window-position=-32000,-32000", "--window-size=1280,900"],
+             "--no-first-run", "--no-default-browser-check", "--no-startup-window"],
             startupinfo=si, close_fds=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self._we_spawned = True
@@ -379,9 +350,61 @@ class BraveWebSearch:
         page = getattr(self, "_page", None)
         if page is not None and not page.is_closed():
             return page
+        before = self._brave_hwnds() if not self._own_browser else set()
         self._page = ctx.pages[0] if (ctx.pages and not self._attached) else await ctx.new_page()
-        self._hide()      # a new tab makes Chromium show the window again
+        if not self._own_browser:
+            for _ in range(20):
+                new_hwnds = self._brave_hwnds() - before
+                if new_hwnds:
+                    self._our_hwnd = max(new_hwnds)
+                    break
+                await asyncio.sleep(0.15)
         return self._page
+
+    async def _park_offscreen(self, ctx, page) -> None:
+        """Hide JARVIS's own window — that exact HWND, nothing else.
+
+        Two earlier attempts broke his browser instead, and both are worth remembering:
+        - Moving it off-screen wrote left:-1240 into his profile's saved window_placement,
+          which every window Chromium opened afterwards inherited. His Brave then opened
+          off-screen too, so clicking the taskbar icon did nothing.
+        - Minimising it made Chromium record "minimized" as the show state for the next
+          window, so HIS window came up minimised as well.
+        Hiding one specific HWND touches neither the saved placement nor the show state,
+        so his windows open exactly as they always did. Verified all three ways.
+        """
+        if self._own_browser or not self._our_hwnd:
+            return
+        try:
+            import win32con
+            import win32gui
+            h = self._our_hwnd
+            if not win32gui.IsWindow(h):
+                self._our_hwnd = None
+                return
+            ex = win32gui.GetWindowLong(h, win32con.GWL_EXSTYLE)
+            win32gui.SetWindowLong(h, win32con.GWL_EXSTYLE,
+                                   (ex | win32con.WS_EX_TOOLWINDOW) & ~win32con.WS_EX_APPWINDOW)
+            win32gui.ShowWindow(h, win32con.SW_HIDE)
+            _HIDDEN_HWNDS.add(h)
+        except Exception as e:
+            log.debug("could not conceal JARVIS's browser window: %s", e)
+
+    @staticmethod
+    def _brave_hwnds() -> set[int]:
+        import win32gui
+        found: set[int] = set()
+
+        def cb(hwnd, _):
+            if "brave" in (win32gui.GetWindowText(hwnd) or "").lower():
+                found.add(hwnd)
+            return True
+
+        try:
+            win32gui.EnumWindows(cb, None)
+        except Exception:
+            pass
+        return found
 
     def _hide(self) -> None:
         """Keep JARVIS's browsing invisible.
@@ -391,9 +414,23 @@ class BraveWebSearch:
         opened Brave himself we touch nothing: his windows are his, and our work simply
         lives in a background tab of his.
         """
-        if not self._pid or not self._we_spawned:
+        # Hide every window owned by a brave.exe running OUR profile. Keying off a single
+        # pid missed it: the newest brave.exe with the profile on its command line is a
+        # renderer, not the process that owns the window, so nothing ever got hidden.
+        # Matching on the profile directory is exact, and his Brave — a different profile
+        # in a different process — can never match it.
+        if not self._own_browser:
             return
-        _hide_windows_of_pid(self._pid)
+        from config import APP_DIR
+        profile = str(APP_DIR / self._profile_name).lower()
+        try:
+            import psutil
+            for pr in psutil.process_iter(["name", "cmdline"]):
+                if ((pr.info["name"] or "").lower() == "brave.exe"
+                        and any(profile in (a or "").lower() for a in (pr.info["cmdline"] or []))):
+                    _hide_windows_of_pid(pr.pid)
+        except Exception as e:
+            log.debug("could not hide the search browser: %s", e)
 
     async def warmup(self) -> None:
         """Launch at boot so the first search isn't a cold start."""
@@ -403,7 +440,11 @@ class BraveWebSearch:
                 # No bring_to_front and no navigation: warming exists to pay the browser
                 # start-up cost early, and he must never have a window jump in front of
                 # him at boot because of it.
-                await self._tab(ctx)
+                page = await self._tab(ctx)
+                try:
+                    await page.goto("about:blank", wait_until="domcontentloaded", timeout=10000)
+                except Exception:
+                    pass
                 self._hide()
                 self._last = time.time()
             log.info("search browser warmed up")
@@ -465,7 +506,7 @@ class BraveWebSearch:
                 try:
                     await page.goto(base + quote_plus(query),
                                     wait_until="domcontentloaded", timeout=25000)
-                    self._hide()          # Chromium re-shows on navigation
+                    self._hide()          # Chromium re-shows the window on navigation
                     await page.wait_for_timeout(1200)
                     try:
                         await page.wait_for_selector(sel, timeout=8000)
@@ -514,6 +555,7 @@ class BraveWebSearch:
                 await page.wait_for_timeout(500)
             await page.wait_for_timeout(800)
             imgs = await page.evaluate(_EXTRACT_IMAGES_JS)
+            await self._park_offscreen(ctx, page)
             self._hide()
             self._last = time.time()
             return imgs[:count]
@@ -534,6 +576,9 @@ class BraveWebSearch:
             self._ctx = None
             self._page = None
             self._attached = False
+            if self._our_hwnd:
+                _HIDDEN_HWNDS.discard(self._our_hwnd)
+            self._our_hwnd = None
             self._pid = None
             try:
                 # Attached, not launched: stopping the driver just disconnects. His Brave
