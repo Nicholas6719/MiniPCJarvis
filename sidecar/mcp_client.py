@@ -7,7 +7,6 @@ data, never instructions — same rule as every other external content source.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import AsyncExitStack
 

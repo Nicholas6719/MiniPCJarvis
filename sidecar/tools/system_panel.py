@@ -14,7 +14,6 @@ _wifi_cache: tuple[float, dict] = (0.0, {})
 
 
 def _wifi() -> dict:
-    global _wifi_cache
     ts, cached = _wifi_cache
     if time.time() - ts < 15.0 and cached:
         return cached

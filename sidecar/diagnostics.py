@@ -12,7 +12,7 @@ log = logging.getLogger("jarvis.diagnostics")
 
 
 async def run_diagnostics() -> list[dict]:
-    from audio.io import mic, speaker
+    from audio.io import mic
     from audio.stt import stt
     from audio.tts import tts, VOICES_DIR
     from llm.llama_server import llama
@@ -147,7 +147,7 @@ async def run_diagnostics() -> list[dict]:
 
 async def repair(subsystem: str) -> dict:
     """Best-effort repair actions per subsystem."""
-    from audio.io import mic, speaker
+    from audio.io import mic
     from audio.stt import stt
     from audio.tts import tts
     from llm.llama_server import llama

@@ -331,8 +331,9 @@ async def _ddg_search(query: str, count: int) -> dict:
 # Wikipedia's robot policy requires a descriptive User-Agent with a contact address.
 # A generic browser UA gets a 403 with "Please respect our robot policy" — this is
 # compliance, not a workaround.
-WIKI_UA = ("JARVIS-Personal-Assistant/1.0 (local desktop assistant; "
-           "contact: nicholas.coppola67@gmail.com)")
+WIKI_UA = str(config.get("web", "wikipedia_user_agent", default="")) or (
+    "JARVIS-Personal-Assistant/1.0 "
+    "(+https://github.com/Nicholas6719/MiniPCJarvis)")
 
 # What the last real search actually did. Diagnostics used to report "Web Search: ok"
 # purely because Brave was installed, while every search had been returning zero results

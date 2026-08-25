@@ -9,7 +9,6 @@ import datetime as dt
 import logging
 import time
 
-from config import DB_PATH
 from events import bus
 from memory.store import memory  # reuse the open SQLite connection's db file
 

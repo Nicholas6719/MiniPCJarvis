@@ -512,6 +512,8 @@ async def memory_update(memory_id: int, body: dict,
 async def debug_silence(body: dict, x_jarvis_token: str | None = Header(None)):
     """Self-test: keep the speaker quiet for N seconds (turns still run end to end)."""
     _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
     from audio.io import speaker
     import time as _t
     speaker.silent_until = _t.time() + float(body.get("seconds", 600))
@@ -548,6 +550,8 @@ async def brain_export(x_jarvis_token: str | None = Header(None)):
 async def debug_view(body: dict, x_jarvis_token: str | None = Header(None)):
     """Dev/test: switch the HUD to a view (conversation|files|apps|system|browser|...)."""
     _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
     await bus.emit("set_view", view=str(body.get("view", "conversation")))
     return {"ok": True}
 
@@ -557,6 +561,9 @@ async def debug_hud_png(x_jarvis_token: str | None = Header(None)):
     """Dev/test: full-resolution capture of the JARVIS window itself (PrintWindow), so
     the agent can look at the HUD without the user's screen."""
     _auth(x_jarvis_token)
+    # A screen-capture endpoint has no business existing in a normal launch, token or not.
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
     from fastapi.responses import Response
     from tools.window_thumbs import capture_window_png
     png = await asyncio.to_thread(capture_window_png, "JARVIS")

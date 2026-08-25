@@ -7,8 +7,12 @@ model, speech recognition, speech synthesis, and memory all run on this machine.
 
 - A real Windows desktop app (Tauri 2): taskbar, Start Menu, system tray,
   global hotkey (`Ctrl+Shift+J`), NSIS installer.
-- Speech-to-speech primary interface: VAD → faster-whisper STT → local LLM with
-  tool calling (llama.cpp Vulkan) → streaming Piper TTS, with barge-in interruption.
+- Speech-to-speech primary interface: VAD → Parakeet TDT STT → local LLM with
+  tool calling (llama.cpp Vulkan) → streaming Kokoro TTS, with barge-in interruption.
+- A learned intent router ("the brain") answers known requests in ~0.3 s without
+  touching the language model at all, and learns new phrasings from real use.
+- Keyless web search and research, driven through a hidden Brave of its own —
+  no API key and no account.
 - A real tool system with per-tool risk classification and confirmation gating.
 - Persistent semantic memory (SQLite + ONNX embeddings).
 - HUD-style UI: reactive core orb, conversation view, live activity log showing
