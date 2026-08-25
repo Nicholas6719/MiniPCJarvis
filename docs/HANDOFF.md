@@ -417,7 +417,27 @@ Two opposite requirements sharing one browser, and both are easy to break:
   and its work is just a background tab in his window.
 Guarded end to end by `tests/brave_search_check.py`.
 
-## HIS browser, not ours — the rule that governs all of this
+## NEVER put JARVIS in his Brave profile (learned the hard way, 2026-08-25)
+The CAPTCHA that made research useless was **Brave Search**, not automation and not the
+throwaway profile. From a brand new profile: Brave Search challenges, Google challenges,
+**DuckDuckGo serves normally** and returns ten good results. Changing the ENGINE was the
+whole fix. Moving JARVIS into his profile was never needed and broke his browser badly:
+sharing his profile means sharing his windows, and Chromium hands the last window's state
+to the next one it opens. Every concealment leaked into HIS windows —
+- off-screen wrote `left:-1240` into his profile's saved `window_placement`, so his own
+  Brave opened off-screen and clicking the taskbar icon did nothing (repaired; backup at
+  `Default/Preferences.jarvis-backup`)
+- minimised made his next window open minimised
+- hiding the HWND still leaked the state
+…and he could not use his own browser while JARVIS was open.
+So: JARVIS runs an ISOLATED Brave — own profile under APP_DIR, own process, off-screen and
+off the taskbar, DuckDuckGo as the engine. No CDP attach (it could latch onto his). It
+cannot reach, drive or reconfigure his browser. `open_url` still opens HIS Brave for
+things he asks to use.
+Guarded by `tests/brave_search_check.py`, which asserts JARVIS is NOT in his profile and
+that clicking Brave gives him a usable window.
+
+## Superseded: HIS browser, not ours
 JARVIS **attaches** to Brave, it never owns it. It spawns Brave detached (minimised,
 `--remote-debugging-port`) and connects over CDP, so "JARVIS started it" and "he started
 it" are the same path and letting go of the driver never touches the browser. Do not go
