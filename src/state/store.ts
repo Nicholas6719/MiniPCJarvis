@@ -133,6 +133,15 @@ interface Store {
 // closes something you are actively looking at.
 const MANUAL_HOLD_MS = 45000;
 
+// Showing a view is never a permanent pin. Every entry point (tab click, "show me the
+// files tab" by voice, and the debug/self-test hook) used to set pinned:true, and the
+// collapse timer skips anything pinned — so the HUD never found its way back to the orb.
+// Only the PIN button pins now; everything else gets a timed hold.
+const showView = (v: View) => ({
+  view: v, ambient: false, pinned: false, navVisible: true,
+  panelUntil: Date.now() + MANUAL_HOLD_MS,
+});
+
 let draftId = "";
 let pendingDelta = "";
 let deltaFlush = 0;
@@ -177,14 +186,7 @@ export const useStore = create<Store>((set, get) => ({
   setWakeMode: (m) => set({ wakeMode: m }),
   setRightPanel: (p) => set({ rightPanel: p }),
   setFilePreview: (p) => set({ filePreview: p }),
-  // A click on a tab used to PIN it, and the collapse timer skips anything pinned — so a
-  // tab you opened stayed on screen forever and the HUD never went back to the orb.
-  // It gets a longer hold than a panel JARVIS opened mid-turn (you asked for this one,
-  // so you get time to read it), but it does time out. The PIN button still overrides.
-  setView: (v) => set({
-    view: v, ambient: false, pinned: false, navVisible: true,
-    panelUntil: Date.now() + MANUAL_HOLD_MS,
-  }),
+  setView: (v) => set(showView(v)),
   surface: (v, opts) => set((st) => ({
     view: v, ambient: false,
     pinned: opts?.pin ?? st.pinned,
@@ -415,11 +417,11 @@ export const useStore = create<Store>((set, get) => ({
         push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
         break;
       case "set_view":   // debug/remote: switch the HUD view (used by UI self-tests)
-        set({ view: evt.view as View, ambient: false, pinned: true, navVisible: true });
+        set(showView(evt.view as View));
         break;
       case "ui": {       // voice: "show the files tab" / "show me the tabs" / "pin that" / "hide everything"
         const a = evt.action;
-        if (a === "show" && evt.view) set({ view: evt.view as View, ambient: false, pinned: true, navVisible: true });
+        if (a === "show" && evt.view) set(showView(evt.view as View));
         else if (a === "tabs") set((st) => ({ navVisible: true, ambient: false, panelUntil: Date.now() + st.holdMs * 2 }));
         else if (a === "pin") set({ pinned: true, ambient: false });
         else if (a === "unpin") set((st) => ({ pinned: false, panelUntil: Date.now() + st.holdMs }));
