@@ -382,6 +382,10 @@ export const useStore = create<Store>((set, get) => ({
         set((st) => ({
           media: { query: evt.query, images: evt.images ?? [], ts: evt.ts },
           view: st.autoSwitch ? "media" : st.view,
+          // The image search announces itself as a "web" stage so the progress shows,
+          // which parks an empty WEB panel beside the pictures once they arrive. The
+          // pictures ARE the result — drop the progress panel and give them the room.
+          rightPanel: "activity",
           ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000,
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
