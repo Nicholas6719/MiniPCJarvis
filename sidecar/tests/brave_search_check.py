@@ -22,6 +22,29 @@ def brave_pids():
             if (p.info["name"] or "").lower() == "brave.exe"}
 
 
+def visible_brave_windows():
+    """Brave windows actually on a screen — not hidden, not minimised, not parked off it."""
+    import win32gui
+    out = []
+
+    def scan(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd) or win32gui.IsIconic(hwnd):
+            return True
+        title = win32gui.GetWindowText(hwnd) or ""
+        if "brave" not in title.lower():
+            return True
+        left, top, _r, _b = win32gui.GetWindowRect(hwnd)
+        if left > -5000 and top > -5000:
+            out.append(f"{title[:44]} @({left},{top})")
+        return True
+
+    try:
+        win32gui.EnumWindows(scan, None)
+    except Exception:
+        pass
+    return out
+
+
 fails = []
 
 
@@ -56,6 +79,21 @@ async def main() -> int:
             if (p.info["name"] or "").lower() == "brave.exe"
             and any(profile in (a or "").lower() for a in (p.info["cmdline"] or []))]
     check("it is driving his own Brave profile, not a scratch one", bool(ours))
+
+    # THE thing that made him give up on this: a Brave window appearing and taking the
+    # screen while he was talking to JARVIS. Research is meant to happen in the background
+    # and be read in the JARVIS panel. Assert it directly rather than trusting the flags.
+    check(f"no Brave window is on screen ({visible_brave_windows() or 'none'})",
+          not visible_brave_windows())
+
+    # ...and the mirror image: a site he asked to OPEN must land somewhere he can see.
+    # Chromium is single-instance per profile, so handing the URL to the running instance
+    # put the tab inside JARVIS's hidden window and "open YouTube" did nothing visible.
+    from tools.windows_tools import open_url
+    open_url("example.com")
+    await asyncio.sleep(6)
+    shown = visible_brave_windows()
+    check(f"a site he asks for opens in a window he can see ({shown or 'NOTHING'})", bool(shown))
 
     # HIS browser must survive JARVIS letting go of it. The idle reaper used to call
     # close() on the whole context, and main.py closes it on shutdown — which, now that

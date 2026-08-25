@@ -293,13 +293,72 @@ def open_url(url: str) -> dict:
     things the user wants to use - YouTube, Netflix, a shop. JARVIS's hidden browser is
     only for his own reading (browser_open / fetch_page / web_search)."""
     import os
+    import subprocess
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+    # JARVIS keeps a hidden Brave for its own reading, and Chromium is single-instance per
+    # profile — so os.startfile hands the URL to THAT instance and the tab opens inside the
+    # hidden window. "Open YouTube" then does nothing visible at all. Ask for an explicit
+    # new window, positioned on screen, and bring it forward: this one is for him to use.
+    try:
+        from search_brave_web import _brave_path
+        exe = _brave_path()
+    except Exception:
+        exe = None
+    if exe:
+        try:
+            subprocess.Popen([exe, "--new-window", "--window-position=120,80",
+                              "--window-size=1360,880", url], close_fds=True)
+            _focus_newest_browser_window()
+            return {"opened": url, "where": "your browser"}
+        except Exception as e:
+            log.warning("could not open %s in a new Brave window: %s", url, e)
     try:
         os.startfile(url)
         return {"opened": url, "where": "your browser"}
     except Exception as e:
         return {"error": f"could not open {url}: {e}"}
+
+
+def _focus_newest_browser_window() -> None:
+    """Bring the window we just opened for him to the front, and only that one."""
+    import time as _t
+    from search_brave_web import hidden_hwnds
+    for _ in range(12):
+        _t.sleep(0.4)
+        hidden = hidden_hwnds()
+        found = []
+
+        def cb(hwnd, _unused):
+            if hwnd in hidden or not win32gui.IsWindowVisible(hwnd):
+                return True
+            title = win32gui.GetWindowText(hwnd) or ""
+            if "brave" not in title.lower():
+                return True
+            found.append(hwnd)
+            return True
+
+        try:
+            win32gui.EnumWindows(cb, None)
+        except Exception:
+            return
+        if not found:
+            continue
+        hwnd = found[-1]
+        try:
+            l, t, _r, _b = win32gui.GetWindowRect(hwnd)
+            if l <= -5000 or t <= -5000:      # inherited the hidden window's position
+                win32gui.SetWindowPos(hwnd, 0, 120, 80, 1360, 880, win32con.SWP_NOZORDER)
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, 0, 0)
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            finally:
+                ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        except Exception:
+            pass
+        return
 
 
 def enter_sleep_mode() -> dict:

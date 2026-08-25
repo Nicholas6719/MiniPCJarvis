@@ -164,6 +164,16 @@ def _show_windows_of_pid_offscreen(pid: int) -> None:
         pass
 
 
+# Which windows JARVIS has hidden for its own use. open_url needs to tell "the window I
+# just opened for him" apart from "the window JARVIS is quietly reading in" — and they
+# belong to the same Brave process, so the pid cannot distinguish them.
+_HIDDEN_HWNDS: set[int] = set()
+
+
+def hidden_hwnds() -> set[int]:
+    return set(_HIDDEN_HWNDS)
+
+
 def _hide_windows_of_pid(pid: int) -> int:
     """Hide (SW_HIDE) every top-level window owned by a process tree so the
     search browser has no taskbar button at all."""
@@ -187,6 +197,7 @@ def _hide_windows_of_pid(pid: int) -> int:
                 ex = (ex | win32con.WS_EX_TOOLWINDOW) & ~win32con.WS_EX_APPWINDOW
                 win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex)
                 win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+                _HIDDEN_HWNDS.add(hwnd)
                 hidden += 1
         except Exception:
             pass
@@ -210,6 +221,7 @@ class BraveWebSearch:
         self._engine: str | None = None
         self._attached = False          # True when driving a Brave we did not launch
         self._own_browser = False       # True only for a scratch profile we own outright
+        self._we_spawned = False        # True when JARVIS started Brave (so ours to hide)
         self._page = None               # JARVIS's own tab
         self._reaper: asyncio.Task | None = None
 
@@ -323,7 +335,8 @@ class BraveWebSearch:
             import httpx
             async with httpx.AsyncClient(timeout=2) as c:
                 if (await c.get(f"http://127.0.0.1:{self.CDP_PORT}/json/version")).status_code == 200:
-                    return                                   # already up and driveable
+                    self._we_spawned = False   # his window, his rules: never hide or move it
+                    return
         except Exception:
             pass
         si = None
@@ -336,10 +349,12 @@ class BraveWebSearch:
         subprocess.Popen(
             [_brave_path(), f"--remote-debugging-port={self.CDP_PORT}",
              f"--user-data-dir={profile}", "--profile-directory=Default",
-             "--no-first-run", "--no-default-browser-check"],
+             "--no-first-run", "--no-default-browser-check",
+             "--window-position=-32000,-32000", "--window-size=1280,900"],
             startupinfo=si, close_fds=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        log.info("started his Brave minimised with remote debugging")
+        self._we_spawned = True
+        log.info("started his Brave off-screen with remote debugging")
 
     def _find_pid(self, profile: str) -> None:
         try:
@@ -365,38 +380,20 @@ class BraveWebSearch:
         if page is not None and not page.is_closed():
             return page
         self._page = ctx.pages[0] if (ctx.pages and not self._attached) else await ctx.new_page()
+        self._hide()      # a new tab makes Chromium show the window again
         return self._page
 
     def _hide(self) -> None:
-        """Minimise, don't hide.
+        """Keep JARVIS's browsing invisible.
 
-        This is HIS browser now. The old code stripped it off the taskbar and parked it
-        off-screen, which is what made it "JARVIS's hidden browser" — he could never get
-        at the page it had just loaded. Minimised means the search is sitting in his
-        taskbar the moment he wants to look at it, without stealing focus while he works.
+        Research runs in the background and is read in the JARVIS panel. A Brave window
+        appearing — never mind taking the screen — is the bug, not the feature. If HE
+        opened Brave himself we touch nothing: his windows are his, and our work simply
+        lives in a background tab of his.
         """
-        if not self._pid:
+        if not self._pid or not self._we_spawned:
             return
-        if _real_profile() is None:
-            _hide_windows_of_pid(self._pid)
-            return
-        try:
-            import win32con
-            import win32gui
-            import win32process
-
-            def cb(hwnd, _):
-                if not win32gui.IsWindowVisible(hwnd):
-                    return True
-                if win32process.GetWindowThreadProcessId(hwnd)[1] != self._pid:
-                    return True
-                if not win32gui.IsIconic(hwnd):
-                    win32gui.ShowWindow(hwnd, win32con.SW_SHOWMINNOACTIVE)
-                return True
-
-            win32gui.EnumWindows(cb, None)
-        except Exception as e:
-            log.debug("could not minimise the search window: %s", e)
+        _hide_windows_of_pid(self._pid)
 
     async def warmup(self) -> None:
         """Launch at boot so the first search isn't a cold start."""
@@ -468,7 +465,7 @@ class BraveWebSearch:
                 try:
                     await page.goto(base + quote_plus(query),
                                     wait_until="domcontentloaded", timeout=25000)
-                    self._hide()
+                    self._hide()          # Chromium re-shows on navigation
                     await page.wait_for_timeout(1200)
                     try:
                         await page.wait_for_selector(sel, timeout=8000)
