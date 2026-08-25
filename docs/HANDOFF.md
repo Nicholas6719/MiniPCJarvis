@@ -386,7 +386,31 @@ but the user's folder was empty; log files diverge.
   pattern silently matches nothing. It happened three times in one session. Use the Write
   tool for patch scripts.
 
-## Web search is bot-blocked (2026-08-25)
+## Web search = HIS Brave (2026-08-25, current)
+Search drives his OWN Brave profile (`_real_profile()`, auto-detected under LOCALAPPDATA),
+MINIMISED, in a tab of its own. No API key, no account. Rules that matter:
+- **Never go back to a scratch profile.** A blank profile with no history is exactly what
+  bot detection looks for; the old `browser-profile` version got a CAPTCHA on literally
+  every query and returned zero results, and the model relayed that as "I couldn't find
+  reliable information". Using his real profile is what makes search work at all.
+- **Brave Search is deliberately NOT used.** Even from his profile it challenges automated
+  queries (first one fine, everything after it "Verifying you're not a bot"). Google, then
+  DuckDuckGo. Both serve normally in the same browser. Do not try to defeat a challenge —
+  detect it and move to the next engine.
+- **Minimised, never hidden.** The old code stripped the taskbar button and parked it at
+  -32000,-32000, so he could never get at the page JARVIS had just loaded. Minimised means
+  he clicks Brave and it is right there, which is the whole point.
+- **JARVIS keeps its own tab.** When attached to a running Brave, `pages[0]` is whatever HE
+  is reading — navigating that away would be unforgivable.
+- `brave_session` IS `brave_web`. They used to be two profiles, so a search and a page-read
+  each spawned their own hidden Brave.
+- The extractor anchors on the result TITLE element per engine. Scraping anchors generally
+  put Google's video carousel above the web results and made DuckDuckGo's displayed URL
+  the title.
+- Gate: `tests/brave_search_check.py` (search works, in HIS profile) and
+  `tests/research_e2e.py` (end to end, no fabrication).
+
+## History: web search was bot-blocked before this (keyless-API era)
 Both keyless routes are gone: DuckDuckGo's HTML endpoint answers HTTP 202 with a CAPTCHA,
 and Brave Search serves a CAPTCHA page to the automation browser (Mojeek and Startpage
 too). That is WHY research failed — `web_search` returned `[]`, which the model read as
