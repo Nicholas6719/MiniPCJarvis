@@ -386,6 +386,24 @@ but the user's folder was empty; log files diverge.
   pattern silently matches nothing. It happened three times in one session. Use the Write
   tool for patch scripts.
 
+## HIS browser, not ours — the rule that governs all of this
+JARVIS **attaches** to Brave, it never owns it. It spawns Brave detached (minimised,
+`--remote-debugging-port`) and connects over CDP, so "JARVIS started it" and "he started
+it" are the same path and letting go of the driver never touches the browser. Do not go
+back to `launch_persistent_context` on his profile: Playwright kills what it launched, so
+his Brave died with the sidecar, tabs and all.
+Chromium is single-instance per profile (verified): once JARVIS has started Brave, him
+opening it from his own shortcut joins the SAME process — no second browser, debug port
+still live, and JARVIS can open its own tab and search while he is browsing.
+Anything that touches the window must ask `self._own_browser` first. Three things were
+tolerable against a throwaway profile and are unforgivable against his:
+- the idle reaper called `close()` after 15 min → now closes only JARVIS's own tab
+- shutdown closed the whole context → now only our tab
+- `warmup()` called `bring_to_front()` → his browser jumped in front of him at boot
+- the image path flung the window to -32000 and stripped its taskbar button
+Also: JARVIS keeps its OWN tab (`_tab()`). When attached, `pages[0]` is whatever he is
+reading.
+
 ## Web search = HIS Brave (2026-08-25, current)
 Search drives his OWN Brave profile (`_real_profile()`, auto-detected under LOCALAPPDATA),
 MINIMISED, in a tab of its own. No API key, no account. Rules that matter:
