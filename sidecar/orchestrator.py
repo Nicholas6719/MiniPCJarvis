@@ -133,6 +133,10 @@ class Orchestrator:
         self._speak_cancel = asyncio.Event()
         self._loop_task: asyncio.Task | None = None
         self._wake_task: asyncio.Task | None = None
+        # Only assigned once the language model starts, but shutdown() reads it
+        # unconditionally — so a failed boot turned into "Application shutdown failed"
+        # with an AttributeError on the way out.
+        self._watchdog_task: asyncio.Task | None = None
         self._preroll: np.ndarray | None = None     # audio from before the wake word fired
         self._armed_until: float = 0.0               # conversation window (no wake word needed)
         self._sounds = {k: f() for k, f in PALETTE.items()}  # built once, replayed

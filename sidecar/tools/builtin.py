@@ -328,7 +328,82 @@ async def _ddg_search(query: str, count: int) -> dict:
     return {"query": query, "results": results, "provider": "duckduckgo"}
 
 
+# Wikipedia's robot policy requires a descriptive User-Agent with a contact address.
+# A generic browser UA gets a 403 with "Please respect our robot policy" — this is
+# compliance, not a workaround.
+WIKI_UA = ("JARVIS-Personal-Assistant/1.0 (local desktop assistant; "
+           "contact: nicholas.coppola67@gmail.com)")
+
+# What the last real search actually did. Diagnostics used to report "Web Search: ok"
+# purely because Brave was installed, while every search had been returning zero results
+# for who knows how long. A health check that cannot fail is not a health check.
+LAST_SEARCH: dict = {"ts": 0.0, "provider": None, "results": None, "error": None}
+
+SEARCH_BLOCKED = (
+    "Web search is unavailable: DuckDuckGo and Brave Search are both serving bot "
+    "challenges to automated requests, and no Brave Search API key is configured. "
+    "Add a Brave Search API key in Settings (the free tier covers 2,000 searches a "
+    "month) to restore full web search."
+)
+
+
+async def _wikipedia_search(query: str, count: int = 5) -> dict:
+    """Encyclopedic fallback that is actually allowed to be used by a program.
+
+    Not a replacement for web search — it will never know today's GPU price — but it
+    answers the factual half of "research X" without a key, and it is a documented,
+    permitted API rather than a scrape of a page that does not want to be scraped.
+    """
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True,
+                                 headers={"User-Agent": WIKI_UA}) as c:
+        r = await c.get("https://en.wikipedia.org/w/api.php",
+                        params={"action": "query", "list": "search", "srsearch": query,
+                                "format": "json", "srlimit": min(count, 5)})
+        r.raise_for_status()
+        hits = r.json().get("query", {}).get("search", [])
+        results = []
+        for h in hits:
+            title = h.get("title", "")
+            summary = ""
+            try:
+                sr = await c.get("https://en.wikipedia.org/api/rest_v1/page/summary/"
+                                 + title.replace(" ", "_"))
+                if sr.status_code == 200:
+                    summary = (sr.json().get("extract") or "")[:400]
+            except Exception:
+                pass
+            results.append({
+                "title": title,
+                "url": "https://en.wikipedia.org/wiki/" + title.replace(" ", "_"),
+                "snippet": summary or re.sub(r"<[^>]+>", "", h.get("snippet", "")),
+                "host": "en.wikipedia.org",
+            })
+    # Wikipedia will happily return five articles for "current price of an RTX 5090".
+    # Without this note the model treats that as a successful search, finds nothing useful
+    # in it, and answers from memory anyway — confidently and wrongly ("the top-rated 2026
+    # mini PC is the Intel NUC 13 Extreme", a 2022 product). Say what this is and is not.
+    return {"query": query, "results": results, "provider": "wikipedia",
+            "note": ("ENCYCLOPEDIA ONLY. Live web search is unavailable, so these are "
+                     "Wikipedia articles, not current web results. They cannot answer "
+                     "anything about present-day prices, news, releases or availability. "
+                     "If they do not contain the answer, tell the user that live web "
+                     "search is unavailable and a Brave Search API key is needed in "
+                     "Settings — do NOT answer from your own memory.")}
+
+
+def _note_search(out: dict) -> dict:
+    import time as _t
+    LAST_SEARCH.update({"ts": _t.time(), "provider": out.get("provider"),
+                        "results": len(out.get("results") or []),
+                        "error": out.get("error")})
+    return out
+
+
 async def web_search(query: str, count: int = 5) -> dict:
+    return _note_search(await _web_search(query, count))
+
+
+async def _web_search(query: str, count: int = 5) -> dict:
     key = secrets.get("brave_api_key")
     from events import bus
     await bus.emit("web", stage="searching", query=query)
@@ -346,9 +421,24 @@ async def web_search(query: str, count: int = 5) -> dict:
                 log.warning("brave browser search failed: %s", e)
                 await bus.emit("web", stage="error", query=query, error=str(e)[:120])
         try:
-            return await _ddg_search(query, count)
+            ddg = await _ddg_search(query, count)
+            if ddg.get("results"):
+                await bus.emit("web", stage="results", query=query, results=ddg["results"])
+                return ddg
         except Exception as e:
-            return {"error": f"web search failed: {e}"}
+            log.warning("ddg search failed: %s", e)
+        try:
+            wiki = await _wikipedia_search(query, count)
+            if wiki.get("results"):
+                await bus.emit("web", stage="results", query=query, results=wiki["results"])
+                return wiki
+        except Exception as e:
+            log.warning("wikipedia search failed: %s", e)
+        # Every keyless route is bot-blocked. Say so plainly instead of returning an empty
+        # list, which the model reads as "nothing exists" and reports as "I couldn't find
+        # reliable information" — leaving nobody any idea that search is simply switched off.
+        await bus.emit("web", stage="blocked", query=query, error=SEARCH_BLOCKED)
+        return {"query": query, "results": [], "error": SEARCH_BLOCKED, "blocked": True}
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.get(
             "https://api.search.brave.com/res/v1/web/search",

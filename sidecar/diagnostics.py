@@ -99,12 +99,27 @@ async def run_diagnostics() -> list[dict]:
 
     # Web search
     from search_brave_web import brave_web
-    if secrets.get("brave_api_key"):
-        add("Web Search", "ok", "Brave Search API")
+    from tools.builtin import LAST_SEARCH
+    last = LAST_SEARCH
+    if last.get("ts") and last.get("results") == 0:
+        # the only report that reflects reality: the last search really did come back empty
+        add("Web Search", "error",
+            f"last search returned nothing ({last.get('provider') or 'all providers blocked'})"
+            + (" — add a Brave Search API key in Settings" if not secrets.get("brave_api_key") else ""))
+    elif last.get("ts") and last.get("results") and last.get("provider") == "wikipedia":
+        add("Web Search", "warn",
+            "Wikipedia only — live web search is bot-blocked. No current prices, news or "
+            "releases. Add a Brave Search API key in Settings.")
+    elif last.get("ts") and last.get("results"):
+        add("Web Search", "ok", f"{last['results']} results via {last.get('provider')}")
+    elif secrets.get("brave_api_key"):
+        add("Web Search", "ok", "Brave Search API key configured (untested this session)")
     elif brave_web.available:
-        add("Web Search", "ok", "via your Brave browser (no API key needed)")
+        add("Web Search", "warn",
+            "no API key — keyless search is bot-blocked by DuckDuckGo and Brave Search; "
+            "Wikipedia only. Add a Brave Search API key in Settings.")
     else:
-        add("Web Search", "warn", "install Brave browser or add a Brave API key in Settings")
+        add("Web Search", "error", "no search provider available — add a Brave Search API key in Settings")
 
     # Memory
     try:
