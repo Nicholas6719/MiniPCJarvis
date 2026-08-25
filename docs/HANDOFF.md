@@ -386,6 +386,20 @@ but the user's folder was empty; log files diverge.
   pattern silently matches nothing. It happened three times in one session. Use the Write
   tool for patch scripts.
 
+## Panels, not tabs
+Files, media, browser, research and web all surface themselves when JARVIS uses them, take
+the SAME main slot with the orb on the left, and fade back to the orb when the turn ends.
+The tab strip is no longer how you get anywhere — it appears only on a deliberate reach
+for the top edge, or "show me the tabs". `showView()` must NOT set `navVisible`.
+Two things that made them feel inconsistent, both fixed:
+- `web` events set `rightPanel` but never `view`, so a search while the files panel was up
+  left the files in the centre and squeezed the results into a side strip. Web now claims
+  the main slot like the others (a `research` run keeps its own view).
+- `show_images` announces progress as a `web` stage, which parked an empty WEB panel next
+  to the pictures once they arrived. The `images` event now clears it.
+Verify visually with `/debug/hud.png` — one turn at a time. Firing several turns back to
+back races them and the screenshot shows the wrong panel, which looks like a bug and isn't.
+
 ## JARVIS's browsing is INVISIBLE; what he asks for is VISIBLE
 Two opposite requirements sharing one browser, and both are easy to break:
 - **Research/search/fetch**: no window, ever. It runs in the background and he reads it in
