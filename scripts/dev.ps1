@@ -12,8 +12,10 @@
 # The port and token are fixed so test harnesses can hardcode them:
 #   python tests\research_e2e.py 8790 devtoken123
 #
-# NOTE: this runs alongside the INSTALLED app only if that app is closed — they would
-# otherwise fight over the same llama-server, browser profile and database.
+# The installed app is closed first, deliberately. Two llama-servers do not fit on a
+# 780M: the second one sits at 503 until it times out, every test then runs against
+# nothing, and the run reports five bare shrugs that have nothing to do with the code.
+# Failing loudly beats a whole test run that quietly measured a dead port.
 param([switch]$Stop)
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -30,6 +32,16 @@ Get-CimInstance Win32_Process -Filter "name='python.exe'" |
     ForEach-Object { taskkill /PID $_.ProcessId /F 2>&1 | Out-Null }
 Start-Sleep 2
 if ($Stop) { "dev sidecar stopped"; exit 0 }
+
+# Close the installed app (and its llama-server) so the dev one owns the GPU.
+$installed = Get-Process jarvis -ErrorAction SilentlyContinue
+if ($installed) {
+    "closing the installed JARVIS so the dev sidecar can load the model"
+    $installed | ForEach-Object { taskkill /PID $_.Id /T /F 2>&1 | Out-Null }
+    Get-CimInstance Win32_Process -Filter "name='jarvis-sidecar.exe'" |
+        ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>&1 | Out-Null }
+    Start-Sleep 4
+}
 
 Set-Location "$root\sidecar"
 $env:JARVIS_DEBUG = "1"

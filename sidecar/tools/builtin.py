@@ -339,6 +339,14 @@ WIKI_UA = ("JARVIS-Personal-Assistant/1.0 (local desktop assistant; "
 # for who knows how long. A health check that cannot fail is not a health check.
 LAST_SEARCH: dict = {"ts": 0.0, "provider": None, "results": None, "error": None}
 
+# Questions that only a live web index can answer. Wikipedia, Hacker News and Stack
+# Exchange have none of this, so asking them is just supplying material to hallucinate
+# around. News is deliberately NOT here: Hacker News answers that one well.
+_NEEDS_LIVE_WEB = re.compile(
+    r"\b(price|prices|pricing|cost|costs|how much (?:is|are|does)|msrp|deal|deals|"
+    r"in stock|stock|availability|available now|buy|cheapest|"
+    r"best|top|recommended|which (?:one )?should i)\b", re.I)
+
 SEARCH_BLOCKED = (
     "Web search is unavailable: DuckDuckGo and Brave Search are both serving bot "
     "challenges to automated requests, and no Brave Search API key is configured. "
@@ -526,6 +534,14 @@ async def _web_search(query: str, count: int = 5) -> dict:
                 return ddg
         except Exception as e:
             log.warning("ddg search failed: %s", e)
+        # Some questions cannot be answered by ANY of the keyless sources: today's price,
+        # what is in stock, "the best <thing> of <year>". Handing the model five Wikipedia
+        # articles for those is worse than handing it nothing — it finds no answer, and
+        # then supplies one from memory about half the time ("the GMKtec NucBox M6 Ultra
+        # tops the 2026 list"). With no context there is nothing to fill in from.
+        if _NEEDS_LIVE_WEB.search(query):
+            await bus.emit("web", stage="blocked", query=query, error=SEARCH_BLOCKED)
+            return {"query": query, "results": [], "error": SEARCH_BLOCKED, "blocked": True}
         try:
             keyless = await _keyless_search(query, count)
             if keyless.get("results"):
