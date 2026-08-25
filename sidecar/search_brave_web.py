@@ -1,9 +1,17 @@
-"""Keyless web + image search using the user's installed Brave browser.
+"""Keyless web + image search driven through the user's OWN Brave browser.
 
-Runs Brave Search in a hidden persistent Brave window driven by Playwright, so
-no API key or account is needed. Headless mode gets a captcha; a headed window
-does not. The window is moved off-screen AND hidden from the taskbar, warmed
-at boot so the first search is fast, and kept alive between searches.
+His real profile, with his history and logins — not a scratch one. That is both what he
+asked for and what makes it work: a blank profile is precisely what bot detection looks
+for, and the old throwaway-profile version was getting a CAPTCHA and zero results on
+every single query, which the model then relayed as "I couldn't find anything".
+
+The window is MINIMISED, never hidden: JARVIS searches in the background while he works,
+and the moment he wants to see it he clicks Brave in the taskbar and the page is there.
+JARVIS keeps its own tab so it can never navigate away from whatever he is reading.
+
+Engines: Google, then DuckDuckGo. Brave Search is deliberately not used — it challenges
+automated queries even from his own profile (measured: the first query fine, every one
+after it "Verifying you're not a bot"). No API key, no account.
 """
 from __future__ import annotations
 
@@ -17,26 +25,32 @@ log = logging.getLogger("jarvis.search")
 
 IDLE_CLOSE_S = 900  # 15 min
 
-_EXTRACT_JS = r"""() => {
-  const out = [], seen = new Set();
-  for (const a of document.querySelectorAll('a[href^="http"]')) {
-    const parent = a.parentElement;
-    if (!parent || !/result-content/.test(parent.className || '')) continue;
-    const href = a.href;
-    if (!href || seen.has(href) || href.includes('search.brave.com')) continue;
-    seen.add(href);
-    const lines = (a.innerText || '').split('\\n').map(s => s.trim()).filter(Boolean);
-    const title = lines.length ? lines[lines.length - 1] : href;
-    const body = parent.parentElement && parent.parentElement.parentElement;
-    let snippet = '';
-    if (body) {
-      const leaves = [...body.querySelectorAll('*')].filter(e => e.children.length === 0 && !a.contains(e) && e.innerText && e.innerText.trim().length > 40);
-      leaves.sort((x, y) => y.innerText.length - x.innerText.length);
-      snippet = leaves.length ? leaves[0].innerText.trim() : '';
+_EXTRACT_JS = r"""({titleSel, engineHost}) => {
+  // Anchored on the result TITLE, not on links in general. Taking every anchor pulled in
+  // Google's video carousel ahead of the web results and turned DuckDuckGo's displayed
+  // URL into the title. Engines restyle constantly; "the heading inside the result link"
+  // has outlived several of those redesigns.
+  const seen = new Set(), out = [];
+  for (const el of document.querySelectorAll(titleSel)) {
+    const a = el.closest('a[href^="http"]') || el.querySelector('a[href^="http"]');
+    if (!a) continue;
+    let host;
+    try { host = new URL(a.href).hostname.replace(/^www\./, ''); } catch (e) { continue; }
+    if (host.includes(engineHost)) continue;
+    const title = (el.innerText || '').replace(/\s+/g, ' ').trim();
+    if (title.length < 8) continue;
+    const key = a.href.split('#')[0];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    let box = a, hops = 0;
+    while (box && hops < 6 && box.innerText.trim().length < title.length + 90) {
+      box = box.parentElement; hops++;
     }
-    let host = '';
-    try { host = new URL(href).hostname.replace(/^www\\./, ''); } catch (e) {}
-    out.push({ title, url: href, snippet: snippet.slice(0, 240), host });
+    let snippet = box ? box.innerText.replace(/\s+/g, ' ').trim() : '';
+    const i = snippet.indexOf(title);
+    if (i >= 0) snippet = snippet.slice(i + title.length).trim();
+    out.push({ title: title.slice(0, 140), url: a.href, snippet: snippet.slice(0, 280), host });
+    if (out.length >= 10) break;
   }
   return out;
 }"""
@@ -47,8 +61,8 @@ _EXTRACT_IMAGES_JS = r"""() => {
     let src = img.currentSrc || img.src || img.getAttribute('data-src') || '';
     if (!src && img.srcset) src = img.srcset.split(',')[0].trim().split(' ')[0];
     if (!src.startsWith('http') || seen.has(src)) continue;
-    // Brave's own result thumbnails live on imgs.search.brave.com; other hosts are chrome/ads
-    if (!/imgs\.search\.brave\.com/.test(src)) continue;
+    // Accept the search engine's thumbnail hosts; anything else on the page is chrome/ads
+    if (!/imgs\.search\.brave\.com|external-content\.duckduckgo\.com/.test(src)) continue;
     const r = img.getBoundingClientRect();
     const w = Math.max(img.naturalWidth || 0, r.width || 0), h = Math.max(img.naturalHeight || 0, r.height || 0);
     if (w < 90 || h < 90) continue;
@@ -58,6 +72,36 @@ _EXTRACT_IMAGES_JS = r"""() => {
   }
   return out;
 }"""
+
+
+def _real_profile() -> str | None:
+    """HIS Brave profile — the one with his logins, history and cookies.
+
+    JARVIS used to search from a blank throwaway profile parked at -32000,-32000. A brand
+    new profile with no history is exactly what bot detection is looking for, so every
+    search came back with a CAPTCHA and zero results. Driving the browser he actually
+    uses is both what he asked for and the thing that makes search work at all.
+    """
+    base = os.environ.get("LOCALAPPDATA", "")
+    if base:
+        p = os.path.join(base, "BraveSoftware", "Brave-Browser", "User Data")
+        if os.path.isdir(p):
+            return p
+    return None
+
+
+# Brave Search challenges automated queries even from his own profile (measured: first
+# query fine, every one after that "Verifying you're not a bot"). Google and DuckDuckGo
+# serve normally in the same browser, so those are what we use. Order matters: Google
+# first, DuckDuckGo as the fallback.
+_ENGINES = [
+    ("google", "https://www.google.com/search?q=", "google.com", "#search h3, #rso h3"),
+    ("duckduckgo", "https://duckduckgo.com/?q=", "duckduckgo.com",
+     '[data-testid="result-title-a"], article h2'),
+]
+
+_CHALLENGE = ("not a bot", "unusual traffic", "are you human", "captcha",
+              "verify you", "quick check before")
 
 
 def _brave_path() -> str | None:
@@ -163,6 +207,9 @@ class BraveWebSearch:
         self._pid: int | None = None
         self._lock = asyncio.Lock()
         self._last = 0.0
+        self._engine: str | None = None
+        self._attached = False          # True when driving a Brave we did not launch
+        self._page = None               # JARVIS's own tab
         self._reaper: asyncio.Task | None = None
 
     @property
@@ -173,6 +220,8 @@ class BraveWebSearch:
     def ready(self) -> bool:
         return self._ctx is not None
 
+    CDP_PORT = 9222
+
     async def _ensure(self):
         if self._ctx is not None:
             return self._ctx
@@ -180,13 +229,44 @@ class BraveWebSearch:
         from config import APP_DIR
         if self._pw is None:
             self._pw = await async_playwright().start()
-        profile = str(APP_DIR / self._profile_name)
-        _kill_stale_profile_users(profile)
-        self._ctx = await self._pw.chromium.launch_persistent_context(
-            profile, executable_path=_brave_path(), headless=False,
-            args=["--window-position=-32000,-32000", "--window-size=1200,900",
-                  "--no-first-run", "--no-default-browser-check"],
-            viewport={"width": 1200, "height": 900})
+        # If a Brave is already up with debugging open — usually one JARVIS started
+        # earlier — attach to it instead of trying to launch a second one on the same
+        # profile, which Chromium refuses outright.
+        try:
+            browser = await self._pw.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{self.CDP_PORT}", timeout=2500)
+            self._ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+            self._attached = True
+            log.info("attached to the running Brave over CDP")
+            return self._ctx
+        except Exception:
+            pass
+        profile = _real_profile() or str(APP_DIR / self._profile_name)
+        own = profile != _real_profile()
+        if own:
+            # only ever kill Brave for a scratch profile of ours, never for his
+            _kill_stale_profile_users(profile)
+        args = ["--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
+                # so a later sidecar restart can attach instead of fighting for the profile
+                f"--remote-debugging-port={self.CDP_PORT}"]
+        if not own:
+            args.append("--profile-directory=Default")
+        else:
+            args.append("--window-position=-32000,-32000")
+        try:
+            self._ctx = await self._pw.chromium.launch_persistent_context(
+                profile, executable_path=_brave_path(), headless=False,
+                args=args, viewport=None if not own else {"width": 1280, "height": 900})
+        except Exception as e:
+            # His Brave is already open, so the profile is locked and we cannot drive it.
+            # Say so rather than silently falling back to a blank profile that gets
+            # CAPTCHA'd on every query.
+            if own:
+                raise
+            raise RuntimeError(
+                "Brave is already running, so JARVIS can't drive it. Close Brave and ask "
+                "again — JARVIS will reopen it with your normal profile."
+            ) from e
         # hide from taskbar (needs the window to exist first)
         self._pid = None
         try:
@@ -206,11 +286,49 @@ class BraveWebSearch:
             self._reaper = asyncio.create_task(self._reap())
         return self._ctx
 
+    async def _tab(self, ctx):
+        """JARVIS's own tab in his Brave.
+
+        Attaching to a running browser means ctx.pages[0] is whatever HE is reading.
+        Navigating that away would be unforgivable, so JARVIS keeps one tab of its own
+        and reuses it — which is also what makes "click Brave and it's right there" true.
+        """
+        page = getattr(self, "_page", None)
+        if page is not None and not page.is_closed():
+            return page
+        self._page = ctx.pages[0] if (ctx.pages and not self._attached) else await ctx.new_page()
+        return self._page
+
     def _hide(self) -> None:
-        if self._pid:
-            n = _hide_windows_of_pid(self._pid)
-            if n:
-                log.info("search browser hidden (%d window(s))", n)
+        """Minimise, don't hide.
+
+        This is HIS browser now. The old code stripped it off the taskbar and parked it
+        off-screen, which is what made it "JARVIS's hidden browser" — he could never get
+        at the page it had just loaded. Minimised means the search is sitting in his
+        taskbar the moment he wants to look at it, without stealing focus while he works.
+        """
+        if not self._pid:
+            return
+        if _real_profile() is None:
+            _hide_windows_of_pid(self._pid)
+            return
+        try:
+            import win32con
+            import win32gui
+            import win32process
+
+            def cb(hwnd, _):
+                if not win32gui.IsWindowVisible(hwnd):
+                    return True
+                if win32process.GetWindowThreadProcessId(hwnd)[1] != self._pid:
+                    return True
+                if not win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_SHOWMINNOACTIVE)
+                return True
+
+            win32gui.EnumWindows(cb, None)
+        except Exception as e:
+            log.debug("could not minimise the search window: %s", e)
 
     async def warmup(self) -> None:
         """Launch at boot so the first search isn't a cold start."""
@@ -258,34 +376,55 @@ class BraveWebSearch:
         async with self._lock:
             self._last = time.time()
             ctx = await self._ensure()
-            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            await page.bring_to_front()
-            await page.goto(f"https://search.brave.com/search?q={quote_plus(query)}&source=web",
-                            wait_until="domcontentloaded", timeout=25000)
-            self._hide()
-            try:
-                await page.wait_for_selector(".result-content", timeout=15000)
-            except Exception:
-                title = await page.title()
-                log.warning("no results rendered for %r (page: %s)", query, title)
-            results = await page.evaluate(_EXTRACT_JS)
+            page = await self._tab(ctx)
+            # deliberately NO bring_to_front: he asked for this to happen in the
+            # background while he works, and to be there when he clicks Brave himself.
+            last_err = ""
+            for name, base, host, sel in _ENGINES:
+                try:
+                    await page.goto(base + quote_plus(query),
+                                    wait_until="domcontentloaded", timeout=25000)
+                    self._hide()
+                    await page.wait_for_timeout(1200)
+                    try:
+                        await page.wait_for_selector(sel, timeout=8000)
+                    except Exception:
+                        pass
+                    body = ((await page.inner_text("body"))[:400] or "").lower()
+                    if any(w in body for w in _CHALLENGE):
+                        last_err = f"{name} asked to verify"
+                        log.warning("%s served a bot challenge for %r", name, query)
+                        continue
+                    results = await page.evaluate(
+                        _EXTRACT_JS, {"titleSel": sel, "engineHost": host})
+                    if results:
+                        log.info("search %r -> %d results via %s", query, len(results), name)
+                        self._last = time.time()
+                        self._engine = name
+                        return results[:count]
+                    last_err = f"{name} returned nothing"
+                except Exception as e:
+                    last_err = f"{name}: {str(e)[:70]}"
+                    log.warning("search on %s failed: %s", name, str(e)[:90])
+            log.warning("no engine returned results for %r (%s)", query, last_err)
             self._last = time.time()
-            return results[:count]
+            return []
 
     async def _images(self, query: str, count: int = 8) -> list[dict]:
         async with self._lock:
             self._last = time.time()
             ctx = await self._ensure()
-            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            await page.bring_to_front()
-            # Chromium won't lazy-load images in a hidden window: show it
-            # off-screen (invisible, no taskbar button) just for this load.
+            page = await self._tab(ctx)
+            # Brave's image search challenges automation the same way its web search does;
+            # DuckDuckGo's serves normally from his profile. No bring_to_front — the window
+            # only needs to be un-minimised for a moment so Chromium lazy-loads the images.
             if self._pid:
                 _show_windows_of_pid_offscreen(self._pid)
-            await page.goto(f"https://search.brave.com/images?q={quote_plus(query)}",
+            await page.goto(f"https://duckduckgo.com/?iax=images&ia=images&q={quote_plus(query)}",
                             wait_until="domcontentloaded", timeout=25000)
             try:
-                await page.wait_for_selector("img[src*='imgs.search.brave.com']", timeout=15000)
+                await page.wait_for_selector("img.tile--img__img, img[src*='external-content']",
+                                             timeout=15000)
             except Exception:
                 pass
             for _ in range(3):
@@ -302,11 +441,15 @@ class BraveWebSearch:
         # must not tear down a context that an in-flight request is holding.
         async with self._lock:
             try:
-                if self._ctx:
-                    await self._ctx.close()
+                if self._ctx and not self._attached:
+                    await self._ctx.close()      # ours to close
+                elif self._page and not self._page.is_closed():
+                    await self._page.close()     # his browser: only our own tab goes
             except Exception:
                 pass
             self._ctx = None
+            self._page = None
+            self._attached = False
             self._pid = None
             try:
                 if self._pw:
@@ -316,5 +459,7 @@ class BraveWebSearch:
             self._pw = None
 
 
-brave_web = BraveWebSearch()                      # web + image search tab
-brave_session = BraveWebSearch("session-browser")  # JARVIS's interactive in-app browser
+brave_web = BraveWebSearch()
+# One browser, not two. These used to be separate profiles, so a search and a page-read
+# each spawned their own hidden Brave — exactly the "it opens other windows" complaint.
+brave_session = brave_web
