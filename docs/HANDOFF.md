@@ -367,6 +367,40 @@ but the user's folder was empty; log files diverge.
   A single short phrase is too little work to fan across cores, and it leaves the CPU to
   llama-server. Knob: `brain.embed_threads`.
 
+## How to work on this (read before changing anything)
+- **Iterate with `scripts\dev.ps1`, not `release.ps1`.** It runs the sidecar FROM SOURCE
+  on :8790 / `devtoken123` in ~40 s. A full release is ~15 min (PyInstaller 4, Rust 7,
+  install 2, suites 6) and `quick.ps1` is still ~5 — a Python edit needs none of that.
+  Build and install ONCE, at the end, when it already works. It closes the installed app
+  first on purpose: two llama-servers do not fit on a 780M, and the loser sits at 503
+  until it times out, so an entire test run silently measures a dead port.
+- **Test the capability, not the micro-behaviour.** Every suite was green while research
+  was completely dead. `tests/research_e2e.py` is the model for this: it runs the thing
+  the user actually asks for and judges it the way he does.
+- **A test that cannot see the failure is worse than no test.** Two examples from one
+  session: the research suite reported PASS on three obvious failures because its matcher
+  only knew ASCII apostrophes and the model writes U+2019; and its first pass/fail rule
+  condemned a correct, sourced answer as fabrication. Sanity-check a new suite against
+  output you already know is bad.
+- **Never heredoc Python containing regex.** `\b` becomes a literal backspace and the
+  pattern silently matches nothing. It happened three times in one session. Use the Write
+  tool for patch scripts.
+
+## Web search is bot-blocked (2026-08-25)
+Both keyless routes are gone: DuckDuckGo's HTML endpoint answers HTTP 202 with a CAPTCHA,
+and Brave Search serves a CAPTCHA page to the automation browser (Mojeek and Startpage
+too). That is WHY research failed — `web_search` returned `[]`, which the model read as
+"nothing exists", and with no sources it answered from stale memory and sounded certain
+("the top-rated mini PC in 2026 is the Intel NUC 13 Extreme" — a 2022 machine, invented
+specs). Do not try to defeat the CAPTCHAs.
+What exists now instead: Wikipedia + Hacker News (Algolia) + Stack Exchange, all
+documented keyless APIs, merged ROUND-ROBIN (Wikipedia returns five articles for any
+query and was burying the useful hits). Price / stock / "best <thing> of <year>" skip
+them entirely and return a blocked error — those sources cannot answer it, and handing
+the model near-miss context is what produced the fabrications. News is exempt; HN covers
+it well. **The real fix is a Brave Search API key in Settings** (free tier, 2,000/month);
+the code path already exists and takes it.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
