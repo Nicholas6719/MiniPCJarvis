@@ -156,10 +156,14 @@ class MemoryStore:
         self.db.commit()
 
     def recent_transcript(self, n: int = 12) -> list[dict]:
+        # id and ts ride along: anything that needs to know WHICH turn a row
+        # belongs to cannot use content alone (the same question recurs), and
+        # counting rows breaks silently once the window is full.
         rows = self.db.execute(
-            "SELECT role, content FROM transcript ORDER BY id DESC LIMIT ?", (n,)
+            "SELECT id, ts, role, content FROM transcript ORDER BY id DESC LIMIT ?", (n,)
         ).fetchall()
-        return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+        return [{"id": r[0], "ts": r[1], "role": r[2], "content": r[3]}
+                for r in reversed(rows)]
 
 
 memory = MemoryStore()

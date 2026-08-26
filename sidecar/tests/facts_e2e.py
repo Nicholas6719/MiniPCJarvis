@@ -26,33 +26,53 @@ def check(name, cond, detail=""):
         fails.append(name)
 
 
+def _rows():
+    return req("GET", "/transcript?limit=60")["transcript"]
+
+
+_answer = ""
+
+
 def say(text):
-    """Speak a turn and wait for ITS answer: our user row in the tail with an
-    assistant row after it. (Row-COUNT deltas break once the transcript hits the
-    endpoint's cap — learned at exactly 181.3 s per run.) Waits for QUIET first:
-    /text while he is still speaking drops the turn entirely."""
+    """Speak a turn and wait for ITS answer.
+
+    Anchors on the transcript row ID of our own user row — content matching reads
+    a previous run's answer (these suites repeat phrases), and row COUNTING breaks
+    silently once the window is full: an old copy scrolls off exactly as the new
+    one arrives. Waits for QUIET first: /text mid-speech drops the turn."""
+    global _answer
+    _answer = ""
     for _ in range(30):
         if req("GET", "/health")["state"] in ("idle", "sleeping"):
             break
         time.sleep(2)
+    max_id_before = max([r["id"] for r in _rows()] or [0])
     req("POST", "/text", {"text": text})
     t0 = time.time()
-    for _ in range(90):
-        time.sleep(2)
-        rows = req("GET", "/transcript?limit=10")["transcript"]
-        for i, r in enumerate(rows):
-            if r["role"] == "user" and r["content"] == text:
-                if any(x["role"] == "assistant" for x in rows[i + 1:]):
-                    return time.time() - t0
+    for _ in range(360):
+        time.sleep(0.5)      # fine-grained: a fact turn is ~0.3 s + speech
+        rows = _rows()
+        mine = [r for r in rows if r["id"] > max_id_before
+                and r["role"] == "user" and r["content"] == text]
+        if not mine:
+            continue
+        after = [r for r in rows if r["id"] > mine[-1]["id"] and r["role"] == "assistant"]
+        if after:
+            _answer = after[0]["content"]
+            break
     return time.time() - t0
 
 
 def last_assistant():
-    rows = req("GET", "/transcript?limit=6")["transcript"]
-    for r in reversed(rows):
-        if r["role"] == "assistant":
-            return r["content"]
-    return ""
+    return _answer
+
+
+def last_first_token_ms():
+    """How long until he STARTED answering. Wall-clock to the transcript row is
+    dominated by TTS playback (a spoken sentence is ~4 s of audio no matter where
+    the answer came from) — first token is what the fact store actually changes."""
+    recent = req("GET", "/metrics").get("recent") or []
+    return (recent[-1] or {}).get("first_token_ms") if recent else None
 
 
 # start clean: remove leftovers from earlier runs
@@ -65,6 +85,7 @@ for f in req("GET", "/facts")["facts"]:
 # revise it, and the classifier correctly rejects it. Learned the hard way.)
 say("look up what year the eiffel tower was completed")
 a1 = last_assistant()
+web_ms = last_first_token_ms()
 check("web turn answered", any(ch.isdigit() for ch in a1), a1[:80])
 stored = None
 for _ in range(12):
@@ -78,12 +99,19 @@ check("fact graduated into the store", stored is not None)
 # 2. a paraphrase is served from the brain — fast, no web, no LLM
 if stored:
     before = req("GET", "/facts")["stats"]["served"]
-    dt = say("when was the eiffel tower finished")
+    say("when was the eiffel tower finished")
+    fact_ms = last_first_token_ms()
     a2 = last_assistant()
     after = req("GET", "/facts")["stats"]["served"]
     check("paraphrase served from the store", after > before, f"{before}->{after}")
     check("fact answer spoken", any(ch.isdigit() for ch in a2), a2[:80])
-    check("fact turn is fast (<6 s wall incl. speech)", dt < 6, f"{dt:.1f}s")
+    # the POINT of the fact store: he STARTS answering the same question almost
+    # instantly instead of searching the web for it again
+    check("fact answer starts within a second", fact_ms is not None and fact_ms < 1000,
+          f"{fact_ms} ms")
+    check("fact start far beats the web start",
+          fact_ms is not None and web_ms is not None and fact_ms < web_ms / 3,
+          f"fact {fact_ms} ms vs web {web_ms} ms")
 
     # 3. provenance on demand — he never volunteers it, but answers for it
     say("how do you know that")
