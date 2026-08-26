@@ -1,4 +1,12 @@
-# The Brain Beyond the LLM — agreed design (discussed 2026-08-26, NOT yet built)
+# The Brain Beyond the LLM — agreed design (discussed 2026-08-26)
+
+STATUS (2026-08-26 afternoon): stages 1 + the fact-store core of 2/3 are BUILT,
+installed and e2e-verified — `brain/facts.py` (store, realm triggers, temp-0
+timeless classifier, provenance), `/facts` + `/turnstats` endpoints, evidence
+capture in web_search/research, the fact read/write paths in the orchestrator,
+`tests/test_facts.py` in the build gate and `tests/facts_e2e.py` in the release
+suite. NOT yet built: the nightly audit loop, paraphrase distillation,
+idle-hours pre-fetch, the small-model tier.
 
 Goal: JARVIS answers mainly from his own brain — fast AND accurate — with the LLM
 as a last resort instead of a default. Realistic target: 70–80% of turns never

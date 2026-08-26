@@ -451,6 +451,37 @@ each one is a contract. Findings (commit 6163105), all fixed + gate-protected:
   queued reports flushed at boot — check builds/timestamps before panicking).
   The Settings toggle reads the same Run value, so it shows ON and can turn it off.
 
+## THE FACT STORE (2026-08-26 afternoon) — brain roadmap stages 1-2 shipped
+Design: docs/BRAIN_ROADMAP.md (read it first). Implementation notes:
+- `brain/facts.py`: FactStore singleton `facts` + module fn `record_evidence`
+  (tools call it). Serve threshold 0.90 (stricter than routing 0.82). Evidence
+  is INSTANCE state — calling module fns as methods was an AttributeError that
+  compileall/pyflakes CANNOT catch; only facts_e2e caught it. Trust the e2e.
+- Flow: web_search/research record evidence -> _converse end schedules
+  _fact_intake (3 s later, background) -> REALM2 triggers on question AND
+  answer -> temp-0 timeless classify (max_tokens 600: gpt-oss REASONS first;
+  at 180 the YES truncated away and everything read as NO) -> store with
+  sources. Read: _converse tries facts.lookup BEFORE the LLM (after reflexes;
+  llm_after reflexes skip it) -> _fact_turn speaks polished answer ~0.3 s.
+- The classifier is CONSERVATIVE BY DESIGN and that is correct: it rejected
+  "how tall is mount kilimanjaro" because surveys revise mountain heights.
+  Use completed history for tests. Stored questions are query_clean'd so
+  paraphrases land close in embedding space.
+- "how do you know that" -> provenance reflex speaks facts.last_served's
+  source + verified date. He NEVER volunteers sources (user rule).
+- /facts (list+stats), DELETE /facts/{id}, /turnstats (turn-path shares —
+  roadmap stage 1; memory.log_turn_stat at both turn_done sites).
+- e2e gotchas that burned an hour: (a) after a hotswap WAIT FOR THE AI ENGINE
+  diagnostics check, idle is not enough — turns hit the llm-loading branch;
+  (b) transcript row-count deltas break at the endpoint's cap (limit param!) —
+  match your own user row + following assistant row; (c) a pending REMINDER
+  can fire mid-suite and pollute the transcript (the 90-min stretch reminder
+  from brain_e2e did exactly that); (d) /text while he is SPEAKING drops the
+  turn silently — suites must wait for idle between turns.
+- KNOWN GAP (app-level, unfixed): /text during speech should queue or barge-in,
+  not vanish — a typed message mid-speech is currently lost. Candidate for the
+  next UX pass.
+
 ## FEATURE GAPS the route sweep surfaced (for the planning session)
 Things users will say that today fall to the LLM without a real tool behind them:
 - Relative volume: "turn it up / down a bit" (volume_set is absolute-only).

@@ -27,16 +27,23 @@ def check(name, cond, detail=""):
 
 
 def say(text):
-    """Speak a turn and wait for ITS answer — a new assistant row after our user
-    row — not whatever the transcript already held (early-idle race)."""
-    before = len(req("GET", "/transcript?limit=200")["transcript"])
+    """Speak a turn and wait for ITS answer: our user row in the tail with an
+    assistant row after it. (Row-COUNT deltas break once the transcript hits the
+    endpoint's cap — learned at exactly 181.3 s per run.) Waits for QUIET first:
+    /text while he is still speaking drops the turn entirely."""
+    for _ in range(30):
+        if req("GET", "/health")["state"] in ("idle", "sleeping"):
+            break
+        time.sleep(2)
     req("POST", "/text", {"text": text})
     t0 = time.time()
     for _ in range(90):
         time.sleep(2)
-        rows = req("GET", "/transcript?limit=200")["transcript"]
-        if len(rows) >= before + 2 and rows[-1]["role"] == "assistant":
-            break
+        rows = req("GET", "/transcript?limit=10")["transcript"]
+        for i, r in enumerate(rows):
+            if r["role"] == "user" and r["content"] == text:
+                if any(x["role"] == "assistant" for x in rows[i + 1:]):
+                    return time.time() - t0
     return time.time() - t0
 
 
