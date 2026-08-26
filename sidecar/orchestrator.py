@@ -22,6 +22,7 @@ from audio.wake import wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
 from brain.router import brain
+from brain.facts import facts
 import collections
 import re as _re
 from config import config
@@ -641,6 +642,7 @@ class Orchestrator:
 
     async def _converse(self, text: str, t_start: float) -> None:
         memory.log_turn("user", text)
+        facts.reset_evidence()
         # ---- reflex: JARVIS's own brain handles known requests without the LLM ----
         reflex = None
         if config.get("brain", "enabled", default=True):
@@ -656,6 +658,16 @@ class Orchestrator:
                        or (reflex[0].direct_if is not None and reflex[0].direct_if(text))):
             await self._reflex_turn(text, reflex, t_start)
             return
+        # ---- realm 1: a stored, web-verified, timeless fact answers instantly ----
+        if reflex is None:
+            try:
+                fact = await facts.lookup(text)
+            except Exception:
+                log.exception("fact lookup failed — continuing to the LLM")
+                fact = None
+            if fact:
+                await self._fact_turn(text, fact, t_start)
+                return
         if not getattr(self, "_llm_ready", True):
             line = "My language model is still loading. Give me a few more seconds and ask again."
             await bus.emit("assistant_delta", text=line)
@@ -756,8 +768,20 @@ class Orchestrator:
             self._history = self._history[-20:]
             memory.log_turn("assistant", full_reply)
         breakdown = self.metrics.finish()
+        latency = int((time.time() - t_start) * 1000)
+        memory.log_turn_stat("tool_then_llm" if reflex else
+                             "llm_general" if general_hint else "llm_tools",
+                             reflex[0].name if reflex else None, latency)
+        # the turn's web evidence may graduate into a timeless fact (realm 1) —
+        # classified in the background, never blocking the conversation
+        evidence = facts.take_evidence()
+        if full_reply and evidence:
+            from brain.skills import without_honorific as _wh
+            answer = _wh(strip_markdown(full_reply))
+            ev = evidence[-1]
+            asyncio.create_task(self._fact_intake(text, answer, ev))
         # the transcript takes the markdown-free text; the streamed deltas are raw
-        await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
+        await bus.emit("turn_done", latency_ms=latency,
                        breakdown=breakdown, text=strip_markdown(full_reply or ""))
         if self.sm.state != State.ERROR:
             await self.sm.to(State.IDLE, force=True)
@@ -828,6 +852,36 @@ class Orchestrator:
             await queue.put(clean_for_speech(reply))
         return reply
 
+    async def _fact_intake(self, question: str, answer: str, evidence: dict) -> None:
+        """Background: maybe graduate this turn's sourced answer into the fact
+        store. Waits out the TTS tail so the classifier never contends with a turn."""
+        try:
+            await asyncio.sleep(3)
+            stored = await facts.consider(question, answer,
+                                          evidence.get("sources") or [],
+                                          evidence.get("origin", "search"))
+            if stored:
+                await bus.emit("fact_learned", question=question)
+        except Exception:
+            log.exception("fact intake failed")
+
+    async def _fact_turn(self, text: str, fact: dict, t_start: float) -> None:
+        """A stored timeless fact answers without the LLM (~0.3 s). The receipts
+        (sources, verified date) stay on facts.last_served for "how do you know"."""
+        from brain.skills import polish
+        brain.stats["fact"] = brain.stats.get("fact", 0) + 1
+        await bus.emit("reflex", skill="fact", tool=None,
+                       args={"verified": fact["verified_ts"]},
+                       confidence=fact["score"], mode="direct")
+        self._speak_cancel = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        task = asyncio.create_task(self._speaker_worker(queue))
+        reply = polish(fact["answer"])
+        self.metrics.mark("first_token_ms")
+        await bus.emit("assistant_delta", text=reply)
+        await queue.put(clean_for_speech(reply))
+        await self._finish_reflex(text, reply, t_start, "fact", queue, task)
+
     async def _finish_reflex(self, text: str, reply: str, t_start: float, label: str,
                              queue: asyncio.Queue, task: asyncio.Task) -> None:
         await queue.put(None)
@@ -843,7 +897,10 @@ class Orchestrator:
             memory.log_turn("assistant", reply)
         breakdown = self.metrics.finish()
         breakdown["reflex"] = label
-        await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
+        latency = int((time.time() - t_start) * 1000)
+        memory.log_turn_stat("fact" if label == "fact" else
+                             "routine" if label == "command" else "reflex", label, latency)
+        await bus.emit("turn_done", latency_ms=latency,
                        breakdown=breakdown, reflex=label, text=strip_markdown(reply or ""))
         if self.sm.state != State.ERROR:
             # "go to sleep" ends in SLEEPING, not IDLE: no follow-up window, nothing but

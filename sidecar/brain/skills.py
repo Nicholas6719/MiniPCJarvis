@@ -714,7 +714,26 @@ def slots_clock(t: str) -> dict | None:
     return None if _ELSEWHERE.search(t) else {}
 
 
+def say_provenance(_s: dict, _r: dict) -> str:
+    """He never volunteers sources (user's rule) — but must answer for them."""
+    from brain.facts import facts as _facts
+    f = _facts.last_served
+    if not f:
+        return "That came from my own reasoning this turn, not a stored fact."
+    try:
+        host = re.sub(r"^www\.", "", (f["sources"][0]["url"].split("/")[2]))
+    except Exception:
+        host = "the web"
+    when = dt.date.fromtimestamp(f["verified_ts"]).strftime("%B %d")
+    return f"From {host}, last verified {when}."
+
+
 SKILLS: list[Skill] = [
+    Skill("provenance", None, [
+        "how do you know that", "what's your source", "where did you get that",
+        "says who", "where did that come from", "what is your source for that",
+        "how do you know this", "who told you that", "can you cite that"],
+        speak=say_provenance),
     Skill("time", None, [
         "what time is it", "what's the time", "tell me the time", "do you have the time",
         "current time", "time check", "what time is it right now", "got the time",

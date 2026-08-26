@@ -45,6 +45,9 @@ CASES = [
     ("switch to a british voice", None),    # was: hunting a window titled "a british voice"
     ("show me pictures from my trip", None),# was: web-searching his personal photos
     ("we're done here", "sleep"),           # dismissals still work
+    # provenance (fact store receipts): he never volunteers sources, but answers for them
+    ("how do you know that", "provenance"), ("what's your source", "provenance"),
+    ("where did you get that", "provenance"),
 ]
 
 async def main() -> int:

@@ -472,6 +472,29 @@ async def stats(x_jarvis_token: str | None = Header(None)):
     }
 
 
+@app.get("/facts")
+async def list_facts(x_jarvis_token: str | None = Header(None)):
+    """The fact store with receipts — realm 1 of docs/BRAIN_ROADMAP.md."""
+    _auth(x_jarvis_token)
+    from brain.facts import facts
+    return {"facts": facts.list_all(), "stats": facts.stats}
+
+
+@app.delete("/facts/{fact_id}")
+async def delete_fact(fact_id: int, x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from brain.facts import facts
+    facts.delete(fact_id)
+    return {"ok": True}
+
+
+@app.get("/turnstats")
+async def turn_stats(days: int = 7, x_jarvis_token: str | None = Header(None)):
+    """Which turns wake the LLM and what they cost (brain roadmap stage 1)."""
+    _auth(x_jarvis_token)
+    return memory.turn_stats_summary(max(1, min(90, days)))
+
+
 @app.get("/tasks")
 async def tasks_list(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

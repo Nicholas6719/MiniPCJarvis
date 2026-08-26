@@ -107,6 +107,10 @@ async def research(query: str, num_sources: int = 4) -> dict:
     ok = sum(1 for s in sources if not s.get("note"))
     await bus.emit("research", stage="done", query=query, fetched=ok,
                    total=len(sources))
+    if ok:
+        from brain.facts import record_evidence
+        record_evidence(query, [{"url": s["url"], "title": s.get("title", "")}
+                                for s in sources if not s.get("note")], "research")
     return {
         "query": query,
         "sources": sources,

@@ -28,6 +28,13 @@ CREATE TABLE IF NOT EXISTS transcript (
     role TEXT NOT NULL,
     content TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS turn_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    path TEXT NOT NULL,          -- routine | reflex | fact | tool_then_llm | llm_general | llm_tools
+    skill TEXT,
+    latency_ms INTEGER
+);
 """
 
 
@@ -48,6 +55,32 @@ class MemoryStore:
             from fastembed import TextEmbedding
             self._embedder = TextEmbedding("BAAI/bge-small-en-v1.5")
         return np.array(list(self._embedder.embed(texts)), dtype=np.float32)
+
+    async def embed_texts(self, texts: list[str]) -> np.ndarray:
+        """Shared embedder for other stores (the fact store) — one ONNX model in RAM."""
+        return await asyncio.to_thread(self._embed, texts)
+
+    # ---- turn-path instrumentation (brain roadmap stage 1) --------------------
+    def log_turn_stat(self, path: str, skill: str | None, latency_ms: int) -> None:
+        try:
+            self.db.execute("INSERT INTO turn_stats (ts, path, skill, latency_ms) VALUES (?,?,?,?)",
+                            (time.time(), path, skill, latency_ms))
+            self.db.commit()
+        except Exception:
+            log.exception("turn stat insert failed")
+
+    def turn_stats_summary(self, days: int = 7) -> dict:
+        """What fraction of turns woke the LLM, and what they cost — the data that
+        decides which brain investment pays next."""
+        since = time.time() - days * 86400
+        rows = self.db.execute(
+            "SELECT path, COUNT(*), AVG(latency_ms), SUM(latency_ms) FROM turn_stats "
+            "WHERE ts >= ? GROUP BY path ORDER BY COUNT(*) DESC", (since,)).fetchall()
+        total = sum(r[1] for r in rows) or 1
+        return {"days": days, "total_turns": total,
+                "paths": [{"path": r[0], "turns": r[1], "share": round(r[1] / total, 3),
+                           "avg_ms": int(r[2] or 0), "total_s": int((r[3] or 0) / 1000)}
+                          for r in rows]}
 
     async def remember(self, content: str, category: str = "fact",
                        source: str = "conversation", confidence: str = "medium") -> int:

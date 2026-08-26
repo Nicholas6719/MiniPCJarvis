@@ -62,7 +62,7 @@ if ($SkipTests) { exit 0 }
 Set-Location "$root\sidecar"
 $env:PYTHONIOENCODING = 'utf-8'
 $failed = 0
-foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py", "sleep_e2e.py", "research_e2e.py", "filler_e2e.py", "voice_ux_e2e.py", "hud_e2e.py")) {
+foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py", "sleep_e2e.py", "research_e2e.py", "filler_e2e.py", "voice_ux_e2e.py", "hud_e2e.py", "facts_e2e.py")) {
     & $log "== $t"
     & .\.venv\Scripts\python.exe "tests\$t" $port $tok 2>&1 | Select-Object -Last 4
     if ($LASTEXITCODE -ne 0 -and $t -notin @("filler_e2e.py", "general_e2e.py", "voice_ux_e2e.py")) { $failed++ }
