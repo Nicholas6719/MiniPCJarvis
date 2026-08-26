@@ -122,6 +122,7 @@ body.compact .mono-sub { display: none; }
 .tick--br-v { right: calc(44px * var(--s)); bottom: calc(40px * var(--s)); width: 1px; height: calc(26px * var(--s)); }
 
 .wordmark {
+  cursor: pointer;
   position: absolute; z-index: 4;
   left: calc(78px * var(--s)); top: calc(56px * var(--s));
   font: 400 calc(13px * var(--s))/1 "Share Tech Mono", monospace;

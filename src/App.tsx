@@ -71,6 +71,14 @@ export default function App() {
 
   useEffect(() => connectEvents(onEvent), [onEvent]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") useStore.getState().dismissStage();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // don't animate a window nobody is looking at
   useEffect(() => {
     const sync = () => document.body.classList.toggle("is-hidden", document.hidden);
@@ -173,7 +181,8 @@ export default function App() {
       <div className="tick tick--tr-h" /><div className="tick tick--tr-v" />
       <div className="tick tick--bl-h" /><div className="tick tick--bl-v" />
       <div className="tick tick--br-h" /><div className="tick tick--br-v" />
-      <div className="wordmark">JARVIS</div>
+      <button className="wordmark" title="Settings"
+              onClick={() => useStore.getState().setSettingsSection("voice")}>JARVIS</button>
       <div className="clock">{clock}</div>
 
       {/* the core — it carries the layout with it (§5.1) */}
