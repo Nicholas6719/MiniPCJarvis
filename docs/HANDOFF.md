@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-08-23.
+Updated: 2026-08-26.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -366,6 +366,44 @@ but the user's folder was empty; log files diverge.
   (2) fastembed pinned to ONE thread: measured 39 ms vs 57 ms default vs 80 ms on eight.
   A single short phrase is too little work to fan across cores, and it leaves the CPU to
   llama-server. Knob: `brain.embed_threads`.
+
+## WHERE THINGS STAND (2026-08-26 morning) — resume here
+- The full HUD redesign is BUILT, INSTALLED and pushed (commits a671cdc..8131e6f).
+  All release suites green. Design source of truth:
+  `Jarvis UI mockup improvements/design_handoff_jarvis_hud/README.md`.
+- INCIDENT resolved this morning: the user stopped the session mid-release on 08-25
+  ~21:20. The release's DETACHED real-session install task still fired at 21:23:59,
+  killed the running (sleeping) jarvis.exe, then died before the NSIS installer ran —
+  the app stayed dead all night. The user experienced this as "sleep mode closed
+  JARVIS after 5-10 minutes". NOT a sleep-mode bug. Fixed by re-running
+  `Documents/jarvis_install.cmd` via schtasks (that installer, 08-25 21:23, includes
+  wordmark-click->settings and Escape-dismiss).
+  RULE: a stopped release may still have its install task queued — check
+  `jarvis_install.log`: a log that ends after the taskkill lines (no "installer exit",
+  no "DONE") means the app was killed and never reinstalled. Never assume a stopped
+  release left the app alive; re-run the install cmd.
+- NEXT (user's stated plan): 1) finish walking him through how the new UI works,
+  2) review what overnight sleep produced — proactive quiet hours default 22:00-08:00
+  suppress alerts entirely; watchdogs/self-heal still log (check Settings->History and
+  the activity), 3) THE BIG ONE: plan "the proper functionality of JARVIS" — the
+  feature roadmap, together. Always state your understanding before starting work.
+
+## HOW THE NEW UI WORKS (for explaining to the user)
+- Rest = radial: reactor centred, room faded. Speak, or Ctrl+Shift+J, or click the orb.
+- A turn that produces something to read = anchor: core slides left (.9s), the STAGE
+  opens beside it. The renderer is chosen by what the turn does: answer -> prose ·
+  search/research -> browser · pictures -> images · file -> file · folder -> folder ·
+  settings/history/memory/tasks/about -> settings rail.
+- After the spoken answer: 5 s hold (drain bar), then back to radial. "keep it" pins.
+  Escape or "hide everything" dismisses. Clicking the JARVIS wordmark opens Settings.
+- Voice surface phrases (ui skill): "show settings" / "settings, history" / "show my
+  memory" / "show tasks" / "pin that" / "hide everything".
+- Gate: room amber, radial, DO IT / NO or spoken yes/no, never times out.
+  Faults: room red, four wedges, RESTART IT is real (/repair).
+- Media/table/split/apps stages: renderers not built — no backend data yet (no music
+  player, no comparison engine, no task concurrency). These are features to plan.
+- Embedded-Brave-in-stage (design §6.4) deliberately deferred — the one open design
+  question; the browser stage renders JARVIS's real search/read events meanwhile.
 
 ## THE HUD (2026-08-25): arc reactor, two geometries, one stage
 The UI is the design in `Jarvis UI mockup improvements/design_handoff_jarvis_hud/` —
