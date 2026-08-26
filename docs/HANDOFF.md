@@ -367,6 +367,27 @@ but the user's folder was empty; log files diverge.
   A single short phrase is too little work to fan across cores, and it leaves the CPU to
   llama-server. Knob: `brain.embed_threads`.
 
+## THE HUD (2026-08-25): arc reactor, two geometries, one stage
+The UI is the design in `Jarvis UI mockup improvements/design_handoff_jarvis_hud/` —
+read its README before touching `src/`. The reasons behind the layout matter; several
+obvious "improvements" were tried in design and explicitly rejected (bright nucleus disc,
+read-only browser, bottom status strips, per-breakpoint layouts).
+- `ArcReactor.tsx` = the core; `App.tsx` = geometry + atmosphere + chrome; `Stage.tsx` =
+  every content surface; `Wedges.tsx` = faults + the gate. There are NO view tabs and no
+  status bar — the utterance selects the stage renderer via store events.
+- `--rim` (one variable per state) drives the whole room. `--s` drives ALL dimensions
+  (calc(Npx * var(--s))): chrome/wedges re-anchor to the real viewport, stage right edge
+  follows the screen.
+- Dismiss: stages hold 5 s after the answer (drain bar), voice "keep it"/pin holds.
+- UI iteration: `vite build` (~0.6 s) + `node scripts/serve_dist.cjs`, page at
+  `http://127.0.0.1:5173/?port=8790&token=devtoken123` against `scripts\dev.ps1`.
+  Vite's DEV server silently wedges on this machine (accepts, never responds) — don't
+  use it. Port 1420 is silently firewalled — don't use it either. Screenshot with
+  Playwright headless (sidecar venv) for pixel checks against `screens/*.png`.
+- Flagged deviations (handoff §17): embedded Brave in the stage not built yet (browser
+  stage renders JARVIS's real browsing from events); media/table/split/apps stages have
+  no backend data; the gate's scoped-permission button needs backend support first.
+
 ## How to work on this (read before changing anything)
 - **Iterate with `scripts\dev.ps1`, not `release.ps1`.** It runs the sidecar FROM SOURCE
   on :8790 / `devtoken123` in ~40 s. A full release is ~15 min (PyInstaller 4, Rust 7,
