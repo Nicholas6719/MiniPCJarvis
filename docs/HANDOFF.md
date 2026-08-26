@@ -396,7 +396,9 @@ each one is a contract. Findings (commit 6163105), all fixed + gate-protected:
   tab/panel suffix, so the LLM invented "volume 70%, shortcut Win+J"). slots_ui now
   takes bare sections, "settings, history", history/about views.
 - "wake up" MATCHED THE SLEEP SKILL (embeds near sleep seeds) — he answered a wake
-  request by going back to sleep. Guard in slots_sleep; test_brain pins it None.
+  request by going back to sleep. Guard in slots_sleep, PLUS a "wakeack" reflex
+  ("wake up"/"good morning jarvis" -> "At your service.") because the LLM fallback
+  answered a wake with a history echo ("Spiders have eight legs."). test_brain pins.
 - "keep it" pinned the WRONG STAGE: the ui event lands after this turn's transcript
   already swapped the stage to fresh prose. Fix: store snapshots the outgoing stage
   (with its web/images/files data) on every swap/dismiss; pin/focus/restore operate
