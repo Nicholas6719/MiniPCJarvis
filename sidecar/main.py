@@ -77,6 +77,8 @@ async def lifespan(app: FastAPI):
             logging.getLogger("jarvis").exception("brain failed to load (LLM-only mode)")
     asyncio.create_task(_load_brain())
     asyncio.create_task(orchestrator.start())
+    from brain.night_school import night_school
+    night_school.start(orchestrator)   # audits + curiosity + distillation while he sleeps
     yield
     proactive.stop()
     scheduler.stop()
@@ -615,6 +617,24 @@ async def debug_confirm_test(x_jarvis_token: str | None = Header(None)):
                 await orchestrator.sm.to(State.IDLE, force=True)
     asyncio.create_task(_run())
     return {"ok": True}
+
+
+@app.post("/debug/night_school")
+async def debug_night_school(x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): run one full night-school pass right now,
+    ignoring the sleep/quiet-hours conditions. Blocks until done; returns the report."""
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from brain.night_school import night_school
+    return await night_school.run(force=True)
+
+
+@app.get("/night_school")
+async def night_school_status(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from brain.night_school import night_school
+    return {"last_run": night_school._last_run_ts(), "last_report": night_school.last_report}
 
 
 @app.post("/debug/llm_probe")

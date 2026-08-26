@@ -70,6 +70,9 @@ class FactStore:
         import sqlite3
         self.db = sqlite3.connect(db_path or DB_PATH, check_same_thread=False)
         self.db.executescript(_SCHEMA)
+        cols = [r[1] for r in self.db.execute("PRAGMA table_info(facts)")]
+        if "strikes" not in cols:   # audit: two UNCLEAR verdicts demote
+            self.db.execute("ALTER TABLE facts ADD COLUMN strikes INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
         self.last_served: dict | None = None   # for "how do you know that"
         self.stats = {"served": 0, "stored": 0, "rejected": 0}
@@ -195,10 +198,19 @@ class FactStore:
     # ------------------------------------------------------------------ audit
     def due_for_audit(self, limit: int = 40) -> list[dict]:
         rows = self.db.execute(
-            "SELECT id, question, answer, sources, verified_ts FROM facts "
+            "SELECT id, question, answer, sources, verified_ts, strikes FROM facts "
             "WHERE status='active' ORDER BY verified_ts ASC LIMIT ?", (limit,)).fetchall()
         return [{"id": r[0], "question": r[1], "answer": r[2],
-                 "sources": json.loads(r[3]), "verified_ts": r[4]} for r in rows]
+                 "sources": json.loads(r[3]), "verified_ts": r[4], "strikes": r[5]} for r in rows]
+
+    def strike(self, fact_id: int) -> int:
+        """An UNCLEAR audit verdict. Two strikes -> demoted (default distrust)."""
+        self.db.execute("UPDATE facts SET strikes = strikes + 1 WHERE id=?", (fact_id,))
+        self.db.commit()
+        n = self.db.execute("SELECT strikes FROM facts WHERE id=?", (fact_id,)).fetchone()[0]
+        if n >= 2:
+            self.demote(fact_id, "two unclear audits")
+        return n
 
     def mark_verified(self, fact_id: int) -> None:
         self.db.execute("UPDATE facts SET verified_ts=? WHERE id=?", (time.time(), fact_id))

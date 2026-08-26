@@ -72,8 +72,11 @@ Hard rules:
   inspectable ("how do you know that?" → he cites source + verified date).
   Same principle for the overnight audit: log findings in Settings → History,
   no unprompted morning announcements — he answers if asked.
-- Footprint: approved. Claude's assessment: ~10 GB RAM headroom today
-  (20B model ≈ 12 GB + app ≈ 21/31 GB used); a 2–4 GB small model fits
-  comfortably and should run ~4–5× faster than the 20B on the 780M
-  (bandwidth-bound). Verify with a bakeoff (scripts/model_trial.ps1 pattern)
-  before locking the choice — measure, don't assume.
+- Footprint: approved — but the small-model tier was MEASURED AND REJECTED
+  (2026-08-26 bakeoff, run beside the live 20B): gemma-3-4b-q4 generates
+  22 t/s on the 780M (14 t/s CPU) while gpt-oss-20b does 27 t/s, because
+  gpt-oss is MoE with only ~3.6B ACTIVE params — it already IS the small
+  model at generation time. A dense 4B is slower, not faster, on this box.
+  "4-5x faster" was Claude's prediction; the measurement falsified it.
+  Revisit only if a faster small MoE or big Vulkan prompt-processing gains
+  appear. The speed win ships via the fact store (~0.3 s) instead.

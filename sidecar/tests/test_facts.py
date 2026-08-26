@@ -91,6 +91,53 @@ async def main() -> int:
     after = [f for f in fs.list_all() if f["id"] == due[1]["id"]][0]["verified_ts"]
     check("mark_verified bumps the stamp", after >= before)
 
+    # --- the audit verdict machine (night school job 1), offline ------------
+    import brain.night_school as ns
+    ns.facts = fs                     # point the module at the test store
+    school = ns.NightSchool()
+
+    async def fetch_ok(_u):
+        return "The Eiffel Tower was completed in 1889 and stands in Paris."
+
+    async def fetch_dead(_u):
+        return ""
+
+    await fs.consider("what year was the eiffel tower completed",
+                      "It was completed in 1889.", SRC, "research", classify=yes)
+    fact = next(f for f in fs.due_for_audit() if "1889" in f["answer"])
+
+    async def same(_q, _a, _e):
+        return "SAME"
+
+    async def changed(_q, _a, _e):
+        return "CHANGED"
+
+    async def unclear(_q, _a, _e):
+        return "UNCLEAR"
+
+    school._fetch, school._compare = fetch_ok, same
+    check("audit SAME confirms", await school._audit_one(fact) == "confirmed")
+    v_after = [f for f in fs.list_all() if f["id"] == fact["id"]][0]["verified_ts"]
+    check("audit SAME re-stamps", v_after >= fact["verified_ts"])
+
+    school._compare = unclear
+    check("audit UNCLEAR strikes once", await school._audit_one(fact) == "unclear")
+    check("second UNCLEAR demotes", await school._audit_one(fact) == "changed")
+    check("demoted after strikes stops serving",
+          await fs.lookup("what year was the eiffel tower completed") is None)
+
+    await fs.consider("who composed the moonlight sonata",
+                      "Beethoven composed the Moonlight Sonata.", SRC, "research", classify=yes)
+    f2 = next(f for f in fs.due_for_audit() if "Beethoven" in f["answer"])
+    school._compare = changed
+    check("audit CHANGED demotes immediately", await school._audit_one(f2) == "changed")
+
+    await fs.consider("what is the chemical symbol for gold",
+                      "Gold's chemical symbol is Au.", SRC, "research", classify=yes)
+    f3 = next(f for f in fs.due_for_audit() if "Au" in f["answer"])
+    school._fetch, school._compare = fetch_dead, same
+    check("dead source strikes, not demotes", await school._audit_one(f3) == "unclear")
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 
