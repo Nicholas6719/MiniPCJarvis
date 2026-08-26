@@ -388,16 +388,53 @@ but the user's folder was empty; log files diverge.
   the activity), 3) THE BIG ONE: plan "the proper functionality of JARVIS" — the
   feature roadmap, together. Always state your understanding before starting work.
 
+## 2026-08-26 (user away 12 h): every UI promise now has a working backend
+The instruction was "make sure the UI elements we added all work". The method that
+found everything: read every hint the UI PRINTS ON SCREEN and speak it at the app —
+each one is a contract. Findings (commit 6163105), all fixed + gate-protected:
+- "show settings" FABRICATED a settings readout (ui skill regex required a
+  tab/panel suffix, so the LLM invented "volume 70%, shortcut Win+J"). slots_ui now
+  takes bare sections, "settings, history", history/about views.
+- "wake up" MATCHED THE SLEEP SKILL (embeds near sleep seeds) — he answered a wake
+  request by going back to sleep. Guard in slots_sleep; test_brain pins it None.
+- "keep it" pinned the WRONG STAGE: the ui event lands after this turn's transcript
+  already swapped the stage to fresh prose. Fix: store snapshots the outgoing stage
+  (with its web/images/files data) on every swap/dismiss; pin/focus/restore operate
+  on the snapshot when the current stage is an answerless prose. Same snapshot powers
+  "bring that back" (restore) and "keep it for ten minutes" (pinUntil -> drain).
+- "bigger" / "the second one" / "back to the grid" now exist: ui focus action ->
+  images.focus -> featured-image layout (.images__focus).
+- Folder stage's "say a file name to open it" was a lie — "open jarvis install log"
+  hit open_app and failed. open_application now falls back to file_tools.open_by_name
+  (token match, spaces==underscores==dots) -> preview_file stage. Hint reworded to
+  'SAY "OPEN" AND A FILE NAME'. Folder/file stages hold 30 s (invite a follow-up),
+  everything else 5 s (holdFor()).
+- /transcript ignored ?limit -> History pane could never show >30 turns.
+- Stale source chips from the previous search decorated unrelated prose answers ->
+  transcript event clears web/images (unless pinned). Prose stage now opens AT the
+  transcript (question at 40px, mock 03), not at first token.
+- "open settings" stays open_app (Windows Settings; canon "open APP" collides) —
+  "show settings" = JARVIS's stage. Deliberate split: show = stage, open = app.
+- NEW GATE `tests/hud_e2e.py PORT TOKEN`: serves dist/ itself, Playwright+Brave
+  headless, drives the store contract via window.__jarvis (exposed in store.ts) —
+  19 checks; wired into release.ps1. test_brain now 53 cases (all voice hooks).
+- Verified live on the real sidecar: gate wedges (DO IT round-trip), 4 fault wedges
+  with real telemetry, sleep->ASLEEP->wake, folder/images/browser/prose stages.
+- Testing artifact to know: rAF batching means assistant deltas don't flush while
+  the window is HIDDEN (background tab) — streaming is fine when visible.
+
 ## HOW THE NEW UI WORKS (for explaining to the user)
 - Rest = radial: reactor centred, room faded. Speak, or Ctrl+Shift+J, or click the orb.
 - A turn that produces something to read = anchor: core slides left (.9s), the STAGE
   opens beside it. The renderer is chosen by what the turn does: answer -> prose ·
   search/research -> browser · pictures -> images · file -> file · folder -> folder ·
   settings/history/memory/tasks/about -> settings rail.
-- After the spoken answer: 5 s hold (drain bar), then back to radial. "keep it" pins.
-  Escape or "hide everything" dismisses. Clicking the JARVIS wordmark opens Settings.
+- After the spoken answer: 5 s hold (drain bar; folder/file 30 s), then back to
+  radial. Escape or "hide everything" dismisses. Wordmark click opens Settings.
 - Voice surface phrases (ui skill): "show settings" / "settings, history" / "show my
-  memory" / "show tasks" / "pin that" / "hide everything".
+  memory" / "show tasks" / "keep it" / "keep it for ten minutes" / "bring that back"
+  / "hide everything" / on images: "bigger", "the second one", "back to the grid"
+  / in a folder: "open" + a file name.
 - Gate: room amber, radial, DO IT / NO or spoken yes/no, never times out.
   Faults: room red, four wedges, RESTART IT is real (/repair).
 - Media/table/split/apps stages: renderers not built — no backend data yet (no music
