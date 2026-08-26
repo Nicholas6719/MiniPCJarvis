@@ -258,6 +258,81 @@ async def delete_file(path: str) -> dict:
     return {"recycled": _display(p)}
 
 
+# ---- the Recycle Bin itself -------------------------------------------------
+# It is a shell NAMESPACE, not a folder: no path to walk. Shell32 via COM is the
+# only honest way to see inside it (and the only way to restore an item, which
+# is what "undo that" has to mean).
+_BIN_CLSID = 10   # ssfBITBUCKET
+
+
+def _bin_items():
+    """(items, folder). COM must be initialised on whatever thread calls this —
+    these tools run via asyncio.to_thread, so a fresh thread each time."""
+    import pythoncom
+    import win32com.client
+    pythoncom.CoInitialize()
+    shell = win32com.client.Dispatch("Shell.Application")
+    folder = shell.Namespace(_BIN_CLSID)
+    items = folder.Items()
+    return [items.Item(i) for i in range(items.Count)], folder
+
+
+def list_recycle_bin(limit: int = 40) -> dict:
+    """What is in the Recycle Bin right now — name, original folder, when deleted."""
+    try:
+        items, folder = _bin_items()
+    except Exception as e:
+        return {"error": f"could not read the recycle bin: {e}"}
+    out = []
+    for it in items:
+        try:
+            out.append({
+                "name": it.Name,
+                # column 1 = original location, 2 = date deleted, 3 = size
+                "original_folder": folder.GetDetailsOf(it, 1),
+                "deleted": folder.GetDetailsOf(it, 2),
+                "size": folder.GetDetailsOf(it, 3),
+            })
+        except Exception:
+            continue
+    out.sort(key=lambda e: e.get("deleted", ""), reverse=True)
+    return {"count": len(out), "items": out[:limit]}
+
+
+def restore_from_recycle_bin(name: str) -> dict:
+    """Put a deleted item back where it came from (Explorer's own Restore verb)."""
+    q = (name or "").strip().lower()
+    if not q:
+        return {"error": "which item should I restore?"}
+    try:
+        items, _folder = _bin_items()
+    except Exception as e:
+        return {"error": f"could not read the recycle bin: {e}"}
+    match = next((it for it in items if it.Name.lower() == q), None) or \
+        next((it for it in items if q in it.Name.lower()), None)
+    if match is None:
+        return {"error": f"nothing called {name} is in the recycle bin"}
+    for verb in match.Verbs():
+        if verb.Name.replace("&", "").lower() in ("restore", "undo delete"):
+            verb.DoIt()
+            return {"restored": match.Name}
+    return {"error": f"Windows would not offer a Restore action for {match.Name}"}
+
+
+def empty_recycle_bin() -> dict:
+    """Permanently delete everything in the bin. HIGH risk: this is NOT undoable."""
+    try:
+        items, _ = _bin_items()
+        n = len(items)
+        # SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND
+        rc = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 0x1 | 0x2 | 0x4)
+        if rc not in (0, -2147418113):
+            return {"error": f"could not empty the recycle bin (code {rc})"}
+        return {"emptied": n}
+    except Exception as e:
+        return {"error": f"could not empty the recycle bin: {e}"}
+
+
 async def move_file(path: str, destination: str) -> dict:
     p = _resolve(path)
     if p is None or not p.exists():
@@ -356,6 +431,25 @@ def register_all() -> None:
         description="Send a file or folder to the Recycle Bin (undoable).",
         parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
         risk=Risk.LOW, handler=delete_file, timeout=60))
+    registry.register(Tool(
+        name="list_recycle_bin",
+        description="Show what is currently in the Windows Recycle Bin (deleted files "
+                    "and folders, where they came from, and when they were deleted).",
+        parameters={"type": "object", "properties": {
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, "required": []},
+        risk=Risk.SAFE, handler=list_recycle_bin, timeout=25))
+    registry.register(Tool(
+        name="restore_from_recycle_bin",
+        description="Restore a deleted file or folder from the Recycle Bin back to where "
+                    "it was. Use for 'undo that delete' / 'put X back'.",
+        parameters={"type": "object", "properties": {"name": {"type": "string"}},
+                    "required": ["name"]},
+        risk=Risk.LOW, handler=restore_from_recycle_bin, timeout=25))
+    registry.register(Tool(
+        name="empty_recycle_bin",
+        description="Permanently delete everything in the Recycle Bin. Cannot be undone.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.HIGH, handler=empty_recycle_bin, timeout=60))
     registry.register(Tool(
         name="open_with_windows",
         description="Open a file in its default Windows application (only when the user explicitly "

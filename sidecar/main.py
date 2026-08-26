@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
     from tools import file_tools, weather
     file_tools.register_all()
     weather.register_all()
+    if config.get("remote", "allow_input", default=True):
+        from tools import input_tools     # remote hands (R2), all risk-gated
+        input_tools.register_all()
     if os.environ.get("JARVIS_DEBUG") == "1":
         from tools.registry import Risk, Tool, registry as _reg
 

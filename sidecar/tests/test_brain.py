@@ -48,6 +48,10 @@ CASES = [
     # provenance (fact store receipts): he never volunteers sources, but answers for them
     ("how do you know that", "provenance"), ("what's your source", "provenance"),
     ("where did you get that", "provenance"),
+    # the recycle bin (he could not see it at all until 2026-08-26 evening)
+    ("what files are in the recycle bin", "recycle_bin"),
+    ("what's in the trash", "recycle_bin"), ("what did i delete", "recycle_bin"),
+    ("find the file called budget", "find_file"),   # must NOT become a restore
 ]
 
 async def main() -> int:

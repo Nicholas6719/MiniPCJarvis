@@ -298,6 +298,38 @@ def say_find(slots: dict, res: dict) -> str:
     return f"I found {n} matches; the closest is {first.get('name')} in your {first.get('where')}."
 
 
+def say_bin(_s: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"] if res["error"].startswith("nothing") else "I couldn't read the recycle bin."
+    n = res.get("count", 0)
+    if n == 0:
+        return "Your recycle bin is empty."
+    items = res.get("items", [])
+    names = ", ".join(i["name"] for i in items[:3])
+    if n <= 3:
+        return f"The recycle bin has {n} item{'s' if n != 1 else ''}: {names}."
+    return f"The recycle bin has {n} items. The most recent are {names}."
+
+
+def say_restore(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"] + "."
+    return f"Restored {res.get('restored')}."
+
+
+_RESTORE = re.compile(r"\b(?:restore|undelete|put\s+back|bring\s+back|recover|undo\s+the\s+delete)\b"
+                      r"(?:\s+(?:the|my|that)?\s*)?(.{2,60}?)?(?:\s+from\s+(?:the\s+)?(?:recycle\s*bin|trash))?[.!?]*$")
+
+
+def slots_restore(t: str) -> dict | None:
+    m = _RESTORE.search(t)
+    if not m:
+        return None
+    name = (m.group(1) or "").strip(" '\"")
+    name = re.sub(r"^(?:file|folder|document)s?\s+(?:called|named)\s+", "", name)
+    return {"name": name} if len(name) >= 2 else None
+
+
 _SWITCH = re.compile(r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to|show me the)\s+(?:the\s+|my\s+)?(.+?)(?:\s+window|\s+app)?[.!?]*$")
 
 
@@ -857,6 +889,19 @@ SKILLS: list[Skill] = [
         "what's in my downloads", "show me my pictures", "open the documents folder", "what's on my desktop",
         "list my downloads", "show me the files on my desktop", "browse my documents", "go to my downloads"],
         slots=slots_folder, speak=say_folder),
+    Skill("recycle_bin", "list_recycle_bin", [
+        "what's in the recycle bin", "what files are in the recycle bin",
+        "show me the recycle bin", "check the recycle bin", "what's in the trash",
+        "show me the trash", "what did i delete", "what's in my bin",
+        "list the recycle bin", "anything in the recycle bin"],
+        speak=say_bin),
+    Skill("restore_file", "restore_from_recycle_bin", [
+        # NOT "recover the file called X": that canonicalizes to find_file's
+        # 'find the file called NAME' form and steals real searches.
+        "restore the budget file", "put back the notes file", "undelete report.docx",
+        "bring back the screenshot i deleted", "restore that file from the recycle bin",
+        "put back the plan document", "undelete the invoice", "restore it from the trash"],
+        slots=slots_restore, speak=say_restore),
     Skill("find_file", "find_files", [
         "find the file called budget", "find my resume", "where is the file named invoice",
         "look for a file called notes", "search my documents for taxes", "find files with report in the name",

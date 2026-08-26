@@ -240,8 +240,10 @@ class TelegramBridge:
             c["images_query"] = evt.get("query", "")
         elif kind == "tool_call" and evt.get("status") == "success":
             res = evt.get("result")
-            if evt.get("tool") == "take_screenshot" and isinstance(res, dict) and res.get("path"):
+            if evt.get("tool") in ("take_screenshot", "screenshot_grid") \
+                    and isinstance(res, dict) and res.get("path"):
                 c["screenshot"] = res["path"]
+                c["grid"] = res.get("grid")
         elif kind == "file_preview":
             c["file"] = evt.get("path")
         elif kind == "confirmation_required":
@@ -258,6 +260,16 @@ class TelegramBridge:
                         reply_markup={"inline_keyboard": [[
                             {"text": "DO IT", "callback_data": f"confirm:{cid}:yes"},
                             {"text": "NO", "callback_data": f"confirm:{cid}:no"}]]})
+
+    @staticmethod
+    async def _recycle(path: str) -> None:
+        """Send a delivered screenshot to the Recycle Bin — recoverable, not gone."""
+        try:
+            from tools.file_tools import FOF_ALLOWUNDO, FO_DELETE, _QUIET, _shell_op
+            await asyncio.to_thread(_shell_op, FO_DELETE, str(path), None,
+                                    _QUIET | FOF_ALLOWUNDO)
+        except Exception:
+            log.warning("could not recycle %s", path, exc_info=True)
 
     async def _remote_turn(self, text: str) -> None:
         from tools.registry import registry
@@ -286,7 +298,14 @@ class TelegramBridge:
                     if url and not await self._send_photo_url(url):
                         break   # DDG thumbs occasionally refuse Telegram's fetch
                 if c.get("screenshot"):
-                    await self._upload(c["screenshot"], "photo")
+                    await self._upload(c["screenshot"], "photo",
+                                       caption=(f'Say "click C4" — grid {c["grid"]}'
+                                                if c.get("grid") else ""))
+                    # remote screenshots are a MESSAGE, not a file the user wanted:
+                    # once it's on the phone it goes to the bin, so the desktop and
+                    # the screenshots folder don't fill up with them.
+                    if config.get("remote", "recycle_screenshots", default=True):
+                        await self._recycle(c["screenshot"])
                 if c.get("file"):
                     await self._upload(c["file"], "document")
             finally:

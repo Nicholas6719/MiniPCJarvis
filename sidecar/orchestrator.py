@@ -63,6 +63,15 @@ CONFIRM_PHRASE = {
     "power_action": lambda a: f"{a.get('action', 'that').capitalize()} the computer?",
     "lock_computer": lambda a: "Lock the computer?",
     "browser_submit": lambda a: "Submit that form?",
+    # remote hands (R2): say exactly what will be typed/pressed/clicked
+    "type_text": lambda a: f"Type \"{str(a.get('text', ''))[:60]}\""
+                           + (f" into {a['window']}" if a.get("window") else "")
+                           + (" and press enter?" if a.get("press_enter") else "?"),
+    "press_keys": lambda a: f"Press {a.get('keys', 'that')}"
+                            + (f" in {a['window']}" if a.get("window") else "") + "?",
+    "click_screen": lambda a: f"Click {a.get('cell') or str(a.get('x', '')) + ',' + str(a.get('y', ''))}"
+                              + (" (double)" if a.get("double") else "") + "?",
+    "empty_recycle_bin": lambda a: "Permanently empty the recycle bin? This cannot be undone.",
 }
 
 # Facts want one right answer every time; a haiku wants a different one each time. The
