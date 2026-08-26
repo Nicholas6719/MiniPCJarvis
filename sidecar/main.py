@@ -79,6 +79,9 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(orchestrator.start())
     from brain.night_school import night_school
     night_school.start(orchestrator)   # audits + curiosity + distillation while he sleeps
+    if config.get("remote", "telegram", default=True):
+        from remote_telegram import telegram
+        telegram.start(orchestrator)   # dormant until a token is stored
     yield
     proactive.stop()
     scheduler.stop()
@@ -488,6 +491,36 @@ async def delete_fact(fact_id: int, x_jarvis_token: str | None = Header(None)):
     from brain.facts import facts
     facts.delete(fact_id)
     return {"ok": True}
+
+
+@app.post("/remote/telegram/token")
+async def set_telegram_token(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Store the bot token (DPAPI-encrypted) and start the bridge. The token never
+    touches config.json or logs."""
+    _auth(x_jarvis_token)
+    from remote_telegram import telegram
+    token = str(body.get("token", "")).strip()
+    if not token or ":" not in token:
+        raise HTTPException(400, "that does not look like a bot token")
+    return await telegram.set_token(token)
+
+
+@app.get("/remote/telegram/status")
+async def telegram_status(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from remote_telegram import telegram
+    return telegram.status()
+
+
+@app.post("/remote/telegram/unpair")
+async def telegram_unpair(x_jarvis_token: str | None = Header(None)):
+    """Forget the paired chat; a new pairing code is issued on next start."""
+    _auth(x_jarvis_token)
+    from remote_telegram import telegram
+    config.set("remote", "telegram_chat_id", value=None)
+    import secrets as _s
+    telegram.pairing_code = f"{_s.randbelow(1000000):06d}"
+    return {"ok": True, "pairing_code": telegram.pairing_code}
 
 
 @app.get("/turnstats")

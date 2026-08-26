@@ -87,6 +87,7 @@ DEFAULTS: dict[str, Any] = {
     "persona": {"honorific": "sir", "honorific_rate": 0.55},
     "confirm": {"by_voice": True},   # answer shutdown/restart confirmations by saying yes/no
     "ui": {"panel_hold_s": 5},      # seconds the stage holds after an answer (§6.3: 5 s + drain bar)
+    "remote": {"telegram": True, "telegram_chat_id": None},   # token: DPAPI file, never here
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,

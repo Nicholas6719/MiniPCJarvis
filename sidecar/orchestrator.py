@@ -132,6 +132,9 @@ class Orchestrator:
         self._turn_task: asyncio.Task | None = None
         self._listen_flag = asyncio.Event()   # push-to-talk pressed / listening on
         self._speak_cancel = asyncio.Event()
+        # a Telegram-originated turn: same pipeline, but no TTS to an empty room
+        # and no spoken yes/no on confirmations (the phone gets buttons instead)
+        self.remote_turn = False
         self._loop_task: asyncio.Task | None = None
         self._wake_task: asyncio.Task | None = None
         # Only assigned once the language model starts, but shutdown() reads it
@@ -919,6 +922,8 @@ class Orchestrator:
         resolving it now unblocks the tool). Falls back to the on-screen confirm if voice
         is off or unclear."""
         await self.sm.to(State.WAITING, force=True)
+        if self.remote_turn:
+            return  # the phone shows DO IT / NO buttons; no room to speak into
         phrase = CONFIRM_PHRASE.get(tool, lambda a: f"Should I run {tool.replace('_', ' ')}?")(args or {})
         try:
             await self.speak_line(phrase + " Say yes or no.")
@@ -994,6 +999,8 @@ class Orchestrator:
         """Speak one line immediately (outside the normal turn queue)."""
         cancel = self._speak_cancel if self._speak_cancel is not None else asyncio.Event()
         await bus.emit("assistant_delta", text=line + " ")
+        if self.remote_turn:
+            return   # the text reaches the phone; nobody is in the room to hear it
         async for chunk in tts.synthesize_stream(clean_for_speech(line), cancel):
             if cancel.is_set():
                 break
@@ -1258,6 +1265,8 @@ class Orchestrator:
                     break
                 if self._speak_cancel.is_set():
                     continue
+                if self.remote_turn:
+                    continue   # remote turn: text goes to the phone, not the speakers
                 if not spoke or self.sm.state != State.SPEAKING:
                     await self.sm.to(State.SPEAKING, force=True)
                     spoke = True

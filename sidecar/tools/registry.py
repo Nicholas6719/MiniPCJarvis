@@ -55,6 +55,8 @@ class ToolRegistry:
         # confirmation_id -> future resolved by the UI's answer
         self._pending: dict[str, asyncio.Future] = {}
         self._audit_db = None
+        # widened to 120 s during remote (Telegram) turns — phones answer slower
+        self.confirm_timeout = 30
 
     def _audit(self, tool: str, args: Any, risk: str, status: str,
                confirmed: bool | None = None) -> None:
@@ -126,7 +128,7 @@ class ToolRegistry:
             try:
                 if self.confirm_hook:      # speak the question; listen for a spoken yes/no
                     await self.confirm_hook(name, args)
-                approved = await asyncio.wait_for(fut, timeout=30)
+                approved = await asyncio.wait_for(fut, timeout=self.confirm_timeout)
             except asyncio.TimeoutError:
                 self._pending.pop(confirm_id, None)
                 await bus.emit("tool_call", call_id=call_id, tool=name,

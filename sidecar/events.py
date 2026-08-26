@@ -15,6 +15,16 @@ class EventBus:
     def __init__(self) -> None:
         self._clients: set[Any] = set()  # fastapi WebSocket objects
         self._lock = asyncio.Lock()
+        # in-process listeners (the Telegram bridge): sync callables taking the
+        # event dict; they schedule their own async work and must never raise
+        self._listeners: list[Any] = []
+
+    def add_listener(self, fn: Any) -> None:
+        self._listeners.append(fn)
+
+    def remove_listener(self, fn: Any) -> None:
+        if fn in self._listeners:
+            self._listeners.remove(fn)
 
     async def attach(self, ws: Any) -> None:
         async with self._lock:
@@ -41,6 +51,11 @@ class EventBus:
                 await asyncio.wait_for(ws.send_text(payload), timeout=2.0)
             except Exception:
                 await self.detach(ws)
+        for fn in list(self._listeners):
+            try:
+                fn(evt)
+            except Exception:
+                log.exception("event listener failed")
         log.debug("event %s %s", kind, data.get("summary", ""))
         return evt
 
