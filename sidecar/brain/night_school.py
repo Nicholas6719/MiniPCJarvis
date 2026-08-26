@@ -49,6 +49,11 @@ _PARA_PROMPT = (
     'Give {n} short, natural, different ways a person might say this to a voice '
     'assistant: "{u}"\nOne per line, no numbering, no quotes.')
 
+_SYNTH_PROMPT = (
+    "Question: {q}\n\nSources:\n{extracts}\n\n"
+    "Answer the question in ONE short spoken sentence using ONLY the sources. "
+    "If the sources do not clearly answer it, reply exactly: UNKNOWN")
+
 
 class NightSchool:
     def __init__(self) -> None:
@@ -226,9 +231,15 @@ class NightSchool:
                 res = await research(t, num_sources=3)
                 srcs = [{"url": s["url"], "title": s.get("title", "")}
                         for s in (res.get("sources") or []) if s.get("extract")]
-                answer = (res.get("sources") or [{}])[0].get("extract", "")[:350]
-                if srcs and answer:
-                    await facts.consider(t, answer, srcs, "research")
+                extracts = "\n---\n".join(
+                    s.get("extract", "")[:900] for s in (res.get("sources") or [])
+                    if s.get("extract"))[:2600]
+                if not (srcs and extracts):
+                    continue
+                # synthesize a SPOKEN answer from the sources — a stored fact is a
+                # sentence he can say, never raw page prose
+                answer = await self._synthesize(t, extracts)
+                if answer and await facts.consider(t, answer, srcs, "research"):
                     done += 1
             except Exception:
                 log.exception("curiosity research failed for %r", t[:60])
@@ -236,6 +247,24 @@ class NightSchool:
                 facts.reset_evidence()
             await asyncio.sleep(5)
         return done
+
+    async def _synthesize(self, q: str, extracts: str) -> str:
+        out = ""
+        try:
+            from llm.provider import local_llm
+            async for ch in local_llm.stream(
+                    [{"role": "user", "content": _SYNTH_PROMPT.format(q=q, extracts=extracts)}],
+                    max_tokens=600, sampling={"temperature": 0.0}):
+                out += ch.text
+                if ch.done:
+                    break
+        except Exception:
+            log.exception("curiosity synthesis failed")
+            return ""
+        ans = out.strip().splitlines()[-1].strip() if out.strip() else ""
+        if not ans or "UNKNOWN" in ans.upper() or len(ans) > 300:
+            return ""
+        return ans
 
     async def _distill(self, awake) -> int:
         """Widen ROUTING: paraphrase recent tool_then_llm utterances and teach

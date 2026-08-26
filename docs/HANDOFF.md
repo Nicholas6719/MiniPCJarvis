@@ -482,6 +482,29 @@ Design: docs/BRAIN_ROADMAP.md (read it first). Implementation notes:
   not vanish — a typed message mid-speech is currently lost. Candidate for the
   next UX pass.
 
+## NIGHT SCHOOL (2026-08-26 evening) — the brain roadmap is fully built
+`brain/night_school.py` — singleton `night_school`, started in main's lifespan.
+- Conditions: state SLEEPING + proactive quiet hours + ≥72 h since last run
+  (night_meta table in the facts DB). Checks every 30 min. Aborts between items
+  the moment he wakes. Config kill-switch: facts.night_school.
+- Job 1 audit: original-source re-fetch -> temp-0 SAME/CHANGED/UNCLEAR.
+  UNCLEAR strikes; 2 strikes demote; CHANGED demotes instantly.
+- Job 2 curiosity: recent transcript questions (what/who/when/how...) that are
+  realm-1-eligible, unrouted, and unknown -> research -> SYNTHESIZE one spoken
+  sentence at temp 0 ("UNKNOWN" -> skip) -> normal facts.consider gates. First
+  pass stored RAW PAGE EXTRACTS as answers — a stored fact must be a sentence
+  he can SAY; the synthesis step is not optional.
+- Job 3 distillation: paraphrases via LLM -> brain.learn (its safety bar:
+  slots-executable, general-guard, dedupe, 14-word cap, seeds override).
+- Verify with POST /debug/night_school (forces a full pass, returns the
+  report); GET /night_school for the last report. Audit verdict machine is
+  offline-gated in test_facts.py (fetch/compare injectable).
+- SMALL-MODEL TIER: measured and REJECTED — gpt-oss-20b is MoE (~3.6B active,
+  27 t/s gen); a dense gemma-3-4b does 22 t/s GPU / 14 CPU beside it. The
+  bakeoff (scratchpad script, pattern: spin second llama-server on 8035 with
+  timings) falsified the "4-5x" assumption. Do NOT ship a dense-small tier on
+  this box; revisit only with a faster small MoE.
+
 ## FEATURE GAPS the route sweep surfaced (for the planning session)
 Things users will say that today fall to the LLM without a real tool behind them:
 - Relative volume: "turn it up / down a bit" (volume_set is absolute-only).

@@ -1,12 +1,20 @@
 # The Brain Beyond the LLM — agreed design (discussed 2026-08-26)
 
-STATUS (2026-08-26 afternoon): stages 1 + the fact-store core of 2/3 are BUILT,
-installed and e2e-verified — `brain/facts.py` (store, realm triggers, temp-0
-timeless classifier, provenance), `/facts` + `/turnstats` endpoints, evidence
-capture in web_search/research, the fact read/write paths in the orchestrator,
-`tests/test_facts.py` in the build gate and `tests/facts_e2e.py` in the release
-suite. NOT yet built: the nightly audit loop, paraphrase distillation,
-idle-hours pre-fetch, the small-model tier.
+STATUS (2026-08-26 evening): ALL STAGES RESOLVED.
+- Stage 1 instrumentation: /turnstats (per-turn path + latency). SHIPPED.
+- Stage 2/3 fact store + realms + provenance: brain/facts.py. SHIPPED, e2e 7/7.
+- Stage 3 nightly audit + stage 4 background learning: brain/night_school.py —
+  one sleep-window worker, three jobs: fact audit (strikes, demote-by-default),
+  OVERNIGHT CURIOSITY (recent transcript questions researched + answers
+  SYNTHESIZED into one spoken sentence at temp 0 — raw extracts are rejected),
+  paraphrase distillation (brain.learn's safety bar). Runs while SLEEPING in
+  quiet hours, ≥72 h apart, aborts when he wakes; /debug/night_school forces a
+  pass; /night_school shows the last report. SHIPPED — verified live twice:
+  audit confirmed the Eiffel fact against Wikipedia; curiosity taught him
+  "spiders have eight legs" (Wikipedia) and the Rayleigh-scattering sky answer
+  (NASA), and a PARAPHRASE was then served from the store with persona intact.
+- Stage 5 small-model tier: MEASURED AND REJECTED (see bakeoff note below).
+- Stage 6 reflex growth: ongoing via the feature-gap list in HANDOFF.md.
 
 Goal: JARVIS answers mainly from his own brain — fast AND accurate — with the LLM
 as a last resort instead of a default. Realistic target: 70–80% of turns never
