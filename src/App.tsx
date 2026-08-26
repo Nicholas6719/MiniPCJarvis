@@ -6,7 +6,7 @@ import { ArcReactor, CORE_SPEC } from "./components/ArcReactor";
 import { Stage } from "./components/Stage";
 import { ConfirmationGate, FaultWedges } from "./components/Wedges";
 import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
-import { useStore, JarvisState } from "./state/store";
+import { useStore, JarvisState, setHoldBase } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
 
 // Radial states (§5): the machine turning to face you. Everything else anchors.
@@ -95,6 +95,7 @@ export default function App() {
       try {
         const r = await api("/config");
         useStore.getState().setWakeMode(r.config?.wake?.mode ?? "push_to_talk");
+        setHoldBase(r.config?.ui?.panel_hold_s ?? 5);
       } catch {}
     })();
   }, [configVersion, state === "idle"]);

@@ -86,7 +86,7 @@ DEFAULTS: dict[str, Any] = {
     # brain/skills.py honorific()). Set honorific "" to switch it off entirely.
     "persona": {"honorific": "sir", "honorific_rate": 0.55},
     "confirm": {"by_voice": True},   # answer shutdown/restart confirmations by saying yes/no
-    "ui": {"panel_hold_s": 12},     # seconds a panel stays after a turn before the HUD goes ambient
+    "ui": {"panel_hold_s": 5},      # seconds the stage holds after an answer (§6.3: 5 s + drain bar)
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,

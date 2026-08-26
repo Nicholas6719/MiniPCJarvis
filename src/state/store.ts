@@ -139,14 +139,18 @@ interface Store {
 
 // After the answer is spoken the stage holds this long, then the core comes home.
 // Signalled by the drain bar; "keep it" pins. (§6.3 — deliberately quiet.)
+// The base is the Settings knob "The stage holds after an answer" (ui.panel_hold_s).
 export const STAGE_HOLD_MS = 5000;
+let holdBaseMs = STAGE_HOLD_MS;
+export function setHoldBase(seconds: number) {
+  if (Number.isFinite(seconds)) holdBaseMs = Math.max(3000, Math.min(120000, seconds * 1000));
+}
 // A surface the user asked for by voice ("show settings") holds much longer.
 const ASKED_FOR_HOLD_MS = 120000;
 // Folder and file stages invite a follow-up ("say open + a file name"), so they
-// outlive the 5 s drain that fits answers and image grids.
-const BROWSE_HOLD_MS = 30000;
+// never drain faster than 30 s.
 export function holdFor(kind: StageKind): number {
-  return kind === "folder" || kind === "file" ? BROWSE_HOLD_MS : STAGE_HOLD_MS;
+  return kind === "folder" || kind === "file" ? Math.max(30000, holdBaseMs) : holdBaseMs;
 }
 
 // "bring that back" — the last dismissed stage, with the data it was showing.

@@ -160,6 +160,9 @@ def slots_app(t: str) -> dict | None:
     name = m.group(1).strip()
     if not name or name in _NOT_AN_APP:
         return None
+    # "put on some music" is a media request, not an app called "some music"
+    if re.fullmatch(r"(?:some\s+|the\s+)?(?:music|tunes|songs?|a\s+song)", name):
+        return None
     # a bare generic word or a phrase that reads like a sentence, not an app name
     if name.startswith(("down ", "off ", "the ", "all ")) or len(name.split()) > 3:
         return None
@@ -303,6 +306,9 @@ def slots_switch(t: str) -> dict | None:
     if not m:
         return None
     name = m.group(1).strip()
+    # "switch to a british voice" is about HIS voice, not a window title
+    if re.search(r"\b(?:voice|accent|language|tone)\b", name):
+        return None
     return {"title": name} if 1 < len(name) <= 40 else None
 
 
@@ -464,6 +470,14 @@ def slots_sleep(t: str) -> dict | None:
         return None
     if re.search(r"\bwake\b|\bget up\b|\bcome back\b|\bi'?m back\b|\bmorning\b", t):
         return None
+    # "minimize everything" is about the WINDOWS; "be quieter" is about volume;
+    # "go to sleep in an hour" is a timer we don't have — all better honest than wrong
+    if re.search(r"\b(?:minimize|close|hide)\b.*\b(?:everything|all)\b", t):
+        return None
+    if re.search(r"\bquieter\b|\bquiet(?:er)?\s+down\b|\blower your voice\b", t):
+        return None
+    if re.search(r"\bin\s+(?:a|an|one|\d+)\s*(?:hours?|minutes?|min)\b", t):
+        return None
     return {}
 
 
@@ -517,6 +531,9 @@ def slots_images(t: str) -> dict | None:
     spiderman" both become keywords (+count). Only fires when something was
     actually command phrasing — a kNN misroute of plain prose stays None."""
     from tools.query_clean import clean_image_query
+    # "pictures FROM my trip" are the user's own photos, not a web search
+    if re.search(r"\bfrom\s+(?:my|our|the)\b", t):
+        return None
     q, count = clean_image_query(t.strip())
     if not q or q == t.strip().strip(" .?!"):
         return None
@@ -790,7 +807,10 @@ SKILLS: list[Skill] = [
         speak=say_windows),
     Skill("media_pause", "media_control", [
         "pause", "pause the music", "pause playback", "play", "resume the music", "play the music",
-        "pause spotify", "resume playback", "unpause", "pause that", "play pause"],
+        # NOT "put on some music": "put on" canonicalizes to the open-APP form and
+        # clashes with open_app; slots_app rejects music-words so it falls to the LLM.
+        "pause spotify", "resume playback", "unpause", "pause that", "play pause",
+        "play some music"],
         fixed_args={"action": "play_pause"}, speak=say_media),
     Skill("media_next", "media_control", [
         "next song", "skip this song", "next track", "skip", "play the next one", "skip this track"],
@@ -865,6 +885,8 @@ SKILLS: list[Skill] = [
         "wake up", "wake up jarvis", "are you awake", "you up", "good morning jarvis",
         "morning jarvis", "rise and shine", "time to wake up", "you there",
         "are you there jarvis"],
+        # "wake ME up at 7" is an alarm for the USER, not a greeting for him
+        slots=lambda t: None if re.search(r"\bwake\s+(?:me|us)\b", t) else {},
         speak=lambda _s, _r: "At your service."),
     Skill("sleep", "enter_sleep_mode", [
         # He gets dismissed in a lot of different moods, so the seeds cover the clusters:

@@ -34,7 +34,17 @@ CASES = [
     ("hide everything", "ui"),
     # "wake up" must NEVER land on the sleep skill (he'd answer a wake by re-sleeping)
     ("wake up", "wakeack"), ("wake up jarvis", "wakeack"), ("time to wake up", "wakeack"),
-    ("good morning jarvis", "wakeack"),
+    ("good morning jarvis", "wakeack"), ("are you there", "wakeack"),
+    # misroutes found by the 2026-08-26 route sweep: each of these did the WRONG THING
+    ("minimize everything", None),          # was: JARVIS slept instead of minimizing windows
+    ("be quieter", None),                   # was: JARVIS slept instead of lowering volume
+    ("go to sleep in an hour", None),       # was: slept immediately
+    ("wake me up at 7", None),              # was: "At your service." to an alarm request
+    ("put on some music", None),            # was: launching an app called "some music";
+                                            # slots_app now rejects music-words -> LLM plays
+    ("switch to a british voice", None),    # was: hunting a window titled "a british voice"
+    ("show me pictures from my trip", None),# was: web-searching his personal photos
+    ("we're done here", "sleep"),           # dismissals still work
 ]
 
 async def main() -> int:

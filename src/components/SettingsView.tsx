@@ -122,8 +122,8 @@ export function SettingsView() {
           </button>
         </label>
         <label className="settings__row">
-          <span>Panels fade back to the orb after (seconds)</span>
-          <input type="number" min={3} max={120} value={cfg.ui?.panel_hold_s ?? 12}
+          <span>The stage holds after an answer, then fades (seconds)</span>
+          <input type="number" min={3} max={120} value={cfg.ui?.panel_hold_s ?? 5}
                  onChange={(e) => patch({ ui: { panel_hold_s: Number(e.target.value) } })} />
         </label>
         <label className="settings__row settings__row--toggle">
