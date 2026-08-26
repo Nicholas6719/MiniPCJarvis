@@ -120,14 +120,18 @@ function VisualStrip({ hint }: { hint: string }) {
   );
 }
 
-// The 5s dismiss bar — deliberately quiet (§6.3).
+// The dismiss bar — deliberately quiet (§6.3). Label and drain length track the
+// actual hold, which varies by stage kind and by "keep it for ten minutes".
 function HoldBar() {
   const stage = useStore((s) => s.stage);
   if (!stage?.holdUntil || stage.pinned) return null;
+  const remaining = Math.max(0, stage.holdUntil - Date.now());
+  const label = remaining >= 90000 ? `HOLDING ${Math.round(remaining / 60000)} MIN`
+    : `HOLDING ${Math.round(remaining / 1000)} s`;
   return (
     <div className="stage__hold">
-      <div className="hold__track"><div className="hold__drain" style={{ animationDuration: `${STAGE_HOLD_MS}ms` }} /></div>
-      <span className="mono-sub">HOLDING 5 s · SAY "KEEP IT" OR "BRING THAT BACK"</span>
+      <div className="hold__track"><div className="hold__drain" style={{ animationDuration: `${remaining}ms` }} /></div>
+      <span className="mono-sub">{label} · SAY "KEEP IT" OR "BRING THAT BACK"</span>
     </div>
   );
 }
@@ -206,7 +210,7 @@ function BrowserStage() {
       <StageHeader
         eyebrow={web?.query ? `YOU SAID "${web.query.toUpperCase()}"` : "ON THE WEB"}
         word={handoff ? "OVER TO YOU" : web?.stage === "done" ? "READ" : "BROWSING"}
-        meta={total ? `${readCount} OF ${total} READ` : "SEARCHING"}
+        meta={total ? (readCount ? `${readCount} OF ${total} READ` : `${total} RESULTS`) : "SEARCHING"}
         live={web?.stage !== "done"}
       />
       <div className="browser__wrap">
@@ -276,29 +280,45 @@ function BrowserStage() {
 function ImagesStage() {
   const images = useStore((s) => s.images);
   const imgs = images?.images ?? [];
+  const focus = images?.focus;
+  const focused = focus != null ? imgs[focus] : null;
   return (
     <>
       <StageHeader
         eyebrow={images?.query ? `YOU SAID "SHOW ME ${images.query.toUpperCase()}"` : "IMAGES"}
-        word="SHOWING"
+        word={focused ? `IMAGE ${(focus ?? 0) + 1} OF ${imgs.length}` : "SHOWING"}
         meta={`${imgs.length} IMAGES`}
         live={false}
       />
-      <div className="images__note">
-        <span>{imgs.length} images — say <span style={{ color: "var(--rim)" }}>"bigger"</span> or <span style={{ color: "var(--rim)" }}>"the second one"</span></span>
-        <span className="mono-sub">DUCKDUCKGO IMAGES · KEYLESS</span>
-      </div>
-      <div className="images__grid">
-        {imgs.slice(0, 8).map((im, i) => (
-          <div key={i} className={`imtile ${i === 0 ? "imtile--best" : ""}`}>
-            <img src={im.src} alt={im.alt} loading="lazy" />
-            {i === 0 && <div className="imtile__best mono-sub">BEST MATCH</div>}
-            <div className="imtile__src mono-sub">{im.page ? hostOf(im.page) : ""}</div>
+      {focused ? (
+        <>
+          <div className="images__note">
+            <span>say <span style={{ color: "var(--rim)" }}>"back to the grid"</span> or another one — <span style={{ color: "var(--rim)" }}>"the third one"</span></span>
+            <span className="mono-sub">{focused.page ? hostOf(focused.page).toUpperCase() : ""}</span>
           </div>
-        ))}
-      </div>
+          <div className="images__focus">
+            <img src={focused.src} alt={focused.alt} />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="images__note">
+            <span>{imgs.length} images — say <span style={{ color: "var(--rim)" }}>"bigger"</span> or <span style={{ color: "var(--rim)" }}>"the second one"</span></span>
+            <span className="mono-sub">DUCKDUCKGO IMAGES · KEYLESS</span>
+          </div>
+          <div className="images__grid">
+            {imgs.slice(0, 8).map((im, i) => (
+              <div key={i} className={`imtile ${i === 0 ? "imtile--best" : ""}`}>
+                <img src={im.src} alt={im.alt} loading="lazy" />
+                {i === 0 && <div className="imtile__best mono-sub">BEST MATCH</div>}
+                <div className="imtile__src mono-sub">{im.page ? hostOf(im.page) : ""}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <HoldBar />
-      <VisualStrip hint='HOLDING · SAY "KEEP IT" TO PIN' />
+      <VisualStrip hint={focused ? 'SAY "BACK TO THE GRID" FOR ALL OF THEM' : 'HOLDING · SAY "KEEP IT" TO PIN'} />
     </>
   );
 }
@@ -403,7 +423,7 @@ function FolderStage() {
         </div>
       </div>
       <HoldBar />
-      <VisualStrip hint='SAY A FILE NAME TO OPEN IT' />
+      <VisualStrip hint='SAY "OPEN" AND A FILE NAME' />
     </>
   );
 }
@@ -539,7 +559,7 @@ export function Stage() {
   const stage = useStore((s) => s.stage);
   const dismiss = useStore((s) => s.dismissStage);
 
-  // the 5s hold: when it elapses (and nothing pinned it), the core comes home
+  // the hold: when it elapses (and nothing pinned it), the core comes home
   useEffect(() => {
     if (!stage?.holdUntil || stage.pinned) return;
     const ms = stage.holdUntil - Date.now();
@@ -550,6 +570,19 @@ export function Stage() {
     }, ms + 50);
     return () => clearTimeout(t);
   }, [stage?.holdUntil, stage?.pinned, dismiss]);
+
+  // a timed pin ("keep it for ten minutes") expires into the normal drain
+  useEffect(() => {
+    if (!stage?.pinned || !stage.pinUntil) return;
+    const ms = stage.pinUntil - Date.now();
+    const t = setTimeout(() => {
+      const cur = useStore.getState().stage;
+      if (cur?.pinned && cur.pinUntil && Date.now() >= cur.pinUntil) {
+        useStore.setState({ stage: { ...cur, pinned: false, pinUntil: undefined, holdUntil: Date.now() + STAGE_HOLD_MS } });
+      }
+    }, Math.max(0, ms));
+    return () => clearTimeout(t);
+  }, [stage?.pinned, stage?.pinUntil]);
 
   if (!stage) return null;
   switch (stage.kind) {

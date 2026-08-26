@@ -175,6 +175,15 @@ async def open_application(name: str) -> dict:
     # use). It's sync, so run it off the event loop or it freezes audio/wake/TTS.
     target = await asyncio.to_thread(_resolve_app, name)
     if not target:
+        # not an app — maybe it's a file: "open jarvis install log" after a folder
+        # listing (the folder stage says "say open + a file name")
+        from tools import file_tools
+        try:
+            hit = await file_tools.open_by_name(name)
+        except Exception:
+            hit = None
+        if hit is not None and "error" not in hit:
+            return hit
         site = site_for(name)
         if site:
             # no app installed by that name but it's a known service: open it for the user

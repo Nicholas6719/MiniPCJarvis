@@ -26,6 +26,13 @@ CASES = [
     ("what is a solid state drive", None),
     # ...while the live readings that look similar must still be reflexes
     ("what's the time", "time"), ("what's the date", "date"), ("what's the cpu at", "stats"),
+    # the stage's voice hooks (§6.3/§6.5): every hint printed on screen must route
+    ("show settings", "ui"), ("show me the history", "ui"), ("settings history", "ui"),
+    ("bring that back", "ui"), ("keep it for ten minutes", "ui"), ("keep it", "ui"),
+    ("make that bigger", "ui"), ("zoom in on the second one", "ui"), ("back to the grid", "ui"),
+    ("hide everything", "ui"),
+    # "wake up" must NEVER land on the sleep skill (he'd answer a wake by re-sleeping)
+    ("wake up", None), ("wake up jarvis", None),
 ]
 
 async def main() -> int:

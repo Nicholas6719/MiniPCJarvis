@@ -427,6 +427,17 @@ body.compact .stage__machine { display: none; }
 .imtile--best { border-color: color-mix(in srgb, var(--rim) 45%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--rim) 20%, transparent), 0 14px 34px rgba(0,0,0,.45); }
 .imtile__best { position: absolute; left: calc(9px * var(--s)); top: calc(9px * var(--s)); padding: calc(4px * var(--s)) calc(9px * var(--s)); border-radius: 3px; background: color-mix(in srgb, var(--rim) 88%, #04080c); color: #04121a; letter-spacing: .16em; font-size: calc(9px * var(--s)); }
 .imtile__src { position: absolute; left: 0; right: 0; bottom: 0; padding: calc(9px * var(--s)) calc(11px * var(--s)); background: linear-gradient(transparent, rgba(2,6,10,.92)); color: var(--text-secondary); letter-spacing: .1em; font-size: calc(9.5px * var(--s)); }
+/* "bigger" — one image featured (§6.5 voice hooks) */
+.images__focus {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  padding-bottom: calc(14px * var(--s));
+}
+.images__focus img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  border-radius: calc(8px * var(--s));
+  border: 1px solid color-mix(in srgb, var(--rim) 45%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--rim) 20%, transparent), 0 24px 60px rgba(0,0,0,.55);
+}
 
 /* file stage (§6.6) + folder listing */
 .filebox__wrap { flex: 1; min-height: 0; padding: calc(22px * var(--s)) 0 calc(18px * var(--s)); display: flex; flex-direction: column; }

@@ -389,27 +389,62 @@ def say_weather(slots: dict, res: dict) -> str:
 _UI_VIEWS = {"files": "files", "file": "files", "apps": "apps", "app": "apps", "windows": "apps", "system": "system",
              "browser": "browser", "web": "browser", "memory": "memory", "memories": "memory", "tasks": "tasks",
              "reminders": "tasks", "diagnostics": "diagnostics", "settings": "settings", "conversation": "conversation",
-             "chat": "conversation", "media": "media", "pictures": "media", "research": "research"}
+             "chat": "conversation", "media": "media", "pictures": "media", "research": "research",
+             "history": "history", "about": "about", "voice": "settings", "options": "settings"}
+
+_ORDINALS = {"first": 0, "second": 1, "third": 2, "fourth": 3, "fifth": 4, "sixth": 5,
+             "seventh": 6, "eighth": 7, "1st": 0, "2nd": 1, "3rd": 2, "4th": 3,
+             "one": 0, "two": 1, "three": 2, "four": 3}
+
+_KEEP_FOR = re.compile(r"\b(?:keep|pin|hold)\b.*?\bfor\s+(?:the next\s+)?(an?\s+|\d+\s*|one\s+|two\s+|five\s+|ten\s+|fifteen\s+|twenty\s+|thirty\s+)?(hour|hours|minutes?|min)\b")
+_NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30}
 
 
 def slots_ui(t: str) -> dict | None:
-    if re.search(r"\b(?:hide|close|clear|dismiss)\b.*\b(?:everything|all|the panels?|the tabs?|that|this|it)\b|^(?:hide|dismiss)\b", t):
+    if re.search(r"\b(?:hide|close|clear|dismiss)\b.*\b(?:everything|all|the panels?|the tabs?|the stage|that|this|it)\b|^(?:hide|dismiss)\b", t):
         return {"action": "hide"}
+    # "bring that back" / "bring back the pictures" — restore the last stage (§6.3)
+    if re.search(r"\bbring\b.*\bback\b|\brestore\b.*\b(?:that|it|the stage|the panel)\b|\bput (?:that|it) back\b", t):
+        return {"action": "restore"}
+    # "keep it for ten minutes" — a timed pin
+    mk = _KEEP_FOR.search(t)
+    if mk:
+        amount, unit = (mk.group(1) or "").strip(), mk.group(2)
+        n = int(amount) if amount.isdigit() else _NUM_WORDS.get(amount, 10)
+        return {"action": "pin", "minutes": n * 60 if unit.startswith("hour") else n}
     if re.search(r"\b(?:pin|keep)\b.*\b(?:that|this|it|the panel|the tab|open|up)\b", t):
         return {"action": "pin"}
     if re.search(r"\bunpin\b|\bstop pinning\b|\blet it (?:go|fade)\b", t):
         return {"action": "unpin"}
+    # image focus: "bigger", "zoom in on the third one", "show me the second one"
+    if re.search(r"\b(?:bigger|enlarge|zoom in|blow (?:it|that) up|full ?size)\b", t) or \
+       re.search(r"\b(?:show|focus|zoom)\b.*\bthe\s+(?:first|second|third|fourth|fifth|sixth|seventh|eighth|1st|2nd|3rd|4th)\s+(?:one|image|picture|photo|pic)\b", t):
+        mo = re.search(r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth|1st|2nd|3rd|4th)\b", t)
+        return {"action": "focus", "index": _ORDINALS.get(mo.group(1), 0) if mo else 0}
+    if re.search(r"\b(?:smaller|zoom out|back to the grid|show (?:them|the grid|all of them)( again)?)\b", t):
+        return {"action": "focus", "index": None}
+    # old tab-era phrasings land on the settings stage — the nearest designed surface
     if re.search(r"\b(?:show|bring up|pull up|open|display)\b.*\b(?:tabs|menu|navigation|nav|the bar|panels|hidden)\b", t):
-        return {"action": "tabs"}
-    m = re.search(r"\b(?:show|bring up|pull up|open|go to|display|switch to)\b\s+(?:me\s+)?(?:the\s+|my\s+)?([a-z]+)\s*(?:tab|panel|view|screen)\b", t)
+        return {"action": "show", "view": "settings"}
+    # "show settings", "open the history", "pull up diagnostics" — suffix optional now
+    m = re.search(r"\b(?:show|bring up|pull up|open|go to|display|switch to)\b\s+(?:me\s+)?(?:the\s+|my\s+|your\s+)?([a-z]+)\s*(?:tab|panel|view|screen|page)?\b", t)
     if m and m.group(1) in _UI_VIEWS:
         return {"action": "show", "view": _UI_VIEWS[m.group(1)]}
+    # "settings, history" / bare "settings" — land on a section directly
+    ms = re.search(r"^(?:settings|options)\b[,:]?\s*([a-z]+)?$", t)
+    if ms:
+        sec = ms.group(1)
+        return {"action": "show", "view": _UI_VIEWS.get(sec or "settings", "settings")}
     return None
 
 
 def say_ui(slots: dict, res: dict) -> str:
     a = slots.get("action")
-    return {"hide": "Done.", "pin": "Pinned.", "unpin": "Unpinned.", "tabs": "Here are the tabs."}.get(a, "Here you go.")
+    if a == "pin" and slots.get("minutes"):
+        n = slots["minutes"]
+        return f"I'll keep it up for {n // 60} hour{'s' if n >= 120 else ''}." if n >= 60 else f"I'll keep it up for {n} minutes."
+    return {"hide": "Done.", "pin": "Pinned.", "unpin": "Unpinned.", "restore": "Bringing it back.",
+            "focus": "There."}.get(a, "Here you go.")
 
 
 _PC_NOT_JARVIS = re.compile(r"\b(computer|pc|laptop|machine|desktop|workstation|windows|system)\b", re.I)
@@ -422,8 +457,12 @@ _SLEEP_QUESTION = re.compile(
 
 def slots_sleep(t: str) -> dict | None:
     """'go to sleep' is him; 'put the COMPUTER to sleep' is the machine (power_action),
-    and 'how many hours should I sleep' is a question about sleep, not a dismissal."""
+    and 'how many hours should I sleep' is a question about sleep, not a dismissal.
+    'wake up' embeds NEAR the sleep seeds (same topic) — without the guard he answers
+    a wake request by going back to sleep."""
     if _PC_NOT_JARVIS.search(t) or _SLEEP_QUESTION.search(t):
+        return None
+    if re.search(r"\bwake\b|\bget up\b|\bcome back\b|\bi'?m back\b|\bmorning\b", t):
         return None
     return {}
 
@@ -802,7 +841,14 @@ SKILLS: list[Skill] = [
         "show me the files tab", "show the apps tab", "bring up the system panel", "open the settings tab",
         "show me the tabs", "show the hidden tabs", "bring up the menu", "pin that", "keep that panel up",
         "unpin it", "hide everything", "clear the panels", "dismiss that", "show the browser tab",
-        "pull up the diagnostics panel", "show me the memory tab", "go to the tasks tab"],
+        "pull up the diagnostics panel", "show me the memory tab", "go to the tasks tab",
+        # the stage era: sections by name, restore, timed pin, image focus (§6.3, §6.5).
+        # "open settings" stays with open_app (canon "open APP") — show = stage, open = app.
+        "show settings", "show your settings", "show the history", "show our conversation history",
+        "settings history", "show diagnostics", "bring that back", "bring the pictures back",
+        "keep it", "keep it for ten minutes", "keep that up for an hour",
+        "make it bigger", "bigger", "zoom in on the third one", "show me the second one bigger",
+        "back to the grid"],
         slots=slots_ui, speak=say_ui),
     Skill("sleep", "enter_sleep_mode", [
         # He gets dismissed in a lot of different moods, so the seeds cover the clusters:

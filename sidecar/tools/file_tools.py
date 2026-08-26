@@ -160,6 +160,48 @@ async def find_files(query: str, folder: str | None = None, limit: int = 40) -> 
             "results": [{"name": h["name"], "where": _display(Path(h["path"]).parent), "kind": h["kind"]} for h in hits[:15]]}
 
 
+async def open_by_name(query: str) -> dict | None:
+    """Resolve a spoken name ("jarvis install log") to a file/folder in the roots and
+    show it — the folder stage promises "say open + a file name". Returns None when
+    nothing matches so the caller (open_application) can fall through to websites.
+    No 'files' event here: a failed app launch shouldn't flash the folder stage."""
+    q = query.lower().strip().strip('"')
+    words = [w for w in re.split(r"[\s_\-.]+", q) if w]
+    if not words:
+        return None
+    best: Path | None = None
+    best_mtime = -1.0
+    t0 = time.time()
+    for base in roots().values():
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if not d.startswith((".", "node_modules", "__pycache__", ".venv", "target"))]
+            if len(Path(dirpath).relative_to(base).parts) >= 5:
+                dirnames[:] = []
+            for n in filenames + dirnames:
+                nl = re.sub(r"[\s_\-.]+", " ", n.lower())
+                if all(w in nl for w in words):
+                    p = Path(dirpath) / n
+                    try:
+                        mt = p.stat().st_mtime
+                    except OSError:
+                        continue
+                    if mt > best_mtime:
+                        best, best_mtime = p, mt
+            if time.time() - t0 > 6:
+                break
+        if time.time() - t0 > 6:
+            break
+    if best is None:
+        return None
+    if best.is_dir():
+        return await list_folder(str(best))
+    pv = await preview_file(str(best))
+    if "error" in pv:
+        return None
+    await bus.emit("file_preview", **pv)
+    return {"opened_file": best.name, "path": str(best)}
+
+
 async def preview_file(path: str) -> dict:
     p = _resolve(path)
     if p is None or not p.is_file():

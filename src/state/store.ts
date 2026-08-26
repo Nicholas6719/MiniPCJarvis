@@ -26,7 +26,17 @@ export interface StageState {
   openedTs: number;
   holdUntil: number;      // epoch ms; 0 = held by activity (turn still running)
   pinned: boolean;        // "keep it" — stays until dismissed
+  pinUntil?: number;      // "keep it for ten minutes" — epoch ms the pin expires
   settingsSection?: SettingsSection;
+}
+
+// What "bring that back" restores: the stage plus the data it was rendering.
+interface StageSnapshot {
+  stage: StageState;
+  web: WebState | null;
+  images: ImagesState | null;
+  files: FilesState | null;
+  filePreview: FilePreview | null;
 }
 
 export interface TranscriptEntry {
@@ -66,6 +76,7 @@ export interface WebState {
 export interface ImagesState {
   query: string;
   images: { src: string; alt: string; w: number; h: number; page?: string }[];
+  focus?: number | null;   // "bigger" / "the second one" — featured image index
   ts: number;
 }
 
@@ -121,7 +132,8 @@ interface Store {
   setFilePreview: (p: FilePreview | null) => void;
   openStage: (kind: StageKind, extra?: Partial<StageState>) => void;
   dismissStage: () => void;
-  pinStage: (pinned: boolean) => void;
+  restoreStage: () => void;
+  pinStage: (pinned: boolean, minutes?: number) => void;
   setSettingsSection: (s: SettingsSection) => void;
 }
 
@@ -130,6 +142,15 @@ interface Store {
 export const STAGE_HOLD_MS = 5000;
 // A surface the user asked for by voice ("show settings") holds much longer.
 const ASKED_FOR_HOLD_MS = 120000;
+// Folder and file stages invite a follow-up ("say open + a file name"), so they
+// outlive the 5 s drain that fits answers and image grids.
+const BROWSE_HOLD_MS = 30000;
+export function holdFor(kind: StageKind): number {
+  return kind === "folder" || kind === "file" ? BROWSE_HOLD_MS : STAGE_HOLD_MS;
+}
+
+// "bring that back" — the last dismissed stage, with the data it was showing.
+let lastSnapshot: StageSnapshot | null = null;
 
 let draftId = "";
 let pendingDelta = "";
@@ -191,9 +212,36 @@ export const useStore = create<Store>((set, get) => ({
         ...extra,
       },
     })),
-  dismissStage: () => set({ stage: null }),
-  pinStage: (pinned) =>
-    set((st) => (st.stage ? { stage: { ...st.stage, pinned, holdUntil: 0 } } : {})),
+  dismissStage: () =>
+    set((st) => {
+      // An answerless prose stage (a bare "hide everything" turn) isn't worth
+      // restoring — snapshotting it would clobber the stage the user meant.
+      const worthKeeping = st.stage &&
+        (st.stage.kind !== "prose" || st.turn?.elapsedMs != null || st.assistantDraft.length > 0);
+      if (st.stage && worthKeeping) {
+        lastSnapshot = {
+          stage: { ...st.stage, pinned: false, pinUntil: undefined },
+          web: st.web, images: st.images, files: st.files, filePreview: st.filePreview,
+        };
+      }
+      return { stage: null };
+    }),
+  restoreStage: () => {
+    if (!lastSnapshot) return;
+    const snap = lastSnapshot;
+    set({
+      stage: { ...snap.stage, openedTs: Date.now(), holdUntil: Date.now() + ASKED_FOR_HOLD_MS },
+      web: snap.web, images: snap.images, files: snap.files,
+      filePreview: snap.filePreview,
+    });
+  },
+  pinStage: (pinned, minutes) =>
+    set((st) => (st.stage ? {
+      stage: {
+        ...st.stage, pinned, holdUntil: 0,
+        pinUntil: pinned && minutes ? Date.now() + minutes * 60000 : undefined,
+      },
+    } : {})),
   setSettingsSection: (s) =>
     set((st) => ({
       stage: {
@@ -227,10 +275,10 @@ export const useStore = create<Store>((set, get) => ({
         set((st) => {
           const next: Partial<Store> = { state: evt.state };
           if (evt.state !== "idle") next.armedUntil = 0;
-          // Speaking finished → the stage holds 5 s then collapses (unless pinned or
+          // Speaking finished → the stage holds then collapses (unless pinned or
           // the user asked for this surface explicitly).
           if (evt.state === "idle" && st.stage && !st.stage.pinned && !st.stage.holdUntil) {
-            next.stage = { ...st.stage, holdUntil: Date.now() + STAGE_HOLD_MS };
+            next.stage = { ...st.stage, holdUntil: Date.now() + holdFor(st.stage.kind) };
           }
           return next;
         });
@@ -238,16 +286,32 @@ export const useStore = create<Store>((set, get) => ({
       }
       case "transcript":
         flushDelta(set);
-        set((st) => ({
-          transcript: [
-            ...st.transcript,
-            { id: evt.id, role: "user", text: evt.text, ts: evt.ts },
-          ],
-          assistantDraft: "",
-          turn: { userText: evt.text, startedTs: Date.now(), elapsedMs: null, steps: stepDefaults() },
-          // a new turn reclaims the stage: whatever we open next owns it
-          stage: st.stage?.pinned ? st.stage : null,
-        }));
+        set((st) => {
+          const outgoing = st.stage;
+          // The outgoing stage becomes the "bring that back" snapshot.
+          if (outgoing && !outgoing.pinned && outgoing.kind !== "prose") {
+            lastSnapshot = {
+              stage: { ...outgoing, pinned: false, pinUntil: undefined },
+              web: st.web, images: st.images, files: st.files, filePreview: st.filePreview,
+            };
+          }
+          return {
+            transcript: [
+              ...st.transcript,
+              { id: evt.id, role: "user", text: evt.text, ts: evt.ts },
+            ],
+            assistantDraft: "",
+            turn: { userText: evt.text, startedTs: Date.now(), elapsedMs: null, steps: stepDefaults() },
+            // A new turn reclaims the stage. The prose stage opens NOW with the
+            // question at 40px (mock 03); a web/files/images event upgrades it.
+            stage: outgoing?.pinned
+              ? outgoing
+              : { kind: "prose" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: false },
+            // and yesterday's sources don't decorate today's answer
+            web: outgoing?.pinned ? st.web : null,
+            images: outgoing?.pinned ? st.images : null,
+          };
+        });
         draftId = "";
         break;
       case "assistant_delta": {
@@ -465,9 +529,36 @@ export const useStore = create<Store>((set, get) => ({
           else if (view === "files") get().openStage("folder", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
           else if (view === "browser" || view === "research") get().openStage("browser", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
           else if (view === "conversation") get().openStage("prose", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
-        } else if (action === "pin") get().pinStage(true);
-        else if (action === "unpin") get().pinStage(false);
-        else if (action === "hide") get().dismissStage();
+        } else if (action === "pin" || action === "focus" || action === "unpin" || action === "restore" || action === "hide") {
+          // These arrive AFTER this turn's transcript already swapped the stage to a
+          // fresh prose ("keep it" heard → new turn → prose). The thing being pinned,
+          // focused or hidden is the snapshot that swap just took — put it back first.
+          const st0 = get();
+          const freshProse = st0.stage?.kind === "prose"
+            && st0.turn?.elapsedMs == null && !st0.assistantDraft;
+          if (freshProse && lastSnapshot && action !== "hide") get().restoreStage();
+          if (action === "hide") get().dismissStage();
+          else if (action === "pin") get().pinStage(true, evt.minutes ?? undefined);
+          else if (action === "unpin") get().pinStage(false);
+          else if (action === "restore") { /* restored above; nothing more to do */ }
+        }
+        if (action === "focus") {
+          // "bigger" / "the second one" — feature one image; null returns to the grid
+          set((st) => {
+            if (!st.images) return {};
+            const n = st.images.images.length;
+            const idx = evt.index == null ? null : Math.max(0, Math.min(n - 1, Number(evt.index)));
+            return {
+              images: { ...st.images, focus: idx },
+              stage: {
+                kind: "images" as StageKind,
+                openedTs: st.stage?.kind === "images" ? st.stage.openedTs : Date.now(),
+                holdUntil: Date.now() + ASKED_FOR_HOLD_MS,
+                pinned: st.stage?.pinned ?? false,
+              },
+            };
+          });
+        }
         break;
       }
       case "config_changed":
@@ -484,3 +575,7 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 }));
+
+// Handle for the HUD test harness (tests/hud_e2e.py): drive and inspect the store
+// from the page. Harmless in production — it only exposes what the UI already shows.
+if (typeof window !== "undefined") (window as any).__jarvis = useStore;
