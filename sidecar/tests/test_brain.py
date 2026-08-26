@@ -32,7 +32,8 @@ CASES = [
     ("make that bigger", "ui"), ("zoom in on the second one", "ui"), ("back to the grid", "ui"),
     ("hide everything", "ui"),
     # "wake up" must NEVER land on the sleep skill (he'd answer a wake by re-sleeping)
-    ("wake up", None), ("wake up jarvis", None),
+    ("wake up", "wakeack"), ("wake up jarvis", "wakeack"), ("time to wake up", "wakeack"),
+    ("good morning jarvis", "wakeack"),
 ]
 
 async def main() -> int:

@@ -850,6 +850,14 @@ SKILLS: list[Skill] = [
         "make it bigger", "bigger", "zoom in on the third one", "show me the second one bigger",
         "back to the grid"],
         slots=slots_ui, speak=say_ui),
+    Skill("wakeack", None, [
+        # "wake up" embeds near the sleep cluster — without its own skill the guard in
+        # slots_sleep sends it to the LLM, which answers a wake request with whatever
+        # the history suggests. /text and the wake word already woke him; just answer.
+        "wake up", "wake up jarvis", "are you awake", "you up", "good morning jarvis",
+        "morning jarvis", "rise and shine", "time to wake up", "you there",
+        "are you there jarvis"],
+        speak=lambda _s, _r: "At your service."),
     Skill("sleep", "enter_sleep_mode", [
         # He gets dismissed in a lot of different moods, so the seeds cover the clusters:
         # explicit sleep, "we're finished", military stand-down, goodbyes, and get-lost.

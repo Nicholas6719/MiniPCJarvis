@@ -84,9 +84,13 @@ CHECKS_JS = """
 """
 
 
+class _Quiet(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):   # request lines are noise in a test report
+        pass
+
+
 def serve_dist() -> tuple[socketserver.TCPServer, int]:
-    handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(
-        *a, directory=str(DIST), **k)
+    handler = lambda *a, **k: _Quiet(*a, directory=str(DIST), **k)
     srv = socketserver.TCPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, srv.server_address[1]
