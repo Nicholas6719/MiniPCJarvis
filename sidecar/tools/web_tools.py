@@ -68,6 +68,10 @@ async def research(query: str, num_sources: int = 4) -> dict:
     round; every source is emitted to the UI so the process stays visible.
     """
     num_sources = max(2, min(6, num_sources))
+    # Clean HERE, not just in web_search: the store keys the browser stage by
+    # query, so research events and web events must carry the same string.
+    from tools.query_clean import clean_search_query
+    query = clean_search_query(query)
     await bus.emit("research", stage="searching", query=query)
     search = await web_search(query, count=num_sources + 2)
     if "error" in search:
@@ -114,8 +118,14 @@ async def research(query: str, num_sources: int = 4) -> dict:
 async def show_images(query: str, count: int = 8) -> dict:
     """Find pictures and display them in the JARVIS interface."""
     from search_brave_web import brave_web
+    from tools.query_clean import clean_image_query
     if not brave_web.available:
         return {"error": "image search needs the Brave browser installed"}
+    # "show me 5 images of spiderman" -> query "spiderman", count 5 — whether the
+    # brain or the LLM built this call, the engine sees keywords only.
+    query, spoken_count = clean_image_query(query)
+    if spoken_count:
+        count = spoken_count
     await bus.emit("web", stage="images_searching", query=query)
     try:
         imgs = await brave_web.images(query, max(1, min(12, count)))

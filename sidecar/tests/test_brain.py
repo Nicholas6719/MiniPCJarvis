@@ -13,6 +13,7 @@ CASES = [
     ("grab a screenshot and save it to my desktop", "screenshot"), ("take a screenshot please", "screenshot"),
     ("search the web for the best gaming laptop under 1500", "search"), ("look up tomorrow's weather in framingham", "weather"),
     ("show me a picture of a worm", "images"), ("show me some photos of saturn", "images"),
+    ("show me iron man", "images"), ("show me 5 images of spiderman", "images"),
     ("what's on my screen right now", "screen"), ("have a look at my screen", "screen"),
     ("remind me in 25 minutes to call dad", "reminder"), ("set a reminder for 6 pm to start dinner", "reminder"),
     ("remember that i like my coffee black", "remember"),

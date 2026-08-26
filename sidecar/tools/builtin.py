@@ -517,7 +517,10 @@ async def _keyless_search(query: str, count: int) -> dict:
 
 
 async def web_search(query: str, count: int = 5) -> dict:
-    return _note_search(await _web_search(query, count))
+    # The LLM path passes whatever the model wrote — often the raw utterance
+    # ("search the web for X please"). The search box gets keywords only.
+    from tools.query_clean import clean_search_query
+    return _note_search(await _web_search(clean_search_query(query), count))
 
 
 async def _web_search(query: str, count: int = 5) -> dict:

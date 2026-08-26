@@ -512,15 +512,18 @@ def slots_search(t: str) -> dict | None:
     return {"query": q} if len(q) >= 3 and q != t.strip() else None
 
 
-_IMG_LEAD = re.compile(
-    r"^(?:hey\s+)?(?:jarvis[,.]?\s+)?(?:can you\s+|could you\s+|please\s+)?"
-    r"(?:show(?:\s+me)?|find(?:\s+me)?|pull\s+up|get(?:\s+me)?|display|bring\s+up)\s+"
-    r"(?:a\s+|some\s+|me\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+", re.I)
-
-
 def slots_images(t: str) -> dict | None:
-    q = _IMG_LEAD.sub("", t.strip(), count=1).strip(" .?!")
-    return {"query": q} if q and q != t.strip() else None
+    """Shares the tools' cleaner so "show me iron man" and "show me 5 images of
+    spiderman" both become keywords (+count). Only fires when something was
+    actually command phrasing — a kNN misroute of plain prose stays None."""
+    from tools.query_clean import clean_image_query
+    q, count = clean_image_query(t.strip())
+    if not q or q == t.strip().strip(" .?!"):
+        return None
+    out: dict = {"query": q}
+    if count:
+        out["count"] = count
+    return out
 
 
 def slots_reminder(t: str) -> dict | None:
@@ -748,7 +751,12 @@ SKILLS: list[Skill] = [
         "find me a photo of a golden retriever", "pull up images of the eiffel tower",
         "show me some pictures of worms", "show me an image of a black hole",
         "get me pictures of the northern lights", "display photos of mount everest",
-        "show me a pic of iron man", "bring up pictures of a lamborghini"],
+        "show me a pic of iron man", "bring up pictures of a lamborghini",
+        # bare forms — no media noun, or a spoken count ("show me iron man").
+        # NOT "show me spiderman pictures": trailing "pictures" canonicalizes into
+        # the Pictures-FOLDER pattern and clashes with the folder skill.
+        "show me iron man", "show me the aurora borealis", "show me 5 images of spiderman",
+        "show me three pictures of puppies"],
         slots=slots_images, speak=say_images),
     Skill("screen", "analyze_screen", [
         "look at my screen", "what's on my screen", "take a look at my screen",

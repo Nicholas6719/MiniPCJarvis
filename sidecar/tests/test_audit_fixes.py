@@ -39,6 +39,39 @@ check("reminder 'tonight' = PM", r and r.get("at_time") == "21:00", r)
 check("'no thanks' is not a correction", slots_correction("no thanks") is None)
 check("'no i meant X' is a correction", (slots_correction("no i meant open spotify") or {}).get("rest") == "open spotify")
 
+# --- search/image queries are keywords, never the spoken command (2026-08-26) ---
+from tools.query_clean import clean_image_query, clean_search_query  # noqa: E402
+from brain.skills import slots_images  # noqa: E402
+
+check("'show me iron man' -> 'iron man'", clean_image_query("show me iron man") == ("iron man", None),
+      clean_image_query("show me iron man"))
+check("'show me 5 images of spiderman' -> ('spiderman', 5)",
+      clean_image_query("show me 5 images of spiderman") == ("spiderman", 5),
+      clean_image_query("show me 5 images of spiderman"))
+check("'pictures of a nebula please' -> 'a nebula'",
+      clean_image_query("pictures of a nebula please")[0] == "a nebula")
+check("'show me spiderman pictures' -> 'spiderman'",
+      clean_image_query("show me spiderman pictures")[0] == "spiderman")
+check("'a couple of photos of mars' -> ('mars', 2)",
+      clean_image_query("a couple of photos of mars") == ("mars", 2),
+      clean_image_query("a couple of photos of mars"))
+check("a question is left alone", clean_image_query("how do i show images in css")[0] == "how do i show images in css")
+check("slots_images 'show me iron man'", (slots_images("show me iron man") or {}).get("query") == "iron man",
+      slots_images("show me iron man"))
+check("slots_images passes the count", (slots_images("show me 5 images of spiderman") or {}) == {"query": "spiderman", "count": 5},
+      slots_images("show me 5 images of spiderman"))
+check("'search the web for the best mini pc' -> keywords",
+      clean_search_query("search the web for the best mini pc") == "the best mini pc")
+check("'look up who won the game' -> keywords", clean_search_query("look up who won the game") == "who won the game")
+check("'show me the latest nvidia drivers' -> keywords",
+      clean_search_query("show me the latest nvidia drivers") == "the latest nvidia drivers")
+check("'research the best mini pc of 2026' strips the verb",
+      clean_search_query("research the best mini pc of 2026") == "the best mini pc of 2026")
+check("'research methods in psychology' keeps its noun",
+      clean_search_query("research methods in psychology") == "research methods in psychology")
+check("search questions pass through", clean_search_query("what is the tallest building") == "what is the tallest building")
+check("clean is idempotent", clean_search_query("the best mini pc") == "the best mini pc")
+
 # --- file-tool sandbox: relative traversal blocked ---
 check("traversal '../../../Windows/..' blocked", _resolve("../../../Windows/System32/drivers/etc/hosts") is None)
 check("traversal '../..' blocked", _resolve("../../AppData/Roaming/JARVIS/config.json") is None)
