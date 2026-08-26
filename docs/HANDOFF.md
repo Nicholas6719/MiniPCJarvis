@@ -424,6 +424,19 @@ each one is a contract. Findings (commit 6163105), all fixed + gate-protected:
   with real telemetry, sleep->ASLEEP->wake, folder/images/browser/prose stages.
 - Testing artifact to know: rAF batching means assistant deltas don't flush while
   the window is HIDDEN (background tab) — streaming is fine when visible.
+- QUERY CLEANING (user report: "show me iron man" searched verbatim): shared
+  `tools/query_clean.py` strips command phrasing to keywords in TWO layers —
+  slots_images/the tools themselves (web_search, show_images, research), because
+  the LLM path passes whatever the model wrote. Spoken counts work ("5 images of
+  spiderman" -> count 5). Conservative on ambiguity: "research methods in
+  psychology" keeps its noun (bare search/research only strip before a
+  determiner); questions pass through. research() cleans AT ENTRY so its events
+  and web events carry the same query string (the store keys the browser stage
+  by query). 15 unit guards in test_audit_fixes; routing seeds for bare forms
+  ("show me iron man") — NOT "show me spiderman pictures", trailing "pictures"
+  canonicalizes into the Pictures-FOLDER pattern.
+- brain_e2e is order-sensitive: run it against a QUIET app — starting it while a
+  turn is still speaking shifts every expectation off by one (looks like 0/8).
 
 ## HOW THE NEW UI WORKS (for explaining to the user)
 - Rest = radial: reactor centred, room faded. Speak, or Ctrl+Shift+J, or click the orb.
