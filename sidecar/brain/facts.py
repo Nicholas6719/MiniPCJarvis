@@ -73,6 +73,19 @@ class FactStore:
         self.db.commit()
         self.last_served: dict | None = None   # for "how do you know that"
         self.stats = {"served": 0, "stored": 0, "rejected": 0}
+        self._evidence: list[dict] = []        # this turn's web sources
+
+    # ---- per-turn evidence: the web tools record what they fetched, so the
+    # turn's answer can be traced to real sources before it may become a fact
+    def record_evidence(self, query: str, sources: list[dict], origin: str) -> None:
+        self._evidence.append({"query": query, "sources": sources, "origin": origin})
+
+    def reset_evidence(self) -> None:
+        self._evidence.clear()
+
+    def take_evidence(self) -> list[dict]:
+        ev, self._evidence = self._evidence, []
+        return ev
 
     # ------------------------------------------------------------------ serve
     async def lookup(self, text: str) -> dict | None:
@@ -162,9 +175,11 @@ class FactStore:
         from llm.provider import local_llm
         out = ""
         try:
+            # gpt-oss reasons before it answers: give it room, or the YES/NO
+            # gets truncated away and everything reads as NO
             async for ch in local_llm.stream(
                     [{"role": "user", "content": _TIMELESS_PROMPT.format(q=q, a=a)}],
-                    max_tokens=180, sampling={"temperature": 0.0}):
+                    max_tokens=600, sampling={"temperature": 0.0}):
                 out += ch.text
                 if ch.done:
                     break
@@ -173,7 +188,9 @@ class FactStore:
             return False
         # the model may reason before answering; judge only the final word
         words = re.findall(r"\b(YES|NO)\b", out.upper())
-        return bool(words) and words[-1] == "YES"
+        verdict = bool(words) and words[-1] == "YES"
+        log.info("timeless classify %r -> %s (%r)", q[:60], verdict, out[-80:])
+        return verdict
 
     # ------------------------------------------------------------------ audit
     def due_for_audit(self, limit: int = 40) -> list[dict]:
@@ -207,19 +224,7 @@ class FactStore:
 
 facts = FactStore()
 
-# ---- per-turn evidence: the web tools record what they fetched, so the turn's
-# answer can be traced to real sources before it may become a fact ------------
-_turn_evidence: list[dict] = []
-
 
 def record_evidence(query: str, sources: list[dict], origin: str) -> None:
-    _turn_evidence.append({"query": query, "sources": sources, "origin": origin})
-
-
-def reset_evidence() -> None:
-    _turn_evidence.clear()
-
-
-def take_evidence() -> list[dict]:
-    ev, _turn_evidence[:] = list(_turn_evidence), []
-    return ev
+    """Module-level convenience for the web tools."""
+    facts.record_evidence(query, sources, origin)

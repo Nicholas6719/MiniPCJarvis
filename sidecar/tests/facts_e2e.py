@@ -27,37 +27,43 @@ def check(name, cond, detail=""):
 
 
 def say(text):
+    """Speak a turn and wait for ITS answer — a new assistant row after our user
+    row — not whatever the transcript already held (early-idle race)."""
+    before = len(req("GET", "/transcript?limit=200")["transcript"])
     req("POST", "/text", {"text": text})
     t0 = time.time()
     for _ in range(90):
         time.sleep(2)
-        if req("GET", "/health")["state"] in ("idle", "sleeping") and time.time() - t0 > 4:
+        rows = req("GET", "/transcript?limit=200")["transcript"]
+        if len(rows) >= before + 2 and rows[-1]["role"] == "assistant":
             break
     return time.time() - t0
 
 
 def last_assistant():
-    rows = req("GET", "/transcript?limit=4")["transcript"]
+    rows = req("GET", "/transcript?limit=6")["transcript"]
     for r in reversed(rows):
         if r["role"] == "assistant":
             return r["content"]
     return ""
 
 
-# start clean: remove any kilimanjaro fact from earlier runs
+# start clean: remove leftovers from earlier runs
 for f in req("GET", "/facts")["facts"]:
-    if "kilimanjaro" in f["question"].lower():
+    if "eiffel" in f["question"].lower():
         req("DELETE", f"/facts/{f['id']}")
 
-# 1. a sourced timeless answer should graduate into the store (background, ~10 s)
-say("look up how tall mount kilimanjaro is")
+# 1. a sourced timeless answer should graduate into the store (background, ~15 s).
+# Completed history — unambiguously timeless. (A mountain's height is NOT: surveys
+# revise it, and the classifier correctly rejects it. Learned the hard way.)
+say("look up what year the eiffel tower was completed")
 a1 = last_assistant()
 check("web turn answered", any(ch.isdigit() for ch in a1), a1[:80])
 stored = None
 for _ in range(12):
     time.sleep(5)
     stored = next((f for f in req("GET", "/facts")["facts"]
-                   if "kilimanjaro" in f["question"].lower() and f["status"] == "active"), None)
+                   if "eiffel" in f["question"].lower() and f["status"] == "active"), None)
     if stored:
         break
 check("fact graduated into the store", stored is not None)
@@ -65,7 +71,7 @@ check("fact graduated into the store", stored is not None)
 # 2. a paraphrase is served from the brain — fast, no web, no LLM
 if stored:
     before = req("GET", "/facts")["stats"]["served"]
-    dt = say("how tall is mount kilimanjaro")
+    dt = say("when was the eiffel tower finished")
     a2 = last_assistant()
     after = req("GET", "/facts")["stats"]["served"]
     check("paraphrase served from the store", after > before, f"{before}->{after}")

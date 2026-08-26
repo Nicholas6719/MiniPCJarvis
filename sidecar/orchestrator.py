@@ -670,6 +670,7 @@ class Orchestrator:
                 return
         if not getattr(self, "_llm_ready", True):
             line = "My language model is still loading. Give me a few more seconds and ask again."
+            memory.log_turn("assistant", line)   # History must show BOTH sides of the turn
             await bus.emit("assistant_delta", text=line)
             try:
                 await self.speak_line(line)
