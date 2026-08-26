@@ -59,10 +59,13 @@ Hard rules:
 5. Small-model tier for easy realm-3 turns (brain picks the tier).
 6. Keep growing plain reflexes (see feature-gap list in HANDOFF.md).
 
-## Still open (ask Nicholas)
-- Morning report: when an audit finds a changed fact, should JARVIS SAY so on
-  first interaction next morning, or only log it in Settings → History?
-- Footprint: fact store + embeddings ≈ a couple GB; a small realm-3 model adds
-  ~2–4 GB more. Acceptable, or keep to current footprint?
-- Provenance in speech: mention sources when answering from the brain, or keep
-  receipts inspectable in the memory view only?
+## Resolved (Nicholas, 2026-08-26)
+- Provenance in speech: NEVER mention sources unless asked. Receipts stay
+  inspectable ("how do you know that?" → he cites source + verified date).
+  Same principle for the overnight audit: log findings in Settings → History,
+  no unprompted morning announcements — he answers if asked.
+- Footprint: approved. Claude's assessment: ~10 GB RAM headroom today
+  (20B model ≈ 12 GB + app ≈ 21/31 GB used); a 2–4 GB small model fits
+  comfortably and should run ~4–5× faster than the 20B on the 780M
+  (bandwidth-bound). Verify with a bakeoff (scripts/model_trial.ps1 pattern)
+  before locking the choice — measure, don't assume.
