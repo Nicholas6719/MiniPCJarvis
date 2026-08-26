@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><style>
+@font-face{font-family:"Share Tech Mono";font-weight:400;src:url("fonts/sharetechmono-400.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:600;src:url("fonts/rajdhani-600.ttf") format("truetype")}
+@keyframes arcSpin{to{transform:rotate(360deg)}}
+@keyframes arcBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+@keyframes arcPulse{0%,100%{opacity:.62}50%{opacity:1}}
+</style></helmet>
+<div ref="{{ rootRef }}" style="position:relative;width:{{size}}px;height:{{size}}px;display:grid;place-items:center;--c:{{color}};--spin:{{spin}};--glow:{{glow}};--chg:{{charge}};--a1:.035;--a2:.035;--a3:.035;--a4:.035;--amp:.035;font-family:'Share Tech Mono',monospace;flex:none">
+
+  <div style="position:absolute;inset:-22%;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--c) 42%,transparent) 0%,transparent 62%);opacity:calc(var(--glow) * (.82 + var(--amp) * .9));transform:scale(calc(1 + var(--amp) * .07));pointer-events:none"></div>
+
+  <div style="position:absolute;inset:3%;border-radius:50%;background:radial-gradient(circle at 50% 42%,#0a1c28 0%,#030c14 62%,#020709 100%);box-shadow:inset 0 0 30px rgba(0,0,0,.8)"></div>
+
+  <div style="position:absolute;inset:0;border-radius:50%;background:repeating-conic-gradient(from 0deg,color-mix(in srgb,var(--c) 80%,transparent) 0 .6deg,transparent .6deg 5deg);-webkit-mask-image:radial-gradient(closest-side,transparent 94%,#000 95.5%);mask-image:radial-gradient(closest-side,transparent 94%,#000 95.5%);opacity:.7;animation:arcSpin calc(var(--spin) * 9) linear infinite"></div>
+
+  <div style="position:absolute;inset:3%;border-radius:50%;border:1px solid color-mix(in srgb,var(--c) 34%,transparent)"></div>
+
+  <div style="position:absolute;inset:4.5%;border-radius:50%;background:repeating-conic-gradient(from 7.5deg,color-mix(in srgb,var(--c) 34%,transparent) 0 20deg,transparent 20deg 30deg);-webkit-mask-image:radial-gradient(closest-side,transparent 77%,#000 79%);mask-image:radial-gradient(closest-side,transparent 77%,#000 79%);animation:arcSpin calc(var(--spin) * 3) linear infinite"></div>
+
+  <div style="position:absolute;inset:22%;border-radius:50%;border:1px solid color-mix(in srgb,var(--c) 26%,transparent)"></div>
+
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(15deg) translateY(-460%) scaleY(var(--a1));opacity:calc(.18 + var(--a1) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(45deg) translateY(-460%) scaleY(var(--a2));opacity:calc(.18 + var(--a2) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(75deg) translateY(-460%) scaleY(var(--a3));opacity:calc(.18 + var(--a3) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(105deg) translateY(-460%) scaleY(var(--a4));opacity:calc(.18 + var(--a4) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(135deg) translateY(-460%) scaleY(var(--a1));opacity:calc(.18 + var(--a1) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(165deg) translateY(-460%) scaleY(var(--a2));opacity:calc(.18 + var(--a2) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(195deg) translateY(-460%) scaleY(var(--a3));opacity:calc(.18 + var(--a3) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(225deg) translateY(-460%) scaleY(var(--a4));opacity:calc(.18 + var(--a4) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(255deg) translateY(-460%) scaleY(var(--a1));opacity:calc(.18 + var(--a1) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(285deg) translateY(-460%) scaleY(var(--a2));opacity:calc(.18 + var(--a2) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(315deg) translateY(-460%) scaleY(var(--a3));opacity:calc(.18 + var(--a3) * .82);box-shadow:0 0 7px var(--c)"></div>
+  <div style="position:absolute;width:2.5%;height:7%;background:var(--c);border-radius:1px;transform:rotate(345deg) translateY(-460%) scaleY(var(--a4));opacity:calc(.18 + var(--a4) * .82);box-shadow:0 0 7px var(--c)"></div>
+
+  <div style="position:absolute;inset:14%;border-radius:50%;background:conic-gradient(from -90deg,var(--c) 0 calc(var(--chg) * 1%),transparent calc(var(--chg) * 1%));-webkit-mask-image:radial-gradient(closest-side,transparent 91%,#000 93%);mask-image:radial-gradient(closest-side,transparent 91%,#000 93%);filter:drop-shadow(0 0 7px var(--c))"></div>
+
+  <div style="position:absolute;inset:23%;border-radius:50%;background:repeating-conic-gradient(from 22.5deg,color-mix(in srgb,var(--c) 95%,transparent) 0 32deg,transparent 32deg 45deg);-webkit-mask-image:radial-gradient(closest-side,transparent 70%,#000 72%);mask-image:radial-gradient(closest-side,transparent 70%,#000 72%);filter:drop-shadow(0 0 5px color-mix(in srgb,var(--c) 50%,transparent));animation:arcSpin calc(var(--spin) * 5) linear infinite reverse"></div>
+
+  <div style="position:absolute;width:2px;height:50%;top:0;left:calc(50% - 1px);transform-origin:50% 100%;transform:rotate(0deg);background:linear-gradient(180deg,transparent 0 4%,color-mix(in srgb,var(--c) 75%,transparent) 4% 40%,transparent 40%)"></div>
+  <div style="position:absolute;width:2px;height:50%;top:0;left:calc(50% - 1px);transform-origin:50% 100%;transform:rotate(120deg);background:linear-gradient(180deg,transparent 0 4%,color-mix(in srgb,var(--c) 75%,transparent) 4% 40%,transparent 40%)"></div>
+  <div style="position:absolute;width:2px;height:50%;top:0;left:calc(50% - 1px);transform-origin:50% 100%;transform:rotate(240deg);background:linear-gradient(180deg,transparent 0 4%,color-mix(in srgb,var(--c) 75%,transparent) 4% 40%,transparent 40%)"></div>
+
+  <div style="position:absolute;inset:36%;border-radius:50%;border:2px solid var(--c);box-shadow:inset 0 0 20px color-mix(in srgb,var(--c) 40%,transparent),0 0 16px color-mix(in srgb,var(--c) 28%,transparent);background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--c) 16%,#02080d) 0%,#01060a 100%)"></div>
+
+  <div style="position:absolute;inset:40%;border-radius:50%;background:radial-gradient(circle at 50% 58%,color-mix(in srgb,var(--c) 55%,transparent) 0%,transparent 72%);opacity:calc(.55 + var(--amp) * .75);pointer-events:none"></div>
+
+  <div style="position:absolute;inset:40.5%;clip-path:polygon(50% 4%,97% 88%,3% 88%);background:linear-gradient(172deg,#ffffff 0%,color-mix(in srgb,var(--c) 55%,white) 26%,var(--c) 64%,color-mix(in srgb,var(--c) 72%,#02121a) 100%);filter:drop-shadow(0 0 16px color-mix(in srgb,var(--c) 85%,transparent)) drop-shadow(0 0 40px color-mix(in srgb,var(--c) 45%,transparent));animation:arcBreathe calc(var(--spin) * 4) ease-in-out infinite"></div>
+
+  <sc-if value="{{ showLabel }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;bottom:-11%;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;white-space:nowrap">
+      <div style="font-size:12px;letter-spacing:.55em;color:color-mix(in srgb,var(--c) 82%,white);text-shadow:0 0 16px color-mix(in srgb,var(--c) 60%,transparent);text-indent:.55em">{{ label }}</div>
+      <div style="font-size:10px;letter-spacing:.22em;color:#5c7a90;text-indent:.22em">{{ sub }}</div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:420,&quot;height&quot;:420},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;offline&quot;,&quot;starting&quot;,&quot;idle&quot;,&quot;listening&quot;,&quot;processing&quot;,&quot;thinking&quot;,&quot;searching&quot;,&quot;executing&quot;,&quot;waiting&quot;,&quot;speaking&quot;,&quot;interrupted&quot;,&quot;error&quot;,&quot;sleeping&quot;],&quot;default&quot;:&quot;idle&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Core&quot;},&quot;size&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:300,&quot;min&quot;:80,&quot;max&quot;:640,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Core&quot;},&quot;charge&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0,&quot;min&quot;:0,&quot;max&quot;:100,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Core&quot;},&quot;label&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Core&quot;},&quot;sub&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Core&quot;}}">
+const SPEC = {
+  offline:     ["#3a4656", 0.06, "9s",   "OFFLINE",   "sidecar not responding"],
+  starting:    ["#27c7ff", 0.30, "1.1s", "SPINNING UP", "loading model"],
+  idle:        ["#27c7ff", 0.34, "6s",   "STANDING BY", "ctrl+shift+j to talk"],
+  listening:   ["#45ffc8", 0.62, "1.3s", "LISTENING", "go ahead"],
+  processing:  ["#45d7ff", 0.46, "0.8s", "TRANSCRIBING", ""],
+  thinking:    ["#7a9bff", 0.58, "0.6s", "THINKING", "local model"],
+  searching:   ["#45d7ff", 0.52, "0.5s", "SEARCHING", "reading sources"],
+  executing:   ["#ffc94d", 0.55, "0.6s", "EXECUTING", "running tools"],
+  waiting:     ["#ffc94d", 0.44, "2.2s", "NEEDS YOU", "awaiting confirmation"],
+  speaking:    ["#27c7ff", 0.76, "0.9s", "SPEAKING", "interrupt any time"],
+  interrupted: ["#ff8a5c", 0.50, "0.4s", "STOPPED", ""],
+  error:       ["#ff5c6a", 0.68, "0.35s","FAULT", "diagnostics has it"],
+  sleeping:    ["#22506b", 0.10, "12s",  "ASLEEP", "say jarvis to wake"],
+};
+
+// Voice reactivity: four smoothed bands written straight onto the root element as
+// CSS vars, so the coils deform with speech without re-rendering the tree.
+class Component extends DCLogic {
+  root = React.createRef();
+
+  componentDidMount() {
+    const t0 = performance.now();
+    const smooth = [0, 0, 0, 0];
+    const wob = (t, f, p) =>
+      0.5 + 0.5 * Math.sin(t * f + p) * Math.sin(t * f * 0.41 + p * 1.7);
+
+    const tick = (now) => {
+      this.raf = requestAnimationFrame(tick);
+      const el = this.root.current;
+      if (!el) return;
+      const t = (now - t0) / 1000;
+      const st = this.props.state ?? "idle";
+      const hot = st === "listening" || st === "speaking";
+      if (st !== this.lastState) { this.settled = false; this.lastState = st; }
+      // Speech comes in syllables; listening is breathier and lower.
+      const gate = st === "speaking"
+        ? 0.30 + 0.70 * Math.max(0, Math.sin(t * 7.4) * 0.7 + Math.sin(t * 11.3) * 0.3)
+        : st === "listening" ? 0.18 + 0.52 * wob(t, 3.1, 0.4) : 0;
+      const bands = [
+        wob(t, 9.3, 0.0) * 1.00,
+        wob(t, 6.1, 1.3) * 0.86,
+        wob(t, 13.7, 2.1) * 0.68,
+        wob(t, 4.3, 3.4) * 0.92,
+      ];
+      // A page can hold dozens of these; once a quiet core has settled at the
+      // floor there is nothing to write, so stop touching style entirely.
+      if (!hot && this.settled) return;
+      let peak = 0, moved = false;
+      for (let i = 0; i < 4; i++) {
+        const target = hot ? 0.10 + gate * bands[i] : 0.035;
+        const next = smooth[i] + (target - smooth[i]) * (hot ? 0.34 : 0.06);
+        if (Math.abs(next - smooth[i]) > 0.0004) moved = true;
+        smooth[i] = next;
+        el.style.setProperty("--a" + (i + 1), smooth[i].toFixed(3));
+        if (smooth[i] > peak) peak = smooth[i];
+      }
+      el.style.setProperty("--amp", peak.toFixed(3));
+      this.settled = !hot && !moved;
+    };
+    this.raf = requestAnimationFrame(tick);
+  }
+
+  componentWillUnmount() { cancelAnimationFrame(this.raf); }
+
+  renderVals() {
+    const st = this.props.state ?? "idle";
+    const [color, glow, spin, label, sub] = SPEC[st] ?? SPEC.idle;
+    return {
+      rootRef: this.root,
+      size: this.props.size ?? 300,
+      color, glow, spin, label,
+      sub: this.props.sub ?? sub,
+      charge: this.props.charge ?? 0,
+      showLabel: this.props.label !== false,
+    };
+  }
+}
+</script>
+</body>
+</html>

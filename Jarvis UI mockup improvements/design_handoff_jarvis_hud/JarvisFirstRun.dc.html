@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>JarvisFirstRun</title><script src="support.js"></script></head>
+<body><x-dc>
+<helmet data-dc-atomics><style>
+@font-face{font-family:"Rajdhani";font-weight:400;src:url("fonts/rajdhani-400.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:500;src:url("fonts/rajdhani-500.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:600;src:url("fonts/rajdhani-600.ttf") format("truetype")}
+@font-face{font-family:"Share Tech Mono";font-weight:400;src:url("fonts/sharetechmono-400.ttf") format("truetype")}
+@keyframes flick{0%,100%{opacity:.5}50%{opacity:1}}
+</style></helmet>
+
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#04080c;border:1px solid rgba(39,199,255,.16);color:#d7ecf7">
+  <div style="position:absolute;left:420px;top:50%;width:1300px;height:1000px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(closest-side,rgba(39,199,255,.09),transparent 66%);pointer-events:none"></div>
+  <div style="position:absolute;left:44px;top:40px;width:26px;height:1px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;left:44px;top:40px;width:1px;height:26px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;right:44px;bottom:40px;width:26px;height:1px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;right:44px;bottom:40px;width:1px;height:26px;background:rgba(39,199,255,.3)"></div>
+
+  <div style="position:absolute;left:420px;top:50%;transform:translate(-50%,-50%)"><dc-import name="ArcReactor" state="idle" size="340" label="{{ off }}" hint-size="340px,340px"></dc-import></div>
+  <div style="position:absolute;left:420px;top:calc(50% + 230px);transform:translateX(-50%);text-align:center;display:flex;flex-direction:column;gap:10px;width:460px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.6em;color:#27c7ff;text-indent:.6em">JARVIS</span>
+    <span style="font:400 12px/1.6 'Share Tech Mono',monospace;letter-spacing:.16em;color:#4d6b80">SPEECH · REASONING · MEMORY · VOICE<br>ALL LOCAL TO THIS MACHINE</span>
+  </div>
+
+  <div style="position:absolute;left:820px;right:110px;top:150px;bottom:120px;display:flex;flex-direction:column">
+    <p style="margin:0 0 46px;font:500 34px/1.4 Rajdhani,sans-serif;color:#e4f3fb;max-width:820px;text-wrap:pretty">Good evening. Two things and I'm yours.</p>
+
+    <div style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:#27c7ff;margin-bottom:18px">HOW SHOULD I LISTEN?</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:44px">
+      <div style="display:flex;align-items:center;gap:20px;padding:20px 24px;border:1px solid rgba(39,199,255,.45);border-radius:10px;background:linear-gradient(100deg,rgba(39,199,255,.1),rgba(39,199,255,.02));cursor:pointer">
+        <span style="width:12px;height:12px;border-radius:50%;background:#27c7ff;box-shadow:0 0 12px #27c7ff;flex:none"></span>
+        <span style="flex:1;font:500 21px/1.25 Rajdhani,sans-serif;color:#e4f3fb">Wake word, or the hotkey<span style="display:block;font:400 12px/1.5 'Share Tech Mono',monospace;letter-spacing:.1em;color:#6d8aa0;margin-top:4px">SAY "HEY JARVIS" · OR CTRL+SHIFT+J</span></span>
+        <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">RECOMMENDED</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:20px;padding:20px 24px;border:1px solid rgba(39,199,255,.16);border-radius:10px;cursor:pointer" style-hover="border-color:rgba(39,199,255,.4)">
+        <span style="width:12px;height:12px;border-radius:50%;border:1px solid #4d6b80;flex:none"></span>
+        <span style="flex:1;font:500 21px/1.25 Rajdhani,sans-serif;color:#a8c8da">Wake word only<span style="display:block;font:400 12px/1.5 'Share Tech Mono',monospace;letter-spacing:.1em;color:#4d6b80;margin-top:4px">HANDS NEVER TOUCH THE KEYBOARD</span></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:20px;padding:20px 24px;border:1px solid rgba(39,199,255,.16);border-radius:10px;cursor:pointer" style-hover="border-color:rgba(39,199,255,.4)">
+        <span style="width:12px;height:12px;border-radius:50%;border:1px solid #4d6b80;flex:none"></span>
+        <span style="flex:1;font:500 21px/1.25 Rajdhani,sans-serif;color:#a8c8da">Hotkey only<span style="display:block;font:400 12px/1.5 'Share Tech Mono',monospace;letter-spacing:.1em;color:#4d6b80;margin-top:4px">THE MIC STAYS SHUT UNTIL YOU ASK</span></span>
+      </div>
+    </div>
+
+    <div style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:#27c7ff;margin-bottom:18px">AND MY VOICE</div>
+    <div style="display:flex;gap:10px;margin-bottom:auto">
+      <div style="flex:1;padding:18px 20px;border:1px solid rgba(39,199,255,.45);border-radius:10px;background:linear-gradient(100deg,rgba(39,199,255,.1),rgba(39,199,255,.02));cursor:pointer"><div style="font:500 20px/1.2 Rajdhani,sans-serif;color:#e4f3fb">Alan</div><div style="font:400 11px/1.5 'Share Tech Mono',monospace;letter-spacing:.1em;color:#6d8aa0;margin-top:5px">EN-GB · DRY, CLIPPED</div></div>
+      <div style="flex:1;padding:18px 20px;border:1px solid rgba(39,199,255,.16);border-radius:10px;cursor:pointer" style-hover="border-color:rgba(39,199,255,.4)"><div style="font:500 20px/1.2 Rajdhani,sans-serif;color:#a8c8da">Alba</div><div style="font:400 11px/1.5 'Share Tech Mono',monospace;letter-spacing:.1em;color:#4d6b80;margin-top:5px">EN-GB · WARM</div></div>
+      <div style="flex:1;padding:18px 20px;border:1px solid rgba(39,199,255,.16);border-radius:10px;cursor:pointer" style-hover="border-color:rgba(39,199,255,.4)"><div style="font:500 20px/1.2 Rajdhani,sans-serif;color:#a8c8da">Ryan</div><div style="font:400 11px/1.5 'Share Tech Mono',monospace;letter-spacing:.1em;color:#4d6b80;margin-top:5px">EN-US · NEUTRAL</div></div>
+      <div style="flex:1;padding:18px 20px;border:1px dashed rgba(39,199,255,.2);border-radius:10px;display:grid;place-items:center;cursor:pointer"><span style="font:400 11px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#4d6b80">+ 14 MORE</span></div>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:40px;padding-top:34px;border-top:1px solid rgba(39,199,255,.12)">
+      <span style="font:400 12.5px/1.65 'Share Tech Mono',monospace;letter-spacing:.06em;color:#4d6b80;max-width:640px">Web search stays off until you add a key. Anything risky asks first, every time. All of it changes later.</span>
+      <button style="background:rgba(39,199,255,.14);color:#27c7ff;border:1px solid #27c7ff;border-radius:8px;font:400 15px/1 Rajdhani,sans-serif;letter-spacing:.34em;padding:19px 46px;cursor:pointer;text-indent:.34em;box-shadow:0 0 30px rgba(39,199,255,.16)" style-hover="background:rgba(39,199,255,.26)">BEGIN</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1920,&quot;height&quot;:1080}}">
+class Component extends DCLogic {
+  renderVals() { return { off: false }; }
+}
+</script>
+</body></html>

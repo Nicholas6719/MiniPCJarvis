@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas">
+<style>
+@font-face{font-family:"Rajdhani";font-weight:400;src:url("fonts/rajdhani-400.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:500;src:url("fonts/rajdhani-500.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:600;src:url("fonts/rajdhani-600.ttf") format("truetype")}
+@font-face{font-family:"Share Tech Mono";font-weight:400;src:url("fonts/sharetechmono-400.ttf") format("truetype")}
+body{margin:0;background:#07090b;font-family:"Rajdhani","Segoe UI",sans-serif}
+a{color:#27c7ff;text-decoration:none}a:hover{color:#8ae2ff}
+</style></helmet>
+
+<div style="padding:64px 68px 96px;display:flex;flex-direction:column;gap:0">
+
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:60px;padding-bottom:34px;border-bottom:1px solid rgba(39,199,255,.18);margin-bottom:20px">
+  <div style="display:flex;flex-direction:column;gap:16px;max-width:1080px">
+    <span style="font:400 11px/1 'Share Tech Mono',monospace;letter-spacing:.44em;color:#27c7ff;text-indent:.44em">J A R V I S · H U D</span>
+    <h1 style="margin:0;font:600 46px/1.1 Rajdhani,sans-serif;letter-spacing:-.005em;color:#eaf6fc">The complete redesign</h1>
+    <p style="margin:0;font:400 19px/1.5 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty;max-width:900px">One principle drives every decision below: <b style="color:#d7ecf7;font-weight:500">the core is the subject, and it only ever leaves the middle of the screen to make room for something you have to read.</b></p>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:9px;flex:none;padding-top:8px;text-align:right">
+    <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#4d6b80">1920 × 1080 · VOICE FIRST</span>
+    <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#4d6b80">RAJDHANI · SHARE TECH MONO</span>
+    <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#4d6b80">19 FRAMES · 13 CORE STATES</span>
+    <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#4d6b80">NICHOLAS6719 / MINIPCJARVIS</span>
+  </div>
+</div>
+
+<div style="display:flex;gap:0;padding:22px 0 40px;border-bottom:1px solid rgba(39,199,255,.08)">
+  <div style="flex:1;padding-right:34px"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:11px">WHAT CHANGED</div><p style="margin:0;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">The orb was a 220px decoration in a sidebar. It is now a 380–551px arc reactor at the centre of the screen that reacts to your voice and carries every piece of status.</p></div>
+  <div style="flex:1;padding:0 34px;border-left:1px solid rgba(39,199,255,.1)"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:11px">WHAT WENT AWAY</div><p style="margin:0;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Eleven unlabelled glyph tabs and the hover strip that hid them. Persistent status bars. The 44px grid. Nothing is navigated to any more.</p></div>
+  <div style="flex:1;padding:0 34px;border-left:1px solid rgba(39,199,255,.1)"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:11px">WHAT ARRIVED</div><p style="margin:0;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">A stage that JARVIS drives — a real embedded Brave you can also drive, an image grid, your files — and a room that takes the machine's colour.</p></div>
+  <div style="flex:1;padding-left:34px;border-left:1px solid rgba(39,199,255,.1)"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:11px">STILL TO DESIGN</div><p style="margin:0;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Only the surfaces you haven't asked for yet. Everything in this document is specified.</p></div>
+</div>
+
+<div id="s1" style="padding:56px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">01</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">The rule</h2>
+  </div>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Two geometries, and the state picks which one you get. <b style="color:#d7ecf7;font-weight:500">Radial</b> when the core is the subject — resting, listening, or something's broken. <b style="color:#d7ecf7;font-weight:500">Anchor</b> when reading is the subject — the core slides left and shrinks, and a stage opens beside it. Read the tags along the top: the core steps out of centre, then comes back.</p>
+
+  <div style="display:flex;align-items:flex-start;gap:18px">
+    <div style="display:flex;flex-direction:column;gap:11px;width:672px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(39,199,255,.16)"><span style="font:600 13px/1 Rajdhani,sans-serif;letter-spacing:.14em;color:#d7ecf7">1 · REST</span><span style="font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#27c7ff;border:1px solid rgba(39,199,255,.35);border-radius:3px;padding:3px 6px">RADIAL</span></div>
+      <div style="width:672px;height:378px;overflow:hidden;border:1px solid rgba(39,199,255,.16)"><div style="width:1920px;height:1080px;transform:scale(0.35);transform-origin:0 0"><dc-import name="JarvisFrame" scene="rest" hint-size="1920px,1080px"></dc-import></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:11px;width:672px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(69,255,200,.22)"><span style="font:600 13px/1 Rajdhani,sans-serif;letter-spacing:.14em;color:#d7ecf7">2 · LISTENING</span><span style="font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#45ffc8;border:1px solid rgba(69,255,200,.35);border-radius:3px;padding:3px 6px">RADIAL</span></div>
+      <div style="width:672px;height:378px;overflow:hidden;border:1px solid rgba(39,199,255,.16)"><div style="width:1920px;height:1080px;transform:scale(0.35);transform-origin:0 0"><dc-import name="JarvisFrame" scene="listen" hint-size="1920px,1080px"></dc-import></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:11px;width:672px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(69,215,255,.24)"><span style="font:600 13px/1 Rajdhani,sans-serif;letter-spacing:.14em;color:#d7ecf7">3 · WORKING</span><span style="font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#45d7ff;border:1px solid rgba(69,215,255,.4);border-radius:3px;padding:3px 6px">ANCHOR →</span></div>
+      <div style="width:672px;height:378px;overflow:hidden;border:1px solid rgba(39,199,255,.16)"><div style="width:1920px;height:1080px;transform:scale(0.35);transform-origin:0 0"><dc-import name="JarvisFrame" scene="work" hint-size="1920px,1080px"></dc-import></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:11px;width:672px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(39,199,255,.24)"><span style="font:600 13px/1 Rajdhani,sans-serif;letter-spacing:.14em;color:#d7ecf7">4 · ANSWERING</span><span style="font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#27c7ff;border:1px solid rgba(39,199,255,.4);border-radius:3px;padding:3px 6px">ANCHOR</span></div>
+      <div style="width:672px;height:378px;overflow:hidden;border:1px solid rgba(39,199,255,.16)"><div style="width:1920px;height:1080px;transform:scale(0.35);transform-origin:0 0"><dc-import name="JarvisFrame" scene="answer" hint-size="1920px,1080px"></dc-import></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:11px;width:672px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(255,92,106,.3)"><span style="font:600 13px/1 Rajdhani,sans-serif;letter-spacing:.14em;color:#ffd8dc">5 · FAULT</span><span style="font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ff5c6a;border:1px solid rgba(255,92,106,.45);border-radius:3px;padding:3px 6px">← RADIAL</span></div>
+      <div style="width:672px;height:378px;overflow:hidden;border:1px solid rgba(255,92,106,.22)"><div style="width:1920px;height:1080px;transform:scale(0.35);transform-origin:0 0"><dc-import name="JarvisFrame" scene="fault" hint-size="1920px,1080px"></dc-import></div></div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:0;margin-top:30px;max-width:1400px">
+    <div style="flex:1;padding-right:30px"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#4d6b80;margin-bottom:9px">THE HANDOFF</div><p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Core translates and scales over <b style="color:#a8c8da;font-weight:500">.9s</b> on <span style="font-family:'Share Tech Mono',monospace;font-size:12px">cubic-bezier(.65,0,.25,1)</span>. Rails and radial labels fade out, the stage slides in 44px. One easing for everything, so the core appears to carry the layout with it.</p></div>
+    <div style="flex:1;padding-left:30px;border-left:1px solid rgba(39,199,255,.1)"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#4d6b80;margin-bottom:9px">WHY FAULT IS RADIAL</div><p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Because coming back to the middle reads as the machine turning to face you. A failure isn't another panel appearing — it's the thing that was working stopping and looking at you.</p></div>
+  </div>
+</div>
+
+<div id="s2" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">02</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">The core</h2>
+  </div>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">An arc reactor: twelve outer plates, eight coils, a charge arc, three spokes, and a triangle over a soft bloom. Thirteen states, and the mapping is deliberate — <b style="color:#d7ecf7;font-weight:500">hue</b> is the kind of state, <b style="color:#d7ecf7;font-weight:500">ring speed</b> is urgency, the <b style="color:#d7ecf7;font-weight:500">charge arc</b> is literal progress, <b style="color:#d7ecf7;font-weight:500">coil deformation</b> is live voice amplitude, and <b style="color:#d7ecf7;font-weight:500">core brightness</b> is whether it's speaking. Every moving part maps to one field. Nothing is decorative.</p>
+
+  <div id="shot-core-anatomy" style="width:1560px;background:#04080c;border:1px solid rgba(39,199,255,.16);padding:48px 52px;display:flex;gap:56px;align-items:center;margin-bottom:34px">
+    <div style="position:relative;width:620px;height:620px;flex:none;display:grid;place-items:center">
+      <dc-import name="ArcReactor" state="idle" size="{{ lg }}" label="{{ off }}" charge="{{ c62 }}" hint-size="480px,480px"></dc-import>
+      <div style="position:absolute;left:511px;top:87px;width:22px;height:22px;border-radius:50%;background:#27c7ff;box-shadow:0 0 10px #27c7ff,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">1</div>
+      <div style="position:absolute;left:460px;top:138px;width:22px;height:22px;border-radius:50%;background:#27c7ff;box-shadow:0 0 10px #27c7ff,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">2</div>
+      <div style="position:absolute;left:419px;top:179px;width:22px;height:22px;border-radius:50%;background:#27c7ff;box-shadow:0 0 10px #27c7ff,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">3</div>
+      <div style="position:absolute;left:448px;top:245px;width:22px;height:22px;border-radius:50%;background:#45ffc8;box-shadow:0 0 10px #45ffc8,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">4</div>
+      <div style="position:absolute;left:153px;top:246px;width:22px;height:22px;border-radius:50%;background:#45ffc8;box-shadow:0 0 10px #45ffc8,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">5</div>
+      <div style="position:absolute;left:364px;top:234px;width:22px;height:22px;border-radius:50%;background:#27c7ff;box-shadow:0 0 10px #27c7ff,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">6</div>
+      <div style="position:absolute;left:299px;top:109px;width:22px;height:22px;border-radius:50%;background:#27c7ff;box-shadow:0 0 10px #27c7ff,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">7</div>
+      <div style="position:absolute;left:252px;top:252px;width:22px;height:22px;border-radius:50%;background:#27c7ff;box-shadow:0 0 10px #27c7ff,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#04121a;z-index:5">8</div>
+      <div style="position:absolute;left:332px;top:332px;width:22px;height:22px;border-radius:50%;background:#ffc94d;box-shadow:0 0 10px #ffc94d,0 0 0 3px rgba(4,8,12,.85);display:grid;place-items:center;font:400 11px/1 'Share Tech Mono',monospace;color:#241a04;z-index:5">9</div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:0">
+      <div style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.3em;color:#27c7ff;margin-bottom:20px">ANATOMY · OUTSIDE IN · INSETS AT 380px</div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#27c7ff">1</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Outer halo</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">inset -22%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#7d97a8">Breathes and scales with <span style="font-family:'Share Tech Mono',monospace;font-size:12px">--amp</span>. The only layer outside the box.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#27c7ff">2</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Fine tick ring</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">mask 94–95.5%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#7d97a8">Hairline conic ticks, <span style="font-family:'Share Tech Mono',monospace;font-size:12px">.6deg</span> on / <span style="font-family:'Share Tech Mono',monospace;font-size:12px">5deg</span> off, spins at <span style="font-family:'Share Tech Mono',monospace;font-size:12px">--spin × 9</span>.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#27c7ff">3</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Twelve outer plates</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">mask 77–79%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#7d97a8">The mechanical read. <span style="font-family:'Share Tech Mono',monospace;font-size:12px">20deg</span> on / <span style="font-family:'Share Tech Mono',monospace;font-size:12px">10deg</span> off, <span style="font-family:'Share Tech Mono',monospace;font-size:12px">× 3</span>.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#45ffc8">4</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Charge arc</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">mask 91–93%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#c8e4f2"><b style="font-weight:500">Literal progress.</b> Conic from −90°, filled to <span style="font-family:'Share Tech Mono',monospace;font-size:12px">--chg</span>. Shown here at 62%.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#45ffc8">5</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Twelve voice coils</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">translateY −460%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#c8e4f2"><b style="font-weight:500">Live amplitude.</b> Four bands cycled across twelve bars, 30° apart. Near-flat here because idle.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#27c7ff">6</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Eight coil plates</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">mask 70–72%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#7d97a8">Counter-rotating at <span style="font-family:'Share Tech Mono',monospace;font-size:12px">× 5 reverse</span> — the detail that sells it as machinery.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#27c7ff">7</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Three spokes</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">0° 120° 240°</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#7d97a8">Gradient-masked so only the 4–40% span shows. Static.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0;border-bottom:1px solid rgba(39,199,255,.08)"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#27c7ff">8</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Inner bezel</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">inset 36%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#7d97a8">2px solid, glowing both ways, over a near-black well.</span></div>
+      <div style="display:flex;gap:16px;align-items:baseline;padding:11px 0"><span style="width:22px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#ffc94d">9</span><span style="width:190px;flex:none;font:500 15px/1.2 Rajdhani,sans-serif;color:#eaf6fc">Triangle + bloom</span><span style="width:110px;flex:none;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">inset 40.5%</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#ffdc8a"><b style="font-weight:500">No disc over the triangle.</b> An earlier version had a bright nucleus here; it fought the triangle and was cut.</span></div>
+    </div>
+  </div>
+
+  <div id="shot-core-large" style="width:1560px;background:#04080c;border:1px solid rgba(39,199,255,.16);padding:44px 46px 52px;display:flex;gap:0;align-items:center;justify-content:space-around;margin-bottom:34px">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:22px"><dc-import name="ArcReactor" state="idle" size="{{ md }}" label="{{ off }}" hint-size="330px,330px"></dc-import><div style="text-align:center;display:flex;flex-direction:column;gap:6px"><span style="font:600 14px/1 'Share Tech Mono',monospace;letter-spacing:.3em;color:#27c7ff;text-indent:.3em">IDLE</span><span style="font:400 12px/1.4 Rajdhani,sans-serif;color:#7d97a8">6s spin · halo .34<br>coils at the 0.035 floor</span></div></div>
+    <div style="width:1px;height:300px;background:rgba(39,199,255,.12)"></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:22px"><dc-import name="ArcReactor" state="listening" size="{{ md }}" label="{{ off }}" hint-size="330px,330px"></dc-import><div style="text-align:center;display:flex;flex-direction:column;gap:6px"><span style="font:600 14px/1 'Share Tech Mono',monospace;letter-spacing:.3em;color:#45ffc8;text-indent:.3em">LISTENING</span><span style="font:400 12px/1.4 Rajdhani,sans-serif;color:#7d97a8">1.3s spin · halo .62<br>coils breathing, live</span></div></div>
+    <div style="width:1px;height:300px;background:rgba(39,199,255,.12)"></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:22px"><dc-import name="ArcReactor" state="speaking" size="{{ md }}" charge="{{ c100 }}" label="{{ off }}" hint-size="330px,330px"></dc-import><div style="text-align:center;display:flex;flex-direction:column;gap:6px"><span style="font:600 14px/1 'Share Tech Mono',monospace;letter-spacing:.3em;color:#27c7ff;text-indent:.3em">SPEAKING</span><span style="font:400 12px/1.4 Rajdhani,sans-serif;color:#7d97a8">0.9s spin · halo .76<br>coils syllabic · charge 100%</span></div></div>
+    <div style="width:1px;height:300px;background:rgba(39,199,255,.12)"></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:22px"><dc-import name="ArcReactor" state="error" size="{{ md }}" label="{{ off }}" hint-size="330px,330px"></dc-import><div style="text-align:center;display:flex;flex-direction:column;gap:6px"><span style="font:600 14px/1 'Share Tech Mono',monospace;letter-spacing:.3em;color:#ff5c6a;text-indent:.3em">FAULT</span><span style="font:400 12px/1.4 Rajdhani,sans-serif;color:#7d97a8">0.35s spin · halo .68<br>fastest ring in the set</span></div></div>
+  </div>
+
+  <div id="shot-core-grid" style="width:1560px;background:#04080c;border:1px solid rgba(39,199,255,.16);padding:52px 46px 60px;display:grid;grid-template-columns:repeat(7,1fr);gap:54px 22px;place-items:center">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="idle" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">STANDING BY</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="listening" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#45ffc8">LISTENING</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="processing" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">TRANSCRIBING</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="thinking" size="{{ sm }}" charge="{{ c62 }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">THINKING</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="searching" size="{{ sm }}" charge="{{ c38 }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">SEARCHING</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="executing" size="{{ sm }}" charge="{{ c84 }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#ffc94d">EXECUTING</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="waiting" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#ffc94d">NEEDS YOU</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="speaking" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">SPEAKING</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="interrupted" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">STOPPED</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="error" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#ff5c6a">FAULT</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="starting" size="{{ sm }}" charge="{{ c46 }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">SPINNING UP</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="sleeping" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">ASLEEP</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:16px"><dc-import name="ArcReactor" state="offline" size="{{ sm }}" label="{{ off }}" hint-size="150px,150px"></dc-import><span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#7d97a8">OFFLINE</span></div>
+    <div style="display:flex;flex-direction:column;gap:12px;align-self:center;justify-self:stretch;padding-left:16px;border-left:1px solid rgba(39,199,255,.14)">
+      <span style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.22em;color:#27c7ff">VOICE</span>
+      <span style="font:400 12.5px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Coils run off four smoothed amplitude bands written straight onto the element — syllabic while speaking, breathier while listening, near-flat at rest.</span>
+    </div>
+  </div>
+</div>
+
+<div id="s3" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">03</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">Resting, and listening</h2>
+  </div>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Rest is the screen you see 99% of the time, so it holds almost nothing: the core large and centred, one hint line, and chrome dimmed to a third. Listening keeps the exact same geometry — it hasn't got anything to show you yet — and changes only temperature: the room goes green, the coils come alive, the core tucks in slightly.</p>
+
+  <div style="display:flex;gap:34px;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(39,199,255,.16)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">REST</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">CORE AT 145% · CHROME AT 32% · RADIAL</span></div>
+      <div id="shot-rest" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFrame" scene="rest" hint-size="1920px,1080px"></dc-import></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(69,255,200,.22)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">LISTENING</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">CORE AT 130% · COILS LIVE · RADIAL</span></div>
+      <div id="shot-listen" style="width:1920px;height:1080px;border:1px solid rgba(69,255,200,.2)"><dc-import name="JarvisFrame" scene="listen" hint-size="1920px,1080px"></dc-import></div>
+    </div>
+  </div>
+</div>
+
+<div id="s4" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">04</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">The stage</h2>
+  </div>
+  <p style="margin:0 0 8px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">The right side is not a text column — it's one box, always in the same place, whose <i>content type</i> changes with the task. There is no Files view or Browser view to navigate to; the utterance picks the renderer. That's what replaced the eleven tabs.</p>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">The browser is a <b style="color:#d7ecf7;font-weight:500">real embedded Brave with real tabs</b> — you can click straight into it, open your own tab, and carry on while JARVIS finishes in its. Which makes one question load-bearing: <b style="color:#d7ecf7;font-weight:500">who has the pointer right now.</b> It's answered three ways at once so you can read it from anywhere on screen.</p>
+
+  <div style="display:flex;gap:0;margin-bottom:34px;max-width:1500px;border-top:1px solid rgba(39,199,255,.14);border-bottom:1px solid rgba(39,199,255,.14)">
+    <div style="flex:1;padding:20px 30px 20px 0"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="width:9px;height:9px;border-radius:50%;background:#45d7ff;box-shadow:0 0 9px #45d7ff"></span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#45d7ff">CYAN · JARVIS DRIVING</span></div><p style="margin:0;font:400 13.5px/1.5 Rajdhani,sans-serif;color:#7d97a8">Its tab carries a coloured top edge and a live counter. A pinging marker sits on the link it's about to open.</p></div>
+    <div style="flex:1;padding:20px 30px;border-left:1px solid rgba(39,199,255,.1)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="width:9px;height:9px;border-radius:50%;background:#e6e6ee;box-shadow:0 0 9px #e6e6ee"></span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#e6e6ee">WHITE · YOU HAVE IT</span></div><p style="margin:0;font:400 13.5px/1.5 Rajdhani,sans-serif;color:#7d97a8">Badge and browser ring go white. JARVIS's tab keeps its cyan edge and its counter keeps climbing.</p></div>
+    <div style="flex:1;padding:20px 0 20px 30px;border-left:1px solid rgba(39,199,255,.1)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span style="width:9px;height:9px;border-radius:50%;background:#ffc94d;box-shadow:0 0 9px #ffc94d"></span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#ffc94d">AMBER · WAITING ON YOU</span></div><p style="margin:0;font:400 13.5px/1.5 Rajdhani,sans-serif;color:#7d97a8">A login wall or a confirmation. It hands over rather than stalling, and says what it still needs.</p></div>
+  </div>
+
+  <div style="display:flex;gap:34px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(69,215,255,.24)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · PROSE — "how fast is this thing, really?"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">NOTHING TO LOOK AT, SO THE ANSWER IS THE CONTENT</span></div>
+      <div id="shot-work" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFrame" scene="work" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Your question at 40px — deliberately the largest thing on screen. Source chips resolve green as they're read, the in-flight one flickers, a dashed chip counts what's queued. Underneath, the run reads left to right as a strip rather than a log, and the machine panel names the model and what it remembered about you.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(39,199,255,.24)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · PROSE, SPEAKING — and the 5-second hold</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">HOLDS, THEN COLLAPSES TO THE RESTING CORE</span></div>
+      <div id="shot-answer" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFrame" scene="answer" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">All six sources resolved, the queue gone, the run advanced to "Speaking it". Once it stops talking the stage holds five seconds and then collapses — signalled only by a thin draining bar, since almost always you'll just let it go. "Keep it" pins it, "keep it for ten minutes" sets a timer, "bring that back" restores the last stage whatever it was.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(69,215,255,.24)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · BROWSER — "research the Iron Man arc reactor"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#45d7ff">JARVIS DRIVING</span></div>
+      <div id="shot-browse" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFrame" scene="browse" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Full Brave chrome — back, forward, reload, address bar, tabs, and a <b style="color:#a8c8da;font-weight:500">+</b> that's yours whenever you want it. Nothing is disabled; what's added is legibility. The working tab has a cyan top edge and a live <b style="color:#a8c8da;font-weight:500">3/6</b>, and the marker on result three is captioned <i>OPENING RESULT 3</i> — you see the decision, not just the outcome. Page content is dimmed so a bright site can't blow out the room.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(230,230,238,.24)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · BOTH AT ONCE — your tab in front, JARVIS still working</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#e6e6ee">YOU HAVE THE POINTER</span></div>
+      <div id="shot-shared" style="width:1920px;height:1080px;border:1px solid rgba(230,230,238,.18)"><dc-import name="JarvisFrame" scene="shared" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">You clicked in, opened a second tab, and you're reading docs with a live caret — meanwhile tab 1 keeps its cyan edge and has ticked to <b style="color:#a8c8da;font-weight:500">5/6</b>. The header says <i>STILL WORKING</i> and names the tab it's in. Crucially <b style="color:#a8c8da;font-weight:500">the core on the left keeps charging</b>: your progress indicator never disappears just because you looked away.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(255,201,77,.28)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#ffdc8a">STAGE · HANDOFF — a login wall, so it gives you the pointer</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ffc94d">OVER TO YOU</span></div>
+      <div id="shot-handoff" style="width:1920px;height:1080px;border:1px solid rgba(255,201,77,.2)"><dc-import name="JarvisFrame" scene="handoff" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">It doesn't stall and it doesn't fail — it hands over. Room goes amber, core drops to <b style="color:#ffdc8a;font-weight:500">NEEDS YOU</b>, tab edge and browser ring turn amber, and the password field is pre-focused with an amber ring so your hands know where to go. Written across the bottom of the page and spoken: <i>"It's yours — sign in and I'll pick up where I left off. The other five sources are already read."</i> The escape hatch matters as much as the ask: say "skip it" and it answers from the five it has.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(69,215,255,.24)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · IMAGES — "show me images of the arc reactor"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">JUST THE IMAGES, NO PAGE FURNITURE</span></div>
+      <div id="shot-images" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFrame" scene="images" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">You asked for images, so you get images — no titles, no snippets. Four across, source domain under each, the one it thinks you meant tagged <b style="color:#a8c8da;font-weight:500">BEST MATCH</b> with a lit border, and the eighth still arriving and saying so. Voice takes it from there: "bigger", "the second one", "save that". <span style="color:#5f7b8c">Tiles are placeholders — real thumbnails come from the search.</span></p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(255,201,77,.28)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#ffdc8a">STAGE · FILE — "what did I write about Vulkan speed?"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ffc94d">TOUCHING FILES IS A TOOL RUN</span></div>
+      <div id="shot-file" style="width:1920px;height:1080px;border:1px solid rgba(255,201,77,.2)"><dc-import name="JarvisFrame" scene="file" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Not a file browser and not a list of hits — the file, open, with the matching lines lit and everything around them dimmed to context. Line numbers so you can find it yourself later, path and edit time in the header, <i>3 OF 41 LINES MATCHED</i> so you know how much it read. The room is amber rather than cyan, because the colour already told you this was a tool run.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(255,201,77,.28)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#ffdc8a">STAGE · TWO AT ONCE — "research it and pull up my Vulkan notes"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ffc94d">ONLY BECAUSE TWO TASKS ARE RUNNING</span></div>
+      <div id="shot-split" style="width:1920px;height:1080px;border:1px solid rgba(255,201,77,.2)"><dc-import name="JarvisFrame" scene="split" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Split is a consequence, never a layout option. Two jobs, so two numbered panes, each with its own title, progress bar and content type — live browser left, file right. Pane 2 has finished and says <b style="color:#a8c8da;font-weight:500">DONE</b> while pane 1 is on 3 of 6; the finished pane stays put so you can read it while the other works. Hard cap of two — a third queues rather than shrinking these.</p>
+    </div>
+
+  </div>
+</div>
+
+<div id="s5" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">05</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">When it breaks</h2>
+  </div>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Both faults use the same move — core back to centre, room goes red — but they carry different content, because the useful thing to say is different. A subsystem going down is about triage. You closing its tab is about how cheap it is to recover.</p>
+
+  <div style="display:flex;gap:34px;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(255,92,106,.3)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#ffd8dc">SUBSYSTEM DOWN — the vision server stopped answering</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ff5c6a">FOUR WEDGES · RADIAL</span></div>
+      <div id="shot-fault" style="width:1920px;height:1080px;border:1px solid rgba(255,92,106,.22)"><dc-import name="JarvisFrame" scene="fault" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">What's broken with a repair button, what's still healthy, live telemetry, and <b style="color:#a8c8da;font-weight:500">HAPPENED BEFORE</b> — two prior occurrences and the observation that it's the third time today, so the driver is worth a look rather than another restart. Note telemetry shows idle numbers: the machine isn't busy, it's broken.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(255,92,106,.3)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#ffd8dc">YOU CLOSED ITS TAB — mid-fetch</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ff5c6a">TWO WEDGES · RECOVERABLE</span></div>
+      <div id="shot-tabshut" style="width:1920px;height:1080px;border:1px solid rgba(255,92,106,.22)"><dc-import name="JarvisFrame" scene="tabshut" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Two wedges, not four, and the left one gets equal weight to the right: <b style="color:#a8c8da;font-weight:500">WHAT I STILL HAVE</b> — five of six sources kept, notes intact, only the sixth lost. That's the line that makes the decision easy: <i>"trying again only re-fetches the one, so it's about two seconds."</i> It also says <i>closed by you, not a crash</i>, so you're not left wondering whether something's wrong with the machine.</p>
+    </div>
+  </div>
+</div>
+
+<div id="s6" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">06</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">First contact</h2>
+  </div>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Boot shows real sidecar events with real measurements — no fake progress bars anywhere. First run asks two questions at spoken scale and gets out of the way; no modal box, no wizard.</p>
+
+  <div style="display:flex;gap:34px;align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(39,199,255,.16)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">BOOT</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">EVERY LINE IS A REAL EVENT</span></div>
+      <div id="shot-boot" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisBoot" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">The core spinning up with its charge arc at 72%, then one row per subsystem: status dot, name, a real progress track, and a real timing. Done rows are green and full; the model is mid-load with an actual byte count; the rest sit queued at 45% opacity.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(39,199,255,.16)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">FIRST RUN</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">TWO QUESTIONS, THEN OUT OF THE WAY</span></div>
+      <div id="shot-firstrun" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFirstRun" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">How it should listen, and which voice. Both at a size you'd read from a chair, each option carrying a plain-language subtitle rather than a setting name. The footer states the two rules that matter — web search stays off until you add a key, anything risky asks first — and then gets out of the way.</p>
+    </div>
+  </div>
+</div>
+
+<div id="s7" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">07</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">The rest of the stage</h2>
+  </div>
+  <p style="margin:0 0 8px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Media, tables, and settings — all three as stage types, none of them a destination you navigate to. On your questions: <b style="color:#d7ecf7;font-weight:500">tables</b> are for when the answer <i>is</i> a comparison and prose would make you hold four numbers in your head. <b style="color:#d7ecf7;font-weight:500">Conversation history</b> now lives inside settings as you asked, which turns out to be the right call — it's the same thing as "what have you got on me", so it sits next to memory and permissions.</p>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">And <b style="color:#d7ecf7;font-weight:500">maps don't need a stage type at all</b> — a map is a web page, so "how far is Portland" is the browser stage pointed at a map with the answer spoken over it. One less thing to build. Apps do need their own, so there's a sketch of that below.</p>
+
+  <div style="display:flex;gap:34px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(89,224,165,.26)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · MEDIA — "put on Kid A"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#59e0a5">GREEN · NOTHING TO THINK ABOUT</span></div>
+      <div id="shot-media" style="width:1920px;height:1080px;border:1px solid rgba(89,224,165,.2)"><dc-import name="JarvisFrame" scene="media" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Track title at 40px — same slot the answer occupies, because here the track <i>is</i> the answer. Transport is visible and clickable but it's not the point; the footer names the words that work instead. Up-next runs underneath so "skip two" makes sense. The room goes green rather than cyan: playing music needed no thinking, and a reflex handled it without waking the model. <span style="color:#5f7b8c">Video, incidentally, doesn't need its own type either — a local file plays in this frame with the art area becoming the picture, and anything on the web is already the browser stage.</span></p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(39,199,255,.24)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · TABLE — "is it worth switching quant?"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">WHEN THE ANSWER IS A COMPARISON</span></div>
+      <div id="shot-table" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFrame" scene="table" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">This is what I meant by tables. Spoken aloud, eight quants × four numbers is unfollowable; side by side it's obvious. The row you're on is lit and tagged <b style="color:#a8c8da;font-weight:500">RUNNING</b>, the winning number is the only one at 20px, and the last column is plain English rather than a metric. Then the actual answer sits under the table as a sentence — <i>"stay where you are"</i> — because a table alone isn't an answer. Same pattern would carry "what's eating my disk" or "what did I run this week".</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(39,199,255,.24)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#d7ecf7">STAGE · SETTINGS, ON HISTORY — "what did we talk about earlier?"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#4d6b80">HISTORY LIVES HERE NOW</span></div>
+      <div id="shot-settings" style="width:1920px;height:1080px;border:1px solid rgba(39,199,255,.16)"><dc-import name="JarvisFrame" scene="settings" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">Six sections in the rail, History selected. Each turn shows what you said, what it answered, and <b style="color:#a8c8da;font-weight:500">which tools ran</b> as tags — including the one you denied at the gate, kept on the record on purpose. Voice reaches it directly: "settings, history", then "the Vulkan one". Note the core is at <b style="color:#a8c8da;font-weight:500">idle</b> here, not working — it's showing you something, not doing anything, and the core tells the truth about that.</p>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;flex:none">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(255,201,77,.28)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#ffdc8a">STAGE · APPS — "put the editor on the left"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ffc94d">SPECULATIVE · YOUR CALL</span></div>
+      <div id="shot-apps" style="width:1920px;height:1080px;border:1px solid rgba(255,201,77,.2)"><dc-import name="JarvisFrame" scene="apps" hint-size="1920px,1080px"></dc-import></div>
+      <p style="margin:2px 0 0;width:1920px;font:400 14px/1.55 Rajdhani,sans-serif;color:#7d97a8;text-wrap:pretty">You said this isn't needed yet, so here's just the shape of it: a live map of the screen with each window as a proportional tile, the one it just moved outlined and labelled, and everything else running listed beside it. It's the only surface here that shows you <i>your machine's layout</i> rather than content, which is why it can't borrow another type. The payoff would be named layouts — and <span style="color:#a8c8da">"workshop mode"</span> is already a taught command in your brain data, so the plumbing half exists.</p>
+    </div>
+
+  </div>
+</div>
+
+<div id="s8" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">08</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">The confirmation gate</h2>
+  </div>
+  <p style="margin:0 0 8px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">You asked what this is. It already exists in your build — the thing that stops a high-risk tool from running until you say yes. Today it's a modal that prints the raw JSON arguments and offers ALLOW / DENY, which puts the burden of reading a code fragment on you at exactly the wrong moment.</p>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Redesigned, it's a <b style="color:#d7ecf7;font-weight:500">radial</b> state — the core comes back to centre and faces you, amber, at NEEDS YOU — and it answers three questions in plain language: what will happen, exactly what it touches, and whether it can be taken back.</p>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;width:1920px;padding-bottom:9px;border-bottom:1px solid rgba(255,201,77,.28)"><span style="font:600 15px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#ffdc8a">"DELETE THE OLD QUANT, THE THREE-BIT ONE"</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.18em;color:#ffc94d">NOTHING HAS RUN YET</span></div>
+    <div id="shot-confirm" style="width:1920px;height:1080px;border:1px solid rgba(255,201,77,.2)"><dc-import name="JarvisFrame" scene="confirm" hint-size="1920px,1080px"></dc-import></div>
+  </div>
+
+  <div style="display:flex;gap:0;margin-top:30px;max-width:1560px">
+    <div style="flex:1;padding-right:30px"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#4d6b80;margin-bottom:9px">IT SAYS IT OUT LOUD</div><p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">The spoken sentence carries the consequence, not the syntax: <i>"that's 3.2 gigabytes and it does not go to the recycle bin."</i> You can answer without looking up.</p></div>
+    <div style="flex:1;padding:0 30px;border-left:1px solid rgba(39,199,255,.1)"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#4d6b80;margin-bottom:9px">THE PATH IS STILL THERE</div><p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Left wedge keeps the literal target in mono, plus size, age, and — the line that prevents most accidents — <b style="color:#a8c8da;font-weight:500">other files touched: none</b>.</p></div>
+    <div style="flex:1;padding:0 30px;border-left:1px solid rgba(39,199,255,.1)"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#4d6b80;margin-bottom:9px">SCOPED, NOT BLANKET</div><p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">The third option is <i>always allow deletes in D:\models</i> — a folder, not a permission for everything forever. Dashed and quiet, so it isn't the easy path.</p></div>
+    <div style="flex:1;padding-left:30px;border-left:1px solid rgba(39,199,255,.1)"><div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#4d6b80;margin-bottom:9px">NO TIMEOUT, EVER</div><p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">It waits indefinitely and never decays into yes. Walk away and come back an hour later and the file is still there. Amber holds until you answer.</p></div>
+  </div>
+</div>
+
+<div id="s9" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">09</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">The system</h2>
+  </div>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Everything above is built from this. The state hue is the important one: it's a single variable that drives panel borders, eyebrow labels, inner glow, ambient bloom, the column divider and the answer's bloom — so the whole room changes tone at once.</p>
+
+  <div style="display:flex;gap:0;max-width:1560px;border-top:1px solid rgba(39,199,255,.16)">
+
+    <div style="flex:1;padding:26px 34px 26px 0">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:18px">STATE HUE</div>
+      <div style="display:flex;flex-direction:column;gap:11px">
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#27c7ff;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">Idle · speaking</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">27C7FF</span></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#45ffc8;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">Listening</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">45FFC8</span></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#45d7ff;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">Searching</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">45D7FF</span></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#7a9bff;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">Thinking</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">7A9BFF</span></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#ffc94d;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">Tools · needs you</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">FFC94D</span></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#59e0a5;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">Healthy · done</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">59E0A5</span></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#ff5c6a;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">Fault</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">FF5C6A</span></div>
+        <div style="display:flex;align-items:center;gap:13px"><span style="width:26px;height:26px;border-radius:5px;background:#e6e6ee;flex:none"></span><span style="flex:1;font:400 13.5px/1.2 Rajdhani,sans-serif;color:#d7ecf7">You have the pointer</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">E6E6EE</span></div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(39,199,255,.1);font:400 12.5px/1.6 'Share Tech Mono',monospace;color:#5f7b8c">
+        BG 04080C · PANEL 091620 → 050D13<br>
+        TEXT EAF6FC / D7ECF7 / A8C8DA<br>
+        DIM 8FB6C9 / 4D6B80 / 3D5A6D
+      </div>
+    </div>
+
+    <div style="flex:1.15;padding:26px 34px;border-left:1px solid rgba(39,199,255,.1)">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:18px">TYPE · RAJDHANI SAYS THINGS, MONO MEASURES THEM</div>
+      <div style="display:flex;flex-direction:column;gap:13px">
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">ANSWER 40/500</span><span style="font:500 26px/1 Rajdhani,sans-serif;color:#eaf6fc">Forty-three tokens a second</span></div>
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">FAULT PROSE 31/500</span><span style="font:500 22px/1 Rajdhani,sans-serif;color:#eaf6fc">The vision server stopped</span></div>
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">STATE WORD 34/600</span><span style="font:600 22px/1 Rajdhani,sans-serif;letter-spacing:.12em;color:#27c7ff">SEARCHING</span></div>
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">RUN STEP 15/400</span><span style="font:400 15px/1 Rajdhani,sans-serif;color:#d7ecf7">Reading source 4 of 6</span></div>
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">WORDMARK 13 · .62em</span><span style="font:400 13px/1 'Share Tech Mono',monospace;letter-spacing:.62em;color:#27c7ff">JARVIS</span></div>
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">RADIAL STATE 15 · .5em</span><span style="font:600 15px/1 'Share Tech Mono',monospace;letter-spacing:.5em;color:#27c7ff">STANDING BY</span></div>
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">EYEBROW 10 · .32em</span><span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:#27c7ff">TELEMETRY</span></div>
+        <div style="display:flex;align-items:baseline;gap:16px"><span style="width:150px;flex:none;font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#4d6b80">SUBLABEL 10.5</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">PARAKEET · 180 ms · 0.96</span></div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(39,199,255,.1);font:400 12.5px/1.6 Rajdhani,sans-serif;color:#7d97a8">Floor is <b style="color:#a8c8da;font-weight:500">10px mono / 13.5px Rajdhani</b> — read from a desk, and the original's 9px labels were unreadable. Wide-tracked centred runs need a matching <span style="font-family:'Share Tech Mono',monospace;font-size:11.5px">text-indent</span> to cancel the trailing space.</div>
+    </div>
+
+    <div style="flex:1;padding:26px 0 26px 34px;border-left:1px solid rgba(39,199,255,.1)">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:18px">MOTION · GEOMETRY</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Core translate · scale</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">.9s</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Panel deploy</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">.7s</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Panel fade</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">.45s</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Rim colour · bloom</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">.8s</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Chrome fade</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">.6s</span></div>
+        <div style="padding:9px 0 0;font:400 11.5px/1.5 'Share Tech Mono',monospace;color:#5f7b8c">cubic-bezier(.65,0,.25,1)<br>WEDGE STAGGER .05 / .12 / .19 / .26s</div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(39,199,255,.1);display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Core at rest</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">380px × 1.45</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Core anchored</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">x 380 · ×0.85</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Stage box</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">1082 × 810</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Wedge panels</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">376 / 412 wide</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="flex:1;font:400 13px/1.3 Rajdhani,sans-serif;color:#d7ecf7">Core-facing corner</span><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#8fb6c9">96px radius</span></div>
+        <div style="padding:9px 0 0;font:400 11.5px/1.5 'Share Tech Mono',monospace;color:#5f7b8c">ATMOSPHERE AT Z-INDEX 0<br>CONTENT AT 2 · 3 · 4</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="s10" style="padding:72px 0 0;scroll-margin-top:20px">
+  <div style="display:flex;align-items:baseline;gap:18px;margin-bottom:14px">
+    <span style="font:400 12px/1 'Share Tech Mono',monospace;letter-spacing:.2em;color:#27c7ff">10</span>
+    <h2 style="margin:0;font:600 30px/1.1 Rajdhani,sans-serif;color:#eaf6fc">Scaling</h2>
+  </div>
+  <p style="margin:0 0 8px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">One rule, two clauses, and no breakpoints. <b style="color:#d7ecf7;font-weight:500">Scale uniformly to fit, then let edge-anchored things use the real edges.</b> Because this design is a centred core plus edge-anchored panels — not a flowing document — that gets you every screen without a single layout variant.</p>
+  <p style="margin:0 0 30px;max-width:1000px;font:400 15.5px/1.6 Rajdhani,sans-serif;color:#8fb6c9;text-wrap:pretty">Nothing reflows, ever. Type stays proportional, so the hierarchy you approved at 1080p is the hierarchy at 4K and on a TV. What changes on a wider screen is <i>breathing room</i>, not composition.</p>
+
+  <div style="display:flex;gap:0;max-width:1560px;border-top:1px solid rgba(39,199,255,.16);border-bottom:1px solid rgba(39,199,255,.16);margin-bottom:36px">
+    <div style="flex:1;padding:24px 32px 24px 0">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:13px">CLAUSE ONE · THE FACTOR</div>
+      <div style="font:400 15px/1.7 'Share Tech Mono',monospace;color:#d7ecf7;padding:14px 16px;border-radius:7px;background:rgba(6,14,22,.7);border:1px solid rgba(39,199,255,.16);margin-bottom:14px">scale = clamp(0.85,<br>&nbsp;&nbsp;min(vw / 1920, vh / 1080),<br>&nbsp;&nbsp;2.0)</div>
+      <p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Contain, not cover — so nothing is ever cropped. Applied once, as a transform on the frame root. The core, the stage, every panel and every type size comes along for free.</p>
+    </div>
+    <div style="flex:1;padding:24px 32px;border-left:1px solid rgba(39,199,255,.1)">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:13px">CLAUSE TWO · THE EDGES</div>
+      <p style="margin:0 0 12px;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">After scaling, seven things re-anchor to the real viewport rather than the scaled box: the four corner ticks, the wordmark, the clock, and — the important one — the <b style="color:#a8c8da;font-weight:500">left and right wedge panels</b>.</p>
+      <p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">So on a 21:9 the wedges slide outward and the stage gets genuinely wider, instead of the whole composition sitting in a letterboxed island with black bars either side.</p>
+    </div>
+    <div style="flex:1;padding:24px 0 24px 32px;border-left:1px solid rgba(39,199,255,.1)">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:13px">THE ONE EXCEPTION</div>
+      <p style="margin:0 0 12px;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">The 0.85 floor exists because 10px mono × 0.85 is 8.5px, and below that the sublabels stop being readable at desk distance.</p>
+      <p style="margin:0;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Under 1600 × 900, don't scale further — switch to <b style="color:#a8c8da;font-weight:500">compact</b>: hide the mono sublabels, halve the wedge padding, drop the core to 1.15 at rest. That's the only layout variant in the whole system.</p>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:22px;max-width:1560px">
+
+    <div style="display:flex;align-items:center;gap:26px">
+      <div style="width:190px;flex:none;display:flex;flex-direction:column;gap:4px">
+        <span style="font:500 17px/1.2 Rajdhani,sans-serif;color:#eaf6fc">1920 × 1080</span>
+        <span style="font:400 10.5px/1.4 'Share Tech Mono',monospace;color:#4d6b80">16:9 · YOUR SCREEN<br>SCALE 1.00 · REFERENCE</span>
+      </div>
+      <div style="width:576px;height:324px;flex:none;position:relative;border:1px solid rgba(39,199,255,.3);background:#04080c;display:flex;align-items:stretch;padding:14px;gap:10px">
+        <div style="width:96px;flex:none;border-radius:4px 4px 22px 4px;border:1px dashed rgba(39,199,255,.28);display:grid;place-items:center;font:400 8px/1 'Share Tech Mono',monospace;letter-spacing:.1em;color:#4d6b80">WEDGE</div>
+        <div style="flex:none;width:104px;display:grid;place-items:center"><div style="width:82px;height:82px;border-radius:50%;border:1px solid rgba(39,199,255,.55);background:radial-gradient(circle,rgba(39,199,255,.2),transparent 70%);display:grid;place-items:center;font:400 8px/1 'Share Tech Mono',monospace;color:#27c7ff">CORE</div></div>
+        <div style="flex:1;border-radius:4px;border:1px solid rgba(39,199,255,.28);background:rgba(39,199,255,.04);display:grid;place-items:center;font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#8fb6c9">STAGE 1082</div>
+      </div>
+      <p style="margin:0;flex:1;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Everything is authored here. Every measurement in section 09 is a 1.00 measurement.</p>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:26px">
+      <div style="width:190px;flex:none;display:flex;flex-direction:column;gap:4px">
+        <span style="font:500 17px/1.2 Rajdhani,sans-serif;color:#eaf6fc">3840 × 2160</span>
+        <span style="font:400 10.5px/1.4 'Share Tech Mono',monospace;color:#4d6b80">16:9 · 4K<br>SCALE 2.00 · IDENTICAL</span>
+      </div>
+      <div style="width:576px;height:324px;flex:none;position:relative;border:1px solid rgba(39,199,255,.3);background:#04080c;display:flex;align-items:stretch;padding:14px;gap:10px">
+        <div style="width:96px;flex:none;border-radius:4px 4px 22px 4px;border:1px dashed rgba(39,199,255,.28);display:grid;place-items:center;font:400 8px/1 'Share Tech Mono',monospace;letter-spacing:.1em;color:#4d6b80">WEDGE</div>
+        <div style="flex:none;width:104px;display:grid;place-items:center"><div style="width:82px;height:82px;border-radius:50%;border:1px solid rgba(39,199,255,.55);background:radial-gradient(circle,rgba(39,199,255,.2),transparent 70%);display:grid;place-items:center;font:400 8px/1 'Share Tech Mono',monospace;color:#27c7ff">CORE</div></div>
+        <div style="flex:1;border-radius:4px;border:1px solid rgba(39,199,255,.28);background:rgba(39,199,255,.04);display:grid;place-items:center;font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#8fb6c9">STAGE 2164</div>
+      </div>
+      <p style="margin:0;flex:1;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Same aspect, so it's the reference at double size — pixel for pixel the same composition, twice as sharp. Nothing to decide.</p>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:26px">
+      <div style="width:190px;flex:none;display:flex;flex-direction:column;gap:4px">
+        <span style="font:500 17px/1.2 Rajdhani,sans-serif;color:#eaf6fc">3440 × 1440</span>
+        <span style="font:400 10.5px/1.4 'Share Tech Mono',monospace;color:#45ffc8">21:9 · ULTRAWIDE<br>SCALE 1.33 · EDGES SPREAD</span>
+      </div>
+      <div style="width:774px;height:324px;flex:none;position:relative;border:1px solid rgba(69,255,200,.3);background:#04080c;display:flex;align-items:stretch;padding:14px;gap:10px">
+        <div style="width:128px;flex:none;border-radius:4px 4px 26px 4px;border:1px dashed rgba(69,255,200,.3);display:grid;place-items:center;font:400 8px/1 'Share Tech Mono',monospace;letter-spacing:.1em;color:#4d6b80">WEDGE</div>
+        <div style="flex:none;width:138px;display:grid;place-items:center"><div style="width:108px;height:108px;border-radius:50%;border:1px solid rgba(39,199,255,.55);background:radial-gradient(circle,rgba(39,199,255,.2),transparent 70%);display:grid;place-items:center;font:400 8px/1 'Share Tech Mono',monospace;color:#27c7ff">CORE</div></div>
+        <div style="flex:1;border-radius:4px;border:1px solid rgba(69,255,200,.3);background:rgba(69,255,200,.05);display:grid;place-items:center;font:400 9px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#45ffc8">STAGE 2320 — 880 WIDER THAN CONTAIN WOULD GIVE</div>
+      </div>
+      <p style="margin:0;flex:1;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">This is the case clause two exists for. Scale by height, then let the wedges and the stage take the real edges — the extra 880px becomes usable stage instead of black bars.</p>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:26px">
+      <div style="width:190px;flex:none;display:flex;flex-direction:column;gap:4px">
+        <span style="font:500 17px/1.2 Rajdhani,sans-serif;color:#eaf6fc">1366 × 768</span>
+        <span style="font:400 10.5px/1.4 'Share Tech Mono',monospace;color:#ffc94d">16:9 · SMALL<br>FLOOR 0.85 · COMPACT</span>
+      </div>
+      <div style="width:410px;height:230px;flex:none;position:relative;border:1px solid rgba(255,201,77,.3);background:#04080c;display:flex;align-items:stretch;padding:9px;gap:7px">
+        <div style="width:64px;flex:none;border-radius:3px 3px 16px 3px;border:1px dashed rgba(255,201,77,.3);display:grid;place-items:center;font:400 7px/1 'Share Tech Mono',monospace;color:#4d6b80">WEDGE</div>
+        <div style="flex:none;width:70px;display:grid;place-items:center"><div style="width:56px;height:56px;border-radius:50%;border:1px solid rgba(39,199,255,.5);background:radial-gradient(circle,rgba(39,199,255,.18),transparent 70%);display:grid;place-items:center;font:400 7px/1 'Share Tech Mono',monospace;color:#27c7ff">CORE</div></div>
+        <div style="flex:1;border-radius:3px;border:1px solid rgba(255,201,77,.3);background:rgba(255,201,77,.04);display:grid;place-items:center;font:400 8px/1 'Share Tech Mono',monospace;letter-spacing:.12em;color:#ffdc8a">STAGE · SUBLABELS OFF</div>
+      </div>
+      <p style="margin:0;flex:1;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">Below the floor, stop shrinking and start removing. Mono sublabels go, wedge padding halves, the resting core drops to 1.15 — the composition survives, the 8px text never happens.</p>
+    </div>
+
+  </div>
+
+  <div style="display:flex;gap:0;max-width:1560px;margin-top:36px;padding-top:26px;border-top:1px solid rgba(39,199,255,.16)">
+    <div style="flex:1;padding-right:32px">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:13px">DISTANCE, NOT RESOLUTION</div>
+      <p style="margin:0 0 12px;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#7d97a8">A 4K monitor at 60cm and a 4K TV at 3m have the same pixels and completely different needs, so resolution alone can't drive type size. One setting, two values:</p>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;align-items:baseline;gap:14px"><span style="width:74px;flex:none;font:400 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#27c7ff">DESK</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#a8c8da">Default. Scale as above, full density.</span></div>
+        <div style="display:flex;align-items:baseline;gap:14px"><span style="width:74px;flex:none;font:400 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#ffc94d">ROOM</span><span style="flex:1;font:400 13.5px/1.4 Rajdhani,sans-serif;color:#a8c8da">×1.25 on all type, mono sublabels off, wedges drop to two. Reads from a sofa.</span></div>
+      </div>
+      <p style="margin:12px 0 0;font:400 13px/1.5 Rajdhani,sans-serif;color:#5f7b8c">Belongs in first run as a third question if you ever put it on a TV — otherwise leave it out and default to desk.</p>
+    </div>
+    <div style="flex:1;padding-left:32px;border-left:1px solid rgba(39,199,255,.1)">
+      <div style="font:400 9.5px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#27c7ff;margin-bottom:13px">WHAT NOT TO DO</div>
+      <div style="display:flex;flex-direction:column;gap:11px">
+        <div style="display:flex;gap:12px"><span style="color:#ff5c6a;font:400 13px/1.5 Rajdhani,sans-serif;flex:none">✕</span><span style="font:400 13.5px/1.5 Rajdhani,sans-serif;color:#7d97a8">Media queries with per-breakpoint layouts. There is one layout; it scales.</span></div>
+        <div style="display:flex;gap:12px"><span style="color:#ff5c6a;font:400 13px/1.5 Rajdhani,sans-serif;flex:none">✕</span><span style="font:400 13.5px/1.5 Rajdhani,sans-serif;color:#7d97a8">Stretching to fill a wider screen. The core must stay circular and the plates concentric — never a non-uniform scale.</span></div>
+        <div style="display:flex;gap:12px"><span style="color:#ff5c6a;font:400 13px/1.5 Rajdhani,sans-serif;flex:none">✕</span><span style="font:400 13.5px/1.5 Rajdhani,sans-serif;color:#7d97a8">Letterboxing with black bars on ultrawide. Use the width.</span></div>
+        <div style="display:flex;gap:12px"><span style="color:#ff5c6a;font:400 13px/1.5 Rajdhani,sans-serif;flex:none">✕</span><span style="font:400 13.5px/1.5 Rajdhani,sans-serif;color:#7d97a8">Rem-based type with a fluid root. The transform already handles it, and doubling up drifts the ratios.</span></div>
+        <div style="display:flex;gap:12px"><span style="color:#59e0a5;font:400 13px/1.5 Rajdhani,sans-serif;flex:none">✓</span><span style="font:400 13.5px/1.5 Rajdhani,sans-serif;color:#a8c8da">One transform on the root, seven edge-anchored exceptions, one compact flag. That's the whole implementation.</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  renderVals() {
+    return { off: false, sm: 150, md: 330, lg: 480, c38: 38, c46: 46, c62: 62, c84: 84, c100: 100 };
+  }
+}
+</script>
+</body>
+</html>

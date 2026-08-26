@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><style>
+@font-face{font-family:"Rajdhani";font-weight:400;src:url("fonts/rajdhani-400.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:500;src:url("fonts/rajdhani-500.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:600;src:url("fonts/rajdhani-600.ttf") format("truetype")}
+@font-face{font-family:"Share Tech Mono";font-weight:400;src:url("fonts/sharetechmono-400.ttf") format("truetype")}
+@keyframes rail{to{transform:translate(-50%,-50%) rotate(360deg)}}
+@keyframes railR{to{transform:translate(-50%,-50%) rotate(-360deg)}}
+@keyframes flick{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+</style></helmet>
+
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#04080c;color:#d7ecf7;font-family:Rajdhani,sans-serif;--rim:{{ rim }};--air:{{ air }};--ox:{{ ox }};--osc:{{ osc }};--rad:{{ rad }};--wed:{{ wedge }};--col:{{ col }};--hint:{{ hint }};--chr:{{ chrome }};--d3:{{ d3 }};--b3:{{ b3 }};--o4:{{ o4 }};--d4:{{ d4 }};--b4:{{ b4 }};--s4o:{{ s4o }};--s4c:{{ s4c }};--qd:{{ qd }}">
+  <div style="position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 86% 78% at 50% 46%,transparent 52%,rgba(2,5,8,.30) 86%,rgba(1,3,5,.52) 100%)"></div>
+  <div style="position:absolute;inset:0;z-index:0;pointer-events:none;opacity:calc(.06 + var(--air) * .04);background-image:url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTYwIj48ZmlsdGVyIGlkPSJuIj48ZmVUdXJidWxlbmNlIHR5cGU9ImZyYWN0YWxOb2lzZSIgYmFzZUZyZXF1ZW5jeT0iMC44NSIgbnVtT2N0YXZlcz0iMyIvPjwvZmlsdGVyPjxyZWN0IHdpZHRoPSIxNjAiIGhlaWdodD0iMTYwIiBmaWx0ZXI9InVybCgjbikiIG9wYWNpdHk9IjAuNSIvPjwvc3ZnPg==');background-size:160px 160px"></div>
+  <div style="position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.42;background-image:repeating-linear-gradient(180deg,rgba(0,0,0,.13) 0 1px,transparent 1px 3px)"></div>
+
+  <div style="position:absolute;left:var(--ox);top:50%;width:1500px;height:1100px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(closest-side,color-mix(in srgb,var(--rim) 12%,transparent),transparent 68%);opacity:var(--air);transition:left .9s cubic-bezier(.65,0,.25,1),opacity .8s,background .8s;pointer-events:none"></div>
+
+  <div style="position:absolute;left:50%;top:50%;width:1300px;height:1300px;transform:translate(-50%,-50%);border-radius:50%;border:1px dashed color-mix(in srgb,var(--rim) 12%,transparent);opacity:var(--rad);transition:opacity .6s;animation:rail 240s linear infinite"></div>
+  <div style="position:absolute;left:50%;top:50%;width:980px;height:980px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid color-mix(in srgb,var(--rim) 9%,transparent);opacity:var(--rad);transition:opacity .6s;animation:railR 180s linear infinite"></div>
+
+  <div style="position:absolute;left:44px;top:40px;width:26px;height:1px;background:rgba(39,199,255,.4)"></div>
+  <div style="position:absolute;left:44px;top:40px;width:1px;height:26px;background:rgba(39,199,255,.4)"></div>
+  <div style="position:absolute;right:44px;top:40px;width:26px;height:1px;background:rgba(39,199,255,.4)"></div>
+  <div style="position:absolute;right:44px;top:40px;width:1px;height:26px;background:rgba(39,199,255,.4)"></div>
+  <div style="position:absolute;left:44px;bottom:40px;width:26px;height:1px;background:rgba(39,199,255,.4)"></div>
+  <div style="position:absolute;left:44px;bottom:40px;width:1px;height:26px;background:rgba(39,199,255,.4)"></div>
+  <div style="position:absolute;right:44px;bottom:40px;width:26px;height:1px;background:rgba(39,199,255,.4)"></div>
+  <div style="position:absolute;right:44px;bottom:40px;width:1px;height:26px;background:rgba(39,199,255,.4)"></div>
+
+  <div style="position:absolute;z-index:4;left:78px;top:56px;opacity:var(--chr);transition:opacity .6s ease">
+    <div style="font:400 13px/1 'Share Tech Mono',monospace;letter-spacing:.62em;color:#27c7ff;text-shadow:0 0 18px rgba(39,199,255,.6)">JARVIS</div>
+  </div>
+  <div style="position:absolute;z-index:4;right:78px;top:52px;text-align:right;opacity:var(--chr);transition:opacity .6s ease">
+    <div style="font:400 26px/1 'Share Tech Mono',monospace;letter-spacing:.06em;color:#a8c8da">21:44</div>
+  </div>
+
+  <div style="position:absolute;left:var(--ox);top:50%;transform:translate(-50%,-50%) scale(var(--osc));transition:left .9s cubic-bezier(.65,0,.25,1),transform .9s cubic-bezier(.65,0,.25,1);z-index:2">
+    <dc-import name="ArcReactor" state="{{ state }}" size="{{ orbSize }}" label="{{ off }}" charge="{{ charge }}" hint-size="380px,380px"></dc-import>
+  </div>
+
+  <div style="position:absolute;z-index:4;left:50%;top:128px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:11px;white-space:nowrap;opacity:var(--rad);transition:opacity .5s ease">
+    <div style="font:600 15px/1 'Share Tech Mono',monospace;letter-spacing:.5em;color:var(--rim);text-indent:.5em;text-shadow:0 0 20px color-mix(in srgb,var(--rim) 50%,transparent);transition:color .6s">{{ word }}</div>
+    <div style="font:400 11px/1 'Share Tech Mono',monospace;letter-spacing:.24em;color:#4d6b80;text-indent:.24em">{{ sub }}</div>
+  </div>
+
+  <div style="position:absolute;z-index:4;left:50%;top:856px;transform:translateX(-50%);opacity:var(--hint);transition:opacity .4s ease;font:400 11px/1 'Share Tech Mono',monospace;letter-spacing:.28em;color:#3d5a6d;text-indent:.28em;white-space:nowrap">SAY "HEY JARVIS" OR PRESS CTRL+SHIFT+J</div>
+
+  <sc-if value="{{ isFault }}">
+  <div style="position:absolute;z-index:4;left:50%;top:772px;transform:translateX(-50%);width:760px;text-align:center">
+    <p style="margin:0;font:500 31px/1.4 Rajdhani,sans-serif;letter-spacing:.004em;color:#eaf6fc;text-wrap:balance;text-shadow:0 0 34px color-mix(in srgb,var(--rim) 20%,transparent)">{{ said }}</p>
+  </div>
+
+<sc-if value="{{ isSubsystemFault }}">
+  <div style="position:absolute;z-index:4;left:96px;top:150px;width:376px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * -26px),calc((1 - var(--wed)) * -14px));transition:opacity .45s ease .05s,transform .7s cubic-bezier(.65,0,.25,1) .05s;background:radial-gradient(120% 120% at 100% 100%,color-mix(in srgb,var(--rim) 13%,transparent) 0%,transparent 58%),linear-gradient(160deg,rgba(9,22,32,.9),rgba(5,13,19,.9));border:1px solid color-mix(in srgb,var(--rim) 30%,transparent);border-radius:14px 14px 96px 14px;padding:20px 36px 32px 22px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 color-mix(in srgb,var(--rim) 20%,transparent),inset 0 0 60px color-mix(in srgb,var(--rim) 7%,transparent)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:var(--rim)">TELEMETRY</span>
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;color:#4d6b80">LIVE</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:13px">
+      <div style="display:flex;flex-direction:column;gap:5px"><div style="display:flex;justify-content:space-between;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9"><span>CPU</span><span style="color:#d7ecf7">9%</span></div><div style="height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden"><div style="width:9%;height:100%;background:#27c7ff;box-shadow:0 0 8px #27c7ff"></div></div></div>
+      <div style="display:flex;flex-direction:column;gap:5px"><div style="display:flex;justify-content:space-between;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9"><span>MEMORY</span><span style="color:#d7ecf7">13.1 / 32 GB</span></div><div style="height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden"><div style="width:41%;height:100%;background:#27c7ff;box-shadow:0 0 8px #27c7ff"></div></div></div>
+      <div style="display:flex;flex-direction:column;gap:5px"><div style="display:flex;justify-content:space-between;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9"><span>GENERATION</span><span style="color:#d7ecf7">43 tok/s</span></div><div style="height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden"><div style="width:71%;height:100%;background:#45ffc8;box-shadow:0 0 8px #45ffc8"></div></div></div>
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(39,199,255,.12);font:400 10.5px/1.5 'Share Tech Mono',monospace;color:#4d6b80">qwen2.5-7b-q4_k_m · vulkan<br>parakeet warm · kokoro warm</div>
+  </div>
+
+  <div style="position:absolute;z-index:4;right:96px;top:140px;width:412px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * 26px),calc((1 - var(--wed)) * -14px));transition:opacity .45s ease .12s,transform .7s cubic-bezier(.65,0,.25,1) .12s;background:radial-gradient(120% 120% at 0% 100%,rgba(255,92,106,.16) 0%,transparent 58%),linear-gradient(200deg,rgba(30,12,16,.92),rgba(12,6,9,.9));border:1px solid rgba(255,92,106,.42);border-radius:14px 14px 14px 96px;padding:20px 22px 32px 38px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,92,106,.16)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:#ff5c6a">FAILING SUBSYSTEM</span>
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;color:#ff9aa4;animation:flick 1.1s steps(1) infinite">DOWN</span>
+    </div>
+    <div style="font:500 22px/1.2 Rajdhani,sans-serif;color:#ffd8dc;margin-bottom:8px">vision server</div>
+    <div style="font:400 11px/1.6 'Share Tech Mono',monospace;color:#a8808a;margin-bottom:18px">port 8081 not responding<br>exit code 3221225781</div>
+    <div style="display:flex;gap:9px">
+      <button style="flex:1;background:rgba(255,92,106,.16);color:#ff8a94;border:1px solid rgba(255,92,106,.6);border-radius:7px;font:400 12px/1 Rajdhani,sans-serif;letter-spacing:.22em;padding:13px 0;cursor:pointer">RESTART IT</button>
+      <button style="flex:1;background:none;color:#8d7f84;border:1px solid rgba(255,255,255,.14);border-radius:7px;font:400 12px/1 Rajdhani,sans-serif;letter-spacing:.22em;padding:13px 0;cursor:pointer">LEAVE IT</button>
+    </div>
+  </div>
+
+  <div style="position:absolute;z-index:4;left:96px;bottom:150px;width:376px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * -26px),calc((1 - var(--wed)) * 14px));transition:opacity .45s ease .19s,transform .7s cubic-bezier(.65,0,.25,1) .19s;background:radial-gradient(120% 120% at 100% 0%,color-mix(in srgb,var(--rim) 13%,transparent) 0%,transparent 58%),linear-gradient(20deg,rgba(9,22,32,.9),rgba(5,13,19,.9));border:1px solid color-mix(in srgb,var(--rim) 30%,transparent);border-radius:14px 96px 14px 14px;padding:26px 38px 20px 22px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 color-mix(in srgb,var(--rim) 20%,transparent),inset 0 0 60px color-mix(in srgb,var(--rim) 7%,transparent)">
+    <div style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:var(--rim);margin-bottom:14px">HAPPENED BEFORE</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80;width:52px">14:02</span><span style="flex:1;font:400 14px/1.35 Rajdhani,sans-serif;color:#a8c8da">same fault · restarted, held 4 h</span></div>
+      <div style="display:flex;gap:12px;align-items:baseline"><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80;width:52px">09:18</span><span style="flex:1;font:400 14px/1.35 Rajdhani,sans-serif;color:#a8c8da">same fault · restarted, held 4 h</span></div>
+      <div style="display:flex;gap:12px;align-items:baseline;padding-top:8px;border-top:1px solid rgba(39,199,255,.1)"><span style="font:400 10.5px/1 'Share Tech Mono',monospace;color:var(--rim);width:52px">NOTE</span><span style="flex:1;font:400 14px/1.35 Rajdhani,sans-serif;color:#d7ecf7">Third time today — worth looking at the driver rather than restarting again.</span></div>
+    </div>
+  </div>
+
+  <div style="position:absolute;z-index:4;right:96px;bottom:140px;width:412px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * 26px),calc((1 - var(--wed)) * 14px));transition:opacity .45s ease .26s,transform .7s cubic-bezier(.65,0,.25,1) .26s;background:radial-gradient(120% 120% at 0% 0%,color-mix(in srgb,var(--rim) 13%,transparent) 0%,transparent 58%),linear-gradient(340deg,rgba(9,22,32,.9),rgba(5,13,19,.9));border:1px solid color-mix(in srgb,var(--rim) 30%,transparent);border-radius:96px 14px 14px 14px;padding:30px 22px 20px 40px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 color-mix(in srgb,var(--rim) 20%,transparent),inset 0 0 60px color-mix(in srgb,var(--rim) 7%,transparent)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:var(--rim)">EVERYTHING ELSE</span>
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;color:#59e0a5">5 OF 6 HEALTHY</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:center;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="width:118px;font:400 13.5px/1 Rajdhani,sans-serif;color:#d7ecf7">llama server</span><span style="flex:1;font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">43 tok/s · 4.4 GB</span></div>
+      <div style="display:flex;align-items:center;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="width:118px;font:400 13.5px/1 Rajdhani,sans-serif;color:#d7ecf7">stt · tts</span><span style="flex:1;font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">both warm</span></div>
+      <div style="display:flex;align-items:center;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#ffc94d;box-shadow:0 0 8px #ffc94d;flex:none"></span><span style="width:118px;font:400 13.5px/1 Rajdhani,sans-serif;color:#d7ecf7">brave search</span><span style="flex:1;font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">2 rate limits this hour</span></div>
+      <div style="display:flex;align-items:center;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="width:118px;font:400 13.5px/1 Rajdhani,sans-serif;color:#d7ecf7">memory store</span><span style="flex:1;font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">1,204 rows</span></div>
+      <div style="display:flex;align-items:center;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="width:118px;font:400 13.5px/1 Rajdhani,sans-serif;color:#d7ecf7">skills</span><span style="flex:1;font:400 10.5px/1 'Share Tech Mono',monospace;color:#4d6b80">24 loaded</span></div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isConfirm }}">
+  <div style="position:absolute;z-index:4;left:96px;top:150px;width:376px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * -26px),calc((1 - var(--wed)) * -14px));transition:opacity .45s ease .05s,transform .7s cubic-bezier(.65,0,.25,1) .05s;background:radial-gradient(120% 120% at 100% 100%,color-mix(in srgb,var(--rim) 13%,transparent) 0%,transparent 58%),linear-gradient(160deg,rgba(9,22,32,.9),rgba(5,13,19,.9));border:1px solid color-mix(in srgb,var(--rim) 30%,transparent);border-radius:14px 14px 96px 14px;padding:20px 36px 32px 22px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 color-mix(in srgb,var(--rim) 20%,transparent),inset 0 0 60px color-mix(in srgb,var(--rim) 7%,transparent)">
+    <div style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:var(--rim);margin-bottom:16px">EXACTLY WHAT GOES</div>
+    <div style="font:400 12.5px/1.6 'Share Tech Mono',monospace;color:#d7ecf7;word-break:break-all;margin-bottom:16px">D:\models\qwen2.5-7b-instruct-<wbr>q3_k_s.gguf</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;justify-content:space-between;font:400 13.5px/1.3 Rajdhani,sans-serif;color:#a8c8da"><span>Size</span><span style="color:#eaf6fc">3.2 GB</span></div>
+      <div style="display:flex;justify-content:space-between;font:400 13.5px/1.3 Rajdhani,sans-serif;color:#a8c8da"><span>Last loaded</span><span style="color:#eaf6fc">19 days ago</span></div>
+      <div style="display:flex;justify-content:space-between;font:400 13.5px/1.3 Rajdhani,sans-serif;color:#a8c8da"><span>Other files touched</span><span style="color:#59e0a5">none</span></div>
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(39,199,255,.1);font:400 13.5px/1.45 Rajdhani,sans-serif;color:#7d97a8">One file. Not the folder, not the other three quants.</div>
+  </div>
+
+  <div style="position:absolute;z-index:4;right:96px;top:140px;width:412px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * 26px),calc((1 - var(--wed)) * -14px));transition:opacity .45s ease .12s,transform .7s cubic-bezier(.65,0,.25,1) .12s;background:radial-gradient(120% 120% at 0% 100%,rgba(255,201,77,.16) 0%,transparent 58%),linear-gradient(200deg,rgba(30,24,10,.92),rgba(12,9,4,.9));border:1px solid rgba(255,201,77,.45);border-radius:14px 14px 14px 96px;padding:20px 22px 32px 38px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,201,77,.18)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:#ffc94d">CANNOT BE UNDONE</span>
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;color:#c9a86a">NO RECYCLE BIN</span>
+    </div>
+    <div style="font:500 22px/1.2 Rajdhani,sans-serif;color:#ffeec4;margin-bottom:8px">Permanent delete</div>
+    <div style="font:400 11px/1.6 'Share Tech Mono',monospace;color:#a89a72;margin-bottom:20px">tool: delete_file · risk: high<br>nothing has run yet</div>
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div style="display:flex;gap:9px">
+        <button style="flex:1;background:rgba(255,201,77,.16);color:#ffdc8a;border:1px solid rgba(255,201,77,.6);border-radius:7px;font:400 12px/1 Rajdhani,sans-serif;letter-spacing:.22em;padding:14px 0;cursor:pointer">DO IT</button>
+        <button style="flex:1;background:none;color:#9a9080;border:1px solid rgba(255,255,255,.14);border-radius:7px;font:400 12px/1 Rajdhani,sans-serif;letter-spacing:.22em;padding:14px 0;cursor:pointer">NO</button>
+      </div>
+      <button style="background:none;color:#8d8574;border:1px dashed rgba(255,255,255,.14);border-radius:7px;font:400 11px/1 Rajdhani,sans-serif;letter-spacing:.16em;padding:11px 0;cursor:pointer">ALWAYS ALLOW DELETES IN D:\MODELS</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isTabFault }}">
+  <div style="position:absolute;z-index:4;left:96px;top:150px;width:376px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * -26px),calc((1 - var(--wed)) * -14px));transition:opacity .45s ease .05s,transform .7s cubic-bezier(.65,0,.25,1) .05s;background:radial-gradient(120% 120% at 100% 100%,color-mix(in srgb,var(--rim) 13%,transparent) 0%,transparent 58%),linear-gradient(160deg,rgba(9,22,32,.9),rgba(5,13,19,.9));border:1px solid color-mix(in srgb,var(--rim) 30%,transparent);border-radius:14px 14px 96px 14px;padding:20px 36px 32px 22px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 color-mix(in srgb,var(--rim) 20%,transparent),inset 0 0 60px color-mix(in srgb,var(--rim) 7%,transparent)">
+    <div style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:var(--rim);margin-bottom:16px">WHAT I STILL HAVE</div>
+    <div style="display:flex;flex-direction:column;gap:11px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="flex:1;font:400 14.5px/1.35 Rajdhani,sans-serif;color:#d7ecf7">5 of 6 sources, already read and kept</span></div>
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="flex:1;font:400 14.5px/1.35 Rajdhani,sans-serif;color:#d7ecf7">The notes I'd taken from them</span></div>
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="width:7px;height:7px;border-radius:50%;background:#ff5c6a;box-shadow:0 0 8px #ff5c6a;flex:none"></span><span style="flex:1;font:400 14.5px/1.35 Rajdhani,sans-serif;color:#ffd8dc">The sixth — it was mid-load</span></div>
+      <div style="padding-top:12px;margin-top:2px;border-top:1px solid rgba(39,199,255,.1);font:400 13.5px/1.45 Rajdhani,sans-serif;color:#a8c8da">Trying again only re-fetches the one, so it's about two seconds.</div>
+    </div>
+  </div>
+
+  <div style="position:absolute;z-index:4;right:96px;top:140px;width:412px;opacity:var(--wed);transform:translate(calc((1 - var(--wed)) * 26px),calc((1 - var(--wed)) * -14px));transition:opacity .45s ease .12s,transform .7s cubic-bezier(.65,0,.25,1) .12s;background:radial-gradient(120% 120% at 0% 100%,rgba(255,92,106,.16) 0%,transparent 58%),linear-gradient(200deg,rgba(30,12,16,.92),rgba(12,6,9,.9));border:1px solid rgba(255,92,106,.42);border-radius:14px 14px 14px 96px;padding:20px 22px 32px 38px;box-shadow:0 24px 60px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,92,106,.16)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;letter-spacing:.32em;color:#ff5c6a">WHAT HAPPENED</span>
+      <span style="font:400 10px/1 'Share Tech Mono',monospace;color:#ff9aa4">21:46:08</span>
+    </div>
+    <div style="font:500 22px/1.2 Rajdhani,sans-serif;color:#ffd8dc;margin-bottom:8px">Brave was closed</div>
+    <div style="font:400 11px/1.6 'Share Tech Mono',monospace;color:#a8808a;margin-bottom:18px">my tab went with it, mid-fetch<br>closed by you, not a crash</div>
+    <div style="display:flex;gap:9px">
+      <button style="flex:1;background:rgba(255,92,106,.16);color:#ff8a94;border:1px solid rgba(255,92,106,.6);border-radius:7px;font:400 12px/1 Rajdhani,sans-serif;letter-spacing:.22em;padding:13px 0;cursor:pointer">TRY AGAIN</button>
+      <button style="flex:1;background:none;color:#8d7f84;border:1px solid rgba(255,255,255,.14);border-radius:7px;font:400 12px/1 Rajdhani,sans-serif;letter-spacing:.22em;padding:13px 0;cursor:pointer">ANSWER ANYWAY</button>
+    </div>
+  </div>
+  </sc-if>
+
+  </sc-if>
+
+  <div style="position:absolute;left:722px;top:150px;bottom:120px;width:2px;z-index:3;opacity:var(--col);background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--rim) 55%,transparent) 22%,color-mix(in srgb,var(--rim) 55%,transparent) 78%,transparent);box-shadow:0 0 24px color-mix(in srgb,var(--rim) 40%,transparent);transition:opacity .5s ease"></div>
+
+  <sc-if value="{{ notFault }}" hint-placeholder-val="{{ true }}">
+  <div style="position:absolute;z-index:4;left:760px;right:78px;top:150px;bottom:120px;opacity:var(--col);transform:translateX(calc((1 - var(--col)) * 44px));transition:opacity .5s ease,transform .7s cubic-bezier(.65,0,.25,1);display:flex;flex-direction:column;pointer-events:none">
+    <dc-import name="JarvisStage" kind="{{ stage }}" hint-size="100%,100%"></dc-import>
+  </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1920,&quot;height&quot;:1080},&quot;scene&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;rest&quot;,&quot;listen&quot;,&quot;work&quot;,&quot;answer&quot;,&quot;browse&quot;,&quot;shared&quot;,&quot;handoff&quot;,&quot;images&quot;,&quot;file&quot;,&quot;media&quot;,&quot;table&quot;,&quot;settings&quot;,&quot;apps&quot;,&quot;split&quot;,&quot;confirm&quot;,&quot;tabshut&quot;,&quot;fault&quot;],&quot;default&quot;:&quot;rest&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const TAIL = {
+  reading: {
+    d3: "#27c7ff", b3: "flick", o4: "0.4", d4: "transparent", b4: "none",
+    s4o: "0.55", s4c: "#8fb6c9", qd: "inline-flex", elapsed: "1.42 s",
+    turnLabel: "THIS TURN · 1.42 s",
+    r1: "Heard you", r1sub: "PARAKEET · 180 ms · 0.96",
+    r2: "Reflex matched web_research", r2sub: "94% · MODEL NEVER WOKE",
+    r3: "Reading source 4 of 6", r3sub: "KEYLESS BRAVE · NO ACCOUNT",
+    r4: "Speak it", r4sub: "KOKORO · ALAN",
+  },
+  spoken: {
+    d3: "#59e0a5", b3: "none", o4: "1", d4: "#27c7ff", b4: "flick",
+    s4o: "1", s4c: "#d7ecf7", qd: "none", elapsed: "2.71 s",
+    turnLabel: "THIS TURN · 2.71 s",
+    r1: "Heard you", r1sub: "PARAKEET · 180 ms · 0.96",
+    r2: "Reflex matched web_research", r2sub: "94% · MODEL NEVER WOKE",
+    r3: "Read all 6 sources", r3sub: "KEYLESS BRAVE · 1.9 s",
+    r4: "Speaking it", r4sub: "KOKORO · ALAN · 0.31 s TO FIRST WORD",
+  },
+  fault: {
+    d3: "#59e0a5", b3: "none", o4: "1", d4: "#ffc94d", b4: "flick",
+    s4o: "1", s4c: "#ffd8dc", qd: "none", elapsed: "held 6 m",
+    turnLabel: "THIS FAULT · HELD 6 m",
+    r1: "Detected", r1sub: "CONNECTION REFUSED 127.0.0.1:8081",
+    r2: "Retried twice", r2sub: "EXIT CODE 3221225781 BOTH TIMES",
+    r3: "Everything else kept running", r3sub: "VOICE · TOOLS · MEMORY UNAFFECTED",
+    r4: "Waiting on you", r4sub: "RESTART, OR LEAVE IT DOWN",
+  },
+};
+
+// Geometry follows state: radial when the core is the subject, anchored when reading is.
+const SCEN = {
+  rest:   { state: "idle", word: "STANDING BY", sub: "ctrl+shift+j to talk", heard: "", said: "",
+            charge: 0, chrome: 0.32, rim: "#27c7ff", air: 0.5, tail: "reading",
+            ox: "50%", osc: 1.45, rad: 1, wedge: 0, col: 0, hint: 1 },
+  listen: { state: "listening", word: "LISTENING", sub: "go ahead", heard: "HEARING YOU",
+            said: "how fast is the vulkan build on this thing, really",
+            charge: 0, chrome: 0.6, rim: "#45ffc8", air: 0.8, tail: "reading",
+            ox: "50%", osc: 1.3, rad: 1, wedge: 0, col: 0, hint: 1 },
+  work:   { state: "searching", word: "SEARCHING", sub: "reading sources", heard: "YOU ASKED",
+            said: "How fast is the Vulkan build on this thing, really?",
+            charge: 62, chrome: 1, rim: "#45d7ff", air: 1, tail: "reading", stage: "asking",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  answer: { state: "speaking", word: "SPEAKING", sub: "interrupt any time", heard: "YOU ASKED",
+            said: "About forty-three tokens a second on the seven-billion model, sir — roughly a third of what a discrete card would give you, and comfortably faster than you can read.",
+            charge: 100, chrome: 1, rim: "#27c7ff", air: 1.15, tail: "spoken", stage: "answering",
+            ox: "380px", osc: 0.95, rad: 0, wedge: 0, col: 1, hint: 0 },
+
+  // Same anchor geometry — only the stage's content type changes with the task.
+  browse: { state: "searching", word: "BROWSING", sub: "on the web", heard: "YOU ASKED",
+            charge: 48, chrome: 1, rim: "#45d7ff", air: 1, tail: "reading", stage: "browse",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  shared: { state: "searching", word: "SEARCHING", sub: "you have the pointer", heard: "YOU ASKED",
+            charge: 78, chrome: 1, rim: "#45d7ff", air: 1, tail: "reading", stage: "shared",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  handoff:{ state: "waiting", word: "NEEDS YOU", sub: "login wall", heard: "YOU ASKED",
+            charge: 82, chrome: 1, rim: "#ffc94d", air: 1, tail: "reading", stage: "handoff",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  images: { state: "searching", word: "SHOWING", sub: "image results", heard: "YOU ASKED",
+            charge: 74, chrome: 1, rim: "#45d7ff", air: 1, tail: "reading", stage: "images",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  file:   { state: "executing", word: "READING", sub: "your files", heard: "YOU ASKED",
+            charge: 90, chrome: 1, rim: "#ffc94d", air: 1, tail: "reading", stage: "file",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  // Two things at once — only ever because JARVIS genuinely is doing two things.
+  split:  { state: "executing", word: "RUNNING TWO", sub: "both at once", heard: "YOU ASKED FOR BOTH",
+            charge: 56, chrome: 1, rim: "#ffc94d", air: 1.1, tail: "reading", stage: "split",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+
+  media:  { state: "executing", word: "PLAYING", sub: "local library", heard: "YOU ASKED",
+            charge: 100, chrome: 1, rim: "#59e0a5", air: 1, tail: "reading", stage: "media",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  table:  { state: "speaking", word: "COMPARING", sub: "eight options", heard: "YOU ASKED",
+            charge: 100, chrome: 1, rim: "#27c7ff", air: 1.15, tail: "reading", stage: "table",
+            ox: "380px", osc: 0.9, rad: 0, wedge: 0, col: 1, hint: 0 },
+  settings:{ state: "idle", word: "HISTORY", sub: "settings", heard: "YOU ASKED",
+            charge: 0, chrome: 1, rim: "#27c7ff", air: 0.9, tail: "reading", stage: "settings",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+  apps:   { state: "executing", word: "ARRANGING", sub: "your windows", heard: "YOU ASKED",
+            charge: 88, chrome: 1, rim: "#ffc94d", air: 1, tail: "reading", stage: "apps",
+            ox: "380px", osc: 0.85, rad: 0, wedge: 0, col: 1, hint: 0 },
+
+  // The gate in front of anything destructive. It never times out into yes.
+  confirm:{ state: "waiting", word: "NEEDS YOU", sub: "nothing has happened yet", heard: "BEFORE I DO THIS",
+            said: "You asked me to delete the three-bit quant. That's 3.2 gigabytes and it does not go to the recycle bin — say the word and it's gone.",
+            charge: 0, chrome: 1, rim: "#ffc94d", air: 1.1, tail: "fault", stage: "asking", faultKind: "confirm",
+            ox: "50%", osc: 1.0, rad: 1, wedge: 1, col: 0, hint: 0 },
+
+  // You closed the tab it was working in — a real failure, and recoverable.
+  tabshut:{ state: "error", word: "LOST THE TAB", sub: "say the word and I'll retry", heard: "BROWSER CLOSED",
+            said: "Your browser closed and my tab went with it, mid-fetch. I still have the five sources I'd read — want me to try that last one again?",
+            charge: 0, chrome: 1, rim: "#ff5c6a", air: 1.1, tail: "fault", stage: "asking", faultKind: "tab",
+            ox: "50%", osc: 1.0, rad: 1, wedge: 1, col: 0, hint: 0 },
+
+  fault:  { state: "error", word: "FAULT", sub: "diagnostics has it", heard: "SUBSYSTEM DOWN",
+            said: "The vision server stopped answering on port 8081 — third time today. I've kept everything else running, and I can restart it now if you like.",
+            charge: 0, chrome: 1, rim: "#ff5c6a", air: 1.1, tail: "fault",
+            ox: "50%", osc: 1.0, rad: 1, wedge: 1, col: 0, hint: 0 },
+};
+
+class Component extends DCLogic {
+  renderVals() {
+    const s = SCEN[this.props.scene] ?? SCEN.rest;
+    return {
+      ...s, ...TAIL[s.tail],
+      orbSize: 380, off: false,
+      isFault: s.tail === "fault",
+      notFault: s.tail !== "fault",
+      isTabFault: s.faultKind === "tab",
+      isConfirm: s.faultKind === "confirm",
+      isSubsystemFault: s.tail === "fault" && !s.faultKind,
+    };
+  }
+}
+</script>
+</body>
+</html>

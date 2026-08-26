@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hud-dev",
+      "runtimeExecutable": "C:\\Users\\nicho\\Tools\\node\\node.exe",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "--port",
+        "5173",
+        "--strictPort",
+        "--host",
+        "127.0.0.1"
+      ],
+      "port": 5173
+    }
+  ]
+}

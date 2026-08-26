@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>JarvisBoot</title><script src="support.js"></script></head>
+<body><x-dc>
+<helmet data-dc-atomics><style>
+@font-face{font-family:"Rajdhani";font-weight:400;src:url("fonts/rajdhani-400.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:500;src:url("fonts/rajdhani-500.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:600;src:url("fonts/rajdhani-600.ttf") format("truetype")}
+@font-face{font-family:"Share Tech Mono";font-weight:400;src:url("fonts/sharetechmono-400.ttf") format("truetype")}
+@keyframes flick{0%,100%{opacity:.5}50%{opacity:1}}
+</style></helmet>
+
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;background:radial-gradient(1000px 700px at 50% 42%,#071620 0%,#04080c 62%,#020507 100%);border:1px solid rgba(39,199,255,.16);color:#d7ecf7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0">
+  <div style="position:absolute;left:44px;top:40px;width:26px;height:1px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;left:44px;top:40px;width:1px;height:26px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;right:44px;top:40px;width:26px;height:1px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;right:44px;top:40px;width:1px;height:26px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;left:44px;bottom:40px;width:26px;height:1px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;left:44px;bottom:40px;width:1px;height:26px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;right:44px;bottom:40px;width:26px;height:1px;background:rgba(39,199,255,.3)"></div>
+  <div style="position:absolute;right:44px;bottom:40px;width:1px;height:26px;background:rgba(39,199,255,.3)"></div>
+
+  <div style="margin-bottom:60px"><dc-import name="ArcReactor" state="starting" size="300" charge="72" label="{{ off }}" hint-size="300px,300px"></dc-import></div>
+  <div style="font:400 58px/1 'Share Tech Mono',monospace;letter-spacing:.52em;color:#27c7ff;text-indent:.52em;text-shadow:0 0 40px rgba(39,199,255,.5);margin-bottom:18px">JARVIS</div>
+  <div style="font:400 11px/1 'Share Tech Mono',monospace;letter-spacing:.4em;color:#4d6b80;text-indent:.4em;margin-bottom:64px">SPINNING UP · 72%</div>
+
+  <div style="width:760px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:center;gap:18px"><span style="width:6px;height:6px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="width:210px;font:400 13px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#a8c8da">SIDECAR</span><span style="flex:1;height:2px;background:rgba(255,255,255,.06);overflow:hidden"><span style="display:block;width:100%;height:100%;background:#59e0a5"></span></span><span style="width:90px;text-align:right;font:400 11px/1 'Share Tech Mono',monospace;color:#4d6b80">0.4 s</span></div>
+    <div style="display:flex;align-items:center;gap:18px"><span style="width:6px;height:6px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="width:210px;font:400 13px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#a8c8da">SPEECH IN</span><span style="flex:1;height:2px;background:rgba(255,255,255,.06);overflow:hidden"><span style="display:block;width:100%;height:100%;background:#59e0a5"></span></span><span style="width:90px;text-align:right;font:400 11px/1 'Share Tech Mono',monospace;color:#4d6b80">1.9 s</span></div>
+    <div style="display:flex;align-items:center;gap:18px"><span style="width:6px;height:6px;border-radius:50%;background:#59e0a5;box-shadow:0 0 8px #59e0a5;flex:none"></span><span style="width:210px;font:400 13px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#a8c8da">SPEECH OUT</span><span style="flex:1;height:2px;background:rgba(255,255,255,.06);overflow:hidden"><span style="display:block;width:100%;height:100%;background:#59e0a5"></span></span><span style="width:90px;text-align:right;font:400 11px/1 'Share Tech Mono',monospace;color:#4d6b80">1.2 s</span></div>
+    <div style="display:flex;align-items:center;gap:18px"><span style="width:6px;height:6px;border-radius:50%;background:#27c7ff;box-shadow:0 0 10px #27c7ff;flex:none;animation:flick 1s steps(1) infinite"></span><span style="width:210px;font:400 13px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#d7ecf7">LANGUAGE MODEL</span><span style="flex:1;height:2px;background:rgba(255,255,255,.06);overflow:hidden"><span style="display:block;width:64%;height:100%;background:#27c7ff;box-shadow:0 0 8px #27c7ff"></span></span><span style="width:90px;text-align:right;font:400 11px/1 'Share Tech Mono',monospace;color:#8fb6c9">2.8 / 4.4 GB</span></div>
+    <div style="display:flex;align-items:center;gap:18px;opacity:.45"><span style="width:6px;height:6px;border-radius:50%;border:1px solid #4d6b80;flex:none"></span><span style="width:210px;font:400 13px/1 'Share Tech Mono',monospace;letter-spacing:.14em;color:#8fb6c9">MEMORY · SKILLS</span><span style="flex:1;height:2px;background:rgba(255,255,255,.06)"></span><span style="width:90px;text-align:right;font:400 11px/1 'Share Tech Mono',monospace;color:#4d6b80">queued</span></div>
+  </div>
+
+  <div style="position:absolute;bottom:78px;left:50%;transform:translateX(-50%);font:400 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.26em;color:#3d5a6d">EVERY LINE IS A REAL EVENT FROM THE SIDECAR · NOTHING IS SIMULATED</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1920,&quot;height&quot;:1080}}">
+class Component extends DCLogic {
+  renderVals() { return { off: false }; }
+}
+</script>
+</body></html>

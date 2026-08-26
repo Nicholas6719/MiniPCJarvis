@@ -5,6 +5,30 @@ export type JarvisState =
   | "thinking" | "searching" | "executing" | "waiting" | "speaking"
   | "interrupted" | "error" | "sleeping";
 
+// ---------------------------------------------------------------------------
+// The stage: one box beside the core whose CONTENT TYPE changes with the task.
+// There is nothing to navigate to — the utterance (via sidecar events) selects
+// the renderer. This replaces the eleven view tabs outright.
+// ---------------------------------------------------------------------------
+export type StageKind =
+  | "prose"      // the answer, at 40px
+  | "browser"    // live web work: results, the action marker, read progression
+  | "images"     // grid, four across
+  | "file"       // the file, open, matches lit
+  | "folder"     // a folder listing (no designed surface; kept minimal)
+  | "settings";  // settings rail incl. History
+
+export type SettingsSection =
+  | "voice" | "model" | "tools" | "memory" | "history" | "tasks" | "about";
+
+export interface StageState {
+  kind: StageKind;
+  openedTs: number;
+  holdUntil: number;      // epoch ms; 0 = held by activity (turn still running)
+  pinned: boolean;        // "keep it" — stays until dismissed
+  settingsSection?: SettingsSection;
+}
+
 export interface TranscriptEntry {
   id: string;
   role: "user" | "assistant";
@@ -28,31 +52,20 @@ export interface Confirmation {
   risk: string;
 }
 
-export type View = "conversation" | "memory" | "research" | "media" | "browser" | "files" | "apps" | "system" | "tasks" | "diagnostics" | "settings";
-export type RightPanel = "activity" | "web";
-
 export interface WebResult { title?: string; url: string; snippet?: string; host?: string }
 export interface WebState {
   query: string;
-  stage: string;
+  stage: string;                                  // searching | results | reading | done | error
   results: WebResult[];
   read: Record<string, { ok: boolean; title?: string }>;
+  opening?: string;                               // url of the result being opened right now
   error?: string;
-  ts: number;
-}
-export interface MediaState {
-  query: string;
-  images: { src: string; alt: string; w: number; h: number; page?: string }[];
   ts: number;
 }
 
-export interface BrowserState {
-  url?: string;
-  title?: string;
-  text?: string;
-  shot?: string | null;
-  action?: string;
-  error?: string;
+export interface ImagesState {
+  query: string;
+  images: { src: string; alt: string; w: number; h: number; page?: string }[];
   ts: number;
 }
 
@@ -69,82 +82,54 @@ export interface FilesState {
 }
 export interface FilePreview { path: string; name: string; type: string; text?: string; data?: string; size: number }
 
-export interface ResearchSource {
-  title?: string;
-  url: string;
+// The run timeline: four steps, left to right. Every dot is a real event.
+export type StepStatus = "done" | "active" | "pending";
+export interface RunStep {
+  label: string;
+  sub: string;
+  status: StepStatus;
+  kind: "stt" | "reflex" | "tool" | "tts";
 }
 
-export interface ResearchRun {
-  id: string;
-  ts: number;
-  query: string;
-  stage: "searching" | "reading" | "done";
-  sources: ResearchSource[];
-  fetched?: number;
-  answer?: string;
+export interface TurnState {
+  userText: string;
+  startedTs: number;       // epoch ms of the user transcript
+  elapsedMs: number | null; // set on turn_done
+  steps: RunStep[];
 }
 
 interface Store {
   state: JarvisState;
-  view: View;
   wakeMode: string;
-  rightPanel: RightPanel;
+  stage: StageState | null;
   web: WebState | null;
-  media: MediaState | null;
-  browser: BrowserState | null;
+  images: ImagesState | null;
   files: FilesState | null;
   filePreview: FilePreview | null;
-  armedUntil: number;      // epoch seconds; follow-up window open while now < armedUntil
-  configVersion: number;   // bumps on config_changed so views can refetch
-  autoSwitch: boolean;
-  // ---- ambient HUD: panels surface when used, fade back after the turn ----
-  ambient: boolean;        // true = only orb + last exchange on screen
-  pinned: boolean;         // user pinned the current panel (stays until unpinned)
-  panelUntil: number;      // epoch ms; after this (and idle) the HUD returns to ambient
-  navVisible: boolean;     // tab bar revealed (mouse at top edge / pinned / voice)
-  hovering: boolean;       // mouse is inside the panel: never auto-hide under the cursor
-  doing: string;           // one-line "what I'm doing" shown under the orb during a turn
-  holdMs: number;          // how long a panel stays after a turn (Settings)
+  turn: TurnState | null;
+  armedUntil: number;
+  configVersion: number;
   transcript: TranscriptEntry[];
   activity: ActivityEntry[];
   confirmation: Confirmation | null;
   assistantDraft: string;
-  researchRuns: ResearchRun[];
-  setState: (s: JarvisState) => void;
-  setView: (v: View) => void;
-  setAutoSwitch: (b: boolean) => void;
   onEvent: (evt: any) => void;
   clearConfirmation: () => void;
   hydrateTranscript: (rows: { role: string; content: string }[]) => void;
   setWakeMode: (m: string) => void;
-  setRightPanel: (p: RightPanel) => void;
+  setState: (s: JarvisState) => void;
   setFilePreview: (p: FilePreview | null) => void;
-  surface: (v: View, opts?: { pin?: boolean; hold?: number }) => void;
-  collapse: () => void;
-  setPinned: (b: boolean) => void;
-  setNavVisible: (b: boolean) => void;
-  setHovering: (b: boolean) => void;
-  setHoldMs: (n: number) => void;
+  openStage: (kind: StageKind, extra?: Partial<StageState>) => void;
+  dismissStage: () => void;
+  pinStage: (pinned: boolean) => void;
+  setSettingsSection: (s: SettingsSection) => void;
 }
 
-// How long a tab you opened yourself stays before the HUD settles back to the orb.
-// Longer than the post-turn hold (holdMs, 12 s) because you opened this one to read it.
-// The timer only runs while idle and while the cursor is outside the panel, so it never
-// closes something you are actively looking at.
-const MANUAL_HOLD_MS = 45000;
-
-// Showing a view is never a permanent pin. Every entry point (tab click, "show me the
-// files tab" by voice, and the debug/self-test hook) used to set pinned:true, and the
-// collapse timer skips anything pinned — so the HUD never found its way back to the orb.
-// Only the PIN button pins now; everything else gets a timed hold.
-//
-// It also no longer forces the tab strip open. Panels surface themselves when JARVIS uses
-// them and fade back to the orb on their own, so the tabs are not how you get anywhere —
-// they only appear when you deliberately reach for the top edge.
-const showView = (v: View) => ({
-  view: v, ambient: false, pinned: false,
-  panelUntil: Date.now() + MANUAL_HOLD_MS,
-});
+// After the answer is spoken the stage holds this long, then the core comes home.
+// Signalled by the drain bar; "keep it" pins. (§6.3 — deliberately quiet.)
+export const STAGE_HOLD_MS = 5000;
+// A surface the user asked for by voice ("show settings") holds much longer.
+const ASKED_FOR_HOLD_MS = 120000;
 
 let draftId = "";
 let pendingDelta = "";
@@ -160,48 +145,66 @@ function flushDelta(set: any) {
   if (chunk) set((st: any) => ({ assistantDraft: st.assistantDraft + chunk }));
 }
 
+const stepDefaults = (): RunStep[] => [
+  { label: "Heard you", sub: "PARAKEET", status: "active", kind: "stt" },
+  { label: "Deciding", sub: "BRAIN", status: "pending", kind: "reflex" },
+  { label: "Working", sub: "", status: "pending", kind: "tool" },
+  { label: "Speak it", sub: "KOKORO", status: "pending", kind: "tts" },
+];
+
+function patchStep(turn: TurnState | null, i: number, patch: Partial<RunStep>): TurnState | null {
+  if (!turn) return turn;
+  const steps = turn.steps.map((s, j) => (j === i ? { ...s, ...patch } : s));
+  // everything before an active/done step is done
+  for (let j = 0; j < i; j++) if (steps[j].status !== "done") steps[j] = { ...steps[j], status: "done" };
+  return { ...turn, steps };
+}
+
 export const useStore = create<Store>((set, get) => ({
   state: "offline",
-  view: "conversation",
   wakeMode: "push_to_talk",
-  rightPanel: "activity",
+  stage: null,
   web: null,
-  media: null,
-  browser: null,
+  images: null,
   files: null,
   filePreview: null,
+  turn: null,
   armedUntil: 0,
   configVersion: 0,
-  autoSwitch: true,
-  ambient: true,
-  pinned: false,
-  panelUntil: 0,
-  navVisible: false,
-  hovering: false,
-  doing: "",
-  holdMs: 12000,
   transcript: [],
   activity: [],
   confirmation: null,
   assistantDraft: "",
-  researchRuns: [],
 
   setState: (s) => set({ state: s }),
   setWakeMode: (m) => set({ wakeMode: m }),
-  setRightPanel: (p) => set({ rightPanel: p }),
   setFilePreview: (p) => set({ filePreview: p }),
-  setView: (v) => set(showView(v)),
-  surface: (v, opts) => set((st) => ({
-    view: v, ambient: false,
-    pinned: opts?.pin ?? st.pinned,
-    panelUntil: Date.now() + (opts?.hold ?? 10 * 60 * 1000),   // held until the turn ends
-  })),
-  collapse: () => set({ ambient: true, pinned: false, navVisible: false, view: "conversation", rightPanel: "activity", panelUntil: 0 }),
-  setPinned: (b) => set({ pinned: b }),
-  setNavVisible: (b) => set({ navVisible: b }),
-  setHovering: (b) => set({ hovering: b }),
-  setHoldMs: (n) => set({ holdMs: n }),
-  setAutoSwitch: (b) => set({ autoSwitch: b }),
+
+  openStage: (kind, extra) =>
+    set((st) => ({
+      stage: {
+        kind,
+        openedTs: Date.now(),
+        holdUntil: 0,
+        pinned: false,
+        settingsSection: st.stage?.settingsSection,
+        ...extra,
+      },
+    })),
+  dismissStage: () => set({ stage: null }),
+  pinStage: (pinned) =>
+    set((st) => (st.stage ? { stage: { ...st.stage, pinned, holdUntil: 0 } } : {})),
+  setSettingsSection: (s) =>
+    set((st) => ({
+      stage: {
+        kind: "settings",
+        openedTs: st.stage?.openedTs ?? Date.now(),
+        holdUntil: Date.now() + ASKED_FOR_HOLD_MS,
+        pinned: st.stage?.pinned ?? false,
+        settingsSection: s,
+      },
+    })),
+
   clearConfirmation: () => set({ confirmation: null }),
   hydrateTranscript: (rows) =>
     set((st) => st.transcript.length > 0 ? {} : {
@@ -220,9 +223,19 @@ export const useStore = create<Store>((set, get) => ({
       set((st) => ({ activity: [...st.activity.slice(-119), a] }));
 
     switch (evt.kind) {
-      case "state":
-        set({ state: evt.state, ...(evt.state !== "idle" ? { armedUntil: 0 } : {}) });
+      case "state": {
+        set((st) => {
+          const next: Partial<Store> = { state: evt.state };
+          if (evt.state !== "idle") next.armedUntil = 0;
+          // Speaking finished → the stage holds 5 s then collapses (unless pinned or
+          // the user asked for this surface explicitly).
+          if (evt.state === "idle" && st.stage && !st.stage.pinned && !st.stage.holdUntil) {
+            next.stage = { ...st.stage, holdUntil: Date.now() + STAGE_HOLD_MS };
+          }
+          return next;
+        });
         break;
+      }
       case "transcript":
         flushDelta(set);
         set((st) => ({
@@ -231,15 +244,15 @@ export const useStore = create<Store>((set, get) => ({
             { id: evt.id, role: "user", text: evt.text, ts: evt.ts },
           ],
           assistantDraft: "",
-          doing: "",
+          turn: { userText: evt.text, startedTs: Date.now(), elapsedMs: null, steps: stepDefaults() },
+          // a new turn reclaims the stage: whatever we open next owns it
+          stage: st.stage?.pinned ? st.stage : null,
         }));
         draftId = "";
         break;
       case "assistant_delta": {
         if (!draftId) draftId = evt.id;
-        // Tokens arrive faster than the screen refreshes. Buffer them and commit once per
-        // frame: same text, a fraction of the React renders (this is what made streaming
-        // answers feel heavy while a panel was open).
+        // Tokens arrive faster than the screen refreshes; commit once per frame.
         pendingDelta += evt.text;
         if (!deltaFlush) {
           deltaFlush = requestAnimationFrame(() => {
@@ -249,23 +262,16 @@ export const useStore = create<Store>((set, get) => ({
             if (chunk) set((st) => ({ assistantDraft: st.assistantDraft + chunk }));
           });
         }
+        // an answer streaming with no visual stage = the prose stage
+        set((st) => ({
+          stage: st.stage ?? { kind: "prose", openedTs: Date.now(), holdUntil: 0, pinned: false },
+          turn: patchStep(st.turn, 3, { status: "active", label: "Speaking it" }),
+        }));
         break;
       }
       case "turn_done": {
         flushDelta(set);
-        // The streamed deltas are raw model output; turn_done carries the same reply with
-        // markdown removed. He is told never to emit any, but "*Jaws*" still slipped
-        // through to the transcript. Fall back to the draft for older sidecars.
         const draft = (evt.text as string | undefined)?.trim() || get().assistantDraft;
-        // attach the synthesized answer to a finished research run
-        set((st) => {
-          const runs = [...st.researchRuns];
-          const last = runs[runs.length - 1];
-          if (last && last.stage === "done" && !last.answer && draft.trim()) {
-            last.answer = draft.trim();
-          }
-          return { researchRuns: runs };
-        });
         if (draft.trim()) {
           set((st) => ({
             transcript: [
@@ -276,12 +282,35 @@ export const useStore = create<Store>((set, get) => ({
           }));
         }
         draftId = "";
+        set((st) => ({
+          turn: st.turn
+            ? {
+                ...st.turn,
+                elapsedMs: evt.latency_ms ?? Date.now() - st.turn.startedTs,
+                steps: st.turn.steps.map((s) => ({ ...s, status: "done" as StepStatus })),
+              }
+            : st.turn,
+        }));
         push({ id: evt.id, ts: evt.ts, kind: "turn", summary: `turn complete (${evt.latency_ms} ms)` });
-        set((st) => ({ doing: "", panelUntil: st.ambient ? 0 : Date.now() + st.holdMs }));
         break;
       }
       case "tool_call":
-        if (evt.status === "pending") set({ doing: `${String(evt.tool).replace(/_/g, " ")}…` });
+        if (evt.status === "pending") {
+          set((st) => ({
+            turn: patchStep(st.turn, 2, {
+              status: "active",
+              label: String(evt.tool).replace(/_/g, " "),
+              sub: String(evt.risk ?? "").toUpperCase(),
+            }),
+          }));
+        } else {
+          set((st) => ({
+            turn: patchStep(st.turn, 2, {
+              status: "done",
+              sub: evt.latency_ms ? `${evt.latency_ms} ms` : "",
+            }),
+          }));
+        }
         push({
           id: evt.id, ts: evt.ts, kind: "tool", status: evt.status,
           summary: `${evt.tool} — ${evt.status}${evt.latency_ms ? ` (${evt.latency_ms} ms)` : ""}`,
@@ -307,40 +336,27 @@ export const useStore = create<Store>((set, get) => ({
       case "error":
         push({ id: evt.id, ts: evt.ts, kind: evt.kind, summary: evt.summary ?? evt.kind });
         break;
-      case "research": {
-        const label =
-          evt.stage === "searching" ? `research: searching "${evt.query}"` :
-          evt.stage === "reading" ? `research: reading ${evt.sources?.length ?? 0} sources` :
-          `research: done (${evt.fetched}/${evt.total} sources read)`;
-        push({
-          id: evt.id, ts: evt.ts, kind: "research", summary: label,
-          detail: evt.sources?.map((s: any) => s.title || s.url).join(" · "),
-        });
+      case "research":
+        // research progression rides the same web state (browser stage)
         set((st) => {
-          const runs = [...st.researchRuns];
-          let run = runs.find((r) => r.query === evt.query && r.stage !== "done");
-          if (evt.stage === "searching" || !run) {
-            run = { id: evt.id, ts: evt.ts, query: evt.query, stage: evt.stage, sources: [] };
-            runs.push(run);
+          const prev = st.web && st.web.query === evt.query ? st.web : null;
+          const web: WebState = prev ?? { query: evt.query, stage: evt.stage, results: [], read: {}, ts: evt.ts };
+          const next: WebState = { ...web, stage: evt.stage };
+          if (evt.sources) {
+            next.results = evt.sources.map((s: any) => ({
+              title: s.title, url: s.url,
+              host: s.url ? new URL(s.url).hostname.replace(/^www\./, "") : "",
+            }));
           }
-          run.stage = evt.stage;
-          if (evt.sources) run.sources = evt.sources;
-          if (evt.fetched != null) run.fetched = evt.fetched;
-          const web = st.web && st.web.query === evt.query && evt.stage === "done"
-            ? { ...st.web, stage: "done" } : st.web;
           return {
-            researchRuns: runs.slice(-10),
-            web,
-            // dynamic view switching: research activity pulls up the research view
-            view: st.autoSwitch ? "research" : st.view,
-            ambient: st.autoSwitch ? false : st.ambient,
-            panelUntil: Date.now() + 10 * 60 * 1000,
+            web: next,
+            stage: st.stage?.kind === "browser" ? st.stage
+              : { kind: "browser" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
           };
         });
+        push({ id: evt.id, ts: evt.ts, kind: "research", summary: `research: ${evt.stage} "${evt.query ?? ""}"` });
         break;
-      }
       case "web": {
-        // live web activity takes over the right panel so the user can watch
         set((st) => {
           const prev = st.web && st.web.query === evt.query ? st.web : null;
           const web: WebState = prev ?? { query: evt.query, stage: evt.stage, results: [], read: {}, ts: evt.ts };
@@ -349,65 +365,66 @@ export const useStore = create<Store>((set, get) => ({
           if (evt.stage === "read" && evt.url) {
             next.read[evt.url] = { ok: !!evt.ok, title: evt.title };
             next.stage = "reading";
+            next.opening = undefined;
           }
+          if (evt.stage === "opening" && evt.url) next.opening = evt.url;
           if (evt.error) next.error = evt.error;
           return {
-            web: next, rightPanel: "web", ambient: false,
-            // Claim the main panel, the way files and media do. Without this the view
-            // stayed on whatever the LAST turn opened — asking for research while the
-            // files panel was up left the files there and squeezed the results into a
-            // narrow strip beside them. Research runs keep their own view.
-            view: st.autoSwitch ? (st.view === "research" ? "research" : "conversation") : st.view,
-            panelUntil: Date.now() + 10 * 60 * 1000,
+            web: next,
+            stage: { kind: "browser" as StageKind, openedTs: st.stage?.openedTs ?? Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
+            turn: patchStep(st.turn, 2, {
+              status: evt.stage === "done" ? "done" : "active",
+              label:
+                evt.stage === "searching" ? "Searching the web" :
+                evt.stage === "reading" || evt.stage === "read" ? "Reading sources" :
+                evt.stage === "done" ? "Read the sources" : "Working the web",
+              sub: "KEYLESS BRAVE",
+            }),
           };
         });
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `web: ${evt.stage}${evt.query ? ` "${evt.query}"` : ""}` });
         break;
       }
       case "browser":
-        set((st) => ({
-          browser: { url: evt.url, title: evt.title, text: evt.text, shot: evt.shot, action: evt.action, error: evt.error, ts: evt.ts },
-          view: st.autoSwitch ? "browser" : st.view,
-          ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000,
-        }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `browser: ${evt.action} ${evt.title ? `"${evt.title}"` : evt.url ?? ""}` });
         break;
       case "files":
         set((st) => ({
           files: { path: evt.path, label: evt.label, parent: evt.parent, count: evt.count, entries: evt.entries ?? [], roots: evt.roots ?? {}, query: evt.query, ts: evt.ts },
-          view: st.autoSwitch ? "files" : st.view,
-          ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000,
+          stage: { kind: "folder" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "files", summary: `files: ${evt.label} (${evt.count})` });
         break;
       case "file_preview":
-        set((st) => ({ filePreview: { path: evt.path, name: evt.name, type: evt.type, text: evt.text, data: evt.data, size: evt.size },
-                       view: st.autoSwitch ? "files" : st.view,
-                       ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000 }));
+        set((st) => ({
+          filePreview: { path: evt.path, name: evt.name, type: evt.type, text: evt.text, data: evt.data, size: evt.size },
+          stage: { kind: "file" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
+        }));
         push({ id: evt.id, ts: evt.ts, kind: "files", summary: `preview: ${evt.name}` });
         break;
       case "images":
         set((st) => ({
-          media: { query: evt.query, images: evt.images ?? [], ts: evt.ts },
-          view: st.autoSwitch ? "media" : st.view,
-          // The image search announces itself as a "web" stage so the progress shows,
-          // which parks an empty WEB panel beside the pictures once they arrive. The
-          // pictures ARE the result — drop the progress panel and give them the room.
-          rightPanel: "activity",
-          ambient: st.autoSwitch ? false : st.ambient, panelUntil: Date.now() + 10 * 60 * 1000,
+          images: { query: evt.query, images: evt.images ?? [], ts: evt.ts },
+          stage: { kind: "images" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
         break;
       case "reflex":
-        if (evt.skill && evt.skill !== "general") set({ doing: String(evt.skill).replace(/_/g, " ") });
+        set((st) => ({
+          turn: patchStep(st.turn, 1, {
+            status: "done",
+            label: evt.skill === "general" ? "Straight to the model" : `Reflex matched ${evt.skill}`,
+            sub: `${Math.round((evt.confidence ?? 0) * 100)}%${evt.mode === "direct" ? " · MODEL NEVER WOKE" : ""}`,
+          }),
+        }));
         push({
           id: evt.id, ts: evt.ts, kind: "reflex",
-          summary: `brain: ${evt.skill} (${Math.round((evt.confidence ?? 0) * 100)}%)${evt.mode === "tool_then_llm" ? " → tool, then LLM" : evt.mode === "answer_directly" ? " → LLM answers directly (tools off)" : evt.mode === "answer_hint" ? " → LLM answers directly" : " — no LLM"}`,
+          summary: `brain: ${evt.skill} (${Math.round((evt.confidence ?? 0) * 100)}%)`,
           detail: evt.args && Object.keys(evt.args).length ? evt.args : undefined,
         });
         break;
       case "brain_learned":
-        push({ id: evt.id, ts: evt.ts, kind: "reflex", summary: `brain learned: "${evt.text}" → ${evt.skill} (${evt.examples} examples)` });
+        push({ id: evt.id, ts: evt.ts, kind: "reflex", summary: `brain learned: "${evt.text}" → ${evt.skill}` });
         break;
       case "filler":
         push({ id: evt.id, ts: evt.ts, kind: "speaking", summary: `filler: "${evt.text}"` });
@@ -432,16 +449,25 @@ export const useStore = create<Store>((set, get) => ({
       case "wake":
         push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
         break;
-      case "set_view":   // debug/remote: switch the HUD view (used by UI self-tests)
-        set(showView(evt.view as View));
-        break;
-      case "ui": {       // voice: "show the files tab" / "show me the tabs" / "pin that" / "hide everything"
-        const a = evt.action;
-        if (a === "show" && evt.view) set(showView(evt.view as View));
-        else if (a === "tabs") set((st) => ({ navVisible: true, ambient: false, panelUntil: Date.now() + st.holdMs * 2 }));
-        else if (a === "pin") set({ pinned: true, ambient: false });
-        else if (a === "unpin") set((st) => ({ pinned: false, panelUntil: Date.now() + st.holdMs }));
-        else if (a === "hide") set({ ambient: true, pinned: false, navVisible: false, view: "conversation", rightPanel: "activity", panelUntil: 0 });
+      case "set_view":
+      case "ui": {
+        // Voice / debug surface control, mapped onto the stage system. The eleven
+        // views are gone; the old names land on the nearest designed surface.
+        const action = evt.kind === "set_view" ? "show" : evt.action;
+        const view = String(evt.view ?? "");
+        const sectionFor: Record<string, SettingsSection> = {
+          settings: "voice", memory: "memory", tasks: "tasks",
+          system: "about", diagnostics: "about", history: "history",
+        };
+        if (action === "show") {
+          if (sectionFor[view]) get().setSettingsSection(sectionFor[view]);
+          else if (view === "media") get().openStage("images", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
+          else if (view === "files") get().openStage("folder", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
+          else if (view === "browser" || view === "research") get().openStage("browser", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
+          else if (view === "conversation") get().openStage("prose", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
+        } else if (action === "pin") get().pinStage(true);
+        else if (action === "unpin") get().pinStage(false);
+        else if (action === "hide") get().dismissStage();
         break;
       }
       case "config_changed":

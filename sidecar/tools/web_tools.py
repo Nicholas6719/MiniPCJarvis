@@ -81,6 +81,9 @@ async def research(query: str, num_sources: int = 4) -> dict:
                    sources=[{"url": r["url"], "title": r["title"]}
                             for r in results[:num_sources]])
     async def _read(u):
+        # "opening" before, "read" after: the HUD's action marker shows the decision
+        # (which result is being opened right now), not just the outcome.
+        await bus.emit("web", stage="opening", query=query, url=u)
         page = await fetch_page(u, max_chars=2500)
         await bus.emit("web", stage="read", query=query, url=u,
                        ok=bool(page.get("content")), title=page.get("title"))

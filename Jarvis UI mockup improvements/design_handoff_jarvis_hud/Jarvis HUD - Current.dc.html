@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas">
+<style>
+@font-face{font-family:"Rajdhani";font-weight:400;src:url("fonts/rajdhani-400.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:500;src:url("fonts/rajdhani-500.ttf") format("truetype")}
+@font-face{font-family:"Rajdhani";font-weight:600;src:url("fonts/rajdhani-600.ttf") format("truetype")}
+@font-face{font-family:"Share Tech Mono";font-weight:400;src:url("fonts/sharetechmono-400.ttf") format("truetype")}
+body{margin:0;background:#0a0d10;font-family:"Rajdhani","Segoe UI",sans-serif}
+a{color:#27c7ff}a:hover{color:#8ae2ff}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+@keyframes softPulse{0%,100%{opacity:.86}50%{opacity:1}}
+@keyframes blink{50%{opacity:0}}
+@keyframes bootPulse{0%,100%{opacity:.85}50%{opacity:1}}
+</style></helmet>
+
+<section style="padding:44px 48px 40px;display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;align-items:baseline;gap:12px">
+<span style="font:600 11px/1 'Share Tech Mono',monospace;letter-spacing:.2em;padding:5px 9px;background:#27c7ff;color:#04121a;border-radius:4px">RECREATION</span>
+<span style="font:600 15px/1.2 Rajdhani,sans-serif;color:#cfe7f5">JARVIS HUD as it is today — src/App.tsx + src/styles.css, 1920×1080</span>
+</div>
+<p style="margin:0 0 14px;max-width:900px;font:400 13.5px/1.55 Rajdhani,sans-serif;color:#6d8aa0;text-wrap:pretty">Rebuilt from the repo, not from memory: Rajdhani + Share Tech Mono, <span style="color:#27c7ff">#27c7ff</span> on <span style="color:#27c7ff">#05090f</span>, 44px masked grid, 220px three-ring orb, 300px / 1fr / 320px main grid, ambient mode that collapses to the orb after a 12s hold. Seven states below. This is the baseline the redesign is measured against.</p>
+
+<div style="display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start">
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:9px;font:400 11.5px/1.3 Rajdhani,sans-serif;color:#6d8aa0"><span style="font:600 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.15em;padding:3px 7px;background:rgba(39,199,255,.12);color:#27c7ff;border-radius:4px">A</span>AMBIENT — idle, nav hidden, orb centred</div>
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;display:flex;flex-direction:column;background:radial-gradient(1100px 500px at 50% -10%,rgba(39,199,255,.07),transparent),#05090f;color:#cfe7f5;border:1px solid rgba(39,199,255,.18)">
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(39,199,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(39,199,255,.18) 1px,transparent 1px);background-size:44px 44px;opacity:.25;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);pointer-events:none"></div>
+  <header style="display:flex;align-items:baseline;gap:14px;padding:14px 22px 10px;border-bottom:1px solid transparent">
+    <span style="font-family:'Share Tech Mono',monospace;font-size:20px;letter-spacing:.5em;color:#27c7ff;text-shadow:0 0 14px rgba(39,199,255,.55)">J.A.R.V.I.S.</span>
+    <span style="font-size:11px;letter-spacing:.2em;color:#6d8aa0;text-transform:uppercase">local · speech-first</span>
+  </header>
+  <main style="flex:1;display:grid;grid-template-columns:1fr;place-items:center;gap:14px;padding:14px 22px 18px;min-height:0">
+    <section style="width:720px;display:flex;flex-direction:column;align-items:center;gap:12px">
+      <div style="padding:10px 30px 0">
+        <div style="position:relative;width:220px;height:220px;display:grid;place-items:center">
+          <div style="position:absolute;inset:-30px;border-radius:50%;background:radial-gradient(circle,rgba(39,199,255,.45) 0%,transparent 65%);opacity:.35;animation:softPulse 9s ease-in-out infinite"></div>
+          <div style="position:absolute;inset:8px;border-radius:50%;border:1px solid rgba(39,199,255,.55);border-top-color:#27c7ff;border-right-color:transparent"></div>
+          <div style="position:absolute;inset:26px;border-radius:50%;border:1px solid rgba(39,199,255,.55);border-bottom-color:#27c7ff;border-left-color:transparent"></div>
+          <div style="position:absolute;inset:44px;border-radius:50%;border:1px dashed rgba(39,199,255,.55);opacity:.7"></div>
+          <div style="position:absolute;width:88px;height:88px;border-radius:50%;box-shadow:0 0 24px rgba(39,199,255,.7),0 0 90px rgba(39,199,255,.35);pointer-events:none"></div>
+          <div style="width:88px;height:88px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#a9e8ff 0%,#27c7ff 35%,#0a3c53 100%);box-shadow:inset 0 0 18px rgba(0,8,14,.55);animation:softPulse 7s ease-in-out infinite"></div>
+          <div style="position:absolute;bottom:-34px;font-size:11px;letter-spacing:.35em;color:#7fd6ff;text-shadow:0 0 12px rgba(39,199,255,.6);white-space:nowrap">STANDING BY</div>
+          <div style="position:absolute;bottom:-52px;left:50%;transform:translateX(-50%);white-space:nowrap;font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:.2em;color:#6d8aa0;opacity:.85">ctrl+shift+j to talk</div>
+        </div>
+      </div>
+      <div style="width:100%;display:flex;flex-direction:column;align-items:center;gap:14px;margin-top:56px">
+        <div style="display:flex;flex-direction:column;gap:10px;align-items:center;text-align:center">
+          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:.18em;color:#6d8aa0;text-transform:uppercase">say "hey Jarvis", press Ctrl+Shift+J, or type</div>
+        </div>
+        <div style="width:520px;border-bottom:1px solid rgba(39,199,255,.18);color:#cfe7f5;font:400 15px Rajdhani,sans-serif;padding:6px 4px;text-align:center;opacity:.55;height:30px"></div>
+      </div>
+    </section>
+  </main>
+  <footer style="display:flex;align-items:center;gap:18px;padding:6px 22px;border-top:1px solid rgba(39,199,255,.18);font-family:'Share Tech Mono',monospace;font-size:10.5px;color:#6d8aa0;letter-spacing:.12em">
+    <span>● IDLE</span><span>MODEL qwen2.5-7b-instruct-q4_k_m</span><span>MIC PTT</span><span>CPU 4%</span><span>RAM 38% (12.1 GB)</span>
+    <span style="margin-left:auto">09:41:07 PM</span>
+  </footer>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:9px;font:400 11.5px/1.3 Rajdhani,sans-serif;color:#6d8aa0"><span style="font:600 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.15em;padding:3px 7px;background:rgba(39,199,255,.12);color:#27c7ff;border-radius:4px">B</span>PANEL — conversation, speaking, nav revealed at top edge</div>
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;display:flex;flex-direction:column;background:radial-gradient(1100px 500px at 50% -10%,rgba(39,199,255,.07),transparent),#05090f;color:#cfe7f5;border:1px solid rgba(39,199,255,.18)">
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(39,199,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(39,199,255,.18) 1px,transparent 1px);background-size:44px 44px;opacity:.25;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);pointer-events:none"></div>
+  <header style="display:flex;align-items:baseline;gap:14px;padding:14px 22px 10px;border-bottom:1px solid rgba(39,199,255,.18)">
+    <span style="font-family:'Share Tech Mono',monospace;font-size:20px;letter-spacing:.5em;color:#27c7ff;text-shadow:0 0 14px rgba(39,199,255,.55)">J.A.R.V.I.S.</span>
+    <span style="font-size:11px;letter-spacing:.2em;color:#6d8aa0;text-transform:uppercase">local · speech-first</span>
+    <nav style="margin-left:auto;display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end;row-gap:4px;max-width:70%">
+      <button style="display:inline-flex;align-items:center;gap:6px;padding:5px 8px;line-height:1;background:rgba(39,199,255,.10);border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;letter-spacing:.18em;cursor:pointer;text-shadow:0 0 10px rgba(39,199,255,.5)"><span style="font-size:15px;line-height:1">◈</span><span style="font-size:9px;letter-spacing:.18em">CONVERSATION</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">◎</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">▣</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">◐</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">▤</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">▦</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">◍</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">❖</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">◔</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">⌁</span></button>
+      <button style="display:inline-flex;align-items:center;padding:5px 8px;line-height:1;background:none;border:1px solid transparent;border-radius:6px;color:#6d8aa0;font-family:inherit;cursor:pointer"><span style="font-size:15px;line-height:1">⚙</span></button>
+      <button style="margin-left:10px;background:none;border:1px solid rgba(39,199,255,.18);border-radius:6px;color:#6d8aa0;font-family:inherit;font-size:11px;letter-spacing:.18em;padding:6px 10px;cursor:pointer">PIN</button>
+    </nav>
+  </header>
+  <main style="flex:1;display:grid;grid-template-columns:300px minmax(0,1fr);gap:14px;padding:14px 22px 18px;min-height:0">
+    <section style="display:flex;flex-direction:column;align-items:center;gap:6px;align-content:start">
+      <div style="padding:30px">
+        <div style="position:relative;width:220px;height:220px;display:grid;place-items:center">
+          <div style="position:absolute;inset:-30px;border-radius:50%;background:radial-gradient(circle,rgba(39,199,255,.45) 0%,transparent 65%);opacity:.75;animation:breathe 3.6s ease-in-out infinite"></div>
+          <div style="position:absolute;inset:8px;border-radius:50%;border:1px solid rgba(39,199,255,.55);border-top-color:#27c7ff;border-right-color:transparent;animation:spin 2.4s linear infinite"></div>
+          <div style="position:absolute;inset:26px;border-radius:50%;border:1px solid rgba(39,199,255,.55);border-bottom-color:#27c7ff;border-left-color:transparent;animation:spin 1.68s linear infinite reverse"></div>
+          <div style="position:absolute;inset:44px;border-radius:50%;border:1px dashed rgba(39,199,255,.55);opacity:.7;animation:spin 4.32s linear infinite"></div>
+          <div style="position:absolute;width:88px;height:88px;border-radius:50%;box-shadow:0 0 24px rgba(39,199,255,.7),0 0 90px rgba(39,199,255,.35);pointer-events:none"></div>
+          <div style="width:88px;height:88px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#a9e8ff 0%,#27c7ff 35%,#0a3c53 100%);box-shadow:inset 0 0 18px rgba(0,8,14,.55);animation:breathe 2.4s ease-in-out infinite"></div>
+          <div style="position:absolute;bottom:-34px;font-size:11px;letter-spacing:.35em;color:#7fd6ff;text-shadow:0 0 12px rgba(39,199,255,.6);white-space:nowrap">SPEAKING</div>
+        </div>
+      </div>
+      <div style="width:100%;padding:0 10px;margin-top:48px">
+        <div style="width:100%;display:flex;flex-direction:column;align-items:center;gap:8px">
+          <div style="display:flex;flex-direction:column;gap:10px;align-items:center;text-align:center">
+            <div style="font-size:12px;color:#6d8aa0">what's my CPU doing?</div>
+            <div style="font-size:14px;line-height:1.4;color:#6d8aa0;max-width:680px">Sitting at four percent, sir. Memory is at thirty-eight — nothing worth worrying about.</div>
+          </div>
+          <div style="font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:.22em;color:#27c7ff;text-transform:uppercase;animation:blink 1.4s steps(1) infinite">system stats…</div>
+        </div>
+      </div>
+    </section>
+    <section style="min-width:0;overflow:hidden;background:rgba(8,18,28,.92);border:1px solid rgba(39,199,255,.18);border-radius:10px;box-shadow:inset 0 0 40px rgba(4,12,20,.5);min-height:0;display:flex;flex-direction:column">
+      <div style="display:flex;flex-direction:column;flex:1;min-height:0">
+        <div style="flex:1;overflow:hidden;padding:18px;display:flex;flex-direction:column;gap:14px;justify-content:flex-end">
+          <div style="max-width:82%;align-self:flex-end;text-align:right">
+            <span style="display:block;font-size:10px;letter-spacing:.3em;color:#6d8aa0;margin-bottom:3px">YOU</span>
+            <p style="margin:0;font-size:15px;line-height:1.45;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(9,18,28,.6)">Open the notes folder and read me the last thing I wrote.</p>
+          </div>
+          <div style="max-width:82%;align-self:flex-start">
+            <span style="display:block;font-size:10px;letter-spacing:.3em;color:#27c7ff;margin-bottom:3px">JARVIS</span>
+            <p style="margin:0;font-size:15px;line-height:1.45;padding:8px 12px;border-radius:8px;border:1px solid rgba(39,199,255,.18);background:rgba(9,18,28,.6)">Opening it now. The most recent file is <span style="font-family:'Share Tech Mono',monospace;color:#27c7ff">llama-vulkan-notes.md</span>, edited eleven minutes ago.</p>
+          </div>
+          <div style="max-width:82%;align-self:flex-end;text-align:right">
+            <span style="display:block;font-size:10px;letter-spacing:.3em;color:#6d8aa0;margin-bottom:3px">YOU</span>
+            <p style="margin:0;font-size:15px;line-height:1.45;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(9,18,28,.6)">what's my CPU doing?</p>
+          </div>
+          <div style="max-width:82%;align-self:flex-start">
+            <span style="display:block;font-size:10px;letter-spacing:.3em;color:#27c7ff;margin-bottom:3px">JARVIS</span>
+            <p style="margin:0;font-size:15px;line-height:1.45;padding:8px 12px;border-radius:8px;border:1px solid rgba(39,199,255,.18);background:rgba(9,18,28,.6)">Sitting at four percent, sir. Memory is at thirty-eight — nothing worth worrying about<span style="display:inline-block;width:8px;height:14px;background:#27c7ff;margin-left:4px;vertical-align:text-bottom;animation:blink .9s steps(1) infinite"></span></p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;padding:12px;border-top:1px solid rgba(39,199,255,.18)">
+          <div style="flex:1;background:rgba(6,14,22,.8);border:1px solid rgba(39,199,255,.18);border-radius:6px;color:#6d8aa0;font-family:inherit;font-size:14px;padding:9px 12px">Type to JARVIS…</div>
+          <button style="background:rgba(39,199,255,.12);color:#27c7ff;border:1px solid rgba(39,199,255,.45);border-radius:6px;font-family:inherit;font-size:12px;letter-spacing:.2em;padding:0 16px;cursor:pointer">SEND</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer style="display:flex;align-items:center;gap:18px;padding:6px 22px;border-top:1px solid rgba(39,199,255,.18);font-family:'Share Tech Mono',monospace;font-size:10.5px;color:#6d8aa0;letter-spacing:.12em">
+    <span style="color:#27c7ff">● SPEAKING</span><span>MODEL qwen2.5-7b-instruct-q4_k_m</span><span>MIC WAKE+PTT</span><span>CPU 41%</span><span>RAM 52% (16.6 GB)</span>
+    <span style="margin-left:auto">09:44:22 PM</span>
+  </footer>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:9px;font:400 11.5px/1.3 Rajdhani,sans-serif;color:#6d8aa0"><span style="font:600 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.15em;padding:3px 7px;background:rgba(39,199,255,.12);color:#27c7ff;border-radius:4px">C</span>DIAGNOSTICS — three-column, centre panel + activity log</div>
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;display:flex;flex-direction:column;background:radial-gradient(1100px 500px at 50% -10%,rgba(39,199,255,.07),transparent),#05090f;color:#cfe7f5;border:1px solid rgba(39,199,255,.18)">
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(39,199,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(39,199,255,.18) 1px,transparent 1px);background-size:44px 44px;opacity:.25;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);pointer-events:none"></div>
+  <header style="display:flex;align-items:baseline;gap:14px;padding:14px 22px 10px;border-bottom:1px solid rgba(39,199,255,.18)">
+    <span style="font-family:'Share Tech Mono',monospace;font-size:20px;letter-spacing:.5em;color:#27c7ff;text-shadow:0 0 14px rgba(39,199,255,.55)">J.A.R.V.I.S.</span>
+    <span style="font-size:11px;letter-spacing:.2em;color:#6d8aa0;text-transform:uppercase">local · speech-first</span>
+  </header>
+  <main style="flex:1;display:grid;grid-template-columns:300px minmax(0,1fr) 320px;gap:14px;padding:14px 22px 18px;min-height:0">
+    <section style="display:flex;flex-direction:column;align-items:center;gap:6px;align-content:start">
+      <div style="padding:30px">
+        <div style="position:relative;width:220px;height:220px;display:grid;place-items:center">
+          <div style="position:absolute;inset:-30px;border-radius:50%;background:radial-gradient(circle,rgba(39,199,255,.45) 0%,transparent 65%);opacity:.35;animation:softPulse 9s ease-in-out infinite"></div>
+          <div style="position:absolute;inset:8px;border-radius:50%;border:1px solid rgba(39,199,255,.55);border-top-color:#27c7ff;border-right-color:transparent"></div>
+          <div style="position:absolute;inset:26px;border-radius:50%;border:1px solid rgba(39,199,255,.55);border-bottom-color:#27c7ff;border-left-color:transparent"></div>
+          <div style="position:absolute;inset:44px;border-radius:50%;border:1px dashed rgba(39,199,255,.55);opacity:.7"></div>
+          <div style="position:absolute;width:88px;height:88px;border-radius:50%;box-shadow:0 0 24px rgba(39,199,255,.7),0 0 90px rgba(39,199,255,.35);pointer-events:none"></div>
+          <div style="width:88px;height:88px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#a9e8ff 0%,#27c7ff 35%,#0a3c53 100%);box-shadow:inset 0 0 18px rgba(0,8,14,.55);animation:softPulse 7s ease-in-out infinite"></div>
+          <div style="position:absolute;bottom:-34px;font-size:11px;letter-spacing:.35em;color:#7fd6ff;text-shadow:0 0 12px rgba(39,199,255,.6);white-space:nowrap">STANDING BY</div>
+        </div>
+      </div>
+    </section>
+    <section style="min-width:0;overflow:hidden;background:rgba(8,18,28,.92);border:1px solid rgba(39,199,255,.18);border-radius:10px;box-shadow:inset 0 0 40px rgba(4,12,20,.5);display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px 10px;border-bottom:1px solid rgba(39,199,255,.18)">
+        <span style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:.35em;color:#6d8aa0">SYSTEM DIAGNOSTICS</span>
+        <button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:11px;letter-spacing:.18em;padding:6px 12px;cursor:pointer">RUN CHECKS</button>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:12px 16px">
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 6px;border-bottom:1px dotted rgba(39,199,255,.08)"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:#59e0a5;box-shadow:0 0 8px rgba(89,224,165,.6)"></span><span style="width:160px;font-size:13.5px;letter-spacing:.05em">llama server</span><span style="flex:1;font-family:'Share Tech Mono',monospace;font-size:11.5px;color:#6d8aa0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">127.0.0.1:8080 · qwen2.5-7b-instruct-q4_k_m · 43 tok/s</span></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 6px;border-bottom:1px dotted rgba(39,199,255,.08)"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:#59e0a5;box-shadow:0 0 8px rgba(89,224,165,.6)"></span><span style="width:160px;font-size:13.5px;letter-spacing:.05em">stt</span><span style="flex:1;font-family:'Share Tech Mono',monospace;font-size:11.5px;color:#6d8aa0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">parakeet-tdt-0.6b · warm · 180 ms median</span></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 6px;border-bottom:1px dotted rgba(39,199,255,.08)"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:#59e0a5;box-shadow:0 0 8px rgba(89,224,165,.6)"></span><span style="width:160px;font-size:13.5px;letter-spacing:.05em">tts</span><span style="flex:1;font-family:'Share Tech Mono',monospace;font-size:11.5px;color:#6d8aa0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">kokoro · en_GB-alan-medium · first audio 310 ms</span></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 6px;border-bottom:1px dotted rgba(39,199,255,.08)"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:#ffc94d;box-shadow:0 0 8px rgba(255,201,77,.6)"></span><span style="width:160px;font-size:13.5px;letter-spacing:.05em">brave search</span><span style="flex:1;font-family:'Share Tech Mono',monospace;font-size:11.5px;color:#6d8aa0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">no api key — keyless path in use, 2 rate limits in the last hour</span><button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:9px;letter-spacing:.18em;padding:3px 10px;cursor:pointer">REPAIR</button></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 6px;border-bottom:1px dotted rgba(39,199,255,.08)"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:#ff5c6a;box-shadow:0 0 8px rgba(255,92,106,.6)"></span><span style="width:160px;font-size:13.5px;letter-spacing:.05em">vision server</span><span style="flex:1;font-family:'Share Tech Mono',monospace;font-size:11.5px;color:#6d8aa0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">port 8081 not responding · last exit code 3221225781</span><button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:9px;letter-spacing:.18em;padding:3px 10px;cursor:pointer">REPAIR</button></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 6px;border-bottom:1px dotted rgba(39,199,255,.08)"><span style="width:9px;height:9px;border-radius:50%;flex:none;background:#59e0a5;box-shadow:0 0 8px rgba(89,224,165,.6)"></span><span style="width:160px;font-size:13.5px;letter-spacing:.05em">memory store</span><span style="flex:1;font-family:'Share Tech Mono',monospace;font-size:11.5px;color:#6d8aa0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">sqlite · 1,204 rows · onnx embeddings warm</span></div>
+        <div style="margin-top:18px">
+          <span style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:.35em;color:#6d8aa0">BRAIN — REFLEXES (NO LLM)</span>
+          <div style="display:flex;gap:18px;margin:8px 0 10px;font-size:12px;color:#6d8aa0"><span><b style="color:#27c7ff;font-weight:600">2,318</b> examples</span><span><b style="color:#27c7ff;font-weight:600">24</b> skills</span><span><b style="color:#27c7ff;font-weight:600">71%</b> of turns handled by reflex</span><span><b style="color:#27c7ff;font-weight:600">6</b> learned this session</span></div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px">
+            <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:6px 8px;font-size:11px;display:flex;justify-content:space-between"><span>system stats</span><span style="color:#6d8aa0">184</span></div>
+            <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:6px 8px;font-size:11px;display:flex;justify-content:space-between"><span>open app</span><span style="color:#6d8aa0">211</span></div>
+            <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:6px 8px;font-size:11px;display:flex;justify-content:space-between"><span>set volume</span><span style="color:#6d8aa0">96</span></div>
+            <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:6px 8px;font-size:11px;display:flex;justify-content:space-between"><span>web search +LLM</span><span style="color:#6d8aa0">143</span></div>
+            <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:6px 8px;font-size:11px;display:flex;justify-content:space-between"><span>remind me</span><span style="color:#6d8aa0">78</span></div>
+            <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:6px 8px;font-size:11px;display:flex;justify-content:space-between"><span>read file</span><span style="color:#6d8aa0">64</span></div>
+          </div>
+          <div style="margin-top:10px;font-size:11px;color:#6d8aa0">
+            <div style="font-size:10px;letter-spacing:.2em;color:#27c7ff;margin:8px 0 4px">TAUGHT COMMANDS — say "when I say X, do Y"</div>
+            <div style="padding:2px 0"><b style="color:#cfe7f5;font-weight:500">"workshop mode"</b> → set volume, then open app, then window layout <button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:9px;letter-spacing:.18em;padding:1px 7px;margin-left:8px;cursor:pointer">FORGET</button></div>
+            <div style="padding:2px 0">learned <b style="color:#cfe7f5;font-weight:500">"kill the music"</b> → media pause</div>
+            <div style="padding:2px 0">learned <b style="color:#cfe7f5;font-weight:500">"how hot is it in here"</b> → weather</div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section style="min-width:0;overflow:hidden;background:rgba(8,18,28,.92);border:1px solid rgba(39,199,255,.18);border-radius:10px;box-shadow:inset 0 0 40px rgba(4,12,20,.5);display:flex;flex-direction:column;min-height:0">
+      <div style="flex:1;overflow:hidden;padding:14px;font-family:'Share Tech Mono',monospace;font-size:11.5px">
+        <div style="letter-spacing:.35em;color:#6d8aa0;font-size:10px;margin-bottom:10px">ACTIVITY</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#6d8aa0"><span style="color:rgba(109,138,160,.6)">09:41:02 PM</span><span style="color:#45ffc8">wake word (0.91)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#6d8aa0"><span style="color:rgba(109,138,160,.6)">09:41:03 PM</span><span style="color:#ffd166">brain: system_stats (94%) — no LLM</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#cfe7f5"><span style="color:rgba(109,138,160,.6)">09:41:03 PM</span><span style="color:#59e0a5">system_stats — success (12 ms)</span><span style="flex-basis:100%;color:rgba(109,138,160,.75);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{"cpu_percent":4.1,"ram_percent":38.2,"ram_used_gb":12.1}</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#6d8aa0"><span style="color:rgba(109,138,160,.6)">09:41:04 PM</span><span>turn complete (312 ms)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#6d8aa0"><span style="color:rgba(109,138,160,.6)">09:42:18 PM</span><span style="color:#45d7ff">research: searching "mini pc vulkan throughput"</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#6d8aa0"><span style="color:rgba(109,138,160,.6)">09:42:24 PM</span><span style="color:#45d7ff">research: reading 6 sources</span><span style="flex-basis:100%;color:rgba(109,138,160,.75);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">llama.cpp Vulkan benchmarks · Phoenix APU iGPU notes · r/LocalLLaMA thread</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#cfe7f5"><span style="color:rgba(109,138,160,.6)">09:42:31 PM</span><span style="color:#59e0a5">web_fetch — success (740 ms)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#cfe7f5"><span style="color:rgba(109,138,160,.6)">09:43:02 PM</span><span style="color:#ffc94d">confirmation: delete_file</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#cfe7f5"><span style="color:rgba(109,138,160,.6)">09:43:09 PM</span><span style="color:#ffc94d">delete_file — denied</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#cfe7f5"><span style="color:rgba(109,138,160,.6)">09:43:40 PM</span><span style="color:#ff5c6a">vision_server — error</span><span style="flex-basis:100%;color:rgba(109,138,160,.75);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">connection refused 127.0.0.1:8081</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 0;border-bottom:1px dotted rgba(39,199,255,.08);color:#6d8aa0"><span style="color:rgba(109,138,160,.6)">09:44:12 PM</span><span style="color:#ffd166">brain learned: "how hot is it in here" → weather (3 examples)</span></div>
+      </div>
+    </section>
+  </main>
+  <footer style="display:flex;align-items:center;gap:18px;padding:6px 22px;border-top:1px solid rgba(39,199,255,.18);font-family:'Share Tech Mono',monospace;font-size:10.5px;color:#6d8aa0;letter-spacing:.12em">
+    <span>● IDLE</span><span>MODEL qwen2.5-7b-instruct-q4_k_m</span><span>MIC WAKE+PTT</span><span>CPU 6%</span><span>RAM 41% (13.1 GB)</span>
+    <span style="margin-left:auto">09:44:31 PM</span>
+  </footer>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:9px;font:400 11.5px/1.3 Rajdhani,sans-serif;color:#6d8aa0"><span style="font:600 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.15em;padding:3px 7px;background:rgba(39,199,255,.12);color:#27c7ff;border-radius:4px">D</span>SYSTEM — gauges, power, top processes</div>
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;display:flex;flex-direction:column;background:radial-gradient(1100px 500px at 50% -10%,rgba(39,199,255,.07),transparent),#05090f;color:#cfe7f5;border:1px solid rgba(39,199,255,.18)">
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(39,199,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(39,199,255,.18) 1px,transparent 1px);background-size:44px 44px;opacity:.25;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);pointer-events:none"></div>
+  <header style="display:flex;align-items:baseline;gap:14px;padding:14px 22px 10px;border-bottom:1px solid rgba(39,199,255,.18)">
+    <span style="font-family:'Share Tech Mono',monospace;font-size:20px;letter-spacing:.5em;color:#27c7ff;text-shadow:0 0 14px rgba(39,199,255,.55)">J.A.R.V.I.S.</span>
+    <span style="font-size:11px;letter-spacing:.2em;color:#6d8aa0;text-transform:uppercase">local · speech-first</span>
+  </header>
+  <main style="flex:1;display:grid;grid-template-columns:300px minmax(0,1fr);gap:14px;padding:14px 22px 18px;min-height:0">
+    <section style="display:flex;flex-direction:column;align-items:center;gap:6px;align-content:start">
+      <div style="padding:30px">
+        <div style="position:relative;width:220px;height:220px;display:grid;place-items:center">
+          <div style="position:absolute;inset:-30px;border-radius:50%;background:radial-gradient(circle,rgba(255,201,77,.45) 0%,transparent 65%);opacity:.35"></div>
+          <div style="position:absolute;inset:8px;border-radius:50%;border:1px solid rgba(255,201,77,.55);border-top-color:#ffc94d;border-right-color:transparent;animation:spin 1.6s linear infinite"></div>
+          <div style="position:absolute;inset:26px;border-radius:50%;border:1px solid rgba(255,201,77,.55);border-bottom-color:#ffc94d;border-left-color:transparent;animation:spin 1.12s linear infinite reverse"></div>
+          <div style="position:absolute;inset:44px;border-radius:50%;border:1px dashed rgba(255,201,77,.55);opacity:.7;animation:spin 2.88s linear infinite"></div>
+          <div style="position:absolute;width:88px;height:88px;border-radius:50%;box-shadow:0 0 24px rgba(255,201,77,.7),0 0 90px rgba(255,201,77,.35);pointer-events:none"></div>
+          <div style="width:88px;height:88px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#ffe9b0 0%,#ffc94d 35%,#4d3a12 100%);box-shadow:inset 0 0 18px rgba(0,8,14,.55);animation:breathe 1.6s ease-in-out infinite"></div>
+          <div style="position:absolute;bottom:-34px;font-size:11px;letter-spacing:.35em;color:#ffdc8a;text-shadow:0 0 12px rgba(255,201,77,.6);white-space:nowrap">EXECUTING</div>
+        </div>
+      </div>
+    </section>
+    <section style="min-width:0;overflow:hidden;background:rgba(8,18,28,.92);border:1px solid rgba(39,199,255,.18);border-radius:10px;box-shadow:inset 0 0 40px rgba(4,12,20,.5);display:flex;flex-direction:column;min-height:0">
+      <div style="flex:1;display:flex;flex-direction:column;min-height:0;gap:10px;overflow:hidden;font-family:'Share Tech Mono',monospace;padding:14px 16px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:10px;letter-spacing:.35em;color:#6d8aa0">SYSTEM</span><span style="color:#6d8aa0;font-size:11px">up 4d 6h 12m · 214 processes</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,.25);display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:.25em;color:#27c7ff">SOUND</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><input type="range" min="0" max="100" value="62" style="flex:1;accent-color:#27c7ff"><span style="width:40px;text-align:right;font-size:12px">62%</span><button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:11px;letter-spacing:.18em;padding:6px 12px;cursor:pointer">MUTE</button></div>
+            <div style="font-size:11px;color:#6d8aa0">mic: Blue Yeti (USB)</div>
+          </div>
+          <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,.25);display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:.25em;color:#27c7ff">NETWORK</div>
+            <div style="font-family:Rajdhani,sans-serif;font-size:22px">Wired</div>
+            <div style="font-size:11px;color:#6d8aa0">192.168.1.42</div>
+            <div style="font-size:11px;color:#6d8aa0">↑ 214.7 MB · ↓ 1832.4 MB this session</div>
+          </div>
+          <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,.25);display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:10px;letter-spacing:.25em;color:#27c7ff">POWER</div>
+            <div style="font-family:Rajdhani,sans-serif;font-size:22px">Plugged in</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:11px;letter-spacing:.18em;padding:6px 12px;cursor:pointer">LOCK</button>
+              <button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:11px;letter-spacing:.18em;padding:6px 12px;cursor:pointer">SLEEP</button>
+              <button style="background:none;border:1px solid rgba(39,199,255,.45);border-radius:6px;color:#27c7ff;font-family:inherit;font-size:11px;letter-spacing:.18em;padding:6px 12px;cursor:pointer">RESTART</button>
+              <button style="background:none;border:1px solid rgba(255,92,106,.5);border-radius:6px;color:#ff5c6a;font-family:inherit;font-size:11px;letter-spacing:.18em;padding:6px 12px;cursor:pointer">SHUT DOWN</button>
+            </div>
+          </div>
+          <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,.25)">
+            <div style="display:flex;justify-content:space-between;font-size:11px;letter-spacing:.2em;color:#27c7ff;margin-bottom:6px"><span>CPU</span><span>41%</span></div>
+            <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;width:41%;background:#27c7ff;box-shadow:0 0 8px #27c7ff"></div></div>
+            <div style="font-size:11px;color:#6d8aa0"></div>
+          </div>
+          <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,.25)">
+            <div style="display:flex;justify-content:space-between;font-size:11px;letter-spacing:.2em;color:#27c7ff;margin-bottom:6px"><span>MEMORY</span><span>52%</span></div>
+            <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;width:52%;background:#27c7ff;box-shadow:0 0 8px #27c7ff"></div></div>
+            <div style="font-size:11px;color:#6d8aa0">16.6 / 32 GB</div>
+          </div>
+          <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,.25)">
+            <div style="display:flex;justify-content:space-between;font-size:11px;letter-spacing:.2em;color:#27c7ff;margin-bottom:6px"><span>DISK C:</span><span>68%</span></div>
+            <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;width:68%;background:#27c7ff;box-shadow:0 0 8px #27c7ff"></div></div>
+            <div style="font-size:11px;color:#6d8aa0">0.61 TB free</div>
+          </div>
+        </div>
+        <div style="border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px 12px;background:rgba(0,0,0,.25);display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:10px;letter-spacing:.25em;color:#27c7ff">TOP PROCESSES (memory)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;font-size:11px">
+            <div style="display:flex;justify-content:space-between"><span>llama-server.exe</span><span style="color:#6d8aa0;font-size:10px">6142 MB</span></div>
+            <div style="display:flex;justify-content:space-between"><span>python.exe</span><span style="color:#6d8aa0;font-size:10px">1284 MB</span></div>
+            <div style="display:flex;justify-content:space-between"><span>msedgewebview2.exe</span><span style="color:#6d8aa0;font-size:10px">742 MB</span></div>
+            <div style="display:flex;justify-content:space-between"><span>jarvis.exe</span><span style="color:#6d8aa0;font-size:10px">318 MB</span></div>
+            <div style="display:flex;justify-content:space-between"><span>explorer.exe</span><span style="color:#6d8aa0;font-size:10px">204 MB</span></div>
+            <div style="display:flex;justify-content:space-between"><span>MsMpEng.exe</span><span style="color:#6d8aa0;font-size:10px">188 MB</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer style="display:flex;align-items:center;gap:18px;padding:6px 22px;border-top:1px solid rgba(39,199,255,.18);font-family:'Share Tech Mono',monospace;font-size:10.5px;color:#6d8aa0;letter-spacing:.12em">
+    <span style="color:#27c7ff">● EXECUTING</span><span>MODEL qwen2.5-7b-instruct-q4_k_m</span><span>MIC WAKE+PTT</span><span>CPU 41%</span><span>RAM 52% (16.6 GB)</span>
+    <span style="margin-left:auto">09:45:03 PM</span>
+  </footer>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:9px;font:400 11.5px/1.3 Rajdhani,sans-serif;color:#6d8aa0"><span style="font:600 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.15em;padding:3px 7px;background:rgba(39,199,255,.12);color:#27c7ff;border-radius:4px">E</span>BOOT OVERLAY — real sidecar events, no fake progress</div>
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;background:#05090f;color:#cfe7f5;border:1px solid rgba(39,199,255,.18);display:grid;place-content:center;text-align:center">
+  <div style="font-family:'Share Tech Mono',monospace;font-size:34px;letter-spacing:.6em;color:#27c7ff;text-shadow:0 0 24px rgba(39,199,255,.6);margin-bottom:28px;animation:bootPulse 2.2s ease-in-out infinite">J.A.R.V.I.S.</div>
+  <div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#6d8aa0;min-height:80px">
+    <div style="letter-spacing:.2em;padding:3px 0">initializing…</div>
+    <div style="letter-spacing:.2em;padding:3px 0">sidecar up on 127.0.0.1:8765</div>
+    <div style="letter-spacing:.2em;padding:3px 0">llama.cpp vulkan · qwen2.5-7b-instruct-q4_k_m loaded (4.4 GB)</div>
+    <div style="letter-spacing:.2em;padding:3px 0">parakeet stt warm · kokoro tts warm</div>
+    <div style="letter-spacing:.2em;padding:3px 0">memory store 1,204 rows · 24 skills</div>
+    <div style="letter-spacing:.2em;padding:3px 0;color:#45ffc8;text-shadow:0 0 12px rgba(69,255,200,.5)">system ready</div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:9px;font:400 11.5px/1.3 Rajdhani,sans-serif;color:#6d8aa0"><span style="font:600 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.15em;padding:3px 7px;background:rgba(39,199,255,.12);color:#27c7ff;border-radius:4px">F</span>FIRST RUN — one-time setup card over the HUD</div>
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;background:radial-gradient(1100px 500px at 50% -10%,rgba(39,199,255,.07),transparent),#05090f;color:#cfe7f5;border:1px solid rgba(39,199,255,.18)">
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(39,199,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(39,199,255,.18) 1px,transparent 1px);background-size:44px 44px;opacity:.25;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%)"></div>
+  <div style="position:absolute;inset:0;background:rgba(2,6,10,.7);backdrop-filter:blur(3px);display:grid;place-items:center">
+    <div style="width:460px;background:rgba(13,22,34,.72);border:1px solid rgba(39,199,255,.45);border-radius:12px;padding:26px 28px;box-shadow:0 0 60px rgba(39,199,255,.12)">
+      <div style="font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:.5em;color:#27c7ff;margin-bottom:14px">WELCOME</div>
+      <p style="margin:0 0 18px;font-size:14.5px;line-height:1.5">I'm JARVIS. Everything — speech recognition, reasoning, memory, and my voice — runs locally on this machine. A few choices before we begin:</p>
+      <label style="display:block;margin-bottom:14px;font-size:13px;color:#6d8aa0">How should I listen?
+        <select style="display:block;width:100%;margin-top:5px;background:rgba(6,14,22,.85);border:1px solid rgba(39,199,255,.18);border-radius:6px;color:#cfe7f5;font-family:inherit;font-size:13.5px;padding:8px 10px">
+          <option>Say "Hey Jarvis" or press Ctrl+Shift+J</option>
+        </select>
+      </label>
+      <label style="display:block;margin-bottom:14px;font-size:13px;color:#6d8aa0">Voice
+        <select style="display:block;width:100%;margin-top:5px;background:rgba(6,14,22,.85);border:1px solid rgba(39,199,255,.18);border-radius:6px;color:#cfe7f5;font-family:inherit;font-size:13.5px;padding:8px 10px">
+          <option>en_GB-alan-medium</option>
+        </select>
+      </label>
+      <p style="font-size:12px;color:#6d8aa0;line-height:1.5;margin:14px 0 18px">Web search stays off until you add a Brave API key in Settings. Risky actions always ask before running. You can change everything later.</p>
+      <div style="display:flex;justify-content:flex-end">
+        <button style="background:rgba(39,199,255,.14);color:#27c7ff;border:1px solid #27c7ff;border-radius:6px;font-family:inherit;font-size:13px;letter-spacing:.3em;padding:10px 28px;cursor:pointer">BEGIN</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="display:flex;align-items:baseline;gap:9px;font:400 11.5px/1.3 Rajdhani,sans-serif;color:#6d8aa0"><span style="font:600 10.5px/1 'Share Tech Mono',monospace;letter-spacing:.15em;padding:3px 7px;background:rgba(39,199,255,.12);color:#27c7ff;border-radius:4px">G</span>CONFIRMATION — high-risk tool gate, raw JSON args</div>
+<div style="width:1920px;height:1080px;position:relative;overflow:hidden;background:radial-gradient(1100px 500px at 50% -10%,rgba(39,199,255,.07),transparent),#05090f;color:#cfe7f5;border:1px solid rgba(39,199,255,.18)">
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(39,199,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(39,199,255,.18) 1px,transparent 1px);background-size:44px 44px;opacity:.25;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 80%)"></div>
+  <div style="position:absolute;inset:0;background:rgba(2,6,10,.7);backdrop-filter:blur(3px);display:grid;place-items:center">
+    <div style="width:420px;background:rgba(13,22,34,.72);border:1px solid #ff5c6a;border-radius:10px;padding:20px;box-shadow:0 0 50px rgba(255,201,77,.15)">
+      <div style="font-size:10px;letter-spacing:.35em;color:#ff5c6a;margin-bottom:8px">HIGH RISK ACTION</div>
+      <div style="font-family:'Share Tech Mono',monospace;font-size:18px;color:#cfe7f5;margin-bottom:10px">delete_file</div>
+      <pre style="font-family:'Share Tech Mono',monospace;font-size:12px;color:#6d8aa0;background:rgba(6,14,22,.8);border:1px solid rgba(39,199,255,.18);border-radius:6px;padding:10px;max-height:160px;overflow:auto;margin:0 0 16px;white-space:pre-wrap">{
+  "path": "C:\Users\nick\Documents\notes\llama-vulkan-notes.md",
+  "recursive": false
+}</pre>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button style="background:none;color:#6d8aa0;border:1px solid rgba(255,255,255,.15);border-radius:6px;font-family:inherit;font-size:12px;letter-spacing:.2em;padding:8px 22px;cursor:pointer">DENY</button>
+        <button style="background:rgba(255,92,106,.15);color:#ff5c6a;border:1px solid #ff5c6a;border-radius:6px;font-family:inherit;font-size:12px;letter-spacing:.2em;padding:8px 22px;cursor:pointer">ALLOW</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+</div>
+
+<div style="margin-top:26px;padding-top:20px;border-top:1px solid rgba(39,199,255,.12);max-width:960px">
+<div style="font:600 12px/1 'Share Tech Mono',monospace;letter-spacing:.25em;color:#27c7ff;margin-bottom:10px">WHAT I SEE WRONG WITH IT</div>
+<ol style="margin:0;padding-left:20px;font:400 13.5px/1.6 Rajdhani,sans-serif;color:#9ab5c6;text-wrap:pretty">
+<li><b style="color:#cfe7f5">The orb is not the centre.</b> In panel mode it's demoted to a 300px column and the 88px nucleus reads as a decoration next to a 1200px wall of chat. Idle is the only time it's the subject.</li>
+<li><b style="color:#cfe7f5">Eleven glyph tabs, one hover strip.</b> ◈ ◎ ▣ ◐ ▤ ▦ ◍ ❖ ◔ ⌁ ⚙ are unlearnable, and they only appear when the cursor goes hunting near the top edge — bad for a voice-first machine you barely touch.</li>
+<li><b style="color:#cfe7f5">Two type sizes doing all the work.</b> 10–11px mono all-caps for every label and 13–15px Rajdhani for every body. No scale, so nothing is obviously more important than anything else.</li>
+<li><b style="color:#cfe7f5">The 44px grid and the glow are constant.</b> They read the same at idle and at fault, so the room never changes tone when something is actually wrong.</li>
+<li><b style="color:#cfe7f5">State lives in three places.</b> Orb label, status-bar dot, and the "doing…" line under the orb all say something slightly different at once.</li>
+<li><b style="color:#cfe7f5">No sense of transition.</b> Panels fade in over 160ms in place; the orb never moves. Nothing tells you the machine went from resting to working.</li>
+</ol>
+</div>
+</section>
+</x-dc>
+</body>
+</html>

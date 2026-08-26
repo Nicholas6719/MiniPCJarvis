@@ -1,57 +1,73 @@
-import { useEffect } from "react";
-import { JarvisCore } from "./components/JarvisCore/JarvisCore";
-import { ConversationView } from "./components/ConversationView";
-import { ActivityLog } from "./components/ActivityLog";
-import { ConfirmationModal } from "./components/ConfirmationModal";
-import { MemoryView } from "./components/MemoryView";
-import { SettingsView } from "./components/SettingsView";
-import { ResearchView } from "./components/ResearchView";
-import { TasksView } from "./components/TasksView";
-import { DiagnosticsView } from "./components/DiagnosticsView";
-import { StatusBar } from "./components/StatusBar";
-import { WebPanel } from "./components/WebPanel";
-import { MediaView } from "./components/MediaView";
-import { BrowserView } from "./components/BrowserView";
-import { FilesView } from "./components/FilesView";
-import { AppsView } from "./components/AppsView";
-import { SystemView } from "./components/SystemView";
+// The frame (§5): two geometries, chosen by state. Radial — the core is the
+// subject, centred. Anchor — the core slides left and a stage opens beside it.
+// The core carries the layout with it; nothing cross-fades in place.
+import { useEffect, useMemo, useState } from "react";
+import { ArcReactor, CORE_SPEC } from "./components/ArcReactor";
+import { Stage } from "./components/Stage";
+import { ConfirmationGate, FaultWedges } from "./components/Wedges";
 import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
-import { AmbientView } from "./components/AmbientView";
-import { useStore, View } from "./state/store";
+import { useStore, JarvisState } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
 
-// Icon-first tabs: the glyph is the control, the name is the tooltip (and is shown for
-// whichever tab is active, so you never have to guess what you are looking at).
-const VIEWS: { id: View; label: string; icon: string }[] = [
-  { id: "conversation", label: "CONVERSATION", icon: "◈" },
-  { id: "research", label: "RESEARCH", icon: "◎" },
-  { id: "media", label: "MEDIA", icon: "▣" },
-  { id: "browser", label: "BROWSER", icon: "◐" },
-  { id: "files", label: "FILES", icon: "▤" },
-  { id: "apps", label: "APPS", icon: "▦" },
-  { id: "system", label: "SYSTEM", icon: "◍" },
-  { id: "memory", label: "MEMORY", icon: "❖" },
-  { id: "tasks", label: "TASKS", icon: "◔" },
-  { id: "diagnostics", label: "DIAGNOSTICS", icon: "⌁" },
-  { id: "settings", label: "SETTINGS", icon: "⚙" },
-];
+// Radial states (§5): the machine turning to face you. Everything else anchors.
+const RADIAL: Set<JarvisState> = new Set([
+  "offline", "starting", "listening", "waiting", "error", "sleeping",
+]);
+
+// Per-state room intensity (§ Atmosphere) and chrome opacity (§ Chrome).
+function airFor(state: JarvisState): number {
+  if (state === "idle" || state === "sleeping" || state === "offline") return 0.5;
+  if (state === "listening") return 0.8;
+  if (state === "speaking") return 1.15;
+  if (state === "error" || state === "waiting") return 1.1;
+  return 1;
+}
+function chromeFor(state: JarvisState): number {
+  if (state === "idle" || state === "sleeping" || state === "offline") return 0.32;
+  if (state === "listening") return 0.6;
+  return 1;
+}
+
+function useClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 15000);
+    return () => clearInterval(t);
+  }, []);
+  return now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+// One scaling rule, two clauses, no breakpoints (§10).
+function useScale() {
+  const [s, setS] = useState(1);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const apply = () => {
+      const raw = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+      const scale = Math.min(2.0, Math.max(0.85, raw));
+      setS(scale);
+      setCompact(window.innerWidth < 1600 || window.innerHeight < 900);
+      document.documentElement.style.setProperty("--s", String(scale));
+      document.body.classList.toggle("compact", window.innerWidth < 1600 || window.innerHeight < 900);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
+  return { s, compact };
+}
 
 export default function App() {
   const state = useStore((s) => s.state);
-  const view = useStore((s) => s.view);
-  const setView = useStore((s) => s.setView);
-  const onEvent = useStore((s) => s.onEvent);
+  const stage = useStore((s) => s.stage);
+  const confirmation = useStore((s) => s.confirmation);
+  const web = useStore((s) => s.web);
   const wakeMode = useStore((s) => s.wakeMode);
   const armedUntil = useStore((s) => s.armedUntil);
   const configVersion = useStore((s) => s.configVersion);
-  const rightPanel = useStore((s) => s.rightPanel);
-  const ambient = useStore((s) => s.ambient);
-  const pinned = useStore((s) => s.pinned);
-  const navVisible = useStore((s) => s.navVisible);
-  const setNavVisible = useStore((s) => s.setNavVisible);
-  const setHovering = useStore((s) => s.setHovering);
-  const setPinned = useStore((s) => s.setPinned);
-  const collapse = useStore((s) => s.collapse);
+  const onEvent = useStore((s) => s.onEvent);
+  const clock = useClock();
+  const { s } = useScale();
 
   useEffect(() => connectEvents(onEvent), [onEvent]);
 
@@ -59,60 +75,13 @@ export default function App() {
   useEffect(() => {
     const sync = () => document.body.classList.toggle("is-hidden", document.hidden);
     sync();
-    // leaving the window doesn't fire mouseleave on the panel: clear the hover latch,
-    // otherwise the HUD stays expanded forever after an alt-tab
-    const blur = () => { useStore.getState().setHovering(false); document.body.classList.add("is-hidden"); };
-    const focus = () => document.body.classList.toggle("is-hidden", document.hidden);
     document.addEventListener("visibilitychange", sync);
-    window.addEventListener("blur", blur);
-    window.addEventListener("focus", focus);
-    return () => {
-      document.removeEventListener("visibilitychange", sync);
-      window.removeEventListener("blur", blur);
-      window.removeEventListener("focus", focus);
-    };
+    window.addEventListener("blur", () => document.body.classList.add("is-hidden"));
+    window.addEventListener("focus", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
   }, []);
 
-  // fade back to ambient once the turn is over, the hold has elapsed, nothing is pinned,
-  // and the cursor isn't inside the panel
-  useEffect(() => {
-    const t = setInterval(() => {
-      const st = useStore.getState();
-      if (st.ambient || st.pinned || st.hovering) return;
-      // "busy" states must not freeze a panel on screen forever (error/sleeping never
-      // return to idle on their own)
-      if (!["idle", "error", "sleeping", "offline"].includes(st.state)) return;
-      if (st.panelUntil && Date.now() > st.panelUntil) st.collapse();
-    }, 500);
-    return () => clearInterval(t);
-  }, []);
-
-  // the tab bar lives at the top edge: reveal on approach, hide when the cursor leaves
-  useEffect(() => {
-    let hideTimer: number | undefined;
-    const onMove = (e: MouseEvent) => {
-      const st = useStore.getState();
-      if (e.clientY < 60) { if (!st.navVisible) setNavVisible(true); if (hideTimer) { window.clearTimeout(hideTimer); hideTimer = undefined; } }
-      else if (st.navVisible && !st.pinned && e.clientY > 140 && !hideTimer) {
-        hideTimer = window.setTimeout(() => { setNavVisible(false); hideTimer = undefined; }, 1500);
-      }
-    };
-    window.addEventListener("mousemove", onMove);
-    return () => window.removeEventListener("mousemove", onMove);
-  }, []);
-
-  // settings: hold time
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await api("/config");
-        const secs = Number(r.config?.ui?.panel_hold_s ?? 12);
-        useStore.getState().setHoldMs(Math.max(3, secs) * 1000);
-      } catch {}
-    })();
-  }, [configVersion]);
-
-  // keep the orb's mode label in sync with settings
+  // wake mode + history hydrate
   useEffect(() => {
     (async () => {
       try {
@@ -121,8 +90,6 @@ export default function App() {
       } catch {}
     })();
   }, [configVersion, state === "idle"]);
-
-  // hydrate conversation history so restarting the window keeps continuity
   useEffect(() => {
     (async () => {
       try {
@@ -132,69 +99,117 @@ export default function App() {
     })();
   }, []);
 
+  // ---- derived frame values -------------------------------------------------
+  const gateOpen = confirmation != null;
+  const faultOpen = state === "error";
+  // The state picks the geometry; a held stage keeps the anchor while idle.
+  const geometry: "radial" | "anchor" =
+    gateOpen || faultOpen ? "radial"
+    : RADIAL.has(state) ? "radial"
+    : stage ? "anchor"
+    : state === "idle" ? "radial"
+    : "anchor";
+
+  const rim = gateOpen ? "#ffc94d" : (CORE_SPEC[state] ?? CORE_SPEC.idle)[0];
+  const [, , , word, sub] = CORE_SPEC[state] ?? CORE_SPEC.idle;
+  const air = airFor(state);
+  const chr = chromeFor(state);
+  const anchored = geometry === "anchor";
+
+  // Core scale (§5.2/5.3): rest 1.45 · listening 1.3 · faults + gate 1.0 · anchor 0.85–0.95
+  const coreScale = anchored
+    ? state === "speaking" ? 0.95 : 0.85
+    : gateOpen || faultOpen ? 1.0
+    : state === "listening" ? 1.3
+    : 1.45;
+
+  // Charge arc = literal progress (real source reads), never decorative.
+  const charge = useMemo(() => {
+    const total = web?.results?.length ?? 0;
+    if (!total || !stage) return 0;
+    const read = (web?.results ?? []).filter((r) => web?.read[r.url]).length;
+    if (web?.stage === "done") return 100;
+    return Math.round((read / total) * 100);
+  }, [web, stage]);
+
+  const armed = state === "idle" && armedUntil > Date.now() / 1000;
+  const radialWord = gateOpen ? "NEEDS YOU" : armed ? "CONVERSATION" : word;
+  const radialSub = gateOpen ? "nothing has happened yet"
+    : armed ? "listening · no wake word needed"
+    : state === "idle" && wakeMode === "wake_word" ? 'say "hey jarvis"'
+    : state === "idle" && wakeMode === "both" ? '"hey jarvis" · or ctrl+shift+j'
+    : sub;
+
   const micClick = async () => {
-    try {
-      await api("/listen/toggle", { method: "POST" });
-    } catch {}
+    try { await api("/listen/toggle", { method: "POST" }); } catch {}
   };
 
-  const showNav = navVisible || pinned;
+  const showWedges = gateOpen || faultOpen;
+
   return (
-    <div className={`hud ${ambient ? "hud--ambient" : "hud--panel"} ${showNav ? "hud--nav" : ""}`}>
-      <div className="hud__grid" />
-      <header className="hud__header">
-        <span className="hud__logo">J.A.R.V.I.S.</span>
-        <nav className="hud__nav">
-          {VIEWS.map((v) => (
-            <button key={v.id}
-                    title={v.label}
-                    aria-label={v.label}
-                    className={`hud__navbtn hud__navicon ${view === v.id ? "is-active" : ""}`}
-                    onClick={() => setView(v.id)}>
-              <span className="hud__glyph">{v.icon}</span>
-              {view === v.id && <span className="hud__navname">{v.label}</span>}
-            </button>
-          ))}
-          {!ambient && (
-            <button className={`hud__navbtn hud__pin ${pinned ? "is-active" : ""}`} title={pinned ? "Unpin: fade back when done" : "Pin: keep this panel"}
-                    onClick={() => (pinned ? (setPinned(false), collapse()) : setPinned(true))}>{pinned ? "PINNED" : "PIN"}</button>
-          )}
-        </nav>
-      </header>
-      <main className="hud__main">
-        <section className="hud__left">
-          <button className="hud__corebtn" onClick={micClick} title="Toggle listening (Ctrl+Shift+J)">
-            <JarvisCore state={state} wakeMode={wakeMode} armedUntil={armedUntil} />
-          </button>
-          {!ambient && <div className="hud__sidechat"><AmbientView compact /></div>}
-        </section>
-        {ambient && <section className="hud__ambient"><AmbientView /></section>}
-        {!ambient && (
-        <section className="hud__center" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-          {view === "conversation" && (rightPanel === "web" && !pinned ? <WebPanel /> : <ConversationView />)}
-          {view === "research" && <ResearchView />}
-          {view === "media" && <MediaView />}
-          {view === "browser" && <BrowserView />}
-          {view === "files" && <FilesView />}
-          {view === "apps" && <AppsView />}
-          {view === "system" && <SystemView />}
-          {view === "memory" && <MemoryView />}
-          {view === "tasks" && <TasksView />}
-          {view === "diagnostics" && <DiagnosticsView />}
-          {view === "settings" && <SettingsView />}
-        </section>
-        )}
-        {!ambient && rightPanel === "web" && (pinned || view !== "conversation") && (
-          <section className="hud__right" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-            <WebPanel />
-          </section>
-        )}
-        {!ambient && rightPanel !== "web" && view === "diagnostics" && (
-          <section className="hud__right"><ActivityLog /></section>
-        )}
-      </main>
-      <StatusBar />
-      <ConfirmationModal />
+    <div
+      className={`frame frame--${geometry}`}
+      style={{
+        // @ts-ignore custom properties drive the whole room (§11)
+        "--rim": rim, "--air": air, "--chr": chr,
+        "--rad": geometry === "radial" ? 1 : 0,
+        "--col": anchored ? 1 : 0,
+      } as React.CSSProperties}
+    >
+      {/* atmosphere — behind everything (z 0) */}
+      <div className="atmo atmo--vignette" />
+      <div className="atmo atmo--grain" />
+      <div className="atmo atmo--scanline" />
+
+      {/* ambient bloom follows the core */}
+      <div className="bloom" style={{ left: anchored ? `calc(380px * var(--s))` : "50%" }} />
+
+      {/* orbital rings — radial only */}
+      <div className="rail rail--outer" />
+      <div className="rail rail--inner" />
+
+      {/* chrome: corner ticks, wordmark, clock — re-anchored to the real viewport */}
+      <div className="tick tick--tl-h" /><div className="tick tick--tl-v" />
+      <div className="tick tick--tr-h" /><div className="tick tick--tr-v" />
+      <div className="tick tick--bl-h" /><div className="tick tick--bl-v" />
+      <div className="tick tick--br-h" /><div className="tick tick--br-v" />
+      <div className="wordmark">JARVIS</div>
+      <div className="clock">{clock}</div>
+
+      {/* the core — it carries the layout with it (§5.1) */}
+      <button
+        className="coreslot"
+        onClick={micClick}
+        title="Toggle listening (Ctrl+Shift+J)"
+        style={{
+          left: anchored ? `calc(380px * var(--s))` : "50%",
+          transform: `translate(-50%, -50%) scale(${coreScale})`,
+        }}
+      >
+        <ArcReactor state={gateOpen && state !== "waiting" ? "waiting" : state} size={380 * s} charge={charge} />
+      </button>
+
+      {/* radial state block + rest hint */}
+      <div className="radial__state">
+        <div className="radial__word">{radialWord}</div>
+        <div className="radial__sub mono-sub">{radialSub}</div>
+      </div>
+      {state === "idle" && !stage && !gateOpen && (
+        <div className="radial__hint mono-sub">SAY "HEY JARVIS" OR PRESS CTRL+SHIFT+J</div>
+      )}
+
+      {/* wedges: faults and the gate — radial only */}
+      {gateOpen && <ConfirmationGate />}
+      {faultOpen && !gateOpen && <FaultWedges />}
+
+      {/* column divider — the core casting light on the stage */}
+      <div className="column" />
+
+      {/* the stage */}
+      <div className="stage">
+        {!showWedges && <Stage />}
+      </div>
+
       <FirstRunSetup />
       <BootOverlay />
     </div>

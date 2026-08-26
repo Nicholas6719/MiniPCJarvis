@@ -99,7 +99,9 @@ app.add_middleware(
     CORSMiddleware,
     # WebView2 (Tauri) and dev origins only; API is loopback + token-authed.
     allow_origins=["http://tauri.localhost", "https://tauri.localhost",
-                   "http://localhost:1420", "http://127.0.0.1:1420"],
+                   "http://localhost:1420", "http://127.0.0.1:1420",
+                   # vite dev server (1420 is silently firewalled on this machine)
+                   "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
