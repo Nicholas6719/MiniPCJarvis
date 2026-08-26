@@ -437,6 +437,36 @@ each one is a contract. Findings (commit 6163105), all fixed + gate-protected:
   canonicalizes into the Pictures-FOLDER pattern.
 - brain_e2e is order-sensitive: run it against a QUIET app — starting it while a
   turn is still speaking shifts every expectation off by one (looks like 0/8).
+- ROUTE SWEEP (60 realistic utterances vs /brain/classify; script pattern in git
+  history) found 7 misroutes, all guarded + gate-pinned: "minimize everything" and
+  "be quieter" SLEPT him, "go to sleep in an hour" slept NOW, "wake me up at 7"
+  got "At your service.", "put on some music" launched an app called "some music",
+  "switch to a british voice" hunted a window by that title, "show me pictures
+  from my trip" web-searched his personal photos. Technique worth repeating after
+  any seed/skill change.
+- AUTOSTART: enabled 2026-08-26 (HKCU\...\Run "JARVIS", written via real-session
+  schtasks cmd — agent-shell registry writes may be virtualized). Before this a
+  reboot left JARVIS dead (the 10:27 restart did exactly that; Event 1074 =
+  Start-menu restart, and the WER "BlueScreen" entries that morning were OLD
+  queued reports flushed at boot — check builds/timestamps before panicking).
+  The Settings toggle reads the same Run value, so it shows ON and can turn it off.
+
+## FEATURE GAPS the route sweep surfaced (for the planning session)
+Things users will say that today fall to the LLM without a real tool behind them:
+- Relative volume: "turn it up / down a bit" (volume_set is absolute-only).
+- Voice control: "speak slower", "change your voice", "switch to a british voice",
+  "be quieter" (voice/rate/volume config exists but has no voice-command surface).
+- Reminders by voice: "what reminders do i have", "cancel my reminders" (the tools
+  to LIST/CANCEL don't exist; TasksView shows them but voice can't).
+- "Say that again" (re-speak the last line), "take a note / write that down".
+- Now-playing: "what song is this" (no media metadata source).
+- Local photo/file realm: "show me pictures from my trip", "where are my
+  screenshots" (screenshots folder exists; no local-image browse/search stage).
+- Site-scoped search: "search youtube for lofi beats" (query passes through as
+  plain keywords today).
+- "Read my last email", "what time is my meeting" (no mail/calendar integration).
+- Media backend proper (play actual music, now-playing stage §6.7), table stage
+  (§6.8), split/two-tasks, apps/window-layout stage — designed but unbuilt.
 
 ## HOW THE NEW UI WORKS (for explaining to the user)
 - Rest = radial: reactor centred, room faded. Speak, or Ctrl+Shift+J, or click the orb.
