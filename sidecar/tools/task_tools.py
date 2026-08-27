@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from tasks.scheduler import scheduler
 from tools.registry import Risk, Tool, registry
@@ -46,6 +47,27 @@ def cancel_reminder(task_id: int) -> dict:
     return {"cancelled": task_id} if ok else {"error": f"no pending task {task_id}"}
 
 
+def cancel_reminders_matching(query: str = "") -> dict:
+    """Cancel reminders by what they're ABOUT ("stop reminding me to stretch"), or
+    all of them when query is empty. Nobody knows their reminders' id numbers —
+    without this, "don't remind me to stretch anymore" had nowhere to go and fell
+    to the model, which had no way to act on it either."""
+    pending = scheduler.list_pending()
+    if not pending:
+        return {"cancelled": 0, "none_pending": True}
+    words = [w for w in re.split(r"\s+", (query or "").lower().strip()) if len(w) > 2]
+    if words:
+        hits = [t for t in pending if all(w in t["text"].lower() for w in words)]
+        if not hits:   # looser: any word matches
+            hits = [t for t in pending if any(w in t["text"].lower() for w in words)]
+    else:
+        hits = pending
+    for t in hits:
+        scheduler.cancel(t["id"])
+    return {"cancelled": len(hits), "texts": [t["text"] for t in hits][:5],
+            "query": query, "remaining": len(pending) - len(hits)}
+
+
 def register_all() -> None:
     registry.register(Tool(
         name="set_reminder",
@@ -72,3 +94,11 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "task_id": {"type": "integer"}}, "required": ["task_id"]},
         risk=Risk.LOW, handler=cancel_reminder))
+    registry.register(Tool(
+        name="cancel_reminders_matching",
+        description="Cancel reminders by what they are about — 'stop reminding me to "
+                    "stretch', 'cancel my reminders' (empty query cancels all pending).",
+        parameters={"type": "object", "properties": {
+            "query": {"type": "string", "description": "words from the reminder, or empty for all"}},
+            "required": []},
+        risk=Risk.LOW, handler=cancel_reminders_matching))

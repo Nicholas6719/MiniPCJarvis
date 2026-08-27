@@ -56,6 +56,17 @@ async def main():
         for text, want in CASES:
             results.append(await one(ws, text, want))
             await asyncio.sleep(1.5)
+    # CLEAN UP AFTER OURSELVES: this suite sets a real 90-minute reminder on the
+    # user's real machine. Eight test runs on 2026-08-27 meant eight surprise
+    # "stretch" alerts on his phone through the evening. Tests must not leak.
+    try:
+        pend = httpx.get(BASE + "/tasks", headers=H).json().get("tasks", [])
+        for t in pend:
+            if "stretch" in (t.get("text") or "").lower():
+                httpx.delete(f"{BASE}/tasks/{t['id']}", headers=H, timeout=10)
+                print(f"  cleaned up test reminder #{t['id']}")
+    except Exception as e:
+        print(f"  WARNING could not clean up the test reminder: {e}")
     m = httpx.get(BASE + "/metrics", headers=H).json()
     print("\nmetrics:", json.dumps(m["summary"]))
     b = httpx.get(BASE + "/brain", headers=H).json()

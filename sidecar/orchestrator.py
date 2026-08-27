@@ -14,7 +14,7 @@ import uuid
 
 import numpy as np
 
-from audio.io import mic, speaker, MIC_RATE
+from audio.io import mic, speaker, MIC_RATE, SpeakerStalled
 from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
@@ -225,6 +225,7 @@ class Orchestrator:
         await audio_boot
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
         self._device_task = asyncio.create_task(self._device_watch())
+        self._stuck_task = asyncio.create_task(self._stuck_watchdog())
         asyncio.create_task(self._warm_prompts())
         asyncio.create_task(tts.warm_phrases())
         if config.get("audio", "boot_sound", default=True):
@@ -585,6 +586,46 @@ class Orchestrator:
         return np.concatenate(buf) if buf else None
 
     # ---------- one conversational turn ----------
+
+    async def _stuck_watchdog(self) -> None:
+        """Nothing may leave him unable to answer. A turn that stops making
+        progress — a hung audio device, a wedged tool, a lost await — used to
+        park the state machine off IDLE forever, silently dropping every later
+        request on every channel (2026-08-27: 90 minutes of that). Now a stalled
+        state is force-cleared and reported.
+
+        WAITING is exempt: a confirmation is legitimately waiting on the user,
+        and registry.execute has its own timeout for it."""
+        LIMITS = {State.PROCESSING: 180, State.THINKING: 300, State.SEARCHING: 300,
+                  State.EXECUTING: 300, State.SPEAKING: 240, State.INTERRUPTED: 60}
+        last_state, since = None, time.time()
+        while True:
+            await asyncio.sleep(15)
+            try:
+                st = self.sm.state
+                if st is not last_state:
+                    last_state, since = st, time.time()
+                    continue
+                limit = LIMITS.get(st)
+                if limit is None or time.time() - since <= limit:
+                    continue
+                stuck_for = int(time.time() - since)
+                log.error("state machine stuck in %s for %ss — forcing IDLE", st.value, stuck_for)
+                await bus.emit("error",
+                               summary=f"a turn stalled in {st.value} for {stuck_for}s — recovered")
+                try:                       # stop any half-played speech and free the device
+                    self._speak_cancel.set()
+                    speaker.abort()
+                except Exception:
+                    log.exception("could not quiesce audio during recovery")
+                if self._turn_task and not self._turn_task.done():
+                    self._turn_task.cancel()
+                await self.sm.to(State.IDLE, force=True)
+                last_state, since = State.IDLE, time.time()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("stuck watchdog tick failed")
 
     async def run_text_turn(self, text: str) -> None:
         """Typed input path — same pipeline, no STT."""
@@ -1281,11 +1322,18 @@ class Orchestrator:
                     spoke = True
                 await bus.emit("speaking", text=sentence)
                 self._saying_own_name = "jarvis" in sentence.lower()
-                async for chunk in tts.synthesize_stream(sentence, self._speak_cancel):
-                    if self._speak_cancel.is_set():
-                        break
-                    self.metrics.mark("first_audio_ms")
-                    await speaker.play_chunk(chunk, tts.sample_rate)
+                try:
+                    async for chunk in tts.synthesize_stream(sentence, self._speak_cancel):
+                        if self._speak_cancel.is_set():
+                            break
+                        self.metrics.mark("first_audio_ms")
+                        await speaker.play_chunk(chunk, tts.sample_rate)
+                except SpeakerStalled as e:
+                    # the device died mid-sentence: say so on screen, drop the rest of
+                    # the speech, and let the turn FINISH — silence beats a frozen JARVIS
+                    log.error("speech aborted: %s", e)
+                    await bus.emit("error", summary=f"audio output stalled: {e}")
+                    break
                 if self._speak_cancel.is_set():
                     break  # interrupted — drop any remaining queued sentences
         finally:

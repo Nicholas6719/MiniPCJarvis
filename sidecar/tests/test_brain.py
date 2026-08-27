@@ -57,6 +57,16 @@ CASES = [
     ("send me a grid screenshot", "grid_shot"),
     ("take a screenshot", "screenshot"),            # ...and plain stays plain
     ("take a screenshot to my desktop", "screenshot"),
+    # 2026-08-27, from the Telegram logs: none of these routed anywhere, so a plain
+    # request to stop being nagged reached the model, which had no tool for it either
+    ("don't remind me to stretch anymore", "unremind"),
+    ("stop reminding me to stretch", "unremind"),
+    ("cancel my reminders", "unremind"),
+    ("what reminders do i have", "reminders"),
+    # ...and a courtesy must never be handed to the model (it parroted "Thank you
+    # Jarvis, sir." straight back at him)
+    ("thank you jarvis", "thanks"), ("thanks", "thanks"),
+    ("remind me in 20 minutes to check the oven", "reminder"),   # still sets them
 ]
 
 async def main() -> int:

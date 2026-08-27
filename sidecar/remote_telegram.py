@@ -103,14 +103,16 @@ class TelegramBridge:
                 "polling": bool(self._task and not self._task.done())}
 
     # ------------------------------------------------------------- transport
-    async def _api(self, method: str, timeout: float = 30, **params):
+    async def _api(self, method: str, http_timeout: float = 30, **params):
+        """`params` go to Telegram as the JSON body; http_timeout is ours alone.
+        (They used to be the same knob, which quietly disabled long polling.)"""
         if not self.token:
             return None
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10))
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10))
         try:
             r = await self._client.post(f"{API}/bot{self.token}/{method}",
-                                        json=params, timeout=timeout)
+                                        json=params, timeout=http_timeout)
             data = r.json()
             if not data.get("ok"):
                 log.warning("telegram %s: %s", method, data.get("description"))
@@ -155,13 +157,20 @@ class TelegramBridge:
 
     # ------------------------------------------------------------- the loop
     async def _poll_loop(self) -> None:
+        # httpx logs the full request URL at INFO — and the bot token lives IN that
+        # URL, so every poll was writing the token into sidecar.log in plaintext.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         log.info("telegram bridge polling as @%s", self.bot_username or "?")
         me = await self._api("getMe")
         if me:
             self.bot_username = me.get("username", "")
         while True:
             try:
-                updates = await self._api("getUpdates", timeout=55, offset=self._offset,
+                # `timeout` must be a BODY parameter for Telegram to hold the
+                # connection open (long polling). As an httpx kwarg only, every
+                # call returned instantly and we hammered the API every ~3 s.
+                updates = await self._api("getUpdates", http_timeout=70, timeout=50,
+                                          offset=self._offset,
                                           allowed_updates=["message", "callback_query"])
                 if updates is None:
                     await asyncio.sleep(5)

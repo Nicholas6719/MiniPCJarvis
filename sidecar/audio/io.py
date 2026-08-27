@@ -184,6 +184,10 @@ class Microphone:
             self._stream = None
 
 
+class SpeakerStalled(RuntimeError):
+    """The output device stopped accepting audio (unplugged / slept / switched)."""
+
+
 class Speaker:
     """Plays float32 chunks; cancellable mid-stream for barge-in.
 
@@ -211,6 +215,13 @@ class Speaker:
     silent_until: float = 0.0   # self-test mode: synthesize but don't play (no 3 AM chatter)
 
     async def play_chunk(self, chunk: np.ndarray, rate: int) -> None:
+        """Play one chunk. NEVER blocks the turn forever: PortAudio's write is a
+        blocking call, and when the output device disappears mid-sentence (a
+        headset disconnects, the monitor speakers sleep, the default device
+        changes) it never returns — on 2026-08-27 that wedged a whole turn in
+        SPEAKING for 90 minutes and JARVIS answered nothing, on any channel,
+        until he was restarted. A write that overruns its own audio duration by
+        a wide margin means the device is gone: abort it and self-heal."""
         if time.time() < self.silent_until:
             await asyncio.sleep(len(chunk) / float(rate) * 0.25)   # keep timing roughly real
             return
@@ -225,7 +236,17 @@ class Speaker:
                 except Exception as e:
                     log.debug("write after abort: %s", e)
 
-        await asyncio.to_thread(_write)
+        secs = len(chunk) / float(rate)
+        budget = max(5.0, secs * 4 + 3.0)   # generous: only a dead device exceeds this
+        try:
+            await asyncio.wait_for(asyncio.to_thread(_write), timeout=budget)
+        except asyncio.TimeoutError:
+            log.error("audio write hung (%.1fs of audio, %.0fs budget) — output device "
+                      "is not accepting data; aborting and reopening", secs, budget)
+            self.abort()          # unblocks the stuck writer thread, closes the stream
+            self._stream = None   # next chunk reopens against the CURRENT default device
+            self._rate = None
+            raise SpeakerStalled("the audio output device stopped responding")
 
     def abort(self) -> None:
         """Immediately stop output (drops buffered audio)."""

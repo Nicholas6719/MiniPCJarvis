@@ -749,6 +749,58 @@ def slots_clock(t: str) -> dict | None:
     return None if _ELSEWHERE.search(t) else {}
 
 
+_STOP_REMIND = re.compile(
+    r"\b(?:stop|quit|cancel|don'?t|do not|no more)\b[^.]*?\b(?:remind(?:ing|er|ers)?|alerts?|nag(?:ging)?)\b"
+    r"(?:\s*(?:me|us))?(?:\s*(?:to|about|for|on)\s+(?P<what>.+?))?(?:\s+anymore|\s+any more|\s+again)?[.!?]*$")
+_CANCEL_ALL = re.compile(r"\b(?:cancel|clear|delete|remove)\b.*\b(?:all\s+)?(?:my\s+)?"
+                         r"(?:remind(?:ers?|ing)|alarms?)\b")
+
+
+def slots_unremind(t: str) -> dict | None:
+    """'don't remind me to stretch anymore' -> {'query': 'stretch'};
+    'cancel my reminders' -> {'query': ''} (all)."""
+    m = _STOP_REMIND.search(t)
+    if m:
+        what = (m.group("what") or "").strip(" .!?'\"")
+        what = re.sub(r"\s+(?:anymore|any more|again|please|ever)$", "", what).strip()
+        return {"query": what}
+    if _CANCEL_ALL.search(t):
+        return {"query": ""}
+    return None
+
+
+def say_unremind(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return "I couldn't change your reminders."
+    if res.get("none_pending"):
+        return "You have no reminders set."
+    n = res.get("cancelled", 0)
+    if n == 0:
+        q = slots.get("query")
+        return f"I don't have a reminder about {q}." if q else "You have no reminders set."
+    if n == 1:
+        return f"Done. I won't remind you about {res['texts'][0]} again."
+    return f"Done. I've cancelled {n} reminders."
+
+
+def say_reminders(_s: dict, res: dict) -> str:
+    rem = res.get("reminders") or []
+    if not rem:
+        return "You have no reminders set."
+    if len(rem) == 1:
+        r = rem[0]
+        return f"One reminder: {r['text']}, at {r['due'][11:]}."
+    head = "; ".join(f"{r['text']} at {r['due'][11:]}" for r in rem[:3])
+    return f"You have {len(rem)} reminders: {head}."
+
+
+def say_thanks(_s: dict, _r: dict) -> str:
+    """He used to hand a bare 'thank you' to the model, which once answered by
+    repeating the user's own words back ('Thank you Jarvis, sir.')."""
+    import random as _r2
+    return _r2.choice(["Of course.", "My pleasure.", "Anytime.", "Of course, sir."])
+
+
 def say_provenance(_s: dict, _r: dict) -> str:
     """He never volunteers sources (user's rule) — but must answer for them."""
     from brain.facts import facts as _facts
@@ -901,6 +953,25 @@ SKILLS: list[Skill] = [
         "what's in my downloads", "show me my pictures", "open the documents folder", "what's on my desktop",
         "list my downloads", "show me the files on my desktop", "browse my documents", "go to my downloads"],
         slots=slots_folder, speak=say_folder),
+    Skill("unremind", "cancel_reminders_matching", [
+        # NOT "clear my reminders" (canonicalizes onto the ui skill's "hide
+        # everything") and NOT "no more reminders" (collides with corrections).
+        "don't remind me to stretch anymore", "stop reminding me to stretch",
+        "cancel my reminders", "cancel all my reminders",
+        "stop reminding me about the laundry", "delete my reminders",
+        "don't remind me about that anymore", "stop the reminders",
+        "turn off my reminders"],
+        slots=slots_unremind, speak=say_unremind),
+    Skill("reminders", "list_reminders", [
+        "what reminders do i have", "list my reminders", "what am i being reminded about",
+        "do i have any reminders", "show me my reminders", "what's on my reminder list",
+        "what reminders are set"],
+        speak=say_reminders),
+    Skill("thanks", None, [
+        "thank you", "thanks", "thank you jarvis", "thanks jarvis", "cheers",
+        "much appreciated", "appreciate it", "thanks a lot", "thank you very much",
+        "nice work", "good job", "well done"],
+        speak=say_thanks),
     Skill("recycle_bin", "list_recycle_bin", [
         "what's in the recycle bin", "what files are in the recycle bin",
         "show me the recycle bin", "check the recycle bin", "what's in the trash",
