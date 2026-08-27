@@ -534,6 +534,9 @@ def say_clipboard(_: dict, res: dict) -> str:
 
 
 def slots_screenshot(t: str) -> dict | None:
+    # "screenshot with the grid" is the REMOTE click-grid capture, a different tool
+    if re.search(r"\bgrid\b", t):
+        return None
     out: dict = {}
     m = re.search(r"\b(?:to|in|on|into)\s+(?:my\s+|the\s+)?(desktop|documents?|downloads?|pictures?)\b", t)
     if m:
@@ -801,6 +804,15 @@ SKILLS: list[Skill] = [
         "shut down notepad", "close the calculator", "close brave", "quit vs code",
         "can you close notepad", "close task manager"],
         slots=slots_app, speak=say_close),
+    Skill("grid_shot", "screenshot_grid", [
+        # the remote-control capture: a labelled A1..F8 overlay to click by name
+        "take a grid screenshot", "screenshot with the grid", "send me a grid screenshot",
+        "take a screenshot with the click grid on it", "grid screenshot",
+        "screenshot with the click grid", "show me the screen with the grid",
+        "screenshot the screen with a grid so i can click"],
+        slots=lambda t: {}, speak=lambda _s, r: (
+            "I couldn't take that." if "error" in r else
+            'There you are. Say a cell, like "click C4".')),
     Skill("screenshot", "take_screenshot", [
         "take a screenshot", "screenshot", "capture the screen", "grab a screenshot",
         "take a screenshot and save it to my desktop", "screenshot to my documents folder",

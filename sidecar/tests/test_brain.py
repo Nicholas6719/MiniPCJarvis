@@ -52,6 +52,11 @@ CASES = [
     ("what files are in the recycle bin", "recycle_bin"),
     ("what's in the trash", "recycle_bin"), ("what did i delete", "recycle_bin"),
     ("find the file called budget", "find_file"),   # must NOT become a restore
+    # the remote click-grid capture must not fall into the plain screenshot reflex
+    ("take a screenshot with the click grid on it", "grid_shot"),
+    ("send me a grid screenshot", "grid_shot"),
+    ("take a screenshot", "screenshot"),            # ...and plain stays plain
+    ("take a screenshot to my desktop", "screenshot"),
 ]
 
 async def main() -> int:
