@@ -2,7 +2,7 @@
 REM Sidecar-only update: stop JARVIS and everything it spawned, mirror the fresh PyInstaller
 REM output over %LOCALAPPDATA%\JARVIS\sidecar, relaunch. Runs in the REAL user session.
 REM Refuses to launch on a partial copy (robocopy exit >= 8) - a mixed build is worse than none.
-set LOG=C:\Users\nicho\Documents\jarvis_hotswap.log
+set LOG=C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\logs\hotswap.log
 echo [%DATE% %TIME%] hotswap start > "%LOG%"
 taskkill /F /IM jarvis.exe >> "%LOG%" 2>&1
 taskkill /F /IM jarvis-sidecar.exe >> "%LOG%" 2>&1

@@ -46,3 +46,7 @@ sidecar/tests/kw_*.json
 # JARVIS's own browser profile, should it ever land inside the repo
 browser-profile/
 session-browser/
+
+# The agent's own working files: real-session .cmd helpers, copied logs,
+# HUD screenshots, and the current port/token. Never part of the product.
+.agent/

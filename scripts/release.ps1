@@ -25,9 +25,9 @@ if (-not $SkipBuild) {
 }
 
 & $log "install via real-session scheduled task"
-$installLog = "C:\Users\nicho\Documents\jarvis_install.log"
+$installLog = "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\logs\install.log"
 if (Test-Path $installLog) { Clear-Content $installLog }
-schtasks /Create /TN JARVIS_INSTALL /TR "C:\Users\nicho\Documents\jarvis_install.cmd" /SC ONCE /ST 23:59 /F | Out-Null
+schtasks /Create /TN JARVIS_INSTALL /TR "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\scripts\jarvis_install.cmd" /SC ONCE /ST 23:59 /F | Out-Null
 schtasks /Run /TN JARVIS_INSTALL | Out-Null
 $deadline = (Get-Date).AddMinutes(4)
 while ((Get-Date) -lt $deadline) {
@@ -51,7 +51,7 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep 3
 }
 if (-not $port) { & $log "APP DID NOT COME UP"; exit 1 }
-[IO.File]::WriteAllText('C:\Users\nicho\Documents\jarvis_real.txt', "$port $tok")
+[IO.File]::WriteAllText('C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\session.txt', "$port $tok")
 # the wake model loads lazily after boot: the voice suite is a false failure before it's up
 $deadline = (Get-Date).AddSeconds(120)
 while ((Get-Date) -lt $deadline) { try { $dg = Invoke-RestMethod "http://127.0.0.1:$port/diagnostics" -Headers @{'X-Jarvis-Token'=$tok} -TimeoutSec 20; if (($dg.checks | Where-Object name -eq 'Wake Word').status -eq 'ok') { break } } catch {}; Start-Sleep 5 }

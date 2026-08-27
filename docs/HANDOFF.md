@@ -30,8 +30,13 @@ but the user's folder was empty; log files diverge.
    schtasks /Create /TN NAME /TR "C:\Users\nicho\Documents\x.cmd" /SC ONCE /ST 23:59 /F
    schtasks /Run /TN NAME ; (poll output file) ; schtasks /Delete /TN NAME /F
    ```
-   Output files go under `C:\Users\nicho\Documents\` (not virtualized). Use
-   `start /wait "" "<installer>" /S` in the .cmd (plain invocation cut the log).
+   Helper .cmd files and their output go in **`.agent/`** inside the repo
+   (`.agent/scripts`, `.agent/logs`, `.agent/shots`, `.agent/session.txt`) —
+   NOT in `C:\Users\nicho\Documents\` itself. That is Nicholas's own folder and
+   it accumulated ~25 stray `jarvis_*.cmd/.log/.done` files before this rule
+   (cleaned up 2026-08-27; `.agent/` is gitignored, see `.agent/README.md`).
+   Anywhere under the profile that is not AppData escapes virtualization.
+   Use `start /wait "" "<installer>" /S` in the .cmd (plain invocation cut the log).
 2. Launching `jarvis.exe` from the agent shell / Start-Process / explorer.exe gives a
    SANDBOXED instance (empty voices, default config). Launch via schtasks .cmd with
    `set JARVIS_DEBUG=1` + `start "" "C:\Users\nicho\AppData\Local\JARVIS\jarvis.exe"`

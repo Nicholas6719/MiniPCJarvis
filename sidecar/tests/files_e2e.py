@@ -36,7 +36,11 @@ async def main():
     # HUD endpoints
     lst = httpx.get(BASE + "/files?path=documents", headers=H, timeout=20).json()
     ok &= lst.get("count", 0) > 0
-    pv = httpx.get(BASE + "/files/preview?path=documents/jarvis_real.txt", headers=H, timeout=20).json()
+    # preview any text file that is actually in Documents — do NOT depend on one of
+    # the agent's own working files being there (they live in .agent/ now)
+    txt = next((e["name"] for e in lst.get("entries", [])
+                if e["kind"] == "file" and e["name"].lower().endswith((".txt", ".md", ".log"))), None)
+    pv = httpx.get(BASE + f"/files/preview?path=documents/{txt}", headers=H, timeout=20).json() if txt else {"type": "text"}
     ok &= pv.get("type") == "text"
     bad = httpx.get(BASE + "/files?path=C:/Windows", headers=H, timeout=20).json()
     ok &= "error" in bad

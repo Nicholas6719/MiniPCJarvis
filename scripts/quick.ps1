@@ -12,9 +12,9 @@ cmd /c scripts\build_sidecar.cmd
 if ($LASTEXITCODE -ne 0) { & $log "SIDECAR BUILD FAILED"; exit 1 }
 
 & $log "hot-swap sidecar in the real session"
-$swapLog = "C:\Users\nicho\Documents\jarvis_hotswap.log"
+$swapLog = "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\logs\hotswap.log"
 if (Test-Path $swapLog) { Clear-Content $swapLog }
-schtasks /Create /TN JARVIS_HOTSWAP /TR "C:\Users\nicho\Documents\jarvis_hotswap.cmd" /SC ONCE /ST 23:59 /F | Out-Null
+schtasks /Create /TN JARVIS_HOTSWAP /TR "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\scripts\jarvis_hotswap.cmd" /SC ONCE /ST 23:59 /F | Out-Null
 schtasks /Run /TN JARVIS_HOTSWAP | Out-Null
 $deadline = (Get-Date).AddMinutes(3)
 while ((Get-Date) -lt $deadline) { Start-Sleep 3; if ((Test-Path $swapLog) -and (Select-String -Path $swapLog -Pattern '^DONE' -Quiet)) { break } }
@@ -36,7 +36,7 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep 3
 }
 if (-not $port) { & $log "APP DID NOT COME UP"; exit 1 }
-[IO.File]::WriteAllText('C:\Users\nicho\Documents\jarvis_real.txt', "$port $tok")
+[IO.File]::WriteAllText('C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\session.txt', "$port $tok")
 # the wake model loads lazily after boot: the voice suite is a false failure before it's up
 $deadline = (Get-Date).AddSeconds(120)
 while ((Get-Date) -lt $deadline) { try { $dg = Invoke-RestMethod "http://127.0.0.1:$port/diagnostics" -Headers @{'X-Jarvis-Token'=$tok} -TimeoutSec 20; if (($dg.checks | Where-Object name -eq 'Wake Word').status -eq 'ok') { break } } catch {}; Start-Sleep 5 }

@@ -4,7 +4,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\suites.ps1
 $ErrorActionPreference = "Continue"
 $root = Split-Path $PSScriptRoot
-$pt = (Get-Content "C:\Users\nicho\Documents\jarvis_real.txt") -split ' '
+$pt = (Get-Content "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\session.txt") -split ' '
 $port, $tok = $pt[0], $pt[1]
 Set-Location "$root\sidecar"
 $env:PYTHONIOENCODING = 'utf-8'
