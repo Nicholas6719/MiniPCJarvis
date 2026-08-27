@@ -36,8 +36,8 @@ CASES = [
     ("wake up", "wakeack"), ("wake up jarvis", "wakeack"), ("time to wake up", "wakeack"),
     ("good morning jarvis", "wakeack"), ("are you there", "wakeack"),
     # misroutes found by the 2026-08-26 route sweep: each of these did the WRONG THING
-    ("minimize everything", None),          # was: JARVIS slept instead of minimizing windows
-    ("be quieter", None),                   # was: JARVIS slept instead of lowering volume
+    # both of these used to put JARVIS to sleep; they now have real handlers
+    # (2026-08-27) instead of merely being guarded away from the sleep skill
     ("go to sleep in an hour", None),       # was: slept immediately
     ("wake me up at 7", None),              # was: "At your service." to an alarm request
     ("put on some music", None),            # was: launching an app called "some music";
@@ -67,6 +67,18 @@ CASES = [
     # Jarvis, sir." straight back at him)
     ("thank you jarvis", "thanks"), ("thanks", "thanks"),
     ("remind me in 20 minutes to check the oven", "reminder"),   # still sets them
+    # from the real-world suite: both of these reached the model, which acknowledged
+    # ("Understood.") or did something else entirely (set a CPU alert)
+    ("be quieter", "volume_rel"), ("turn it up", "volume_rel"),
+    ("turn it down a bit", "volume_rel"), ("minimize everything", "show_desktop"),
+    ("bring my windows back", "restore_windows"),
+    ("show me my desktop", "folder"),   # the FOLDER — that meaning came first
+    ("hide everything", "ui"),          # the HUD stage, not the windows
+    ("set the volume to 40 percent", "volume_set"),   # absolute still absolute
+    # recall answers from memory itself now (it was paying an 11 s LLM round to
+    # speak a sentence already sitting on disk)
+    ("what do you remember about my desk lamp", "recall"),
+    ("what did i tell you about my car", "recall"),
 ]
 
 async def main() -> int:

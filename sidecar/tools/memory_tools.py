@@ -12,8 +12,16 @@ async def remember_fact(content: str, category: str = "fact") -> dict:
 
 async def recall(query: str) -> dict:
     hits = await memory.search(query, top_k=5)
-    return {"memories": [{"content": h["content"], "category": h["category"]}
-                         for h in hits]} if hits else {"memories": []}
+    if not hits:
+        return {"memories": []}
+    out = {"memories": [{"content": h["content"], "category": h["category"],
+                         "score": h.get("score")} for h in hits]}
+    # One clearly-best memory can be spoken as-is — no LLM round needed. Recall was
+    # the slowest thing JARVIS did (11 s to say a sentence he already had on disk).
+    top = hits[0]
+    if top.get("score", 0) >= 0.62 and (len(hits) == 1 or top["score"] - hits[1].get("score", 0) >= 0.05):
+        out["direct"] = top["content"]
+    return out
 
 
 def register_all() -> None:

@@ -683,6 +683,8 @@ class Orchestrator:
                     if cancel.is_set():
                         break
                     await speaker.play_chunk(chunk, tts.sample_rate)
+            except SpeakerStalled as e:
+                log.error("wake acknowledgement not spoken: %s", e)
             finally:
                 await self.sm.to(State.IDLE, force=True)
             self._arm_conversation()
@@ -1051,10 +1053,15 @@ class Orchestrator:
         await bus.emit("assistant_delta", text=line + " ")
         if self.remote_turn:
             return   # the text reaches the phone; nobody is in the room to hear it
-        async for chunk in tts.synthesize_stream(clean_for_speech(line), cancel):
-            if cancel.is_set():
-                break
-            await speaker.play_chunk(chunk, tts.sample_rate)
+        try:
+            async for chunk in tts.synthesize_stream(clean_for_speech(line), cancel):
+                if cancel.is_set():
+                    break
+                await speaker.play_chunk(chunk, tts.sample_rate)
+        except SpeakerStalled as e:
+            # a dead output device must never propagate into a turn (it once froze one)
+            log.error("line not spoken: %s", e)
+            await bus.emit("error", summary=f"audio output stalled: {e}")
 
     async def try_voice_confirmation(self, text: str) -> bool:
         """If a confirmation is pending and the user just said a bare yes/no, answer it."""

@@ -794,6 +794,70 @@ def say_reminders(_s: dict, res: dict) -> str:
     return f"You have {len(rem)} reminders: {head}."
 
 
+_VOL_UP = re.compile(r"\b(?:turn|crank|bump|pump)\s*(?:it|the volume|the sound)?\s*up\b|"
+                     r"\b(?:louder|loud er|more volume|volume up|speak up)\b")
+_VOL_DOWN = re.compile(r"\b(?:turn|bring|knock)\s*(?:it|the volume|the sound)?\s*down\b|"
+                       r"\b(?:quieter|quiet down|softer|lower the volume|volume down|"
+                       r"not so loud|too loud|keep it down)\b")
+_VOL_STEP = re.compile(r"\b(?:a lot|a bit|a little|slightly|way)\b")
+
+
+def slots_volume_rel(t: str) -> dict | None:
+    up, down = bool(_VOL_UP.search(t)), bool(_VOL_DOWN.search(t))
+    if up == down:
+        return None                      # neither, or a contradictory both
+    m = _VOL_STEP.search(t)
+    step = 25 if m and m.group(0) in ("a lot", "way") else 8 if m else 15
+    return {"direction": "up" if up else "down", "step": step}
+
+
+def say_volume_rel(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return "I couldn't change the volume."
+    return f"{'Louder' if slots.get('direction') == 'up' else 'Quieter'}, now {res.get('volume_percent')} percent."
+
+
+def say_desktop(_s: dict, res: dict) -> str:
+    return "I couldn't do that." if "error" in res else "Desktop cleared."
+
+
+def say_restore_win(_s: dict, res: dict) -> str:
+    return "I couldn't do that." if "error" in res else "Windows are back."
+
+
+_FIRST_TO_SECOND = [
+    (r"\bmy\b", "your"), (r"\bmine\b", "yours"), (r"\bi am\b", "you are"),
+    (r"\bi'm\b", "you're"), (r"\bi\b", "you"), (r"\bme\b", "you"),
+    (r"\bmyself\b", "yourself"), (r"\bwe\b", "we"),
+]
+
+
+def _to_second_person(s: str) -> str:
+    """Memories are stored in the user's own words ("my desk lamp is on the left");
+    speaking that back verbatim sounds like JARVIS owns the lamp."""
+    out = s.strip()
+    for pat, rep in _FIRST_TO_SECOND:
+        out = re.sub(pat, rep, out, flags=re.I)
+    return out[0].upper() + out[1:] if out else out
+
+
+def say_recall(slots: dict, res: dict) -> str:
+    """Answers from memory WITHOUT the LLM when one memory clearly matches —
+    recall was the slowest thing he did (11 s to speak a sentence already on disk)."""
+    if "error" in res:
+        return "I couldn't search my memory."
+    mems = res.get("memories") or []
+    if not mems:
+        return "I don't have anything about that."
+    one = res.get("direct") or (mems[0]["content"] if len(mems) == 1 else None)
+    if one:
+        said = _to_second_person(one)
+        said = said[0].lower() + said[1:]
+        return f"You told me {said.rstrip('.')}."
+    head = "; ".join(_to_second_person(m["content"]).rstrip(".") for m in mems[:3])
+    return f"A few things: {head}."
+
+
 def say_thanks(_s: dict, _r: dict) -> str:
     """He used to hand a bare 'thank you' to the model, which once answered by
     repeating the user's own words back ('Thank you Jarvis, sir.')."""
@@ -953,6 +1017,24 @@ SKILLS: list[Skill] = [
         "what's in my downloads", "show me my pictures", "open the documents folder", "what's on my desktop",
         "list my downloads", "show me the files on my desktop", "browse my documents", "go to my downloads"],
         slots=slots_folder, speak=say_folder),
+    Skill("volume_rel", "adjust_volume", [
+        # relative volume — nobody speaks in percentages
+        "turn it up", "turn it down", "turn the volume up", "turn the volume down",
+        "a bit louder", "a little quieter", "be quieter", "too loud", "keep it down",
+        "louder please", "quiet down", "turn it down a bit", "crank it up"],
+        slots=slots_volume_rel, speak=say_volume_rel),
+    Skill("show_desktop", "show_desktop", [
+        # NOT "show me my desktop" (that means the Desktop FOLDER, and always has)
+        # and NOT "hide all my windows"/"clear my screen" (they canonicalize onto
+        # the ui skill's "hide everything", which dismisses the HUD stage).
+        "minimize everything", "minimize all my windows", "minimize all windows",
+        "get everything out of the way", "minimize my windows",
+        "minimize all the windows on my screen"],
+        slots=lambda t: {}, speak=say_desktop),
+    Skill("restore_windows", "restore_windows", [
+        "bring my windows back", "restore my windows", "undo that minimize",
+        "put the windows back", "unminimize everything"],
+        slots=lambda t: {}, speak=say_restore_win),
     Skill("unremind", "cancel_reminders_matching", [
         # NOT "clear my reminders" (canonicalizes onto the ui skill's "hide
         # everything") and NOT "no more reminders" (collides with corrections).
@@ -1079,8 +1161,12 @@ SKILLS: list[Skill] = [
         "what did i tell you about my coffee", "do you remember my favorite color",
         "what do you know about me", "what did i say my dentist's name was",
         "remind me what i told you about my car", "do you remember where i park",
-        "what do you remember about my project", "what's my wifi password"],
-        slots=lambda t: {"query": t}, llm_after=True),
+        "what do you remember about my project", "what's my wifi password",
+        # phrasings that were missing the reflex and paying an 11-second LLM round
+        "what do you remember about my desk lamp", "what did i tell you about my desk",
+        "do you remember what i said about the garage", "what do you remember about that",
+        "what have i told you about my routine"],
+        slots=lambda t: {"query": t}, speak=say_recall),
 ]
 
 SKILLS.append(Skill("general", None, [

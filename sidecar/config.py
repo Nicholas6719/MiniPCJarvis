@@ -97,10 +97,15 @@ DEFAULTS: dict[str, Any] = {
               "sound_cues": True, "boot_sound": True,
               # always prefer the webcam mic when present; onboard mic is the fallback
               "preferred_input_names": ["C920", "Webcam", "Logitech"]},
-    # threshold 0.45: "Hey Jarvis" scores ~0.99, bare "Jarvis" 0.46-0.95 by voice,
-    # confusables (service/nervous/harvest) 0.00-0.04. Raise if the TV wakes him,
-    # lower if bare "Jarvis" gets missed.
-    "wake": {"mode": "both", "threshold": 0.45},
+    # threshold 0.60 (raised from 0.45 on 2026-08-27, user's call): "Hey Jarvis"
+    # scores ~0.99, so the full phrase is unaffected; bare "Jarvis" scores 0.46-0.98
+    # by delivery, so it now needs to be said clearly. What forced this: ambient room
+    # audio woke him at 0.94 while he was alone, and the turn that followed hit a dead
+    # speaker and froze him for 90 minutes. NOTE a 0.94 false positive would still pass
+    # this bar — the threshold reduces the mid-range fires; the real protection is that
+    # a false wake is now HARMLESS (empty/garbage transcripts are dropped, and the
+    # stuck-state watchdog can't let a turn hang). Confusables score 0.00-0.04.
+    "wake": {"mode": "both", "threshold": 0.60},
     "vision": {
         "model": r"C:\AI\models\gemma-3-4b-it-q4_0.gguf",
         "mmproj": r"C:\AI\models\gemma-3-4b-it-mmproj.gguf",

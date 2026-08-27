@@ -170,6 +170,40 @@ def set_volume(percent: int) -> dict:
     return {"volume_percent": percent}
 
 
+def adjust_volume(direction: str = "down", step: int = 15) -> dict:
+    """Relative volume — "turn it up", "be quieter". Nobody speaks in percentages;
+    without this, 'be quieter' reached the model, which said "Understood." and
+    changed nothing (2026-08-27)."""
+    vol = _endpoint_volume()
+    cur = round(vol.GetMasterVolumeLevelScalar() * 100)
+    step = max(1, min(50, int(step)))
+    tgt = cur + step if str(direction).lower().startswith("u") else cur - step
+    tgt = max(0, min(100, tgt))
+    vol.SetMasterVolumeLevelScalar(tgt / 100.0, None)
+    if tgt > 0 and vol.GetMute():
+        vol.SetMute(0, None)
+    return {"volume_percent": tgt, "was": cur}
+
+
+def show_desktop() -> dict:
+    """Minimize every window (Explorer's own Show Desktop). 'minimize everything'
+    used to reach the model, which once answered by setting a CPU alert."""
+    import pythoncom
+    import win32com.client
+    pythoncom.CoInitialize()
+    win32com.client.Dispatch("Shell.Application").MinimizeAll()
+    return {"minimized_all": True}
+
+
+def restore_windows() -> dict:
+    """Undo Show Desktop."""
+    import pythoncom
+    import win32com.client
+    pythoncom.CoInitialize()
+    win32com.client.Dispatch("Shell.Application").UndoMinimizeALL()
+    return {"restored": True}
+
+
 def set_mute(muted: bool = True) -> dict:
     vol = _endpoint_volume()
     vol.SetMute(1 if muted else 0, None)
@@ -464,6 +498,26 @@ def register_all() -> None:
             "percent": {"type": "integer", "minimum": 0, "maximum": 100}},
             "required": ["percent"]},
         risk=Risk.LOW, handler=set_volume))
+    registry.register(T(
+        name="adjust_volume",
+        description="Change volume RELATIVE to where it is: 'turn it up', 'a bit louder', "
+                    "'be quieter', 'turn it down'. direction up|down, step in percent.",
+        parameters={"type": "object", "properties": {
+            "direction": {"type": "string", "enum": ["up", "down"]},
+            "step": {"type": "integer", "minimum": 1, "maximum": 50}},
+            "required": ["direction"]},
+        risk=Risk.LOW, handler=adjust_volume))
+    registry.register(T(
+        name="show_desktop",
+        description="Minimize every window to show the desktop ('minimize everything', "
+                    "'hide all my windows', 'show me my desktop').",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.LOW, handler=show_desktop))
+    registry.register(T(
+        name="restore_windows",
+        description="Undo Show Desktop — bring the minimized windows back.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.LOW, handler=restore_windows))
     registry.register(T(
         name="set_mute",
         description="Mute or unmute system audio.",
