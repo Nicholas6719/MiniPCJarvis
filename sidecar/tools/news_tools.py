@@ -55,6 +55,8 @@ FEEDS: dict[str, list[tuple[str, str]]] = {
 }
 
 _TAG = re.compile(r"<[^>]+>")
+_NOISE = {"after", "with", "from", "that", "this", "they", "them", "have",
+          "will", "over", "into", "than", "amid", "says", "said", "more"}
 _UA = {"User-Agent": "JARVIS-personal-assistant/0.3 (local desktop app)"}
 
 
@@ -136,12 +138,20 @@ async def get_news(topic: str = "top", count: int = 5, query: str = "") -> dict:
     if not items:
         return {"error": f"nothing came back for {query or topic} just now."}
     items.sort(key=lambda i: i["_ts"], reverse=True)
-    seen, unique = set(), []
-    for i in items:                                  # the wires often carry the same story
-        key = re.sub(r"[^a-z0-9 ]", "", i["headline"].lower())[:60]
-        if key in seen:
+    # The same story reaches us worded differently ("Celtic and Rangers ordered to
+    # play..." vs "Celtic & Rangers to play..."), so a prefix key does not dedupe
+    # it — compare the significant words instead.
+    kept_words: list[set] = []
+    unique = []
+    for i in items:
+        words = {w for w in re.sub(r"[^a-z0-9 ]", " ", i["headline"].lower()).split()
+                 if len(w) > 3 and w not in _NOISE}
+        if not words:
             continue
-        seen.add(key)
+        if any(len(words & prev) / max(1, min(len(words), len(prev))) >= 0.6
+               for prev in kept_words):
+            continue
+        kept_words.append(words)
         i.pop("_ts", None)
         unique.append(i)
     return {"topic": topic, "query": query or None, "count": len(unique[:count]),

@@ -112,7 +112,9 @@ DEFAULTS: dict[str, Any] = {
     # this bar — the threshold reduces the mid-range fires; the real protection is that
     # a false wake is now HARMLESS (empty/garbage transcripts are dropped, and the
     # stuck-state watchdog can't let a turn hang). Confusables score 0.00-0.04.
-    "wake": {"mode": "both", "threshold": 0.60},
+    # semantic_endpoint: end the turn when the SENTENCE is finished, not when
+    # the room goes quiet (audio/endpoint.py). Falls back to the fixed window.
+    "wake": {"mode": "both", "threshold": 0.60, "semantic_endpoint": True},
     "vision": {
         "model": r"C:\AI\models\gemma-3-4b-it-q4_0.gguf",
         "mmproj": r"C:\AI\models\gemma-3-4b-it-mmproj.gguf",

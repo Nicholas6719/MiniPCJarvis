@@ -29,8 +29,7 @@ from tools.registry import Risk, Tool, registry
 log = logging.getLogger("jarvis.market")
 
 BASE = "https://finnhub.io/api/v1"
-NO_KEY = ("I need a Finnhub API key for market data — add it in Settings under "
-          "Tools and permissions.")
+NO_KEY = "I need a Finnhub API key for market data — add it in Settings, under Markets."
 
 # 60 calls/minute on the free tier. Stay under it by construction.
 _MIN_GAP_S = 1.1

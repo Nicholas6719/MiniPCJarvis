@@ -18,6 +18,7 @@ from audio.io import mic, speaker, MIC_RATE, SpeakerStalled
 from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
+from audio import endpoint
 from audio.wake import wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
@@ -554,6 +555,8 @@ class Orchestrator:
         self._preroll = None
         woke_by_name = False
         new_speech_frames = 0
+        endpoint_task: asyncio.Task | None = None
+        semantic_budget: float | None = None
         if lead_in is not None and len(lead_in):
             # the wake phrase (and any words already spoken) live in here;
             # count it as speech so a command said in one breath is kept
@@ -579,15 +582,40 @@ class Orchestrator:
                 n = sum(1 for p in probs if p >= self.vad.threshold)
                 speech_frames += n
                 new_speech_frames += n
+                if last_speech_t is not None and time.time() - last_speech_t > 0.30:
+                    # they carried on: whatever we decided was about a fragment
+                    semantic_budget = None
+                    if endpoint_task is not None:
+                        endpoint_task.cancel()
+                        endpoint_task = None
                 last_speech_t = time.time()
             # After a bare "Jarvis" people often pause before the request.
             # Until new speech actually starts, allow a longer grace period
             # instead of the normal end-of-speech silence.
             end_silence = (WAKE_GRACE_S if (woke_by_name and new_speech_frames < MIN_SPEECH_FRAMES)
-                           else SILENCE_END_S)
+                           else semantic_budget or SILENCE_END_S)
+            quiet_for = (time.time() - last_speech_t) if last_speech_t else 0.0
+            # Once the pause looks real, ask whether the SENTENCE is finished
+            # rather than only whether the room is quiet. Runs once per
+            # utterance, off the loop, and only moves the deadline below.
+            if (endpoint_task is None and semantic_budget is None
+                    and last_speech_t is not None
+                    and speech_frames >= MIN_SPEECH_FRAMES
+                    and not (woke_by_name and new_speech_frames < MIN_SPEECH_FRAMES)
+                    and quiet_for > 0.30 and buf):
+                endpoint_task = asyncio.create_task(
+                    endpoint.decide(np.concatenate(buf), stt, brain))
+            if endpoint_task is not None and endpoint_task.done():
+                try:
+                    secs, why, heard = endpoint_task.result()
+                    semantic_budget = secs
+                    log.info("endpoint: %.2fs (%s) after %r", secs, why, heard[-60:])
+                except Exception:
+                    semantic_budget = SILENCE_END_S
+                endpoint_task = None
             if (last_speech_t is not None
                     and speech_frames >= MIN_SPEECH_FRAMES
-                    and time.time() - last_speech_t > end_silence):
+                    and quiet_for > end_silence):
                 break
         if speech_frames < MIN_SPEECH_FRAMES:
             return None
