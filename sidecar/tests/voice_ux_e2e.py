@@ -1,7 +1,8 @@
 """Software end-to-end test of the wake/conversation pipeline.
 
 Requires a sidecar started with JARVIS_DEBUG=1 (audio injection endpoint).
-Tests: wake+preroll in one breath, follow-up without wake word, bare 'Jarvis'.
+Tests: wake+preroll in one breath, follow-up without wake word, and bare
+'Jarvis' (reported, not gated — see the threshold note at T3).
 """
 import asyncio, base64, json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -73,12 +74,19 @@ async def main():
         await wait_idle(c)
         wake3 = [e["score"] for e in events[n3:] if e.get("kind") == "wake"]
         spoke3 = [e.get("text") for e in events[n3:] if e.get("kind") == "speaking"]
-        print("T3 bare 'Jarvis' wake:", wake3, "| spoke:", spoke3)
-        t3 = bool(wake3)
+        # Bare "Jarvis" is BEST EFFORT, not a promise. The wake threshold was raised
+        # to 0.60 on 2026-08-27 (user's call) after ambient room audio woke him at
+        # 0.94 while he was alone; the full "hey jarvis" still scores ~0.99, but a
+        # bare "Jarvis" scores 0.46-0.98 depending on delivery, so it may not clear
+        # the bar. Report the score, don't fail the release on it.
+        thr = httpx.get(BASE + "/config", headers=H, timeout=10).json()["config"]["wake"]["threshold"]
+        print(f"T3 bare 'Jarvis' wake: {wake3} | spoke: {spoke3} "
+              f"| threshold {thr} — best effort, not a gate")
+        t3 = True
     lt.cancel()
     print("\nPREROLL:", "PASS" if t1 else "FAIL",
           "| CONVERSATION WINDOW:", "PASS" if t2 else "FAIL",
-          "| BARE JARVIS:", "PASS" if t3 else "FAIL")
+          "| BARE JARVIS:", "woke" if wake3 else "below threshold (expected at 0.60)")
 
 
 asyncio.run(main())
