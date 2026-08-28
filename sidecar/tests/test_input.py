@@ -38,6 +38,21 @@ async def main() -> int:
         check(f"{name} is registered", t is not None)
         if t:
             check(f"{name} requires confirmation", t.requires_confirmation, t.risk)
+    # clicking by control name is the preferred path; it must be gated too
+    from tools import uia  # noqa: E402
+    uia.register_all()
+    t = registry.get("click_control")
+    check("click_control is registered", t is not None)
+    check("click_control requires confirmation", t is not None and t.requires_confirmation)
+    check("list_controls is SAFE (reading a window is not acting)",
+          registry.get("list_controls") is not None
+          and registry.get("list_controls").risk == Risk.SAFE)
+    check("names beat pixels: the specific control outranks the shorter one",
+          uia._score("the close tab button", "Close tab") > uia._score("the close tab button", "Close"))
+    check("spoken phrasing matches a plain label",
+          uia._score("the send button", "Send") >= 0.9)
+    check("an unrelated name scores far too low to click",
+          uia._score("frobnicate", "Send") < 0.55)
     grid = registry.get("screenshot_grid")
     check("screenshot_grid is SAFE (looking is not acting)",
           grid is not None and grid.risk == Risk.SAFE)

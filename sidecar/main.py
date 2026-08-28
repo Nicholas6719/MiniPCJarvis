@@ -55,8 +55,9 @@ async def lifespan(app: FastAPI):
     market_tools.register_all()   # quotes/analysts: realm 2, never cached
     news_tools.register_all()     # keyless RSS
     if config.get("remote", "allow_input", default=True):
-        from tools import input_tools     # remote hands (R2), all risk-gated
+        from tools import input_tools, uia   # remote hands (R2), all risk-gated
         input_tools.register_all()
+        uia.register_all()               # click by control name, not by pixel
     if os.environ.get("JARVIS_DEBUG") == "1":
         from tools.registry import Risk, Tool, registry as _reg
 

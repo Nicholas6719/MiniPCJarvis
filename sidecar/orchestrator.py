@@ -80,6 +80,8 @@ CONFIRM_PHRASE = {
                             + (f" in {a['window']}" if a.get("window") else "") + "?",
     "click_screen": lambda a: f"Click {a.get('cell') or str(a.get('x', '')) + ',' + str(a.get('y', ''))}"
                               + (" (double)" if a.get("double") else "") + "?",
+    "click_control": lambda a: f"Click \"{a.get('name', 'that')}\""
+                               + (f" in {a['window']}" if a.get("window") else "") + "?",
     "empty_recycle_bin": lambda a: "Permanently empty the recycle bin? This cannot be undone.",
 }
 
