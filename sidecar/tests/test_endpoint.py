@@ -52,6 +52,22 @@ def main() -> int:
     # ...but an unrecognised fragment still waits
     check("an unrecognised fragment still waits",
           budget_for("play the", False)[0] == PATIENT)
+    # ...and a HALF-SPOKEN command waits even though the brain matched it: the
+    # reminder skill answers to "remind me to" perfectly, and cutting in there
+    # is exactly the rudeness this is meant to stop.
+    for stem in ("remind me to", "set a timer for", "put a reminder in my", "open the"):
+        check(f"a brain hit does not override {stem!r}",
+              budget_for(stem, True)[0] == PATIENT, budget_for(stem, True))
+    # Parakeet punctuates every clip it is handed, finished or not, so a full
+    # stop after a preposition proves nothing.
+    check("a full stop after a dangling word is still dangling",
+          budget_for("Remind me to.", True)[0] == PATIENT)
+    check("a question mark after a dangling word is still dangling",
+          budget_for("What's the weather in?", True)[0] == PATIENT)
+    check("a question mark after a real ending still ends it",
+          budget_for("What's the weather in Boston?", False)[0] == FAST)
+    check("a full stop after a real ending still ends it",
+          budget_for("Remind me to stretch.", False)[0] == FAST)
     # Nothing heard yet falls back to the old fixed window
     check("silence alone keeps the fixed window", budget_for("", False)[0] == NORMAL)
     check("a shrug keeps the fixed window", budget_for("hello", False)[0] == NORMAL)

@@ -81,9 +81,14 @@ async def main() -> int:
     await asyncio.sleep(1)
 
     # --- into sleep, by voice command text ---
-    httpx.post(BASE + "/text", headers=H, json={"text": "that's all for now"}, timeout=15)
+    # state before AND the reply to the post: when this fails in a full suite run
+    # (and passes alone) the question is always "did the request even land?"
+    was = httpx.get(BASE + "/health", headers=H, timeout=10).json().get("state")
+    r = httpx.post(BASE + "/text", headers=H, json={"text": "that's all for now"}, timeout=15)
     ok = await wait_state("sleeping", 60)
-    check("'that's all for now' puts him to sleep", ok)
+    now = httpx.get(BASE + "/health", headers=H, timeout=10).json().get("state")
+    check("'that's all for now' puts him to sleep", ok,
+          f"was {was!r}, post {r.status_code} {r.text[:80]}, ended {now!r}")
     reflex = [e.get("skill") for e in events if e.get("kind") == "reflex"]
     check("it went through the sleep reflex, not the LLM", "sleep" in reflex)
     await asyncio.sleep(1.5)

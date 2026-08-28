@@ -53,6 +53,18 @@ async def main() -> int:
           uia._score("the send button", "Send") >= 0.9)
     check("an unrelated name scores far too low to click",
           uia._score("frobnicate", "Send") < 0.55)
+    # menus and dialogs are separate top-level windows: they must be walked too,
+    # but an app's other ORDINARY windows must not be, or a click by name can
+    # land in the wrong one
+    check("a menu window counts as a popup", uia._is_popup("#32768"))
+    check("a dialog window counts as a popup", uia._is_popup("#32770"))
+    check("a XAML popup counts as a popup", uia._is_popup("Xaml_WindowedPopupClass"))
+    check("an ordinary app window does not", not uia._is_popup("Notepad"))
+    check("nor does a browser window", not uia._is_popup("Chrome_WidgetWin_1"))
+    # an app that never answers must not be able to hang the click
+    check("the invoke wait is short enough to fall back on",
+          0 < uia.INVOKE_TIMEOUT_S <= 5, uia.INVOKE_TIMEOUT_S)
+
     grid = registry.get("screenshot_grid")
     check("screenshot_grid is SAFE (looking is not acting)",
           grid is not None and grid.risk == Risk.SAFE)

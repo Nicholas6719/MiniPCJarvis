@@ -679,6 +679,26 @@ async def debug_confirm_test(x_jarvis_token: str | None = Header(None)):
     return {"ok": True}
 
 
+@app.post("/debug/tool")
+async def debug_tool(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): run one registered tool with exact
+    arguments, through the real risk gate.
+
+    Tests that go through the model test the model's phrasing as much as the
+    tool; this runs the tool itself so an end-to-end test can prove that a
+    click really clicks. Confirmation still fires — approve it over /confirm
+    like any other client would.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    name = (body.get("tool") or "").strip()
+    if not name:
+        raise HTTPException(400, "tool required")
+    from tools.registry import registry as _reg
+    return await _reg.execute(name, body.get("args") or {})
+
+
 @app.post("/debug/night_school")
 async def debug_night_school(x_jarvis_token: str | None = Header(None)):
     """Dev/test only (JARVIS_DEBUG=1): run one full night-school pass right now,

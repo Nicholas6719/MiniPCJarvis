@@ -694,6 +694,62 @@ the model near-miss context is what produced the fabrications. News is exempt; H
 it well. **The real fix is a Brave Search API key in Settings** (free tier, 2,000/month);
 the code path already exists and takes it.
 
+## 2026-08-28: "did you test everything?" — no, and what testing then found
+
+Four things had been reasoned about and gated offline but never once exercised on the
+real app. Running them for the first time failed immediately and turned up five genuine
+bugs. New gates: `tests/endpoint_e2e.py`, `tests/hands_e2e.py` (both in `suites.ps1`).
+
+1. **Every turn transcribed its audio TWICE.** The semantic endpoint check runs Parakeet
+   over the utterance to judge whether the sentence is finished; the turn then ran it
+   again over the same audio. ~1.5 s of dead air on every single voice turn. The capture
+   loop now keeps that transcript (with the speech-frame count it was taken at, so it is
+   only reused when nothing more was said) and hands it to the turn. `stt_ms` on the
+   transcript event is now 0 where it was ~1500.
+2. **Endpointing looked like it worked and did not.** Its decision was correct and logged,
+   but nothing downstream got faster, because of (1). The transcript event now carries
+   `silence_ms` / `budget_ms` — what he actually waited and what he was waiting for — and
+   the e2e asserts on those, not on wall-clock (injected audio is paced with
+   `asyncio.sleep`, and Windows' ~16 ms timer granularity drifts hundreds of ms over a
+   clip; measuring from the test process reads ~2.4 s for both cases and proves nothing).
+   Measured on the install: finished sentence cut at 0.65 s, dangling one held 1.96 s.
+3. **A half-spoken command was being cut off BECAUSE the brain understood it.** "Remind me
+   to" matches the reminder skill perfectly, and a brain hit outranked every other cue, so
+   the most common way to trail off got the FAST budget. Trailing-off now outranks the
+   brain. Related: Parakeet punctuates every clip from grammar alone, finished or not
+   ("Remind me to.", "What's the weather in?"), so a trailing . ? ! after a function word
+   is not evidence of anything and is ignored. Costs ~1.5 s on questions that legitimately
+   strand a preposition ("who's it by?") — the right trade, since waiting is a pause and
+   cutting someone off makes them say it all again.
+4. **Dictation and the capture loop drank from the SAME mic queue.** Say his name while
+   dictating and the wake word fires, the capture loop starts pulling blocks, and the two
+   of them split the audio — each getting half a sentence. Dictation now takes its own
+   `mic.subscribe()`, and the wake word is muted while dictating (his name may well be in
+   the text being written).
+5. **`click_control` could hang forever.** UIA `Invoke` is a call INTO the other app, and
+   an app that is busy or showing a modal dialog simply never answers it — no exception,
+   no return. The tool sat there until its 30 s timeout and the click never happened at
+   all. Now bounded (`INVOKE_TIMEOUT_S = 2.5`) with a real mouse click as fallback.
+   Also: menus and dialogs are their own top-level windows, so the walk now includes
+   same-process windows **of popup/dialog class only** — an app's other ordinary windows
+   must stay out, or a click by name can land in a different window.
+
+Proven end-to-end on the install, not argued: dictation records -> transcribes -> pastes
+into another app (Windows names the Notepad tab after the pasted text, which is the
+receipt), and `click_control` clicks a named control with a visible consequence.
+`/debug/tool` (JARVIS_DEBUG only) runs one tool with exact arguments through the real risk
+gate, so a test can prove a click really clicks instead of testing the model's phrasing.
+
+STILL UNTESTED: market tools (`get_stock_quote`, `get_analyst_view`, `get_company_news`,
+`get_market_movers`) — they need the Finnhub key in Settings -> Markets. Everything else
+about them is gated; the live call is not.
+
+Known and NOT fixed: the title-bar Close/Minimize/Maximize buttons do not appear in the
+UIA tree for WinUI apps, so "click Close" cannot work — `close_application` is the path
+for that. Win11 Notepad's own unsaved-changes dialog stops responding to both UIA Invoke
+and real mouse clicks at the correct coordinates (its process still reports Responding);
+this looks like a Notepad quirk, not ours, and the test avoids it.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

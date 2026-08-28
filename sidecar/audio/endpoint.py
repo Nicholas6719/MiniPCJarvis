@@ -38,7 +38,14 @@ _DANGLING = re.compile(
     r"to|for|with|without|about|from|into|onto|over|under|between|at|by|on|in|of|"
     r"is|are|was|were|am|be|been|being|do|does|did|can|could|will|would|shall|"
     r"should|may|might|must|going|want|need|"
-    r"um|uh|erm|hmm|well|like|let|then|maybe|actually|just)\s*$", re.I)
+    r"um|uh|erm|hmm|well|like|let|then|maybe|actually|just)\s*[.?!]?\s*$", re.I)
+# Trailing punctuation is allowed through because Parakeet punctuates every clip
+# it is handed, finished or not, from grammar alone: "remind me to" comes back as
+# "Remind me to." and "what's the weather in" as "What's the weather in?" — the
+# mark is invented, so only the last WORD carries information here.
+# This does cost ~1.5 s on questions that legitimately strand a preposition
+# ("who's it by?", "where's it from?"). That is the trade we want: waiting a
+# moment too long is a pause, cutting someone off makes them say it all again.
 # Deliberately NOT dangling, though they look like function words: pronouns end
 # perfectly good sentences ("what time is IT", "read IT", "call HIM") and so do
 # politeness words ("...in detail PLEASE"). Listing them cost 1.9 s of dead air
@@ -70,12 +77,16 @@ def budget_for(text: str, brain_hit: bool) -> tuple[float, str]:
     t = (text or "").strip()
     if not t:
         return NORMAL, "nothing heard yet"
-    # The brain recognising the whole utterance is the strongest signal there is
-    # that it is finished — it outranks any surface cue.
-    if brain_hit:
-        return FAST, "a command the brain recognises"
+    # Trailing off outranks everything, the brain included: "remind me to" and
+    # "set a timer for" match their skills perfectly and are obviously only half
+    # a sentence. Cutting in there is the exact rudeness this module exists to
+    # prevent, so the shape of the words gets the first say.
     if _OPEN_PUNCT.search(t) or _DANGLING.search(t) or _STEM_ONLY.match(t):
         return PATIENT, "trails off mid-thought"
+    # Otherwise the brain recognising the whole utterance is the strongest
+    # signal there is that it is finished.
+    if brain_hit:
+        return FAST, "a command the brain recognises"
     if _TERMINAL.search(t):
         return FAST, "ends on a full stop"
     words = t.split()

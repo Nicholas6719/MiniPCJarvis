@@ -162,6 +162,8 @@ class Orchestrator:
         # with an AttributeError on the way out.
         self._watchdog_task: asyncio.Task | None = None
         self._preroll: np.ndarray | None = None     # audio from before the wake word fired
+        self._heard_text: str | None = None         # transcript the endpoint check already produced
+        self._end_silence: tuple[float, float] = (0.0, 0.0)   # (waited, budget) of the last turn
         self._armed_until: float = 0.0               # conversation window (no wake word needed)
         self._sounds = {k: f() for k, f in PALETTE.items()}  # built once, replayed
         self.sm.on_change(self._announce_state)
@@ -452,6 +454,12 @@ class Orchestrator:
                         State.IDLE, State.WAITING, State.STARTING, State.SLEEPING):
                     consec = 0
                     continue
+                # Dictating into another app: his own name may well be in the
+                # text being written. Do not answer it.
+                from dictation import dictation as _dict
+                if _dict.active:
+                    consec = 0
+                    continue
                 # follow-up window: speech alone is enough
                 if self.armed:
                     probs = armed_vad.feed(block)
@@ -559,6 +567,16 @@ class Orchestrator:
         new_speech_frames = 0
         endpoint_task: asyncio.Task | None = None
         semantic_budget: float | None = None
+        # The endpoint check transcribes the utterance to judge it. If nothing
+        # more is said afterwards that transcript IS the turn's transcript, and
+        # running Parakeet over the same audio a second time costs ~1.5 s of
+        # dead air before he starts thinking. Keep it, with the speech count it
+        # was taken at, and hand it to the turn when it still covers everything.
+        self._heard_text = None
+        self._end_silence = (0.0, 0.0)
+        endpoint_text: str | None = None
+        endpoint_frames = -1
+        frames_at_decision = -1
         if lead_in is not None and len(lead_in):
             # the wake phrase (and any words already spoken) live in here;
             # count it as speech so a command said in one breath is kept
@@ -605,12 +623,15 @@ class Orchestrator:
                     and speech_frames >= MIN_SPEECH_FRAMES
                     and not (woke_by_name and new_speech_frames < MIN_SPEECH_FRAMES)
                     and quiet_for > 0.30 and buf):
+                frames_at_decision = speech_frames
                 endpoint_task = asyncio.create_task(
                     endpoint.decide(np.concatenate(buf), stt, brain))
             if endpoint_task is not None and endpoint_task.done():
                 try:
                     secs, why, heard = endpoint_task.result()
                     semantic_budget = secs
+                    if heard:
+                        endpoint_text, endpoint_frames = heard, frames_at_decision
                     log.info("endpoint: %.2fs (%s) after %r", secs, why, heard[-60:])
                 except Exception:
                     semantic_budget = SILENCE_END_S
@@ -618,9 +639,17 @@ class Orchestrator:
             if (last_speech_t is not None
                     and speech_frames >= MIN_SPEECH_FRAMES
                     and quiet_for > end_silence):
+                # how long he actually waited, and what he was waiting for
+                self._end_silence = (quiet_for, end_silence)
+                log.info("end of speech after %.2fs of silence (budget %.2fs)",
+                         quiet_for, end_silence)
                 break
         if speech_frames < MIN_SPEECH_FRAMES:
             return None
+        # Only reuse it if not another word was spoken after it was taken —
+        # otherwise it is a transcript of half the sentence.
+        if endpoint_text and speech_frames == endpoint_frames:
+            self._heard_text = endpoint_text
         return np.concatenate(buf) if buf else None
 
     # ---------- one conversational turn ----------
@@ -691,7 +720,8 @@ class Orchestrator:
 
     async def _run_turn(self, audio: np.ndarray) -> None:
         if registry.has_pending:          # answering a question, not starting a turn
-            spoken = (await stt.transcribe(audio) or "").strip()
+            pre, self._heard_text = self._heard_text, None
+            spoken = (pre if pre is not None else await stt.transcribe(audio) or "").strip()
             spoken = WAKE_PHRASE.sub("", spoken, count=1).strip()
             await bus.emit("transcript", role="user", text=spoken, source="confirm")
             if await self.try_voice_confirmation(spoken):
@@ -717,11 +747,15 @@ class Orchestrator:
         await self.sm.to(State.PROCESSING)
         t_start = time.time()
         self.metrics.begin()
-        text = await stt.transcribe(audio)
+        already = self._heard_text          # transcribed while judging the pause
+        self._heard_text = None
+        text = already if already is not None else await stt.transcribe(audio)
         self.metrics.mark("stt_ms")
         text = WAKE_PHRASE.sub("", text or "", count=1).strip()
+        waited, budget = self._end_silence
         await bus.emit("transcript", role="user", text=text,
-                       stt_ms=int((time.time() - t_start) * 1000))
+                       stt_ms=int((time.time() - t_start) * 1000),
+                       silence_ms=int(waited * 1000), budget_ms=int(budget * 1000))
         if not text:
             # just the wake word — acknowledge and open the window
             await self.sm.to(State.SPEAKING, force=True)

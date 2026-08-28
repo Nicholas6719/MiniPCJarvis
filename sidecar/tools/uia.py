@@ -39,6 +39,7 @@ _CLICKABLE = {50000, 50002, 50003, 50005, 50007, 50011, 50013, 50018, 50019,
               50024, 50034, 50036, 50004}
 
 _MAX_ELEMENTS = 400          # a deep tree is a slow tree; this is plenty for a window
+INVOKE_TIMEOUT_S = 2.5       # how long to wait on the app before using the mouse
 
 
 def _uia():
@@ -48,18 +49,29 @@ def _uia():
     return comtypes.client.CreateObject(UIA.CUIAutomation, interface=UIA.IUIAutomation), UIA
 
 
+# Window classes Windows uses for menus, dropdowns and dialogs — the things
+# that open ON TOP of an app and are separate top-level windows underneath.
+_POPUP_CLASSES = ("#32768", "#32770", "popup", "menu", "dialog", "taskdialog",
+                  "tooltips_class32", "combolbox")
+
+
+def _is_popup(cls: str) -> bool:
+    c = (cls or "").lower()
+    return any(k in c for k in _POPUP_CLASSES)
+
+
 def _collect(window_title: str | None = None) -> list[dict]:
     """Every named, on-screen control in the foreground (or named) window."""
     import comtypes
     comtypes.CoInitialize()
     iuia, UIA = _uia()
     root = iuia.GetRootElement()
+    tops = root.FindAll(2, iuia.CreateTrueCondition())        # 2 = TreeScope_Children
     target = None
     if window_title:
         q = window_title.strip().lower()
-        cond = iuia.CreateTrueCondition()
-        for i in range(root.FindAll(2, cond).Length):        # 2 = TreeScope_Children
-            el = root.FindAll(2, cond).GetElement(i)
+        for i in range(tops.Length):
+            el = tops.GetElement(i)
             if q in (el.CurrentName or "").lower():
                 target = el
                 break
@@ -70,6 +82,28 @@ def _collect(window_title: str | None = None) -> list[dict]:
         target = iuia.ElementFromHandle(win32gui.GetForegroundWindow())
     if target is None:
         return []
+
+    # An open menu, a dropdown or a modal dialog is its OWN top-level window;
+    # inside the app's tree it is at most an empty placeholder. Walking the
+    # window alone therefore finds "File" but never "Save as". Only windows of
+    # that class are taken — the app's other ORDINARY windows must stay out, or
+    # a second Notepad's buttons get mixed in with this one's and a click by
+    # name can land in the wrong window.
+    roots = [target]
+    try:
+        pid = target.CurrentProcessId
+        for i in range(tops.Length):
+            el = tops.GetElement(i)
+            try:
+                if (el.CurrentProcessId == pid and not el.CurrentIsOffscreen
+                        and _is_popup(el.CurrentClassName or "")
+                        and not iuia.CompareElements(el, target)):
+                    roots.append(el)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    roots = roots[:6]
 
     out: list[dict] = []
     walker = iuia.RawViewWalker
@@ -102,7 +136,8 @@ def _collect(window_title: str | None = None) -> list[dict]:
             except Exception:
                 break
 
-    walk(target, 0)
+    for r in roots:
+        walk(r, 0)
     return out
 
 
@@ -205,18 +240,20 @@ async def click_control(name: str, window: str = "", double: bool = False) -> di
         near = ", ".join(c["name"] for _, c in ranked[:5])
         return {"error": f"I don't see a control called {name}. The closest are: {near}"}
     # Prefer the control's own Invoke: it works even when something overlaps it.
-    def _do() -> str:
+    def _invoke() -> bool:
         import comtypes
         comtypes.CoInitialize()
-        el = best["_el"]
         try:
-            pattern = el.GetCurrentPattern(10000)            # UIA_InvokePatternId
-            if pattern:
-                from comtypes.gen import UIAutomationClient as UIA
-                pattern.QueryInterface(UIA.IUIAutomationInvokePattern).Invoke()
-                return "invoked"
+            pattern = best["_el"].GetCurrentPattern(10000)    # UIA_InvokePatternId
+            if not pattern:
+                return False
+            from comtypes.gen import UIAutomationClient as UIA
+            pattern.QueryInterface(UIA.IUIAutomationInvokePattern).Invoke()
+            return True
         except Exception:
-            pass
+            return False
+
+    def _mouse() -> None:
         import win32api
         import win32con
         x, y = best["x"], best["y"]
@@ -224,8 +261,23 @@ async def click_control(name: str, window: str = "", double: bool = False) -> di
         for _ in range(2 if double else 1):
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, x, y, 0, 0)
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, x, y, 0, 0)
-        return "clicked"
-    how = await asyncio.to_thread(_do)
+
+    # Invoke is a call INTO the other app, and an app that is busy — or showing
+    # a modal dialog — can simply never answer it. Unbounded, that hangs the
+    # whole tool until its timeout and the click never happens at all, which is
+    # the worst outcome of the three. So give Invoke a short go, then use the
+    # mouse, which nothing can block.
+    how = "clicked"
+    try:
+        if await asyncio.wait_for(asyncio.to_thread(_invoke), timeout=INVOKE_TIMEOUT_S):
+            how = "invoked"
+        else:
+            await asyncio.to_thread(_mouse)
+    except asyncio.TimeoutError:
+        log.warning("UIA Invoke on %r did not answer in %.1fs - clicking it instead",
+                    best["name"], INVOKE_TIMEOUT_S)
+        how = "clicked (invoke timed out)"
+        await asyncio.to_thread(_mouse)
     await bus.emit("remote_input", action="click_control", control=best["name"], how=how)
     return {"clicked": best["name"], "role": best["role"], "how": how,
             "match": round(best_score, 2), "x": best["x"], "y": best["y"]}

@@ -64,6 +64,7 @@ class Dictation:
 
     def __init__(self) -> None:
         self.active = False
+        self._q = None                    # our OWN mic subscription, see start()
         self._buf: list[np.ndarray] = []
         self._task: asyncio.Task | None = None
         self._started = 0.0
@@ -90,7 +91,11 @@ class Dictation:
         self.active = True
         self._buf = []
         self._started = time.time()
-        mic.drain()
+        # A private subscription, not mic.queue: the capture loop drinks from
+        # that same queue, so a wake word inside the dictated speech would have
+        # the two of them splitting the blocks between them and each getting
+        # half a sentence.
+        self._q = mic.subscribe()
         self._task = asyncio.create_task(self._record())
         await bus.emit("dictation", stage="listening")
         return {"ok": True}
@@ -99,7 +104,7 @@ class Dictation:
         try:
             while self.active and time.time() - self._started < MAX_SECONDS:
                 try:
-                    block = await asyncio.wait_for(mic.queue.get(), timeout=0.4)
+                    block = await asyncio.wait_for(self._q.get(), timeout=0.4)
                 except asyncio.TimeoutError:
                     continue
                 self._buf.append(block)
@@ -116,6 +121,9 @@ class Dictation:
         if self._task:
             self._task.cancel()
             self._task = None
+        if self._q is not None:
+            mic.unsubscribe(self._q)
+            self._q = None
         secs = time.time() - self._started
         if not self._buf or secs < 0.35:
             await bus.emit("dictation", stage="cancelled", reason="too short")
