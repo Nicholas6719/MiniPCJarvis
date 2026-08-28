@@ -98,6 +98,9 @@ DEFAULTS: dict[str, Any] = {
                "allow_input": True},          # remote typing/clicking (R2), always risk-gated
     # RSS is keyless and instant; Finnhub needs a key (Settings -> Tools)
     "news": {"enabled": True},
+    # hold-to-dictate into any app (Ctrl+Shift+D): local Parakeet, no turn taken
+    "dictation": {"enabled": True, "strip_fillers": True,
+                  "spoken_punctuation": True, "restore_clipboard": True},
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,

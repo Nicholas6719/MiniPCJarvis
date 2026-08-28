@@ -120,12 +120,30 @@ pub fn run() {
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcut(Shortcut::new(
-                    Some(Modifiers::CONTROL | Modifiers::SHIFT),
-                    Code::KeyJ,
-                ))
-                .expect("register hotkey")
-                .with_handler(move |app, _shortcut, event| {
+                .with_shortcuts([
+                    // talk to him
+                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyJ),
+                    // hold to dictate into whatever app has focus (no turn taken)
+                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyD),
+                ])
+                .expect("register hotkeys")
+                .with_handler(move |app, shortcut, event| {
+                    let dictating = shortcut.key == Code::KeyD;
+                    if dictating {
+                        // press starts capture, release transcribes and pastes; the
+                        // window is deliberately NOT raised — dictation belongs to the
+                        // app the user is typing in, not to JARVIS.
+                        let sc = sc_for_hotkey.clone();
+                        let path = if event.state == ShortcutState::Pressed {
+                            "/dictation/start"
+                        } else {
+                            "/dictation/stop"
+                        };
+                        tauri::async_runtime::spawn(async move {
+                            sidecar_post(&sc, path).await;
+                        });
+                        return;
+                    }
                     if event.state == ShortcutState::Pressed {
                         if let Some(win) = app.get_webview_window("main") {
                             // show() alone leaves a MINIMIZED window in the taskbar, which

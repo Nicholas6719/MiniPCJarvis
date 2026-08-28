@@ -86,6 +86,8 @@ async def lifespan(app: FastAPI):
     memory.prune()          # bounded transcript / audit log; knowledge is never pruned
     from tools.shortlist import shortlist
     asyncio.create_task(shortlist.build(registry))   # embed tool descriptions once
+    from dictation import dictation as _dict
+    _dict.orchestrator = orchestrator     # so it refuses to fight a real turn
     from brain.night_school import night_school
     night_school.start(orchestrator)   # audits + curiosity + distillation while he sleeps
     if config.get("remote", "telegram", default=True):
@@ -530,6 +532,22 @@ async def telegram_unpair(x_jarvis_token: str | None = Header(None)):
     import secrets as _s
     telegram.pairing_code = f"{_s.randbelow(1000000):06d}"
     return {"ok": True, "pairing_code": telegram.pairing_code}
+
+
+@app.post("/dictation/start")
+async def dictation_start(x_jarvis_token: str | None = Header(None)):
+    """Hotkey pressed: start capturing for dictation (no turn, no reply)."""
+    _auth(x_jarvis_token)
+    from dictation import dictation
+    return await dictation.start()
+
+
+@app.post("/dictation/stop")
+async def dictation_stop(x_jarvis_token: str | None = Header(None)):
+    """Hotkey released: transcribe and paste into the focused app."""
+    _auth(x_jarvis_token)
+    from dictation import dictation
+    return await dictation.stop()
 
 
 @app.get("/turnstats")
