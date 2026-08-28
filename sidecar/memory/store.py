@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 import time
 
 import numpy as np
 
-from config import DB_PATH
+from config import open_db
 
 log = logging.getLogger("jarvis.memory")
 
@@ -40,7 +39,7 @@ CREATE TABLE IF NOT EXISTS turn_stats (
 
 class MemoryStore:
     def __init__(self) -> None:
-        self.db = sqlite3.connect(DB_PATH, check_same_thread=False)
+        self.db = open_db()
         self.db.executescript(_SCHEMA)
         # migration: pinned flag
         cols = [r[1] for r in self.db.execute("PRAGMA table_info(memories)")]
@@ -154,6 +153,36 @@ class MemoryStore:
         self.db.execute("INSERT INTO transcript (ts, role, content) VALUES (?,?,?)",
                         (time.time(), role, content))
         self.db.commit()
+
+    def prune(self, keep_turns: int = 20000, keep_audit: int = 20000,
+              stats_days: int = 120) -> dict:
+        """Keep the database from growing forever. Called once at startup.
+
+        The transcript and the tool audit log are append-only and had no bound at
+        all: at a few hundred rows a day they are harmless for years, but "harmless
+        for years" is how databases become slow in year three. Memories, facts and
+        brain examples are NEVER pruned — those are the things he knows."""
+        out = {}
+        try:
+            for table, keep in (("transcript", keep_turns), ("audit_log", keep_audit)):
+                exists = self.db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,)).fetchone()
+                if not exists:
+                    continue
+                cur = self.db.execute(
+                    f"DELETE FROM {table} WHERE id NOT IN "
+                    f"(SELECT id FROM {table} ORDER BY id DESC LIMIT ?)", (keep,))
+                out[table] = cur.rowcount
+            cur = self.db.execute("DELETE FROM turn_stats WHERE ts < ?",
+                                  (time.time() - stats_days * 86400,))
+            out["turn_stats"] = cur.rowcount
+            self.db.commit()
+        except Exception:
+            log.exception("prune failed")
+        if any(out.values()):
+            log.info("pruned old rows: %s", out)
+        return out
 
     def recent_transcript(self, n: int = 12) -> list[dict]:
         # id and ts ride along: anything that needs to know WHICH turn a row

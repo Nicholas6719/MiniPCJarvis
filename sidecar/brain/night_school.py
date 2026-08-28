@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import json
 import logging
 import re
 import time

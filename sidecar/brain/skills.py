@@ -858,6 +858,19 @@ def say_recall(slots: dict, res: dict) -> str:
     return f"A few things: {head}."
 
 
+_THANKS_BUT_DISMISSAL = re.compile(
+    r"\bthat'?s (?:all|it|everything)\b|\bfor now\b|\bwe'?re (?:done|finished)\b|"
+    r"\bgood ?night\b|\bnothing (?:else|more)\b|\bi'?m (?:done|good|set)\b|"
+    r"\bsee you\b|\btalk (?:to you )?later\b|\bstand down\b|\bthat is all\b")
+
+
+def slots_thanks(t: str) -> dict | None:
+    """A courtesy is only a courtesy. "Thanks, that's all for now" is a DISMISSAL
+    with a thank-you attached — adding this skill made it answer "Of course."
+    and stay awake, which is a worse answer than the one it replaced."""
+    return None if _THANKS_BUT_DISMISSAL.search(t) else {}
+
+
 def say_thanks(_s: dict, _r: dict) -> str:
     """He used to hand a bare 'thank you' to the model, which once answered by
     repeating the user's own words back ('Thank you Jarvis, sir.')."""
@@ -1053,7 +1066,7 @@ SKILLS: list[Skill] = [
         "thank you", "thanks", "thank you jarvis", "thanks jarvis", "cheers",
         "much appreciated", "appreciate it", "thanks a lot", "thank you very much",
         "nice work", "good job", "well done"],
-        speak=say_thanks),
+        slots=slots_thanks, speak=say_thanks),
     Skill("recycle_bin", "list_recycle_bin", [
         "what's in the recycle bin", "what files are in the recycle bin",
         "show me the recycle bin", "check the recycle bin", "what's in the trash",
@@ -1129,6 +1142,10 @@ SKILLS: list[Skill] = [
         "stand down", "stand by", "dismissed", "you're dismissed", "you can go now",
         "take a break", "you can rest", "get some rest", "take a rest",
         "goodnight jarvis", "good night jarvis", "night jarvis",
+        "goodnight", "good night", "rest now jarvis", "you can switch off",
+        # a thank-you wrapped around a dismissal is still a dismissal
+        "that's it thanks", "thanks that's all", "okay thanks that's all",
+        "thanks that is all", "alright thanks that's everything",
         "see you later", "talk to you later", "catch you later", "bye for now",
         "minimize yourself", "hide yourself", "make yourself scarce",
         "get out of the way", "go away for now", "i'm done for now",

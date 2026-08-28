@@ -17,14 +17,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 from collections import OrderedDict
 import time
 
 import numpy as np
 
 from brain.skills import SKILLS, SKILL_BY_NAME, TOOL_TO_SKILL, Skill
-from config import DB_PATH, config
+from config import config, open_db
 
 log = logging.getLogger("jarvis.brain")
 
@@ -111,7 +110,7 @@ def _norm(t: str) -> str:
 
 class Brain:
     def __init__(self) -> None:
-        self.db = sqlite3.connect(DB_PATH, check_same_thread=False)
+        self.db = open_db()
         self.db.executescript(_SCHEMA)
         self.db.commit()
         self._embedder = None
@@ -224,7 +223,8 @@ class Brain:
 
     # ---------- classification ----------
 
-    async def classify(self, text: str, k: int = 5) -> tuple[str | None, float]:
+    async def classify(self, text: str, k: int = 5,
+                       exclude: set | None = None) -> tuple[str | None, float]:
         """Return (skill, confidence).
 
         Top-match wins; confidence is the top similarity, penalized when the best
@@ -234,6 +234,14 @@ class Brain:
         q = (await asyncio.to_thread(self._embed, [_norm(text)]))[0]
         sims = self._matrix @ q
         order = np.argsort(-sims)
+        if exclude:
+            # decide() asks again without a skill whose slot extractor refused the
+            # phrasing, so a guarded top match hands over to the runner-up instead
+            # of dropping the whole turn on the LLM ("that's it thanks" is a
+            # DISMISSAL that merely looks like a thank-you).
+            order = [i for i in order if self._skills[i] not in exclude]
+            if not order:
+                return None, 0.0
         best = self._skills[order[0]]
         top = float(sims[order[0]])
         rival = 0.0
@@ -377,16 +385,25 @@ class Brain:
     # ---------- decision ----------
 
     async def decide(self, text: str) -> tuple[Skill, dict, float] | None:
-        """If confident and the slots extract cleanly, return (skill, args, confidence)."""
+        """If confident and the slots extract cleanly, return (skill, args, confidence).
+
+        A skill whose extractor REFUSES the phrasing steps aside and the next-best
+        skill gets a turn (bounded, so a chain of refusals still ends at the LLM).
+        Guards exist to say "this is not mine" — before this, saying so threw the
+        whole utterance to the model even when the right skill was ranked second."""
         threshold = float(config.get("brain", "threshold", default=0.82))
-        name, conf = await self.classify(text)
-        if not name or conf < threshold:
-            return None
-        skill = SKILL_BY_NAME[name]
-        slots = skill.slots(_light(text))
-        if slots is None:
-            return None  # couldn't extract what the tool needs -> let the LLM handle it
-        return skill, {**skill.fixed_args, **slots}, conf
+        refused: set = set()
+        light = _light(text)
+        for _ in range(3):
+            name, conf = await self.classify(text, exclude=refused or None)
+            if not name or conf < threshold:
+                return None
+            skill = SKILL_BY_NAME[name]
+            slots = skill.slots(light)
+            if slots is not None:
+                return skill, {**skill.fixed_args, **slots}, conf
+            refused.add(name)
+        return None
 
 
 brain = Brain()

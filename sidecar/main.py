@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 
 from config import LOG_DIR, config, secrets
-from events import bus
+from events import bus, spawn
 from memory.store import memory
 from orchestrator import orchestrator
 from state_machine import State
@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI):
             logging.getLogger("jarvis").exception("brain failed to load (LLM-only mode)")
     asyncio.create_task(_load_brain())
     asyncio.create_task(orchestrator.start())
+    memory.prune()          # bounded transcript / audit log; knowledge is never pruned
     from brain.night_school import night_school
     night_school.start(orchestrator)   # audits + curiosity + distillation while he sleeps
     if config.get("remote", "telegram", default=True):
@@ -765,9 +766,9 @@ async def text_input(body: dict, x_jarvis_token: str | None = Header(None)):
     # typing to him is as deliberate as saying his name: it ends sleep rather than
     # bouncing off it. Without this, sleep mode also silently disabled the text box.
     await orchestrator.wake_if_sleeping()
-    if orchestrator.sm.state not in (State.IDLE, State.INTERRUPTED):
-        return {"ok": False, "error": "busy"}
-    asyncio.create_task(orchestrator.run_text_turn(text))
+    # run_text_turn interrupts speech and waits out a working turn, so a typed
+    # message is never silently dropped for being "busy"
+    spawn(orchestrator.run_text_turn(text), name="text-turn")
     return {"ok": True}
 
 

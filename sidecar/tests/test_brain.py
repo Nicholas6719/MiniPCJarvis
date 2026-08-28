@@ -79,6 +79,10 @@ CASES = [
     # speak a sentence already sitting on disk)
     ("what do you remember about my desk lamp", "recall"),
     ("what did i tell you about my car", "recall"),
+    # a courtesy attached to a DISMISSAL is a dismissal — adding the thanks skill
+    # briefly stole these from sleep mode (found by the 2026-08-27 audit)
+    ("that's it thanks", "sleep"), ("thanks that is all", "sleep"),
+    ("goodnight", "sleep"), ("thank you", "thanks"),
 ]
 
 async def main() -> int:

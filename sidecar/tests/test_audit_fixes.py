@@ -72,6 +72,37 @@ check("'research methods in psychology' keeps its noun",
 check("search questions pass through", clean_search_query("what is the tallest building") == "what is the tallest building")
 check("clean is idempotent", clean_search_query("the best mini pc") == "the best mini pc")
 
+# --- the database must be WAL: four subsystems write to one file from
+# background tasks, and rollback-journal locking made that a "database is
+# locked" waiting to happen (2026-08-27 audit) ---
+from config import open_db  # noqa: E402
+_c = open_db()
+check("database opens in WAL mode", _c.execute("PRAGMA journal_mode").fetchone()[0] == "wal")
+check("busy_timeout is set", _c.execute("PRAGMA busy_timeout").fetchone()[0] >= 5000)
+_c.close()
+
+# --- background work must survive the garbage collector: asyncio holds only a
+# WEAK reference to a running task, so fire-and-forget turns could vanish ---
+from events import spawn, _background  # noqa: E402
+
+
+async def _spawn_survives():
+    done = []
+
+    async def _work():
+        await asyncio.sleep(0.05)
+        done.append(True)
+    spawn(_work())
+    referenced = len(_background) == 1
+    import gc
+    gc.collect()                      # the exact hazard: a collection mid-flight
+    await asyncio.sleep(0.2)
+    return referenced and done == [True] and len(_background) == 0
+
+
+check("spawned work is referenced, survives GC, then releases",
+      asyncio.run(_spawn_survives()))
+
 # --- file-tool sandbox: relative traversal blocked ---
 check("traversal '../../../Windows/..' blocked", _resolve("../../../Windows/System32/drivers/etc/hosts") is None)
 check("traversal '../..' blocked", _resolve("../../AppData/Roaming/JARVIS/config.json") is None)

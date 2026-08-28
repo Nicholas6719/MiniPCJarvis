@@ -15,7 +15,6 @@ stored facts against their original sources while JARVIS sleeps.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -23,7 +22,7 @@ import time
 
 import numpy as np
 
-from config import DB_PATH, config
+from config import config, open_db
 
 log = logging.getLogger("jarvis.facts")
 
@@ -67,8 +66,7 @@ _TIMELESS_PROMPT = (
 
 class FactStore:
     def __init__(self, db_path: str | None = None) -> None:
-        import sqlite3
-        self.db = sqlite3.connect(db_path or DB_PATH, check_same_thread=False)
+        self.db = open_db(db_path)
         self.db.executescript(_SCHEMA)
         cols = [r[1] for r in self.db.execute("PRAGMA table_info(facts)")]
         if "strikes" not in cols:   # audit: two UNCLEAR verdicts demote

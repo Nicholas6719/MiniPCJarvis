@@ -19,7 +19,7 @@ export type StageKind =
   | "settings";  // settings rail incl. History
 
 export type SettingsSection =
-  | "voice" | "model" | "tools" | "memory" | "history" | "tasks" | "about";
+  | "voice" | "model" | "tools" | "memory" | "history" | "tasks" | "learned" | "about";
 
 export interface StageState {
   kind: StageKind;
@@ -490,6 +490,23 @@ export const useStore = create<Store>((set, get) => ({
           summary: `brain: ${evt.skill} (${Math.round((evt.confidence ?? 0) * 100)}%)`,
           detail: evt.args && Object.keys(evt.args).length ? evt.args : undefined,
         });
+        break;
+      case "fact_learned":
+        push({ id: evt.id, ts: evt.ts, kind: "reflex",
+               summary: `learned a fact: "${evt.question}"` });
+        break;
+      case "fact_audit":
+        push({ id: evt.id, ts: evt.ts, kind: "reflex",
+               summary: `re-checked "${evt.question}" — ${evt.verdict}` });
+        break;
+      case "night_school":
+        push({ id: evt.id, ts: evt.ts, kind: "reflex",
+               summary: `night school: ${evt.audited} facts re-checked, ${evt.changed} retired, ` +
+                        `${evt.curiosity} researched, ${evt.learned} new phrasings` });
+        break;
+      case "remote_input":
+        push({ id: evt.id, ts: evt.ts, kind: "tool",
+               summary: `remote ${evt.action}${evt.cell ? ` ${evt.cell}` : ""}${evt.keys ? ` ${evt.keys}` : ""}` });
         break;
       case "brain_learned":
         push({ id: evt.id, ts: evt.ts, kind: "reflex", summary: `brain learned: "${evt.text}" → ${evt.skill}` });

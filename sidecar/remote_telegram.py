@@ -20,13 +20,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets as pysecrets
-import time
 from pathlib import Path
 
 import httpx
 
 from config import APP_DIR, config
-from events import bus
+from events import bus, spawn
 
 log = logging.getLogger("jarvis.telegram")
 
@@ -232,10 +231,10 @@ class TelegramBridge:
         reminders and proactive alerts even when no turn is running."""
         kind = evt.get("kind")
         if kind == "task_due":
-            asyncio.ensure_future(self._send(f"Reminder, sir: {evt.get('text', '')}"))
+            spawn(self._send(f"Reminder, sir: {evt.get('text', '')}"), name="tg-reminder")
             return
         if kind == "proactive":
-            asyncio.ensure_future(self._send(str(evt.get("text") or evt.get("alert") or "")))
+            spawn(self._send(str(evt.get("text") or evt.get("alert") or "")), name="tg-proactive")
             return
         c = self._collect
         if c is None:
@@ -256,7 +255,7 @@ class TelegramBridge:
         elif kind == "file_preview":
             c["file"] = evt.get("path")
         elif kind == "confirmation_required":
-            asyncio.ensure_future(self._send_gate(evt))
+            spawn(self._send_gate(evt), name="tg-gate")
 
     async def _send_gate(self, evt: dict) -> None:
         chat = config.get("remote", "telegram_chat_id", default=None)

@@ -61,3 +61,20 @@ class EventBus:
 
 
 bus = EventBus()
+
+
+# Background tasks must be kept referenced. asyncio only holds a WEAK reference to
+# a running task, so a fire-and-forget create_task() can be garbage collected
+# mid-flight and the work simply vanishes — the hardest class of bug to see,
+# because nothing errors. Anything spawned outside a request's own lifetime goes
+# through here.
+_background: set = set()
+
+
+def spawn(coro, name: str | None = None):
+    """create_task that cannot be collected before it finishes."""
+    import asyncio
+    task = asyncio.create_task(coro, name=name)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    return task

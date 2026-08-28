@@ -26,7 +26,7 @@ from brain.facts import facts
 import collections
 import re as _re
 from config import config
-from events import bus
+from events import bus, spawn
 from llm.llama_server import llama
 from brain.skills import want_honorific
 from llm.prompts import system_prompt, turn_context
@@ -54,6 +54,13 @@ YES_WORDS = re.compile(r"^\s*(?:yes|yes please|yeah|yep|yup|sure|ok|okay|do it|g
 NO_WORDS = re.compile(r"^\s*(?:no|no thanks|no thank you|nope|nah|naw|cancel|stop|don't|do not|"
                       r"never\s*mind|negative|forget it|not now|n[aã]o|nein|non|nyet|nej|no way)"
                       r"\s*[.!,]?\s*$", re.I)
+# Spoken form of the confirmation question, keyed by tool name. NOTE this table
+# only ever fires for tools registered MEDIUM or HIGH (see Tool.requires_confirmation):
+# today that is type_text, press_keys, click_screen, browser_submit, power_action and
+# empty_recycle_bin. The file entries below are deliberately kept but currently
+# UNUSED — file operations are LOW because every one of them is reversible (deletes
+# go to the Recycle Bin, moves can be moved back). If that ever changes, the wording
+# is already here.
 CONFIRM_PHRASE = {
     "close_application": lambda a: f"Close {a.get('name', 'that app')}?",
     "open_application": lambda a: f"Open {a.get('name', 'that app')}?",
@@ -628,7 +635,18 @@ class Orchestrator:
                 log.exception("stuck watchdog tick failed")
 
     async def run_text_turn(self, text: str) -> None:
-        """Typed input path — same pipeline, no STT."""
+        """Typed input path — same pipeline, no STT.
+
+        Typing is deliberate, so a message that lands while he is mid-sentence
+        INTERRUPTS him rather than being thrown away (that used to answer "busy"
+        and the message simply vanished). While he is thinking or running a tool
+        the turn waits its turn instead."""
+        if self.sm.state is State.SPEAKING:
+            await self.interrupt()
+        for _ in range(600):                      # up to 60 s of patience
+            if self.sm.state in (State.IDLE, State.INTERRUPTED, State.SLEEPING):
+                break
+            await asyncio.sleep(0.1)
         await self.sm.to(State.PROCESSING, force=True)
         self.metrics.begin()
         await bus.emit("transcript", role="user", text=text, source="text")
@@ -835,7 +853,7 @@ class Orchestrator:
             from brain.skills import without_honorific as _wh
             answer = _wh(strip_markdown(full_reply))
             ev = evidence[-1]
-            asyncio.create_task(self._fact_intake(text, answer, ev))
+            spawn(self._fact_intake(text, answer, ev), name='fact-intake')
         # the transcript takes the markdown-free text; the streamed deltas are raw
         await bus.emit("turn_done", latency_ms=latency,
                        breakdown=breakdown, text=strip_markdown(full_reply or ""))
@@ -871,7 +889,6 @@ class Orchestrator:
 
     async def _exec_skill(self, skill, args: dict, queue: asyncio.Queue) -> str:
         """Run one reflex skill (tool + templated speech) and return what was said."""
-        from brain.skills import SKILL_BY_NAME  # noqa: F401  (kept local: skills import nothing heavy)
         res: dict = {}
         reply = ""
         from brain.skills import polish

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -206,3 +207,27 @@ config = Config()
 # Secrets are held in memory only; the Rust core injects them from Windows
 # Credential Manager after startup. Never written to disk here.
 secrets: dict[str, str] = {}
+
+
+def open_db(path: str | Path | None = None, timeout: float = 15.0):
+    """Open the JARVIS database the one correct way.
+
+    Four subsystems hold their own connection to this single file (memory,
+    brain examples, facts, the tool audit log) and several of them write from
+    background tasks — the scheduler firing a reminder while a turn logs a row
+    while night school stamps a fact. In SQLite's default rollback-journal mode
+    a writer locks the WHOLE database, so those collide and raise
+    "database is locked", which surfaces as a dead turn. WAL lets one writer and
+    many readers proceed together, and busy_timeout makes the rare true conflict
+    wait instead of raising.
+    """
+    import sqlite3
+    conn = sqlite3.connect(str(path or DB_PATH), check_same_thread=False, timeout=timeout)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")   # WAL-safe, far fewer fsyncs
+        conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
+    except Exception:                                # a read-only or odd FS: still usable
+        logging.getLogger("jarvis.config").warning(
+            "could not enable WAL on the database", exc_info=True)
+    return conn

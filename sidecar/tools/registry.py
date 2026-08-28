@@ -63,9 +63,8 @@ class ToolRegistry:
         """Persistent audit trail of every tool execution attempt."""
         try:
             if self._audit_db is None:
-                import sqlite3
-                from config import DB_PATH
-                self._audit_db = sqlite3.connect(DB_PATH, check_same_thread=False)
+                from config import open_db
+                self._audit_db = open_db()
                 self._audit_db.execute(
                     "CREATE TABLE IF NOT EXISTS audit_log ("
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, tool TEXT, "

@@ -437,6 +437,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "memory", label: "What you've taught me" },
   { id: "history", label: "History" },
   { id: "tasks", label: "Tasks & reminders" },
+  { id: "learned", label: "What he's learned" },
   { id: "about", label: "About this machine" },
 ];
 
@@ -517,6 +518,71 @@ function AboutPane() {
   );
 }
 
+
+// What he has learned on his own (brain roadmap): the design said overnight
+// findings are inspectable but never announced — until now they were emitted as
+// events nothing rendered, so they were invisible.
+function LearnedPane() {
+  const [facts, setFacts] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [night, setNight] = useState<any>(null);
+  useEffect(() => {
+    (async () => {
+      try { const r = await api("/facts"); setFacts(r.facts ?? []); setStats(r.stats); } catch {}
+      try { setNight((await api("/night_school")).last_report); } catch {}
+    })();
+  }, []);
+  const active = facts.filter((f) => f.status === "active");
+  const demoted = facts.filter((f) => f.status !== "active");
+  const when = (ts: number) => ts ? new Date(ts * 1000).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+  const host = (f: any) => { try { return new URL(f.sources?.[0]?.url).hostname.replace(/^www\./, ""); } catch { return ""; } };
+  return (
+    <div className="about">
+      <div className="about__head">
+        <span className="stage__eyebrow" style={{ color: "var(--rim)" }}>FACTS HE KEEPS</span>
+        <span className="mono-sub">{active.length} VERIFIED{demoted.length ? ` · ${demoted.length} RETIRED` : ""}</span>
+      </div>
+      <div className="about__checks">
+        {active.map((f) => (
+          <div key={f.id} className="learned">
+            <div className="learned__a">{f.answer}</div>
+            <div className="learned__meta mono-sub">
+              {host(f)} · verified {when(f.verified_ts)}{f.hits ? ` · used ${f.hits}×` : ""}
+            </div>
+          </div>
+        ))}
+        {active.length === 0 && (
+          <div className="mono-sub" style={{ color: "var(--text-dim)", padding: "10px 0" }}>
+            NOTHING YET — ASK HIM SOMETHING TIMELESS AND HE'LL VERIFY IT ON THE WEB
+          </div>
+        )}
+      </div>
+      <div className="about__head">
+        <span className="stage__eyebrow" style={{ color: "var(--rim)" }}>LAST NIGHT SCHOOL</span>
+        <span className="mono-sub">{night?.finished ? new Date(night.finished * 1000).toLocaleString() : "NOT RUN YET"}</span>
+      </div>
+      <div className="about__checks">
+        {night ? (
+          <div className="learned__meta mono-sub">
+            {night.audited} facts re-checked · {night.confirmed} confirmed ·{" "}
+            {night.changed} changed and retired · {night.curiosity} researched ·{" "}
+            {night.learned} new phrasings{night.aborted ? " · stopped when you woke him" : ""}
+          </div>
+        ) : (
+          <div className="learned__meta mono-sub">
+            HE RE-VERIFIES HIS FACTS WHILE ASLEEP, INSIDE QUIET HOURS
+          </div>
+        )}
+        {stats && (
+          <div className="learned__meta mono-sub">
+            this session: {stats.served} answered from memory · {stats.stored} learned · {stats.rejected} rejected as changeable
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SettingsStage() {
   const stage = useStore((s) => s.stage);
   const setSection = useStore((s) => s.setSettingsSection);
@@ -546,6 +612,7 @@ function SettingsStage() {
           {section === "memory" && <MemoryView />}
           {section === "history" && <HistoryPane />}
           {section === "tasks" && <TasksView />}
+          {section === "learned" && <LearnedPane />}
           {section === "about" && <AboutPane />}
         </div>
       </div>
