@@ -696,7 +696,17 @@ async def debug_tool(body: dict, x_jarvis_token: str | None = Header(None)):
     if not name:
         raise HTTPException(400, "tool required")
     from tools.registry import registry as _reg
-    return await _reg.execute(name, body.get("args") or {})
+    prev = orchestrator.sm.state
+    try:
+        return await _reg.execute(name, body.get("args") or {})
+    finally:
+        # Confirmation moves the state machine — WAITING while he asks, EXECUTING
+        # once approved — and it is the TURN that hands it back afterwards. There
+        # is no turn here, so put it back ourselves. Left parked in EXECUTING, the
+        # next thing said waits 60 s on a turn that does not exist (this is what
+        # made sleep_e2e fail only inside a full suite run).
+        if prev in (State.IDLE, State.SLEEPING) and orchestrator.sm.state != prev:
+            await orchestrator.sm.to(prev, force=True)
 
 
 @app.post("/debug/night_school")

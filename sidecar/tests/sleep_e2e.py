@@ -27,8 +27,8 @@ BASE = f"http://127.0.0.1:{port}"
 fails = []
 
 
-def check(name, cond):
-    print(("  PASS  " if cond else "  FAIL  ") + name)
+def check(name, cond, detail=""):
+    print(("  PASS  " if cond else "  FAIL  ") + name + (f"   {detail}" if not cond and detail else ""))
     if not cond:
         fails.append(name)
 
@@ -81,8 +81,15 @@ async def main() -> int:
     await asyncio.sleep(1)
 
     # --- into sleep, by voice command text ---
-    # state before AND the reply to the post: when this fails in a full suite run
-    # (and passes alone) the question is always "did the request even land?"
+    # This test must start from AWAKE. In a full suite run he is often still
+    # asleep from the last time it ran, and "does this put him to sleep" proves
+    # nothing when he is already there — worse, the wake-and-resettle that
+    # follows is what made this the one suite that failed in a batch and passed
+    # alone.
+    if state() == "sleeping":
+        httpx.post(BASE + "/text", headers=H, json={"text": "wake up"}, timeout=15)
+        await wait_state("idle", 45)
+        await asyncio.sleep(3)
     was = httpx.get(BASE + "/health", headers=H, timeout=10).json().get("state")
     r = httpx.post(BASE + "/text", headers=H, json={"text": "that's all for now"}, timeout=15)
     ok = await wait_state("sleeping", 60)

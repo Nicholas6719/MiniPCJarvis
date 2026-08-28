@@ -23,7 +23,12 @@ foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py
     }
     Start-Sleep 10   # let the speaker drain and the wake model settle
     Write-Host "== $t"
-    & .\.venv\Scripts\python.exe "tests\$t" $port $tok 2>&1 | Select-Object -Last 3
+    # keep enough of the tail to show WHY, not just that it failed: the last 3 lines
+    # once hid the one diagnostic line that explained a suite-only failure
+    $out = & .\.venv\Scripts\python.exe "tests\$t" $port $tok 2>&1
+    $code = $LASTEXITCODE
+    $out | Select-Object -Last $(if ($code -eq 0) { 3 } else { 25 })
+    $global:LASTEXITCODE = $code
     if ($LASTEXITCODE -ne 0 -and $t -notin @("filler_e2e.py", "general_e2e.py", "voice_ux_e2e.py")) {
         $failed += $t
     }
