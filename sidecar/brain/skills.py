@@ -330,6 +330,157 @@ def slots_restore(t: str) -> dict | None:
     return {"name": name} if len(name) >= 2 else None
 
 
+
+# ---- markets and news (realm 2: live every time, never cached) ---------------
+_TICKER_LEAD = re.compile(
+    r"\b(?:price|quote|stock|share[s]?|trading at|worth|cost of|how much is|"
+    r"how'?s|hows|what'?s|whats|is)\b", re.I)
+# A company can appear after a preposition ("price OF apple", "say about apple")
+# or straddled by the question itself ("what's APPLE trading at", "is NVIDIA a buy").
+_CO_PATTERNS = [
+    re.compile(r"\b(?:price|quote|target|rating|ratings|recommendations?)\s+(?:of|for|on)\s+(?P<n>.+?)(?:\s+stock|\s+shares?)?[.!?]*$", re.I),
+    re.compile(r"\b(?:about|regarding|on)\s+(?P<n>.+?)[.!?]*$", re.I),
+    re.compile(r"\b(?:what'?s|whats|how'?s|hows|how is|what is|how are)\s+(?P<n>.+?)\s+(?:trading|doing|stock|shares?|at|priced)\b", re.I),
+    re.compile(r"^\s*(?:is|are)\s+(?P<n>.+?)\s+(?:a|an)\s+(?:good\s+)?(?:buy|sell|hold)\b", re.I),
+    re.compile(r"\b(?:of|for)\s+(?P<n>.+?)[.!?]*$", re.I),
+]
+# trailing words that are never part of a company name
+_CO_TAIL = re.compile(
+    r"\s*\b(?:stock|stocks|shares?|share price|stock price|price|quote|doing|today|"
+    r"right now|now|at|a buy|a good buy|a sell|a hold|currently|this morning)\b\s*$", re.I)
+# Checked BEFORE and AFTER the article strip: "the market" and the "market" it
+# becomes must both be refused, or "how's the market doing" asks Finnhub for a
+# company called Market instead of falling through to the market-wide skill.
+_STOP_CO = {"market", "markets", "stock market", "economy", "news", "it", "that",
+            "them", "things", "stocks", "shares", "portfolio", "my portfolio",
+            "everything", "analysts", "wall street", "s and p", "sp 500", "dow",
+            "nasdaq", "the market", "the markets", "the stock market", "the economy",
+            "the news", "the analysts"}
+
+
+def _company_from(t: str) -> str | None:
+    for pat in _CO_PATTERNS:
+        m = pat.search(t)
+        if not m:
+            continue
+        name = re.sub(r"\s+", " ", m.group("n")).strip(" .?!'\"")
+        for _ in range(3):                     # "nvidia stock price" -> "nvidia"
+            trimmed = _CO_TAIL.sub("", name).strip()
+            if trimmed == name:
+                break
+            name = trimmed
+        if name.lower() in _STOP_CO:
+            return None
+        name = re.sub(r"^(?:the|a|an)\s+", "", name, flags=re.I).strip()
+        if (name and name.lower() not in _STOP_CO and 1 < len(name) <= 34
+                and name.lower() not in ("the", "a", "an", "this", "that", "my")):
+            return name
+    return None
+
+
+def slots_quote(t: str) -> dict | None:
+    """"what's apple trading at" -> {'symbol': 'apple'}. Refuses when no company is
+    named, so "how's the market doing" falls through to the market-wide skill."""
+    if not _TICKER_LEAD.search(t):
+        return None
+    name = _company_from(t)
+    return {"symbol": name} if name else None
+
+
+def say_quote(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    d, pct = res.get("change", 0), res.get("percent", 0)
+    way = "up" if d > 0 else "down" if d < 0 else "flat"
+    if way == "flat":
+        return f"{res['name']} is at {res['price']} dollars, flat on the day."
+    return (f"{res['name']} is at {res['price']} dollars, {way} "
+            f"{abs(d)} or {abs(pct)} percent today.")
+
+
+def slots_analyst(t: str) -> dict | None:
+    name = _company_from(t)
+    return {"symbol": name} if name else None
+
+
+def say_analyst(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    n = res.get("analysts", 0)
+    line = (f"Of {n} analysts covering {res['name']}, {res['buy']} say buy, "
+            f"{res['hold']} hold and {res['sell']} sell.")
+    if res.get("target_mean"):
+        line += f" Their average price target is {res['target_mean']} dollars."
+    return line
+
+
+def say_markets(_s: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    parts = []
+    for m in res.get("markets", []):
+        p = m["percent"]
+        way = "up" if p > 0 else "down" if p < 0 else "flat"
+        parts.append(f"{m['name']} is {way} {abs(p)} percent" if way != "flat"
+                     else f"{m['name']} is flat")
+    return ("; ".join(parts) + ".") if parts else "No market data came back."
+
+
+_NEWS_TOPICS = {
+    "world": "world", "international": "world", "global": "world",
+    "us": "us", "national": "us", "america": "us", "american": "us",
+    "business": "business", "market": "business", "markets": "business",
+    "financial": "business", "finance": "business", "economy": "business",
+    "tech": "technology", "technology": "technology",
+    "science": "science", "space": "science",
+    "sport": "sports", "sports": "sports",
+    "local": "local", "boston": "local", "massachusetts": "local",
+}
+_NEWS_ABOUT = re.compile(r"\b(?:about|on|regarding|around|to do with)\s+(.{2,40}?)[.!?]*$", re.I)
+
+
+def slots_news(t: str) -> dict | None:
+    out: dict = {}
+    for word, topic in _NEWS_TOPICS.items():
+        if re.search(r"\b" + word + r"\b", t):
+            out["topic"] = topic
+            break
+    m = _NEWS_ABOUT.search(t)
+    if m:
+        q = m.group(1).strip(" .?!'\"")
+        q = re.sub(r"^(?:the|a|an)\s+", "", q, flags=re.I).strip()
+        # "news about technology" is a topic, not a keyword search
+        if q and q.lower() not in _NEWS_TOPICS and len(q) > 2:
+            out["query"] = q
+    return out
+
+
+def _headline_lines(items: list, limit: int) -> str:
+    return " ".join(f"{i['headline']}, from {i['source']}, {i['when']}."
+                    for i in items[:limit])
+
+
+def say_news(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    items = res.get("items") or []
+    if not items:
+        return "Nothing came back just now."
+    what = slots.get("query") or ("top" if res.get("topic") == "top" else res.get("topic", "top"))
+    head = f"Here's the latest on {what}." if slots.get("query") else f"Here's the {what} news."
+    return head + " " + _headline_lines(items, 3)
+
+
+def say_breaking(_s: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    if res.get("nothing_breaking"):
+        latest = res.get("latest") or []
+        return ("Nothing breaking in the last few hours. The most recent is: "
+                + _headline_lines(latest, 1)) if latest else "Nothing breaking right now."
+    return "Breaking in the last few hours. " + _headline_lines(res.get("items") or [], 3)
+
+
 _SWITCH = re.compile(r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to|show me the)\s+(?:the\s+|my\s+)?(.+?)(?:\s+window|\s+app)?[.!?]*$")
 
 
@@ -1067,6 +1218,33 @@ SKILLS: list[Skill] = [
         "much appreciated", "appreciate it", "thanks a lot", "thank you very much",
         "nice work", "good job", "well done"],
         slots=slots_thanks, speak=say_thanks),
+    Skill("quote", "get_stock_quote", [
+        "what's apple trading at", "what's the price of nvidia", "how's tesla stock doing",
+        "what is microsoft stock at", "price of amazon shares", "how much is google stock",
+        "what's nvidia at right now", "quote for apple", "how is apple stock doing today",
+        "how is nvidia stock doing", "how are apple shares doing", "what is tesla at today",
+        "how's amazon stock", "what's meta trading at today"],
+        slots=slots_quote, speak=say_quote),
+    Skill("analyst", "get_analyst_view", [
+        "what do analysts say about apple", "is nvidia a buy", "analyst ratings for tesla",
+        "what's the price target on microsoft", "do analysts like amazon",
+        "what are the analyst recommendations for google", "is tesla a good buy according to analysts"],
+        slots=slots_analyst, speak=say_analyst),
+    Skill("markets", "get_market_movers", [
+        "how's the market doing", "how are the markets", "how did the market close",
+        "what's the market doing today", "how's the stock market", "are the markets up",
+        "how's the s and p doing", "market check"],
+        speak=say_markets),
+    Skill("news", "get_news", [
+        "what's in the news", "give me the news", "what's happening in the world",
+        "catch me up on the news", "any news today", "what's the latest news",
+        "tell me the tech news", "what's happening in business", "sports news",
+        "what's the local news", "read me the headlines", "news about the election"],
+        slots=slots_news, speak=say_news),
+    Skill("breaking", "get_breaking_news", [
+        "any breaking news", "what's breaking", "anything breaking right now",
+        "has anything happened", "anything urgent in the news"],
+        speak=say_breaking),
     Skill("recycle_bin", "list_recycle_bin", [
         "what's in the recycle bin", "what files are in the recycle bin",
         "show me the recycle bin", "check the recycle bin", "what's in the trash",

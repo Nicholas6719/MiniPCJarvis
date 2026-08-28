@@ -2,6 +2,10 @@
 Run: python tests/test_audit_fixes.py"""
 import sys, asyncio
 sys.path.insert(0, ".")
+import os, tempfile  # noqa: E402
+# never touch the real jarvis.db: the gates get a throwaway file that
+# brain.load() re-seeds from the SKILLS list
+os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "gate.db"))
 from brain.skills import _number, slots_app, slots_reminder, slots_correction  # noqa: E402
 from brain.router import _light, _norm  # noqa: E402
 from tools.file_tools import _resolve  # noqa: E402

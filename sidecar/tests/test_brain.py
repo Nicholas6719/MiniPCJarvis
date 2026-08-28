@@ -1,6 +1,10 @@
 """Held-out accuracy for the Brain reflex router. Run: python tests/test_brain.py"""
 import asyncio, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os, tempfile  # noqa: E402
+# never touch the real jarvis.db: the gates get a throwaway file that
+# brain.load() re-seeds from the SKILLS list
+os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "gate.db"))
 from brain.router import brain
 
 CASES = [
@@ -83,6 +87,13 @@ CASES = [
     # briefly stole these from sleep mode (found by the 2026-08-27 audit)
     ("that's it thanks", "sleep"), ("thanks that is all", "sleep"),
     ("goodnight", "sleep"), ("thank you", "thanks"),
+    # markets and news (2026-08-27). Prices and headlines are realm 2 — the point
+    # of routing them is that they reach a LIVE tool, never the model's memory.
+    ("what's apple trading at", "quote"), ("how is nvidia stock doing", "quote"),
+    ("what do analysts say about tesla", "analyst"), ("is nvidia a buy", "analyst"),
+    ("how's the market doing", "markets"), ("how are the markets", "markets"),
+    ("what's in the news", "news"), ("tell me the tech news", "news"),
+    ("any breaking news", "breaking"),
 ]
 
 async def main() -> int:

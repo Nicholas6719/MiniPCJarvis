@@ -11,6 +11,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os, tempfile  # noqa: E402
+# never touch the real jarvis.db: the gates get a throwaway file that
+# brain.load() re-seeds from the SKILLS list
+os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "gate.db"))
 
 from brain.router import brain  # noqa: E402
 

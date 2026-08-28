@@ -24,4 +24,4 @@ pub fn delete_secret(name: &str) -> Result<(), String> {
 }
 
 /// Names of secrets JARVIS knows how to use; pushed to the sidecar when present.
-pub const KNOWN_SECRETS: &[&str] = &["brave_api_key"];
+pub const KNOWN_SECRETS: &[&str] = &["brave_api_key", "finnhub_api_key"];

@@ -743,3 +743,9 @@ body.compact .wedge { padding: calc(12px * var(--s)) calc(18px * var(--s)) calc(
   margin-top: calc(4px * var(--s)); color: var(--text-dim);
   font: 400 calc(10.5px * var(--s))/1.5 "Share Tech Mono", monospace; letter-spacing: .08em;
 }
+
+/* explanatory line under a settings control */
+.settings__note {
+  font: 400 calc(13px * var(--s))/1.5 Rajdhani, sans-serif;
+  color: var(--text-dim); margin-top: calc(4px * var(--s)); max-width: calc(460px * var(--s));
+}

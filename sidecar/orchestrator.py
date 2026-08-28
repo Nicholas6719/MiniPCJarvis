@@ -34,6 +34,7 @@ from llm.provider import local_llm
 from memory.store import memory
 from state_machine import State, StateMachine
 from tools.registry import registry
+from tools.shortlist import shortlist
 
 log = logging.getLogger("jarvis.orchestrator")
 
@@ -1206,13 +1207,19 @@ class Orchestrator:
     async def _llm_with_tools(self, messages: list[dict],
                               speak_queue: asyncio.Queue) -> str:
         """Run the LLM, executing tool calls in a loop, streaming sentences to TTS."""
-        tools = registry.schemas()
         full_text = ""
         empty_retries = 0
         user_text = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
         # the message carries a bracketed context note ("current time", ...) above the
         # utterance: only the user's own words decide whether a search is mandatory
         raw_user = user_text.split(chr(10))[-1] if user_text else ""
+        # Offer the tools this turn could plausibly need instead of all sixty: fewer
+        # schema tokens before the first word, and fewer wrong things to reach for.
+        # Any tool this turn has ALREADY used stays on the list so a follow-up round
+        # can call it again.
+        already = {tc["function"]["name"] for m in messages
+                   for tc in (m.get("tool_calls") or [])}
+        tools = await shortlist.pick(registry, raw_user or user_text, keep=already)
         must_use_tool = bool(SEARCH_INTENT.search(raw_user or ""))
         if getattr(self, "_no_tools_first", False):
             must_use_tool = False   # the brain already ran the tool; the model only composes

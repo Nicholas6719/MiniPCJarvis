@@ -15,6 +15,8 @@ export function SettingsView() {
   const [modelList, setModelList] = useState<string[]>([]);
   const [braveKey, setBraveKey] = useState("");
   const [braveSet, setBraveSet] = useState<boolean | null>(null);
+  const [finnhubKey, setFinnhubKey] = useState("");
+  const [finnhubSet, setFinnhubSet] = useState<boolean | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [status, setStatus] = useState("");
 
@@ -34,6 +36,9 @@ export function SettingsView() {
       try {
         setBraveSet(await invoke<boolean>("has_secret", { name: "brave_api_key" }));
       } catch { setBraveSet(null); }
+      try {
+        setFinnhubSet(await invoke<boolean>("has_secret", { name: "finnhub_api_key" }));
+      } catch { setFinnhubSet(null); }
       try {
         setAutostart(await autostartIsEnabled());
       } catch { setAutostart(null); }
@@ -65,6 +70,19 @@ export function SettingsView() {
       setBraveKey("");
       setBraveSet(true);
       setStatus("Brave API key stored in Windows Credential Manager");
+      setTimeout(() => setStatus(""), 4000);
+    } catch {
+      setStatus("credential storage unavailable (dev mode?)");
+    }
+  };
+
+  const saveFinnhubKey = async () => {
+    if (!finnhubKey.trim()) return;
+    try {
+      await invoke("set_secret", { name: "finnhub_api_key", value: finnhubKey.trim() });
+      setFinnhubKey("");
+      setFinnhubSet(true);
+      setStatus("Finnhub key stored in Windows Credential Manager");
       setTimeout(() => setStatus(""), 4000);
     } catch {
       setStatus("credential storage unavailable (dev mode?)");
@@ -188,6 +206,21 @@ export function SettingsView() {
             <button className="ghost-btn" onClick={saveBraveKey}>SAVE</button>
           </div>
         </label>
+      </section>
+
+      <section className="settings__group">
+        <h3>MARKETS</h3>
+        <label>Finnhub API key {finnhubSet === true && <span className="settings__ok">● configured</span>}
+          <div className="settings__row">
+            <input type="password" placeholder={finnhubSet ? "Replace key…" : "Paste API key…"}
+                   value={finnhubKey} onChange={(e) => setFinnhubKey(e.target.value)} />
+            <button className="ghost-btn" onClick={saveFinnhubKey}>SAVE</button>
+          </div>
+        </label>
+        <p className="settings__note">
+          Share prices, analyst ratings and company news. Stored in Windows Credential
+          Manager — never in a config file. Without it he'll say he needs one.
+        </p>
       </section>
 
       <section className="settings__group">

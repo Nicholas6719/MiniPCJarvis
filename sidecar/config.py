@@ -15,7 +15,11 @@ APP_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_PATH = APP_DIR / "config.json"
 LOG_DIR = APP_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-DB_PATH = APP_DIR / "jarvis.db"
+# JARVIS_DB redirects the database, which the offline gates use so they never
+# touch (or mutate) the user's real brain, memories and facts. brain.load()
+# re-seeds an empty file from the SKILLS list, so a routing test on a fresh DB
+# measures the code as written rather than whatever the live brain has learned.
+DB_PATH = Path(os.environ.get("JARVIS_DB") or (APP_DIR / "jarvis.db"))
 
 DEFAULTS: dict[str, Any] = {
     "general": {"first_run_complete": False},
@@ -92,6 +96,8 @@ DEFAULTS: dict[str, Any] = {
     "remote": {"telegram": True, "telegram_chat_id": None,
                "recycle_screenshots": True,   # a screenshot sent to the phone is a message, not a file
                "allow_input": True},          # remote typing/clicking (R2), always risk-gated
+    # RSS is keyless and instant; Finnhub needs a key (Settings -> Tools)
+    "news": {"enabled": True},
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,
