@@ -167,6 +167,19 @@ async def confirm(body: dict, x_jarvis_token: str | None = Header(None)):
     return {"ok": ok}
 
 
+@app.get("/secrets")
+async def which_secrets(x_jarvis_token: str | None = Header(None)):
+    """WHICH secrets this session holds — names only, never values.
+
+    The Rust core owns the credential store and pushes secrets in at startup.
+    If that push is missed (it gives up after three restarts in ten minutes),
+    the sidecar has no way to know it is missing one, and simply behaves as
+    though the user never configured it. This lets the core reconcile.
+    """
+    _auth(x_jarvis_token)
+    return {"present": sorted(k for k, v in secrets.items() if v)}
+
+
 @app.get("/config")
 async def get_config(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

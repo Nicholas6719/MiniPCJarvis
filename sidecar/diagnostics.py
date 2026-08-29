@@ -93,7 +93,7 @@ async def run_diagnostics() -> list[dict]:
     # window stays open to whatever is on television. It failed exactly that way
     # once (COM is per-thread, and it runs on a worker thread), so it reports
     # whether it can actually read the audio sessions rather than being trusted.
-    if not config.get("wake", "ignore_while_audio_plays", default=True):
+    if not config.get("wake", "ignore_while_audio_plays", default=False):
         add("Room Audio", "ok", "not used (his name is never required)")
     else:
         try:
@@ -108,6 +108,19 @@ async def run_diagnostics() -> list[dict]:
                     else "nothing else is playing")
         except Exception as e:
             add("Room Audio", "warn", f"cannot read what is playing ({type(e).__name__})")
+
+    # Markets. The key lives in Windows Credential Manager and the Rust core
+    # pushes it in at startup; the sidecar only ever holds it in memory. So a
+    # sidecar that restarts without that push looks exactly like a man who never
+    # had a key — and tells him to go and add the one he already added. Say it
+    # out loud instead of letting it degrade quietly.
+    if secrets.get("finnhub_api_key"):
+        add("Markets", "ok", "Finnhub key loaded")
+    else:
+        add("Markets", "warn",
+            "no Finnhub key in this session — live prices are unavailable. If you "
+            "already added one, it was lost when the sidecar restarted; reopening "
+            "JARVIS restores it.")
 
     # Vision
     vm = Path(config.get("vision", "model",

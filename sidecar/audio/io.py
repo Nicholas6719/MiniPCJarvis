@@ -201,6 +201,10 @@ class Speaker:
         self._stream: sd.OutputStream | None = None
         self._rate: int | None = None
         self._wlock = threading.Lock()
+        # When we last put sound into the room. The room-audio check reads the
+        # OUTPUT device, which hears JARVIS too — without this he would take his
+        # own voice for a television and start demanding his name back.
+        self.last_write_at = 0.0
 
     def _ensure(self, rate: int) -> sd.OutputStream:
         if self._stream is None or self._rate != rate:
@@ -232,7 +236,9 @@ class Speaker:
                 if stream.closed:
                     return
                 try:
+                    self.last_write_at = time.time()
                     stream.write(chunk.reshape(-1, 1))
+                    self.last_write_at = time.time()
                 except Exception as e:
                     log.debug("write after abort: %s", e)
 

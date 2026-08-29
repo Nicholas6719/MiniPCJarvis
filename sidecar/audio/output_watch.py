@@ -1,5 +1,31 @@
 """Is something ELSE making noise right now?
 
+OFF BY DEFAULT, and the reason matters: with this enabled the packaged sidecar
+corrupts its own heap and dies — three different faulting modules (_ctypes.pyd,
+ntdll.dll, ucrtbase.dll), which is the signature of memory being scribbled on
+and the crash surfacing wherever that allocation is next touched. Nine crashes
+in one afternoon, each a silent forty-second restart.
+
+What has been RULED OUT, so nobody repeats it:
+  * the original per-session enumeration, and its genuinely wrong cast() around
+    a QueryInterface result (a real use-after-free, fixed) — the minimal
+    one-interface version below crashes too
+  * running it on asyncio's shared pool (it has its own thread now)
+  * PortAudio churn on the same device: 300 stream open/close cycles while
+    metering, standalone, clean
+  * both COM apartments at once: 578,000 scans against concurrent UI Automation,
+    standalone, clean
+  * 4,000 back-to-back scans standalone, clean
+
+It has never been reproduced OUTSIDE the PyInstaller bundle, which is the one
+difference left and the place to look next. Until then it stays off: answering
+the television occasionally is a smaller sin than dying.
+
+Turn it on with wake.ignore_while_audio_plays and watch tests/soak_e2e.py — that
+is the only test that catches this, because every feature test stays green while
+the process is crash-looping underneath them.
+
+
 After a turn, JARVIS leaves a short window in which plain speech is enough — you
 should not have to say his name twice in one conversation. A television walks
 straight through that window. It really happened: film dialogue was heard as a
@@ -50,73 +76,71 @@ _heard_at = 0.0      # when another app was last actually making noise
 _broken = False      # if the API is unavailable, never block a turn over it
 
 
-def _own_pids() -> set[int]:
-    """This process and its parent — JARVIS's own speech is not interference."""
-    pids = {os.getpid()}
-    try:
-        import psutil
-        me = psutil.Process()
-        if me.parent():
-            pids.add(me.parent().pid)
-        for c in me.children(recursive=True):
-            pids.add(c.pid)
-    except Exception:
-        pass
-    return pids
-
+# Our own voice, coming back at us. The meter below reads the OUTPUT DEVICE,
+# which hears JARVIS as clearly as it hears anything else, so a moment after he
+# speaks is not evidence that a television is on.
+OWN_TAIL_S = 0.7
 
 _ran_on = ""
+_meter = None            # one long-lived interface, created once
+
+
+def _get_meter():
+    """The output device's peak meter. Made ONCE and kept.
+
+    The first version of this enumerated every audio session and asked each one
+    for its level, which named the app but did ~200x the COM work per look — and
+    corrupted the heap, taking the whole sidecar down. One interface, obtained
+    once and called, is the smallest possible surface for the same answer.
+    """
+    global _meter
+    if _meter is not None:
+        return _meter
+    from ctypes import POINTER, cast
+
+    import comtypes
+    from comtypes import CLSCTX_ALL, CoCreateInstance
+    from pycaw.constants import CLSID_MMDeviceEnumerator, EDataFlow, ERole
+    from pycaw.pycaw import IAudioMeterInformation, IMMDeviceEnumerator
+
+    enumerator = CoCreateInstance(CLSID_MMDeviceEnumerator, IMMDeviceEnumerator,
+                                  comtypes.CLSCTX_INPROC_SERVER)
+    device = enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender.value,
+                                                ERole.eMultimedia.value)
+    # The cast IS correct here: Activate hands back a raw, uncounted pointer,
+    # which is exactly what cast is for. (It is NOT correct on a QueryInterface
+    # result, which already owns its reference — that mistake cost nine crashes.)
+    _meter = cast(device.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None),
+                  POINTER(IAudioMeterInformation))
+    return _meter
 
 
 def _scan() -> tuple[bool, str]:
-    """(is another app making noise, what it is).
-
-    Runs on a worker thread, which is why the CoInitialize matters: COM is
-    per-thread, and without it every call fails with "CoInitialize has not been
-    called" — the check quietly answered "nothing is playing" forever, which
-    looks exactly like working. Same reason tools/uia.py opens the same way.
-    """
+    """Is sound coming out of this machine that is not ours."""
     import comtypes
-    from comtypes import CLSCTX_ALL  # noqa: F401  (imported for pycaw's sake)
-    from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 
-    # MULTITHREADED, not the default apartment: this runs on whatever worker
-    # thread asyncio hands us, and a single-threaded apartment needs a message
-    # pump that a pool thread does not have — the second call onwards then fails
-    # with "Cannot find window class" and the check silently answers "nothing is
-    # playing" forever, which looks exactly like working.
+    # MULTITHREADED, and on this module's own thread: COM apartments are
+    # per-thread and cannot be changed once set, and the UI Automation behind
+    # "click the Send button" needs the default one. Sharing a thread with it
+    # broke clicking by name.
     try:
         comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
     except OSError:
-        pass          # already initialised on this thread, in some apartment
-    global _ran_on
+        pass
+    global _ran_on, _meter
     _ran_on = threading.current_thread().name
 
-    mine = _own_pids()
-    for session in AudioUtilities.GetAllSessions():
-        try:
-            pid = session.ProcessId
-            if not pid or pid in mine:
-                continue
-            # NO cast() here, however much the pycaw examples look like there
-            # should be one. QueryInterface already hands back a typed, counted
-            # interface pointer; casting it makes a second pointer that holds no
-            # reference of its own, so the interface is freed underneath it and
-            # the next call reads freed memory. It does not raise — it takes the
-            # whole process down with an access violation in _ctypes.pyd, which
-            # is what nine crashes today were. (The cast belongs on the raw
-            # pointer that Activate() returns, which is where the examples use it.)
-            meter = session._ctl.QueryInterface(IAudioMeterInformation)
-            if meter.GetPeakValue() > PEAK:
-                name = "something"
-                try:
-                    name = session.Process.name() if session.Process else "something"
-                except Exception:
-                    pass
-                return True, name
-        except Exception:
-            continue
-    return False, ""
+    from audio.io import speaker
+    if time.time() - getattr(speaker, "last_write_at", 0.0) < OWN_TAIL_S:
+        return False, ""            # that is him, not the room
+
+    try:
+        peak = _get_meter().GetPeakValue()
+    except Exception:
+        # the default output device changed under us: drop it and rebuild once
+        _meter = None
+        peak = _get_meter().GetPeakValue()
+    return (peak > PEAK), ("something" if peak > PEAK else "")
 
 
 def other_app_is_playing() -> tuple[bool, str]:

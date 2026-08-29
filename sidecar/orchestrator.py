@@ -481,7 +481,7 @@ class Orchestrator:
                         # required again — the wake word still works, so nothing
                         # is lost but the shortcut. (Film dialogue came through
                         # here once and he ran a web search on it.)
-                        if config.get("wake", "ignore_while_audio_plays", default=True):
+                        if config.get("wake", "ignore_while_audio_plays", default=False):
                             playing, who = await output_watch.playing()
                             if playing:
                                 # observable, not just logged: a thing that

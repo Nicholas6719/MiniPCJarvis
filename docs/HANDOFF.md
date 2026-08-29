@@ -940,6 +940,64 @@ decoder and Parakeet.
 Also: clarify now reads TWO headlines, not three. Three was about twenty seconds of
 talking at him.
 
+## 2026-08-29 (evening): the room-audio guard is OFF, and why
+
+**Read audio/output_watch.py before touching this.** The guard works — a television
+really does stop being able to talk to him — but with it enabled the packaged sidecar
+corrupts its own heap and dies. It ships OFF (`wake.ignore_while_audio_plays`, default
+False) and `wake_guard_e2e` self-skips unless `JARVIS_WAKE_GUARD=1`.
+
+One real bug was found and fixed on the way, and it was mine: a `cast()` wrapped around a
+`QueryInterface` result. QueryInterface already returns a typed, reference-counted
+pointer; casting it makes a second pointer owning no reference, the interface is freed
+underneath it, and the next call reads freed memory. Nine `_ctypes.pyd` access violations
+in one afternoon, each a silent forty-second restart, nothing in the log because there is
+nothing to log. (The cast IS correct on the raw pointer `Activate()` returns — which is
+where the pycaw examples put it, and why it looked right.)
+
+Fixing it was not enough: the minimal one-interface rewrite crashes too. RULED OUT, so
+nobody repeats the work: the session enumeration; the shared thread pool; PortAudio churn
+on the same device (300 stream open/close cycles while metering, clean); both COM
+apartments at once (578,000 scans against concurrent UI Automation, clean); 4,000
+back-to-back scans (clean). It has NEVER been reproduced outside the PyInstaller bundle,
+which is the one remaining difference and the place to look.
+
+**A second bug from the same feature, worth remembering on its own:** COM apartments are
+per-thread and cannot be changed once set. The audio watcher needs MULTITHREADED; the UI
+Automation behind "click the Send button" needs the default. Both were on asyncio's shared
+pool, so whichever landed second failed — "couldn't read that window's controls",
+intermittently, by which thread it drew. Every remote click would have started failing at
+random. It has its own thread now, and `test_output_watch.py` gates both halves.
+
+**tests/soak_e2e.py is new and is the only test that asks whether he SURVIVED.** Every
+feature test stayed green all afternoon while the process was crash-looping underneath
+them — a dead sidecar restarts in forty seconds and answers the next question perfectly.
+It compares the sidecar's pid at the end against the start; a crash is otherwise invisible.
+PACE MATTERS: the first version hammered at ~60x anything a person does, and half of what
+it reported were the SUPERVISOR restarting a merely-busy sidecar (no crash event in the
+Windows log — that is how you tell the two apart). A test that can only fail by being
+unfair teaches you to ignore it. Under realistic load he is stable: 30 turns and 4
+diagnostics over 4 minutes, same process, zero errors.
+
+**Secrets can be lost across a sidecar restart.** The Rust core owns Credential Manager and
+pushes secrets in at startup — but the supervisor gives up after three restarts in ten
+minutes, and today's crash loop exhausted that. The sidecar then behaves exactly like a
+man who never had a key: "add a Finnhub API key in Settings", for a key already added.
+Two mitigations landed, and one is still open:
+  * diagnostics now reports **Markets: ok / no key in this session**, saying explicitly
+    that reopening JARVIS restores it — a silent degradation is the worst kind.
+  * `GET /secrets` returns the NAMES the session holds (never values) so the core can
+    reconcile.
+  * STILL TO DO (needs a Rust build, not done while he was away because a failed install
+    once left the app dead all night): have the supervisor compare `/secrets` against
+    KNOWN_SECRETS on its 20 s tick and re-push anything missing.
+
+When the Windows event log matters: `Get-WinEvent -FilterHashtable @{LogName='Application';
+ProviderName='Application Error'}` filtered to jarvis-sidecar names the faulting module.
+Three different modules (_ctypes.pyd, ntdll.dll, ucrtbase.dll) with the same fault bucket
+is the signature of heap corruption — the crash surfaces wherever the damaged allocation
+is next touched, so the module tells you nothing about the culprit.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

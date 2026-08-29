@@ -81,6 +81,15 @@ async def say(c, ev, text, wait=14.0) -> str:
 
 
 async def main() -> int:
+    # The guard is OFF by default: enabling it makes the packaged sidecar corrupt
+    # its heap and die (see audio/output_watch.py for what has been ruled out).
+    # The behaviour is still worth gating for whoever fixes that, but it is not
+    # worth failing every suite run in the meantime.
+    if os.environ.get("JARVIS_WAKE_GUARD") != "1":
+        print("  SKIPPED - the room-audio guard is off by default (it crashes "
+              "the packaged sidecar).\n  Set JARVIS_WAKE_GUARD=1 to test it."
+              "\n\nWAKE GUARD E2E: SKIPPED")
+        return 0
     ev: list = []
 
     async def listen():

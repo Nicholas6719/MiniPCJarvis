@@ -118,12 +118,33 @@ def main() -> int:
     ow.reset()
     ow._scan = real
     ow._broken = False
-    for _ in range(250):
+    for _ in range(600):
         real()
-    check("250 scans in a row and the process is still alive", True)
+    check("600 scans in a row and the process is still alive", True)
 
     # --- his OWN voice is not interference ------------------------------------
-    check("this process counts as its own", os.getpid() in ow._own_pids())
+    # The meter reads the OUTPUT DEVICE, which hears JARVIS as clearly as it
+    # hears a film. Without this he takes his own voice for a television and
+    # starts demanding his name back straight after answering.
+    ow.reset()
+    ow._scan = real
+    from audio.io import speaker
+    was = speaker.last_write_at
+    speaker.last_write_at = time.time()
+    check("his own voice, a moment ago, is not 'something is playing'",
+          real() == (False, ""), real())
+    speaker.last_write_at = was
+    check("the tail is long enough to cover his own speech",
+          0.3 <= ow.OWN_TAIL_S <= 2.0, ow.OWN_TAIL_S)
+
+    # --- one interface, made once ---------------------------------------------
+    ow._meter = None
+    real()
+    first = ow._meter
+    real()
+    check("the meter is built once and kept, not rebuilt every look",
+          first is not None and ow._meter is first)
+
     check("the peak floor ignores an open but silent player", 0 < ow.PEAK < 0.1, ow.PEAK)
     check("the hold is long enough for a pause in speech", 2 <= ow.HOLD_S <= 10, ow.HOLD_S)
 
