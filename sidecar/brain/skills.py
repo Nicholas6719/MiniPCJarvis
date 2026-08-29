@@ -1223,7 +1223,13 @@ SKILLS: list[Skill] = [
         "what is microsoft stock at", "price of amazon shares", "how much is google stock",
         "what's nvidia at right now", "quote for apple", "how is apple stock doing today",
         "how is nvidia stock doing", "how are apple shares doing", "what is tesla at today",
-        "how's amazon stock", "what's meta trading at today"],
+        "how's amazon stock", "what's meta trading at today",
+        # the bare shapes a ticker canonicalises INTO ("price of RIVN" becomes
+        # "price of apple") — the target of a rewrite has to be a seed itself
+        "price of apple", "what is apple at"],
+        # Tickers need no seeds of their own: _ticker_to_company in the router
+        # rewrites "what's AAPL trading at" to this shape before it is embedded.
+        # Seeding them individually taught it nothing about the NEXT ticker.
         slots=slots_quote, speak=say_quote),
     Skill("analyst", "get_analyst_view", [
         "what do analysts say about apple", "is nvidia a buy", "analyst ratings for tesla",

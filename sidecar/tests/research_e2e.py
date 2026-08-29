@@ -105,9 +105,16 @@ async def main() -> int:
             results.append(r)
             r["searched"] = any(x in ("web_search", "research", "fetch_page", "open_url")
                                 for x in r["tools"])
+            # A correct answer can be SHORT. "The RTX 5090 is listed at about
+            # $6,810." is 39 characters and was failing the length floor — this
+            # suite was calling a sourced, correct, perfectly phrased answer a
+            # shrug for being one character under, which is exactly backwards:
+            # brevity is the house style. A reply carrying a concrete figure has
+            # answered the question whatever its length.
             r["substantive"] = (not SHRUG.search(r["reply"])
                                 and not HONEST.search(r["reply"])
-                                and len(r["reply"]) >= 40)
+                                and (len(r["reply"]) >= 40
+                                     or bool(LIVE_CLAIM.search(r["reply"]))))
             r["honest"] = bool(HONEST.search(r["reply"]))
             r["fabricated"] = False   # decided below, once search status is known
             verdict = ("answered" if r["substantive"] else

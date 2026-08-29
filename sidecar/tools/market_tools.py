@@ -65,21 +65,48 @@ def _err(data) -> str | None:
     return data.get("_error") if isinstance(data, dict) else None
 
 
+# A company's name for its ticker does not change between one question and the
+# next, so look it up once. Without this a bare ticker had no name to give and
+# he read the letters out: "A A P L is at 319 dollars".
+_NAMES: dict[str, tuple[str, str]] = {}
+
+
+def _looks_like_ticker(q: str) -> bool:
+    return q.isupper() and 1 <= len(q) <= 5 and q.isalpha()
+
+
 async def _resolve_symbol(name: str) -> tuple[str, str] | None:
-    """'apple' -> ('AAPL', 'Apple Inc'). A bare ticker is used as-is."""
+    """'apple' -> ('AAPL', 'Apple Inc'), and 'AAPL' -> ('AAPL', 'Apple Inc') too."""
     q = (name or "").strip()
     if not q:
         return None
-    if q.isupper() and 1 <= len(q) <= 5 and q.isalpha():
-        return q, q
+    hit = _NAMES.get(q.lower())
+    if hit:
+        return hit
     data = await _get("/search", q=q)
     if not isinstance(data, dict) or _err(data):
-        return None
-    for row in (data.get("result") or []):
-        # common stock on a US exchange: skip warrants, ADR duplicates, foreign lines
-        if row.get("type") in ("Common Stock", "ADR", "ETP", "") and "." not in (row.get("symbol") or "."):
-            return row["symbol"], row.get("description") or row["symbol"]
-    return None
+        # the search failing must not lose him a quote he could still have
+        return (q, q) if _looks_like_ticker(q) else None
+    rows = data.get("result") or []
+    # asked for a ticker, the ticker wins — searching "AMD" also returns
+    # companies with AMD in their name, and the first of those is not it
+    pick = next((r for r in rows if (r.get("symbol") or "").upper() == q.upper()), None)
+    if pick is None:
+        for row in rows:
+            # common stock on a US exchange: skip warrants, ADR duplicates, foreign lines
+            if row.get("type") in ("Common Stock", "ADR", "ETP", "") \
+                    and "." not in (row.get("symbol") or "."):
+                pick = row
+                break
+    if pick is None:
+        return (q, q) if _looks_like_ticker(q) else None
+    label = str(pick.get("description") or pick["symbol"]).strip()
+    if label.isupper():                 # "APPLE INC" is shouting; he is not
+        label = label.title()
+    found = (pick["symbol"], label)
+    _NAMES[q.lower()] = found
+    _NAMES[pick["symbol"].lower()] = found
+    return found
 
 
 async def get_stock_quote(symbol: str) -> dict:

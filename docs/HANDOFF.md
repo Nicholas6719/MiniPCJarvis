@@ -832,6 +832,61 @@ phone.
 Note when reading its output: `answerCallbackQuery: query is too old` in the log during a
 run is the TEST's synthetic callback id, not a fault — a real tap carries a valid one.
 
+## 2026-08-29 (evening): the market gate, and what it cost to make it green
+
+`tests/market_e2e.py` is in `suites.ps1`. It checks the numbers against THEMSELVES —
+price minus previous close must equal the reported change, and the percentage must match
+that change — because "the call came back" passes just as happily with the fields
+shuffled. It self-skips with a clear line if the Finnhub key is ever removed.
+
+It found two real bugs on its FIRST run, and fixing them broke a third thing:
+
+1. **A bare ticker had no name**, so he read the letters out: "A A P L is at 319 dollars".
+   `_resolve_symbol` short-circuited on anything ticker-shaped and returned it as its own
+   name. It resolves and CACHES now (a company's name for its ticker does not change),
+   and de-shouts Finnhub's "APPLE INC" to "Apple Inc".
+2. **Tickers never reached the market tools at all.** "What's AAPL trading at" missed the
+   brain, fell to the LLM, and was answered off a SCRAPED WEB PAGE — a different price
+   from Finnhub's, in 25.9 s. NVDA happened to route; AAPL and TSLA did not. Seeds do not
+   fix this and I tried: the embedder sees NVDA, AAPL and PLTR as three unrelated rare
+   tokens, so seeding one teaches it nothing about the next (0.47-0.78, all under the
+   threshold). The fix belongs in canonicalisation, which is what that layer is for — a
+   ticker is an object, and objects become placeholders before embedding.
+   `_ticker_to_company` runs BEFORE `_light` lowercases, because capitals are the whole
+   signal: without them "how is mom doing" is the same shape as "how is AMD doing".
+   Unseeded tickers now route at 0.99-1.00. Live: 25.9 s -> 1.5 s, and from the right source.
+3. ...and that rule then ate a graphics card: "the current price of an **RTX 5090**"
+   became "an apple 5090" and a research question went to the stock tool. Two guards,
+   both principled rather than a blocklist: a ticker takes no ARTICLE ("an AAPL" is not
+   a thing) and is not followed by a MODEL NUMBER; and an explicit "look up / search /
+   research" is never a request for a quote. Pinned in `test_brain.py` (111/111).
+
+**The research suite was calling a correct answer a shrug.** `len(reply) >= 40` — and
+"The RTX 5090 is listed at about $6,810." is 39 characters. A sourced, correct, concise
+answer failed for one character, and concise is the house style: the gate was penalising
+the behaviour we want. A reply carrying a concrete figure now counts however short it is.
+Three consecutive 5/5 runs after.
+
+Also changed while chasing that (it stands on its own): after a search the model was told
+"no more tools this turn", so when the snippets carried no price its only exits were to
+invent a figure or shrug. When the question asks what something COSTS and no result
+contains money, it may now open the most promising page and read it. Narrow by design —
+every other search keeps the fast path.
+
+**AMBIENT AUDIO, worth telling him:** during a suite run the mic picked up film dialogue
+playing near the PC ("Could you show Dr. Banner into his laboratory", "Protox. Very hard
+to get hold of") and he acted on it — a real web search for "Protos shield" — and it
+killed a clarifying question that was open at the time. The wake word is not the hole
+here; the CONVERSATION WINDOW is: after any turn, plain speech is accepted with no wake
+word, and a television walks straight through it. Not changed unilaterally — he tuned the
+wake threshold himself last time and this is the same kind of call. Options when he wants
+them: shorten the window, require the wake word while audio is playing, or gate it on
+speaker output being active.
+
+A clarifying question now SURVIVES an interruption for the same reason: something said in
+the room is answered as the fresh request it is, but must not throw away the answer he is
+still about to give.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

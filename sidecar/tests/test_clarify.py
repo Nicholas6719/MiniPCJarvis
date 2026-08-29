@@ -103,6 +103,15 @@ def main() -> int:
               isinstance(company.render(dict(company.args), empty), str)
               and len(company.render(dict(company.args), empty)) > 10)
 
+    # --- a question survives an interruption ----------------------------------
+    # something on the television is not an answer AND not a reason to throw the
+    # answer away: he is still about to give it
+    live = clarify.Pending(amb)
+    check("an unrelated sentence is not read as an answer",
+          clarify.choose(live, "could you show doctor banner into his laboratory") is None)
+    check("...and the question it interrupted is still answerable",
+          clarify.choose(live, "the stock") is stock)
+
     # --- a question does not stay open forever --------------------------------
     old = clarify.Pending(amb)
     old.asked_at -= clarify.TTL_S + 1

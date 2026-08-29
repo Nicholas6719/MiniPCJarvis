@@ -90,6 +90,16 @@ CASES = [
     # markets and news (2026-08-27). Prices and headlines are realm 2 — the point
     # of routing them is that they reach a LIVE tool, never the model's memory.
     ("what's apple trading at", "quote"), ("how is nvidia stock doing", "quote"),
+    # by TICKER, and by tickers that are NOT among the seeds — the shape has to
+    # generalise, or typing "NVDA" from the phone falls through to the LLM,
+    # which answers it off a scraped web page instead of the live quote
+    ("what's NVDA trading at", "quote"), ("how is AMD doing", "quote"),
+    ("what is COIN at", "quote"), ("price of RIVN", "quote"),
+    # ...but an uppercase PRODUCT is not a ticker. "the price of an RTX 5090" was
+    # being rewritten to "an apple 5090" and sent to the stock tool instead of
+    # the web — an article and a model number are both giveaways.
+    ("look up what the current price of an RTX 5090 is", "search"),
+    ("what is the price of an RTX 5090", None),
     ("what do analysts say about tesla", "analyst"), ("is nvidia a buy", "analyst"),
     ("how's the market doing", "markets"), ("how are the markets", "markets"),
     ("what's in the news", "news"), ("tell me the tech news", "news"),

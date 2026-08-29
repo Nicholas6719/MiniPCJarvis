@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections import OrderedDict
 import time
 
@@ -96,10 +97,50 @@ def _light(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+# A ticker is an object like any other, and the embedder cannot see that: NVDA,
+# AAPL and PLTR are three unrelated rare tokens, so seeding one teaches it
+# nothing about the next. Typed from his phone that is how he writes them, and
+# "what's AAPL trading at" missed the brain entirely and went to the model,
+# which answered it off a scraped web page instead of the live quote.
+#
+# CAPITALS are the whole signal, so this runs before _light lowercases: without
+# them "how is mom doing" is the same shape as "how is AMD doing".
+_TICKER_CTX = re.compile(
+    r"\b(?:price|quote|stock|stocks|shares?|trading|ticker|worth)\b"
+    r"|\b(?:what'?s|what is|how'?s|how is)\b.{0,20}?\b(?:at|doing)\b", re.I)
+# A ticker is not followed by a model number and does not take an article:
+# "the price of an RTX 5090" is a graphics card, and rewriting it to "an apple
+# 5090" sent a research question to the stock tool. Both guards are cheap and
+# neither costs a real ticker anything — nobody says "an AAPL".
+_TICKER_TOK = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2,5})(?![A-Za-z0-9])(?!\s+\d)")
+_ARTICLE_BEFORE = re.compile(r"\b(?:a|an|the)\s+$", re.I)
+# ...and an explicit request to go and LOOK is never a request for a quote
+_SEARCH_VERB = re.compile(
+    r"\b(?:look up|search|research|google|find out|browse|read about)\b", re.I)
+# capitalised things he says that are emphatically not companies
+_NOT_TICKERS = {"OK", "PC", "AI", "TV", "US", "UK", "USA", "CPU", "RAM", "GPU",
+                "SSD", "USB", "PDF", "CEO", "CFO", "AM", "PM", "EV", "IT", "ID",
+                "URL", "API", "FBI", "NASA", "HTTP", "WIFI", "GPS", "SMS", "DVD"}
+
+
+def _ticker_to_company(t: str) -> str:
+    """"what's AAPL trading at" -> "what's apple trading at", so it matches the
+    seeds by SHAPE. The real ticker is untouched in the text the slots read."""
+    if not _TICKER_CTX.search(t) or _SEARCH_VERB.search(t):
+        return t
+
+    def one(m: "re.Match") -> str:
+        tok = m.group(1)
+        if tok in _NOT_TICKERS or _ARTICLE_BEFORE.search(t[:m.start()]):
+            return tok
+        return "apple"
+    return _TICKER_TOK.sub(one, t, count=1)
+
+
 def _norm(t: str) -> str:
     """Canonical intent form used for embeddings (objects -> placeholders)."""
     import re
-    t = _light(t)
+    t = _light(_ticker_to_company(t))
     for pat, rep in _CANON:
         t2 = re.sub(pat, rep, t, count=1)
         if t2 != t:

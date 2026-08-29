@@ -102,6 +102,13 @@ SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
 # nothing rather than a clipped one-word clip.
 BARE_HONORIFIC = re.compile(r"^\W*sir\W*$", re.I)
 
+# "how much is X" / "what does X cost": the answer is a figure, and a search that
+# comes back without one has not answered it.
+_WANTS_PRICE = re.compile(r"\b(?:price|prices|cost|costs|how much|msrp|"
+                          r"going for|selling for|worth)\b", re.I)
+_HAS_MONEY = re.compile(r"[$£€]\s?\d|\b\d[\d,]*\s?(?:dollars|usd|gbp|eur|pounds|euros)\b",
+                        re.I)
+
 MAX_UTTERANCE_S = 30
 SILENCE_END_S = 0.9          # end of speech after this much silence
 WAKE_GRACE_S = 3.5           # after a bare 'Jarvis', wait this long for the request to start
@@ -883,10 +890,22 @@ class Orchestrator:
                 {"id": call_id, "type": "function",
                  "function": {"name": skill.tool, "arguments": json.dumps(args)}}]})
             if isinstance(result, dict) and result.get("ok"):
-                result = {**result, "note": "Answer the user from these results now, in one or two "
-                                            "spoken sentences."}
-                # the work is done: the model composes the answer, no more tools this turn
-                self._no_tools_first = True
+                # Normally the work is done and the model just composes the answer.
+                # But when he asked what something COSTS and not one result carries a
+                # price, forbidding another tool leaves only two ways out: invent a
+                # figure, or shrug. He shrugged. Let him open the page instead —
+                # that is what a person does, and it is why they searched.
+                if _WANTS_PRICE.search(text) and not _HAS_MONEY.search(
+                        json.dumps(result, default=str)):
+                    result = {**result, "note": "These results may not contain the price. "
+                                                "If they do not, open the most promising one "
+                                                "and read it, then answer in one or two "
+                                                "spoken sentences."}
+                    log.info("search results carry no price - letting him read a page")
+                else:
+                    result = {**result, "note": "Answer the user from these results now, "
+                                                "in one or two spoken sentences."}
+                    self._no_tools_first = True
             messages.append({"role": "tool", "tool_call_id": call_id,
                              "content": json.dumps(result, default=str)})
         else:
@@ -1105,7 +1124,11 @@ class Orchestrator:
             return False
         picked = clarify.choose(pending, text)
         if picked is None:
-            self._drop_clarification("he asked for something else")
+            # NOT an answer — so this sentence is a fresh request and is treated
+            # as one. But the question STAYS open: something said in the room
+            # (a television, someone else talking) must not throw away an answer
+            # he is still about to give. Its own TTL ends it soon enough.
+            log.info("that was not an answer — the question stays open")
             return False
         self._clarify = None
         if picked == "drop":

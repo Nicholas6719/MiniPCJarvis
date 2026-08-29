@@ -91,13 +91,21 @@ async def main() -> int:
         check("it starts speaking straight away",
               got["first"] is not None and got["first"] < 1.0, f"{got['first']}s")
 
-        # --- a question he does not answer is a new request, not an answer -----
+        # --- something else said while a question is open ---------------------
+        # It is answered as the fresh request it is — and the question survives
+        # it, because a television in the room must not throw away the answer he
+        # is still about to give. (This is not hypothetical: it happened during
+        # a suite run, and cost the answer.)
         await turn(c, ev, "anything on apple")
         other = await turn(c, ev, "what time is it")
-        check("changing the subject drops the question, and is answered normally",
+        check("an interruption is answered as its own request",
               not other["asked"] and ("am" in other["reply"].lower()
                                       or "pm" in other["reply"].lower()),
               other["reply"][:80])
+        still = await turn(c, ev, "the stock")
+        check("and the question it interrupted can still be answered",
+              "dollars" in still["reply"].lower(), still["reply"][:120])
+        check("still without a second fetch", still["tools"] == [], still["tools"])
 
         # --- and one that says which half it wants is never interrupted --------
         direct = await turn(c, ev, "what's tesla trading at")
