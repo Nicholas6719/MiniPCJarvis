@@ -199,6 +199,13 @@ class TelegramBridge:
                     ok = registry.resolve_confirmation(cid, ans == "yes")
                     await self._api("answerCallbackQuery", callback_query_id=cq["id"],
                                     text="Done." if ok else "That question expired.")
+                elif data.startswith("clarify:"):
+                    # tapping "The stock" is exactly saying it — it goes back in
+                    # as the next thing he said, and the answer for it is already
+                    # fetched and waiting
+                    choice = data.split(":", 1)[1]
+                    await self._api("answerCallbackQuery", callback_query_id=cq["id"])
+                    spawn(self._remote_turn(choice), name="tg-clarify")
             return
         msg = u.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
@@ -256,6 +263,24 @@ class TelegramBridge:
             c["file"] = evt.get("path")
         elif kind == "confirmation_required":
             spawn(self._send_gate(evt), name="tg-gate")
+        elif kind == "clarify":
+            # the question carries its own options, so the plain reply text would
+            # only repeat it
+            c["asked"] = True
+            spawn(self._send_choice(evt), name="tg-clarify-ask")
+
+    async def _send_choice(self, evt: dict) -> None:
+        """Ask which reading he meant — one tap, no typing. Both answers are
+        already being fetched while this sits on his phone."""
+        chat = config.get("remote", "telegram_chat_id", default=None)
+        if not chat:
+            return
+        opts = [str(o) for o in (evt.get("options") or [])][:3]
+        await self._api("sendMessage", chat_id=chat,
+                        text=str(evt.get("question") or "Which did you mean, sir?"),
+                        reply_markup={"inline_keyboard": [[
+                            {"text": o.title(), "callback_data": f"clarify:{o}"}
+                            for o in opts]]})
 
     async def _send_gate(self, evt: dict) -> None:
         chat = config.get("remote", "telegram_chat_id", default=None)
@@ -301,7 +326,8 @@ class TelegramBridge:
                 except asyncio.TimeoutError:
                     pass
                 c = self._collect
-                await self._send(c.get("text") or "Done, sir.")
+                if not c.get("asked"):        # the question went with its buttons
+                    await self._send(c.get("text") or "Done, sir.")
                 for url in c.get("images", []):
                     if url and not await self._send_photo_url(url):
                         break   # DDG thumbs occasionally refuse Telegram's fetch

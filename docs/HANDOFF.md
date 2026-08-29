@@ -797,6 +797,41 @@ Gates: `tests/test_clarify.py` (49 checks) in the build; `tests/clarify_e2e.py` 
 `suites.ps1` — its load-bearing check is that the CHOSEN branch makes no tool call, which
 is the whole feature.
 
+## 2026-08-29 (later): the remote path, and two bugs only Telegram could show
+
+Everything built this week was verified at the PC. Nothing had been run over Telegram,
+which is how he actually uses JARVIS when he is away. Two real bugs came out of testing it:
+
+1. **A question asked from the phone opened the MICROPHONE at the PC.** `_ask_clarification`
+   armed the conversation window unconditionally, so after he asked something from his
+   phone, anything said near the machine was treated as his reply to a question he had
+   asked from somewhere else entirely. It only arms when `remote_turn` is false now.
+2. **A whole sentence could be swallowed as an answer to a pending question.** "What's the
+   stock market doing" contains "stock" and "market", both words for the stock branch — so
+   with a question open about Tesla it answered with Tesla's price. An answer to "the
+   company or the stock?" is two or three words; `MAX_ANSWER_WORDS = 4`, and anything
+   longer is what it plainly is: a new request.
+
+And one improvement the phone deserves: **a two-way question is now two BUTTONS**, not a
+typing exercise (`clarify:<label>` callbacks, same mechanism as the DO IT / NO
+confirmation gate). Tapping one feeds the label back as the next thing he said, and the
+answer for it is already fetched. The plain reply text is suppressed when buttons carried
+the question, so it does not arrive twice.
+
+`/debug/telegram` (JARVIS_DEBUG only) hands the bridge an update as though it arrived from
+his phone. Only the INBOUND half is simulated — there is no way for the bot to receive a
+message he did not send — everything it sends back is a real message to the real chat.
+
+`tests/telegram_e2e.py` is in `suites.ps1` but **opt-in**: without `JARVIS_TELEGRAM_E2E=1`
+it prints SKIPPED and passes. A test suite has no business putting notifications on his
+phone unasked. Run it deliberately after touching the bridge, clarify, or the market
+tools. Verified 9/9 that way: message -> turn, vague question -> buttons with both
+branches fetching, tap -> answered with NO second fetch, mic NOT armed, markets from the
+phone.
+
+Note when reading its output: `answerCallbackQuery: query is too old` in the log during a
+run is the TEST's synthetic callback id, not a fault — a real tap carries a valid one.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

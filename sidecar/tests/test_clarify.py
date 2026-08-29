@@ -60,6 +60,16 @@ def main() -> int:
     # ...and one that matches both readings equally is not an answer either
     check("a sentence hitting both readings is not an answer",
           clarify.choose(pending, "the company stock") is None)
+    # ...nor is a whole sentence that merely CONTAINS one of the words. Without
+    # this, asking about the market answers about Tesla instead.
+    for said in ("what's the stock market doing today", "how is the market doing",
+                 "remind me to buy shares tomorrow morning",
+                 "put the company meeting in my calendar"):
+        check(f"{said!r} is a new request, not an answer",
+              clarify.choose(pending, said) is None,
+              getattr(clarify.choose(pending, said), "label", None))
+    check("a short answer still counts", clarify.choose(pending, "just the stock please")
+          is not None)
 
     # --- the hard rule: never speculate on anything that acts -----------------
     check("read-only branches are allowed",

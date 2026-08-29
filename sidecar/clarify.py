@@ -34,6 +34,7 @@ log = logging.getLogger("jarvis.clarify")
 
 TTL_S = 75.0          # after this the question is stale and the fetches are dropped
 MAX_BRANCHES = 3
+MAX_ANSWER_WORDS = 4  # longer than this is a new sentence, not an answer
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,11 @@ def choose(pending: Pending, text: str) -> Branch | str | None:
     """Which reading he meant: a Branch, "both", "drop", or None for "not an answer"."""
     t = (text or "").strip().lower()
     if not t:
+        return None
+    # An answer to "the company or the stock?" is two or three words. A whole
+    # sentence is a new request that happens to contain one of them — without
+    # this, "what's the stock market doing" answers a question about Tesla.
+    if len(t.split()) > MAX_ANSWER_WORDS:
         return None
     if _DROP.search(t):
         return "drop"

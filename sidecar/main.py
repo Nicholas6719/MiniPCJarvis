@@ -709,6 +709,32 @@ async def debug_tool(body: dict, x_jarvis_token: str | None = Header(None)):
             await orchestrator.sm.to(prev, force=True)
 
 
+@app.post("/debug/telegram")
+async def debug_telegram(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): hand the bridge an update as though it had
+    arrived from his phone, so the REMOTE path can be tested end to end.
+
+    Only the inbound half is simulated — everything the bridge sends back is a
+    real message to the real chat. There is no other way to test this: the bot
+    cannot receive a message from him without him sending one.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from remote_telegram import telegram
+    chat = config.get("remote", "telegram_chat_id", default=None)
+    if not chat:
+        raise HTTPException(400, "not paired to a chat")
+    if body.get("callback"):
+        update = {"callback_query": {"id": "debug", "from": {"id": chat},
+                                     "data": str(body["callback"])}}
+    else:
+        update = {"message": {"chat": {"id": chat}, "from": {"id": chat},
+                              "text": str(body.get("text") or "")}}
+    spawn(telegram._handle_update(update), name="debug-telegram")
+    return {"ok": True, "sent_as": chat}
+
+
 @app.post("/debug/night_school")
 async def debug_night_school(x_jarvis_token: str | None = Header(None)):
     """Dev/test only (JARVIS_DEBUG=1): run one full night-school pass right now,

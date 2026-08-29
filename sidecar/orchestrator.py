@@ -1082,7 +1082,12 @@ class Orchestrator:
                        breakdown={}, reflex="clarify", text=amb.question)
         if self.sm.state not in (State.ERROR, State.SLEEPING):
             await self.sm.to(State.IDLE, force=True)
-        self._arm_conversation()          # answer it without saying his name again
+        # Answer it without saying his name again — but only if he is IN the room.
+        # A question asked over Telegram must not open the microphone here, or
+        # anything said near the PC gets treated as his reply to a question he
+        # asked from somewhere else entirely.
+        if not self.remote_turn:
+            self._arm_conversation()
         return True
 
     async def _answer_clarification(self, text: str, t_start: float) -> bool:
