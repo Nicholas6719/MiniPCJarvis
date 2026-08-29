@@ -169,7 +169,9 @@ def detect(text: str) -> Ambiguity | None:
             # Finnhub's company news was the other candidate and is investor
             # commentary — "Most active S&P500 stocks" is not what anybody means
             # by news about Tesla.
-            Branch("the company", "get_news", {"query": proper, "count": 3},
+            # two headlines, not three: three is about twenty seconds of talking
+            # at him, and he can always ask for more
+            Branch("the company", "get_news", {"query": proper, "count": 2},
                    ("company", "business", "product", "products", "car", "cars",
                     "firm", "them", "itself", "generally"),
                    render=lambda a, r, name=proper: _say_headlines(name, r)),
@@ -189,7 +191,7 @@ def _say_headlines(subject: str, res: dict) -> str:
     if not rows:
         return f"Nothing came back on {subject} just now, sir."
     heads = " ".join(f"{str(r['headline']).rstrip('. ')}, from {r.get('source', 'the news')}."
-                     for r in rows[:3])
+                     for r in rows[:2])
     return f"On {subject}: {heads}"
 
 

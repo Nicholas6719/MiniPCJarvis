@@ -29,6 +29,8 @@ from events import bus, spawn
 
 log = logging.getLogger("jarvis.telegram")
 
+MAX_VOICE_BYTES = 20_000_000        # Telegram's own download ceiling anyway
+
 TOKEN_PATH = APP_DIR / "telegram.token.bin"
 API = "https://api.telegram.org"
 
@@ -224,8 +226,14 @@ class TelegramBridge:
         if chat_id != allowed or sender != allowed:
             return   # silence for strangers — nothing to probe
         if not text:
-            if msg.get("voice"):
-                await self._send("Voice notes are coming in the next update — text for now, sir.")
+            voice = msg.get("voice") or msg.get("audio") or msg.get("video_note")
+            if voice:
+                spoken = await self._hear(voice)
+                if spoken:
+                    await self._remote_turn(spoken)
+                return
+            if msg.get("photo") or msg.get("document"):
+                await self._send("I can't read attachments yet, sir — say it or type it.")
             return
         if text == "/start":
             await self._send("At your service. Ask me anything you would at the PC.")
@@ -268,6 +276,47 @@ class TelegramBridge:
             # only repeat it
             c["asked"] = True
             spawn(self._send_choice(evt), name="tg-clarify-ask")
+
+    async def _hear(self, voice: dict) -> str:
+        """A voice note, in his own words. Downloads it, decodes it and runs the
+        same recogniser the microphone uses, so talking to him from the other
+        side of the country is the same as talking to him from the chair."""
+        from audio.decode import Undecodable, to_pcm16k
+        from audio.stt import stt
+
+        size = int(voice.get("file_size") or 0)
+        if size > MAX_VOICE_BYTES:
+            await self._send(f"That note is {size // 1_000_000} MB, sir — a little long "
+                             "for me. Under a couple of minutes, if you would.")
+            return ""
+        meta = await self._api("getFile", file_id=voice.get("file_id"))
+        path = (meta or {}).get("file_path")
+        if not path:
+            await self._send("I couldn't fetch that voice note, sir.")
+            return ""
+        try:
+            if self._client is None:
+                self._client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10))
+            r = await self._client.get(f"{API}/file/bot{self.token}/{path}", timeout=60)
+            r.raise_for_status()
+            audio = await asyncio.to_thread(to_pcm16k, r.content)
+        except Undecodable as e:
+            log.warning("voice note undecodable: %s", e)
+            await self._send("I couldn't make out that recording, sir.")
+            return ""
+        except Exception:
+            log.exception("voice note download failed")
+            await self._send("I couldn't fetch that voice note, sir.")
+            return ""
+        heard = (await stt.transcribe(audio) or "").strip()
+        if not heard:
+            await self._send("I couldn't make out that recording, sir.")
+            return ""
+        log.info("voice note: %.1fs -> %r", len(audio) / 16000, heard[:60])
+        # Show what was understood before acting on it: a misheard word is
+        # otherwise invisible, and he is not in the room to notice.
+        await self._send(f"“{heard}”")
+        return heard
 
     async def _send_choice(self, evt: dict) -> None:
         """Ask which reading he meant — one tap, no typing. Both answers are

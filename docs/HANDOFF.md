@@ -887,6 +887,59 @@ A clarifying question now SURVIVES an interruption for the same reason: somethin
 the room is answered as the fresh request it is, but must not throw away the answer he is
 still about to give.
 
+## 2026-08-29 (evening, user away 9h): the television, and voice notes
+
+**A television can no longer talk to him.** The wake word was never the hole — the
+CONVERSATION WINDOW is: after any turn, plain speech opens a turn with no wake word, and
+film dialogue walked straight through it (he ran a real web search on "Protos shield").
+While another application is producing sound that window closes and his name is required
+again. Nothing else changes: his name still works over the noise, and a quiet room is
+exactly as it was. `audio/output_watch.py`, config `wake.ignore_while_audio_plays`.
+
+It took three goes, and the first two LOOKED like they worked:
+1. It never fired on real audio, only on the test double. The scan runs on an asyncio
+   worker thread and **COM is per-thread** — without CoInitialize every call failed and
+   the check answered "nothing is playing" forever, which is indistinguishable from
+   working. (tools/uia.py has always opened with CoInitialize for this reason.)
+2. With that fixed, the FIRST call worked and every one after it failed with "Cannot find
+   window class" — a single-threaded apartment on a pool thread with no message pump.
+   Fixed with `CoInitializeEx(COINIT_MULTITHREADED)`.
+
+Both failures were silent, so two things now make them impossible to miss:
+- a `wake_suppressed` EVENT whenever speech is ignored, with the app that caused it — a
+  thing that ignores you must be able to say why, and the gate asserts on the event
+  rather than on an absent log line (absence proved nothing, and cost an hour).
+- a permanent **Room Audio** line in /diagnostics: "nothing else is playing" /
+  "powershell.exe is playing - his name is required" / a warn if it cannot read at all.
+  Verified in the PACKAGED app against real sound, which is the only test that counts —
+  the venv having pycaw says nothing about the bundle.
+
+Gates: `test_output_watch.py` (includes the thread-pool COM regression) and
+`wake_guard_e2e.py` in suites. Note the wake guard e2e uses `/debug/audio_playing` rather
+than real sound: an end-to-end test with actual audio kept landing on the 8-second
+conversation-window boundary and was flaky for TIMING reasons, proving nothing either
+way. The two halves are proven separately instead — detector against real sound in the
+bundle, wiring by the gate.
+
+**Voice notes from Telegram work.** The bridge used to answer "voice notes are coming in
+the next update" — a promise the product made and did not keep, in the one workflow he
+uses when he is away. `audio/decode.py` turns OGG/Opus (or anything else PyAV reads) into
+the 16 kHz mono float32 the recogniser wants; PyAV rather than shelling out to ffmpeg,
+which is on PATH here and would not be on an installed copy. What he said is echoed back
+in quotes before it is acted on — a misheard word is otherwise invisible when he is not
+in the room. Junk, silence, truncated files and anything over 20 MB are refused with a
+sentence rather than fed to the recogniser.
+
+Gates: `test_voice_note.py` decodes a real Opus fixture (`tests/fixtures/voice_note.oga`)
+and checks the DURATION, because a wrong sample rate is the silent failure here — it
+decodes happily and transcribes as nonsense. The live half is in `telegram_e2e.py`, which
+uses `/debug/telegram_send_voice` to put a clip into the chat and hand its real file_id
+back as though he had recorded it; everything after that is Telegram's own download, the
+decoder and Parakeet.
+
+Also: clarify now reads TWO headlines, not three. Three was about twenty seconds of
+talking at him.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

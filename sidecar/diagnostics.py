@@ -1,6 +1,7 @@
 """System diagnostics: real health checks per subsystem + repair actions."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -86,6 +87,27 @@ async def run_diagnostics() -> list[dict]:
             else "model not loaded", repairable=False)
     else:
         add("Wake Word", "ok", "disabled (push-to-talk mode)")
+
+    # Room audio. This one is here because when it breaks it breaks SILENTLY:
+    # the check simply answers "nothing is playing" forever and the follow-up
+    # window stays open to whatever is on television. It failed exactly that way
+    # once (COM is per-thread, and it runs on a worker thread), so it reports
+    # whether it can actually read the audio sessions rather than being trusted.
+    if not config.get("wake", "ignore_while_audio_plays", default=True):
+        add("Room Audio", "ok", "not used (his name is never required)")
+    else:
+        try:
+            from audio import output_watch
+            playing, who = await asyncio.to_thread(output_watch._scan)
+            if output_watch._broken:
+                add("Room Audio", "warn",
+                    "cannot read what is playing - the follow-up window stays open")
+            else:
+                add("Room Audio", "ok",
+                    f"{who} is playing - his name is required" if playing
+                    else "nothing else is playing")
+        except Exception as e:
+            add("Room Audio", "warn", f"cannot read what is playing ({type(e).__name__})")
 
     # Vision
     vm = Path(config.get("vision", "model",

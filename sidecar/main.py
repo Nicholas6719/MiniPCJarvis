@@ -709,6 +709,62 @@ async def debug_tool(body: dict, x_jarvis_token: str | None = Header(None)):
             await orchestrator.sm.to(prev, force=True)
 
 
+@app.post("/debug/telegram_send_voice")
+async def debug_telegram_send_voice(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): put a voice clip INTO the chat and return
+    its file_id.
+
+    There is no other way to test the voice-note path honestly. The bot cannot
+    receive a recording he did not make, but it can send one — and Telegram
+    hands back a real file_id, which the bridge then downloads and decodes
+    exactly as it would his own.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from pathlib import Path as _P
+
+    import httpx as _httpx
+    from remote_telegram import API, telegram
+    chat = config.get("remote", "telegram_chat_id", default=None)
+    if not chat or not telegram.token:
+        raise HTTPException(400, "not paired to a chat")
+    path = _P(str(body.get("path") or ""))
+    if not path.is_file():
+        raise HTTPException(400, f"no such file: {path}")
+    async with _httpx.AsyncClient(timeout=60) as c:
+        r = await c.post(f"{API}/bot{telegram.token}/sendVoice",
+                         data={"chat_id": str(chat), "caption": "(test clip)"},
+                         files={"voice": (path.name, path.read_bytes(), "audio/ogg")})
+    data = r.json()
+    if not data.get("ok"):
+        raise HTTPException(502, str(data.get("description"))[:200])
+    return {"ok": True, "file_id": (data["result"].get("voice") or {}).get("file_id")}
+
+
+@app.post("/debug/audio_playing")
+async def debug_audio_playing(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): pretend another app is (or is not) making
+    noise, so the wake-word guard can be tested without filling the room with it.
+
+    The detector itself is tested against real sound by hand and in
+    tests/test_output_watch.py; this is for the WIRING — that the microphone
+    loop actually consults it.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from audio import output_watch
+    import time as _t
+    on = bool(body.get("on"))
+    output_watch.reset()
+    if on:
+        # hold it "heard just now" and stop it looking at the real sessions
+        output_watch._heard_at = _t.time() + 3600
+        output_watch._last_at = _t.time() + 3600
+    return {"ok": True, "pretending_audio_plays": on}
+
+
 @app.post("/debug/telegram")
 async def debug_telegram(body: dict, x_jarvis_token: str | None = Header(None)):
     """Dev/test only (JARVIS_DEBUG=1): hand the bridge an update as though it had
@@ -728,6 +784,10 @@ async def debug_telegram(body: dict, x_jarvis_token: str | None = Header(None)):
     if body.get("callback"):
         update = {"callback_query": {"id": "debug", "from": {"id": chat},
                                      "data": str(body["callback"])}}
+    elif body.get("voice_file_id"):
+        update = {"message": {"chat": {"id": chat}, "from": {"id": chat},
+                              "voice": {"file_id": str(body["voice_file_id"]),
+                                        "file_size": int(body.get("file_size") or 0)}}}
     else:
         update = {"message": {"chat": {"id": chat}, "from": {"id": chat},
                               "text": str(body.get("text") or "")}}

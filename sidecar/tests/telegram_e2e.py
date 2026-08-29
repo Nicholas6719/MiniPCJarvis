@@ -122,6 +122,23 @@ async def main() -> int:
         mkt = await inbound(c, ev, text="how are the markets doing")
         check("markets answer from the phone",
               "percent" in mkt["reply"].lower(), mkt["reply"][:120])
+
+        # --- a VOICE NOTE, the whole way round --------------------------------
+        # The bot sends the clip to the chat to get a real file_id, then it is
+        # handed back as though he had recorded it. Everything after that is the
+        # real path: Telegram's own download, the decoder, the recogniser.
+        fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "fixtures", "voice_note.oga")
+        sent = await c.post(f"{BASE}/debug/telegram_send_voice", headers=H,
+                            json={"path": fixture})
+        fid = sent.json().get("file_id") if sent.status_code == 200 else None
+        check("a voice note can be put into the chat to test with", bool(fid),
+              sent.text[:160])
+        if fid:
+            v = await inbound(c, ev, voice_file_id=fid)
+            check("a voice note is transcribed and acted on",
+                  "boston" in v["reply"].lower() or "weather" in v["reply"].lower(),
+                  v["reply"][:160])
     lt.cancel()
     print(f"\nTELEGRAM E2E: {'PASS' if not fails else f'FAIL ({len(fails)})'}")
     return 0 if not fails else 1

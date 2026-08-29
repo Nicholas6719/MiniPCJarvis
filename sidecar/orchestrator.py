@@ -18,7 +18,7 @@ from audio.io import mic, speaker, MIC_RATE, SpeakerStalled
 from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
-from audio import endpoint
+from audio import endpoint, output_watch
 from audio.wake import wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
@@ -442,6 +442,7 @@ class Orchestrator:
         """
         q = mic.subscribe()
         last_fire = 0.0
+        last_noise_log = 0.0
         preroll: collections.deque = collections.deque(maxlen=int(MIC_RATE * 2.0 / 1024) + 1)
         armed_vad = StreamingVAD(threshold=0.6)
         consec = 0
@@ -475,6 +476,24 @@ class Orchestrator:
                     consec = consec + 1 if any(p >= armed_vad.threshold for p in probs) else 0
                     if consec >= 3:
                         consec = 0
+                        # A television is not talking to him. While another app
+                        # is making noise the open window closes and his name is
+                        # required again — the wake word still works, so nothing
+                        # is lost but the shortcut. (Film dialogue came through
+                        # here once and he ran a web search on it.)
+                        if config.get("wake", "ignore_while_audio_plays", default=True):
+                            playing, who = await asyncio.to_thread(
+                                output_watch.other_app_is_playing)
+                            if playing:
+                                # observable, not just logged: a thing that
+                                # silently ignores you must be able to say so
+                                await bus.emit("wake_suppressed", reason="audio",
+                                               app=who or "something")
+                                if time.time() - last_noise_log > 30:
+                                    last_noise_log = time.time()
+                                    log.info("speech heard while %s is playing - "
+                                             "the wake word is required", who or "something")
+                                continue
                         log.info("follow-up speech (conversation window)")
                         self._preroll = np.concatenate(list(preroll)[-8:])  # ~0.5 s lead-in
                         self._armed_until = 0.0

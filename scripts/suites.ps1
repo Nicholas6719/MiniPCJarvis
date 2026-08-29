@@ -13,7 +13,7 @@ $failed = @()
 # was making whatever ran next (research) drop a turn and report a bare shrug.
 foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py",
                  "research_e2e.py", "facts_e2e.py", "filler_e2e.py", "voice_ux_e2e.py",
-                 "endpoint_e2e.py", "hands_e2e.py", "clarify_e2e.py", "market_e2e.py",
+                 "endpoint_e2e.py", "wake_guard_e2e.py", "hands_e2e.py", "clarify_e2e.py", "market_e2e.py",
                  "telegram_e2e.py",
                  "hud_e2e.py", "sleep_e2e.py")) {
     # wait for quiet: a suite that starts mid-sentence reads the previous answer
