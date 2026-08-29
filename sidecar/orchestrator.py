@@ -22,6 +22,7 @@ from audio import endpoint
 from audio.wake import wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
+import clarify
 from brain.router import brain
 from brain.facts import facts
 import collections
@@ -163,6 +164,7 @@ class Orchestrator:
         self._watchdog_task: asyncio.Task | None = None
         self._preroll: np.ndarray | None = None     # audio from before the wake word fired
         self._heard_text: str | None = None         # transcript the endpoint check already produced
+        self._clarify: clarify.Pending | None = None  # a question asked, answers already fetching
         self._end_silence: tuple[float, float] = (0.0, 0.0)   # (waited, budget) of the last turn
         self._armed_until: float = 0.0               # conversation window (no wake word needed)
         self._sounds = {k: f() for k, f in PALETTE.items()}  # built once, replayed
@@ -781,6 +783,14 @@ class Orchestrator:
     async def _converse(self, text: str, t_start: float) -> None:
         memory.log_turn("user", text)
         facts.reset_evidence()
+        # ---- a question he was asked is still open: this may be the answer ----
+        if self._clarify is not None:
+            if await self._answer_clarification(text, t_start):
+                return
+        # ---- or the request splits, and one short question settles it --------
+        amb = clarify.detect(text)
+        if amb is not None and await self._ask_clarification(amb, t_start):
+            return
         # ---- reflex: JARVIS's own brain handles known requests without the LLM ----
         reflex = None
         if config.get("brain", "enabled", default=True):
@@ -952,8 +962,12 @@ class Orchestrator:
         await bus.emit("filler", text=choice)
         await speak_queue.put(choice)
 
-    async def _exec_skill(self, skill, args: dict, queue: asyncio.Queue) -> str:
-        """Run one reflex skill (tool + templated speech) and return what was said."""
+    async def _exec_skill(self, skill, args: dict, queue: asyncio.Queue,
+                          prefetched: dict | None = None) -> str:
+        """Run one reflex skill (tool + templated speech) and return what was said.
+
+        `prefetched` is a result already fetched while a clarifying question was
+        being asked — the whole point of asking early, so don't fetch it twice."""
         res: dict = {}
         reply = ""
         from brain.skills import polish
@@ -963,7 +977,9 @@ class Orchestrator:
             self.metrics.mark("first_token_ms")
             await bus.emit("assistant_delta", text=reply)
             await queue.put(clean_for_speech(reply))
-        if skill.tool:
+        if skill.tool and prefetched is not None:
+            res = prefetched if isinstance(prefetched, dict) else {"value": prefetched}
+        elif skill.tool:
             await self.sm.to(State.EXECUTING, force=True)
             out = await registry.execute(skill.tool, args)
             if out.get("ok"):
@@ -1020,6 +1036,124 @@ class Orchestrator:
         await queue.put(clean_for_speech(reply))
         await self._finish_reflex(text, reply, t_start, "fact", queue, task)
 
+    # ---------- clarify: ask, but fetch every answer while asking ----------
+
+    def _drop_clarification(self, why: str) -> None:
+        """Stop speculating. Any fetch still running is work nobody asked for."""
+        if self._clarify is not None:
+            self._clarify.cancel()
+            log.info("clarification dropped (%s)", why)
+            self._clarify = None
+
+    async def _ask_clarification(self, amb, t_start: float) -> bool:
+        """Ask which reading he meant, and start fetching ALL of them right now.
+
+        Returns False if this cannot be done safely, in which case the turn
+        carries on as if the ambiguity had never been noticed.
+        """
+        def needs_confirmation(tool_name: str) -> bool:
+            tool = registry.get(tool_name)
+            if tool is None:
+                raise KeyError(tool_name)           # unknown = not safe = refuse
+            return tool.requires_confirmation
+
+        if not clarify.validate(amb, needs_confirmation):
+            return False
+        self._drop_clarification("superseded")
+        pending = clarify.Pending(amb)
+        for b in amb.branches:
+            async def fetch(tool=b.tool, args=dict(b.args)):
+                out = await registry.execute(tool, args)
+                return out.get("result") if out.get("ok") else {
+                    "error": out.get("error") or "that didn't come back"}
+            pending.tasks[b.label] = spawn(fetch(), name=f"clarify:{b.label}")
+        self._clarify = pending
+        await bus.emit("clarify", subject=amb.subject, question=amb.question,
+                       options=[b.label for b in amb.branches])
+        log.info("asking %r; fetching %s in the background", amb.question,
+                 [b.label for b in amb.branches])
+        self.metrics.mark("first_token_ms")
+        memory.log_turn("assistant", amb.question)
+        try:
+            await self.speak_line(amb.question)      # emits the text itself
+        except Exception:
+            log.exception("could not ask the clarifying question")
+        await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
+                       breakdown={}, reflex="clarify", text=amb.question)
+        if self.sm.state not in (State.ERROR, State.SLEEPING):
+            await self.sm.to(State.IDLE, force=True)
+        self._arm_conversation()          # answer it without saying his name again
+        return True
+
+    async def _answer_clarification(self, text: str, t_start: float) -> bool:
+        """He answered the question. Use the branch that is already warm.
+
+        Returns False when what he said was not an answer at all — then the
+        speculation is dropped and the sentence is treated as a fresh request,
+        which is what it is.
+        """
+        pending = self._clarify
+        if pending is None:
+            return False
+        if pending.stale:
+            self._drop_clarification("stale")
+            return False
+        picked = clarify.choose(pending, text)
+        if picked is None:
+            self._drop_clarification("he asked for something else")
+            return False
+        self._clarify = None
+        if picked == "drop":
+            pending.cancel()
+            await self._say_and_finish("Of course, sir.", text, t_start, "clarify")
+            return True
+        chosen = list(pending.amb.branches) if picked == "both" else [picked]
+        pending.cancel(keep=None if picked == "both" else picked.label)
+
+        from brain.skills import polish
+        self._speak_cancel = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        task = asyncio.create_task(self._speaker_worker(queue))
+        said = []
+        for b in chosen:
+            try:
+                res = await asyncio.wait_for(pending.tasks[b.label], timeout=30)
+            except asyncio.CancelledError:
+                res = None
+            except Exception:
+                log.exception("the %s branch failed", b.label)
+                res = {"error": "that didn't come back"}
+            waited = int((time.time() - t_start) * 1000)
+            log.info("answered %r from the %s branch (%s, %d ms into the turn)",
+                     pending.amb.subject, b.label,
+                     "already fetched" if res is not None else "refetching", waited)
+            if res is None:                     # cancelled out from under us
+                res = {"error": "that didn't come back"}
+            try:
+                line = polish(b.render(dict(b.args), res))
+            except Exception:
+                log.exception("clarified answer failed to render")
+                line = "I'm afraid that didn't work."
+            if said:
+                await bus.emit("assistant_delta", text=" ")
+            self.metrics.mark("first_token_ms")
+            await bus.emit("assistant_delta", text=line)
+            await queue.put(clean_for_speech(line))
+            said.append(line)
+        await self._finish_reflex(text, " ".join(said), t_start, "clarify", queue, task)
+        return True
+
+    async def _say_and_finish(self, line: str, text: str, t_start: float,
+                              label: str) -> None:
+        """One spoken line, through the normal reflex plumbing."""
+        self._speak_cancel = asyncio.Event()
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        task = asyncio.create_task(self._speaker_worker(queue))
+        self.metrics.mark("first_token_ms")
+        await bus.emit("assistant_delta", text=line)
+        await queue.put(clean_for_speech(line))
+        await self._finish_reflex(text, line, t_start, label, queue, task)
+
     async def _finish_reflex(self, text: str, reply: str, t_start: float, label: str,
                              queue: asyncio.Queue, task: asyncio.Task) -> None:
         await queue.put(None)
@@ -1045,6 +1179,8 @@ class Orchestrator:
             # the wake word gets his attention again.
             if label == "sleep":
                 self._armed_until = 0.0
+                # nothing may keep fetching once he has been dismissed
+                self._drop_clarification("he went to sleep")
                 await self.sm.to(State.SLEEPING, force=True)
                 await bus.emit("conversation", armed=False)
             else:

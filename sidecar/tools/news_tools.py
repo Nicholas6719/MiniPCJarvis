@@ -118,6 +118,25 @@ async def _fetch_feed(client: httpx.AsyncClient, source: str, url: str) -> list[
     return out
 
 
+# Asking the general feeds for one subject almost never works: they carry what
+# is happening everywhere, and a company or a person is named in a handful of
+# stories a week. Google's news SEARCH feed is the right instrument for a named
+# subject — keyless, no scraping, real article headlines with their publisher.
+_SEARCH_FEED = ("https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en")
+
+
+async def _search_news(client: httpx.AsyncClient, query: str) -> list[dict]:
+    import urllib.parse
+    items = await _fetch_feed(client, "the news",
+                              _SEARCH_FEED.format(q=urllib.parse.quote(query)))
+    for i in items:
+        # every headline arrives as "The story - The Publisher"
+        head, sep, pub = i["headline"].rpartition(" - ")
+        if sep and 2 <= len(pub) <= 40:
+            i["headline"], i["source"] = head, pub
+    return items
+
+
 async def get_news(topic: str = "top", count: int = 5, query: str = "") -> dict:
     """Latest headlines, newest first, merged across that topic's feeds."""
     topic = (topic or "top").strip().lower()
@@ -129,12 +148,19 @@ async def get_news(topic: str = "top", count: int = 5, query: str = "") -> dict:
     if feeds is None:
         return {"error": f"I don't have a {topic} feed. I have: " + ", ".join(FEEDS)}
     async with httpx.AsyncClient() as c:
-        batches = await asyncio.gather(*(_fetch_feed(c, s, u) for s, u in feeds))
-    items = [i for b in batches for i in b]
-    if query:
-        words = [w for w in re.split(r"\s+", query.lower()) if len(w) > 2]
-        items = [i for i in items
-                 if all(w in (i["headline"] + " " + i["summary"]).lower() for w in words)]
+        if query:
+            # a named subject: search for it, and only fall back to sieving the
+            # general feeds if the search comes back with nothing
+            items = await _search_news(c, query)
+            if not items:
+                batches = await asyncio.gather(*(_fetch_feed(c, s, u) for s, u in feeds))
+                words = [w for w in re.split(r"\s+", query.lower()) if len(w) > 2]
+                items = [i for b in batches for i in b
+                         if all(w in (i["headline"] + " " + i["summary"]).lower()
+                                for w in words)]
+        else:
+            batches = await asyncio.gather(*(_fetch_feed(c, s, u) for s, u in feeds))
+            items = [i for b in batches for i in b]
     if not items:
         return {"error": f"nothing came back for {query or topic} just now."}
     items.sort(key=lambda i: i["_ts"], reverse=True)

@@ -750,6 +750,53 @@ for that. Win11 Notepad's own unsaved-changes dialog stops responding to both UI
 and real mouse clicks at the correct coordinates (its process still reports Responding);
 this looks like a Notepad quirk, not ours, and the test avoids it.
 
+## 2026-08-29: markets are live, and a vague question now costs nothing
+
+**Finnhub key is in.** Windows Credential Manager, target `finnhub_api_key.JARVIS`
+(keyring 3 builds the target as `{user}.{service}` — confirmed in the crate source, not
+guessed). The Rust core pushes it to the sidecar at startup, so it survives restarts. All
+four market tools verified live against real data, and by voice: "what's apple trading
+at" -> "Apple Inc is at 319.7 dollars, up 5.12 or 1.63 percent today."
+
+**Speculative clarification (his idea, and a good one).** "Any news on Tesla" splits two
+ways — the company or the stock — and guessing wastes a whole turn. He now ASKS... and
+starts fetching BOTH readings while the question is being spoken. When the answer comes
+back the winner is already warm and the losers are cancelled:
+
+| | first word | tools |
+|---|---|---|
+| cold "what's tesla trading at" | 1.45 s | get_stock_quote |
+| vague -> he asks | 0.07 s | both branches start |
+| "the stock" -> answer | 0.06 s | NONE (already fetched) |
+
+`sidecar/clarify.py` holds the engine; the list of ambiguities it knows is deliberately
+short. Do not replace it with "ask the LLM how many readings this has" — that costs the
+seconds the whole thing exists to save.
+
+RULES, enforced rather than assumed (see `tests/test_clarify.py`):
+- **only read-only lookups may run on speculation.** `validate()` refuses any branch whose
+  tool requires confirmation, and refuses an UNKNOWN tool rather than assuming it is safe.
+  Nothing that sends, buys, opens or deletes may ever run on a guess about what he meant.
+- at most 3 branches, so a vague question cannot fan out into a stampede.
+- cancelled on: an answer, "never mind", a change of subject, sleep, or a stale question
+  (75 s). A sentence that matches BOTH readings equally is not an answer — it is a new
+  request, and the speculation is dropped.
+- it must not fire when the request already says which half it means: "how's tesla stock
+  doing", "any news on the tesla recall" are answered straight. Being asked a question you
+  already answered is worse than a wrong guess.
+
+**get_news now SEARCHES for a named subject** (Google News search RSS, keyless). It used
+to sieve ~20 general feeds for the keyword, which meant "news on Tesla" reliably returned
+NOTHING — general feeds carry world news and rarely name a company in the last few hours.
+This fixed the clarify branch and the tool: "news about the election" now returns stories
+from minutes ago. Finnhub's company news was the other candidate and is investor
+commentary ("Most active S&P500 stocks in Friday's session") — not what anyone means by
+news about a company.
+
+Gates: `tests/test_clarify.py` (49 checks) in the build; `tests/clarify_e2e.py` in
+`suites.ps1` — its load-bearing check is that the CHOSEN branch makes no tool call, which
+is the whole feature.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
