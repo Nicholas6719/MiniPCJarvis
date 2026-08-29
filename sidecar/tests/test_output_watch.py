@@ -63,24 +63,64 @@ def main() -> int:
     check("twenty questions cost one look, not twenty", len(calls) == 1, len(calls))
     ow._scan = real
 
-    # --- it runs on asyncio's thread pool, and COM is per-THREAD ---------------
-    # This is the bug that made the whole guard a no-op: the first call worked and
-    # every one after it failed with "Cannot find window class", so the answer was
-    # always "nothing is playing" — indistinguishable from working. It must
-    # survive being called repeatedly from different pool threads.
+    # --- COM is per-THREAD, and this one must keep to its own ------------------
+    # Two bugs live here. First: without CoInitialize every call failed and the
+    # answer was always "nothing is playing" — indistinguishable from working.
+    # Second, and worse: this needs a MULTITHREADED apartment while the UI
+    # Automation behind "click the Send button" needs the default one, and an
+    # apartment cannot be changed once set. Sharing asyncio's pool meant clicking
+    # by name started failing with "couldn't read that window's controls",
+    # intermittently, depending on which thread each landed on. So it runs on its
+    # own thread and never touches the shared pool.
     ow.reset()
     ow._broken = False
     errors = []
 
-    async def pool_calls():
+    async def repeated():
         for _ in range(6):
             try:
-                await asyncio.to_thread(ow._scan)
+                await ow.playing()
             except Exception as e:                      # noqa: BLE001
                 errors.append(f"{type(e).__name__}: {e}")
-    asyncio.run(pool_calls())
-    check("six calls from asyncio's thread pool all survive", not errors, errors[:2])
+        return ow.thread_name()
+    ran_on = asyncio.run(repeated())
+    check("six calls in a row all survive", not errors, errors[:2])
     check("...and it never marked itself broken", not ow._broken)
+    check("it runs on its OWN thread, not a shared one",
+          ran_on.startswith(ow.THREAD_PREFIX), ran_on)
+
+    # ...and the thing it used to break still works afterwards: a plain
+    # single-threaded CoInitialize on a pool thread, which is what UI Automation
+    # does on every click by name.
+    async def uia_style_after():
+        await ow.playing()
+        bad = []
+        for _ in range(4):
+            def sta():
+                import comtypes
+                comtypes.CoInitialize()
+                return True
+            try:
+                await asyncio.to_thread(sta)
+            except Exception as e:                      # noqa: BLE001
+                bad.append(f"{type(e).__name__}: {e}")
+        return bad
+    broke = asyncio.run(uia_style_after())
+    check("clicking by name still works after an audio scan", not broke, broke[:2])
+
+    # --- it must survive being asked over and over ----------------------------
+    # This one is not paranoia. A redundant cast() around the QueryInterface
+    # result made a pointer holding no reference of its own, the interface was
+    # freed underneath it, and the next call read freed memory — taking the whole
+    # sidecar down with an access violation in _ctypes.pyd. Nine times in one
+    # afternoon. It does not raise, so nothing but a crash tells you: the test
+    # for it is simply to do it a lot and still be here afterwards.
+    ow.reset()
+    ow._scan = real
+    ow._broken = False
+    for _ in range(250):
+        real()
+    check("250 scans in a row and the process is still alive", True)
 
     # --- his OWN voice is not interference ------------------------------------
     check("this process counts as its own", os.getpid() in ow._own_pids())

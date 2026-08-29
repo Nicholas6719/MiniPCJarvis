@@ -98,7 +98,7 @@ async def run_diagnostics() -> list[dict]:
     else:
         try:
             from audio import output_watch
-            playing, who = await asyncio.to_thread(output_watch._scan)
+            playing, who = await output_watch.scan_now()
             if output_watch._broken:
                 add("Room Audio", "warn",
                     "cannot read what is playing - the follow-up window stays open")

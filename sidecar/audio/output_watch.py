@@ -17,11 +17,24 @@ Our OWN output is excluded, or he would deafen himself every time he spoke.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("jarvis.output")
+
+# Its OWN thread, never asyncio's shared pool. COM apartments are per-thread and
+# cannot be changed once set: this needs MULTITHREADED, while the UI Automation
+# in tools/uia.py needs the default single-threaded apartment. Run them on the
+# same pool thread and whichever arrives second fails with "Cannot change thread
+# mode after it is set" — which is exactly what happened: clicking by name
+# started failing with "couldn't read that window's controls" as soon as this
+# module existed, intermittently, depending on which thread each landed on.
+_EXEC = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jarvis-audiowatch")
+THREAD_PREFIX = "jarvis-audiowatch"
 
 PEAK = 0.02          # below this a session is silent-but-open (a paused player)
 CACHE_S = 0.75       # enumerating sessions costs a few ms; the answer barely moves
@@ -52,6 +65,9 @@ def _own_pids() -> set[int]:
     return pids
 
 
+_ran_on = ""
+
+
 def _scan() -> tuple[bool, str]:
     """(is another app making noise, what it is).
 
@@ -60,8 +76,6 @@ def _scan() -> tuple[bool, str]:
     called" — the check quietly answered "nothing is playing" forever, which
     looks exactly like working. Same reason tools/uia.py opens the same way.
     """
-    from ctypes import POINTER, cast
-
     import comtypes
     from comtypes import CLSCTX_ALL  # noqa: F401  (imported for pycaw's sake)
     from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
@@ -75,6 +89,8 @@ def _scan() -> tuple[bool, str]:
         comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
     except OSError:
         pass          # already initialised on this thread, in some apartment
+    global _ran_on
+    _ran_on = threading.current_thread().name
 
     mine = _own_pids()
     for session in AudioUtilities.GetAllSessions():
@@ -82,8 +98,15 @@ def _scan() -> tuple[bool, str]:
             pid = session.ProcessId
             if not pid or pid in mine:
                 continue
-            meter = cast(session._ctl.QueryInterface(IAudioMeterInformation),
-                         POINTER(IAudioMeterInformation))
+            # NO cast() here, however much the pycaw examples look like there
+            # should be one. QueryInterface already hands back a typed, counted
+            # interface pointer; casting it makes a second pointer that holds no
+            # reference of its own, so the interface is freed underneath it and
+            # the next call reads freed memory. It does not raise — it takes the
+            # whole process down with an access violation in _ctypes.pyd, which
+            # is what nine crashes today were. (The cast belongs on the raw
+            # pointer that Activate() returns, which is where the examples use it.)
+            meter = session._ctl.QueryInterface(IAudioMeterInformation)
             if meter.GetPeakValue() > PEAK:
                 name = "something"
                 try:
@@ -116,6 +139,23 @@ def other_app_is_playing() -> tuple[bool, str]:
             _heard_at, _last = now, True
             return True, who
     return (now - _heard_at) < HOLD_S, ""
+
+
+async def playing() -> tuple[bool, str]:
+    """The async way in, and the ONLY one production should use: it keeps the
+    COM apartment on this module's own thread."""
+    return await asyncio.get_running_loop().run_in_executor(_EXEC, other_app_is_playing)
+
+
+async def scan_now() -> tuple[bool, str]:
+    """An uncached look, for diagnostics. Same thread, same reason."""
+    return await asyncio.get_running_loop().run_in_executor(_EXEC, _scan)
+
+
+def thread_name() -> str:
+    """Which thread the last scan ran on — the gate checks this, because the
+    whole point is that it is not a shared one."""
+    return _ran_on
 
 
 def reset() -> None:

@@ -482,8 +482,7 @@ class Orchestrator:
                         # is lost but the shortcut. (Film dialogue came through
                         # here once and he ran a web search on it.)
                         if config.get("wake", "ignore_while_audio_plays", default=True):
-                            playing, who = await asyncio.to_thread(
-                                output_watch.other_app_is_playing)
+                            playing, who = await output_watch.playing()
                             if playing:
                                 # observable, not just logged: a thing that
                                 # silently ignores you must be able to say so
