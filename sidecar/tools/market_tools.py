@@ -23,7 +23,7 @@ import time
 
 import httpx
 
-from config import secrets
+from config import config, secrets
 from tools.registry import Risk, Tool, registry
 
 log = logging.getLogger("jarvis.market")
@@ -31,22 +31,34 @@ log = logging.getLogger("jarvis.market")
 BASE = "https://finnhub.io/api/v1"
 NO_KEY = "I need a Finnhub API key for market data — add it in Settings, under Markets."
 
-# 60 calls/minute on the free tier. Stay under it by construction.
-_MIN_GAP_S = 1.1
-_last_call = 0.0
+# 60 calls/minute on the free tier. The first version spaced every call 1.1 s
+# apart, which is under the limit but also serialises everything: five stocks
+# took five and a half seconds before he said a word, and a market brief wants
+# thirty calls. A sliding window is the honest reading of "60 per minute" — burst
+# freely, and only wait when the last minute is actually full.
+_LIMIT_PER_MIN = 55          # a little under 60, for clock skew and retries
+_calls: list[float] = []     # timestamps of recent calls, newest last
 _lock = asyncio.Lock()
+
+
+async def _rate_limit() -> None:
+    while True:
+        async with _lock:
+            now = time.time()
+            _calls[:] = [t for t in _calls if now - t < 60.0]
+            if len(_calls) < _LIMIT_PER_MIN:
+                _calls.append(now)
+                return
+            wait = 60.0 - (now - _calls[0]) + 0.05
+        log.info("finnhub minute is full - holding %.1fs", wait)
+        await asyncio.sleep(max(0.05, wait))
 
 
 async def _get(path: str, **params) -> dict | list | None:
     key = secrets.get("finnhub_api_key")
     if not key:
         return None
-    global _last_call
-    async with _lock:
-        gap = time.time() - _last_call
-        if gap < _MIN_GAP_S:
-            await asyncio.sleep(_MIN_GAP_S - gap)
-        _last_call = time.time()
+    await _rate_limit()
     try:
         async with httpx.AsyncClient(timeout=12) as c:
             r = await c.get(f"{BASE}{path}", params={**params, "token": key})
@@ -193,6 +205,28 @@ async def get_company_news(symbol: str, days: int = 5, count: int = 5) -> dict:
     return {"symbol": tick, "name": name, "count": len(items), "items": items}
 
 
+async def get_watchlist() -> dict:
+    """How HIS names are doing — the ones he holds or follows.
+
+    Separate from get_market_movers, which is the market as a whole. This is the
+    list in config markets.watchlist, and it is the same list the proactive brief
+    uses to decide a move is worth interrupting him for.
+    """
+    names = config.get("markets", "watchlist", default=[]) or []
+    if not names:
+        return {"error": "You haven't given me a list of stocks to follow yet, sir."}
+    out = []
+    for sym in names[:12]:
+        q = await get_stock_quote(sym)
+        if not q.get("error"):
+            out.append(q)
+    if not out:
+        return {"error": NO_KEY if not secrets.get("finnhub_api_key")
+                else "None of your stocks came back just now."}
+    out.sort(key=lambda q: abs(q.get("percent") or 0), reverse=True)
+    return {"count": len(out), "stocks": out}
+
+
 async def get_market_movers() -> dict:
     """How the market itself is doing, via the big index ETFs (no index feed on
     the free tier — SPY/QQQ/DIA track them closely enough to speak about)."""
@@ -238,6 +272,14 @@ def register_all() -> None:
             "count": {"type": "integer", "minimum": 1, "maximum": 10}},
             "required": ["symbol"]},
         risk=Risk.SAFE, handler=get_company_news, timeout=25))
+    registry.register(Tool(
+        name="get_watchlist",
+        description="How the user's OWN stocks are doing - the list he follows. Use for "
+                    "'how are my stocks doing', 'how's my portfolio', 'check my stocks'. "
+                    "For a single named company use get_stock_quote; for the market as a "
+                    "whole use get_market_movers.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.SAFE, handler=get_watchlist, timeout=45))
     registry.register(Tool(
         name="get_market_movers",
         description="How the overall US market is doing right now (S&P 500, Nasdaq, Dow).",

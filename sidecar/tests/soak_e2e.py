@@ -53,9 +53,24 @@ async def main() -> int:
     errors: list[str] = []
     t0 = time.time()
     async with httpx.AsyncClient(timeout=60) as c:
+        async def once(method, url, **kw):
+            """One request, with a single retry on a CONNECTION-level failure.
+
+            Keep-alive has an unavoidable race: the server closes an idle pooled
+            socket at the same moment the client sends on it, and httpx raises
+            ReadError. That is an HTTP client artefact, not the sidecar failing —
+            the process check below is what actually catches a sidecar in
+            trouble. A retry on transport errors only; an HTTP error still counts.
+            """
+            try:
+                return await getattr(c, method)(url, **kw)
+            except httpx.TransportError:
+                await asyncio.sleep(0.5)
+                return await getattr(c, method)(url, **kw)
+
         async def tool(name, **args):
-            r = await c.post(f"{BASE}/debug/tool", headers=H,
-                             json={"tool": name, "args": args})
+            r = await once("post", f"{BASE}/debug/tool", headers=H,
+                           json={"tool": name, "args": args})
             return r.json()
 
         # PACE MATTERS. An earlier version of this ran flat out and reported
@@ -68,15 +83,16 @@ async def main() -> int:
         while time.time() - t0 < SECONDS:
             rounds += 1
             try:
-                await c.post(f"{BASE}/text", headers=H, json={"text": "what time is it"})
+                await once("post", f"{BASE}/text", headers=H,
+                           json={"text": "what time is it"})
                 now = time.time()
                 if now - last_diag > 30:       # COM: audio sessions, if enabled
-                    await c.get(f"{BASE}/diagnostics", headers=H)
+                    await once("get", f"{BASE}/diagnostics", headers=H)
                     last_diag = now
                 if now - last_uia > 15:        # COM: UI Automation, the other apartment
                     await tool("list_controls", window="", limit=10)
                     last_uia = now
-                await c.get(f"{BASE}/health", headers=H)
+                await once("get", f"{BASE}/health", headers=H)
             except Exception as e:                       # noqa: BLE001
                 errors.append(f"round {rounds}: {type(e).__name__}: {e}")
             await asyncio.sleep(5.0)

@@ -414,6 +414,23 @@ def say_analyst(slots: dict, res: dict) -> str:
     return line
 
 
+def say_watchlist(_s: dict, res: dict) -> str:
+    """His own names, biggest mover first — that is the one he wants to hear."""
+    if "error" in res:
+        return res["error"]
+    rows = res.get("stocks") or []
+    if not rows:
+        return "None of your stocks came back just now."
+    parts = []
+    for r in rows[:5]:
+        pct = r.get("percent") or 0
+        way = "up" if pct > 0 else "down" if pct < 0 else "flat"
+        parts.append(f"{r['name']} is {way} {abs(pct)} percent at {r['price']} dollars"
+                     if way != "flat" else
+                     f"{r['name']} is flat at {r['price']} dollars")
+    return "; ".join(parts) + "."
+
+
 def say_markets(_s: dict, res: dict) -> str:
     if "error" in res:
         return res["error"]
@@ -1289,6 +1306,12 @@ SKILLS: list[Skill] = [
         "what's the price target on microsoft", "do analysts like amazon",
         "what are the analyst recommendations for google", "is tesla a good buy according to analysts"],
         slots=slots_analyst, speak=say_analyst),
+    Skill("watchlist", "get_watchlist", [
+        "how are my stocks doing", "how's my portfolio", "how is my portfolio doing",
+        "check my stocks", "how are my stocks", "what are my stocks doing",
+        "how are my positions", "how's my watchlist", "check my portfolio",
+        "how are my shares doing"],
+        speak=say_watchlist),
     Skill("markets", "get_market_movers", [
         "how's the market doing", "how are the markets", "how did the market close",
         "what's the market doing today", "how's the stock market", "are the markets up",

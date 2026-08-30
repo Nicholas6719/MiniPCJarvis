@@ -113,14 +113,28 @@ async def main() -> int:
         check("a company that does not exist is refused, not invented",
               not bad["_ok"] and bad.get("price") is None, bad)
 
+        # --- his own names, and the limiter that serves them ------------------
+        w = await tool(c, "get_watchlist")
+        check("his own stocks come back as a list", w["_ok"], w["_error"])
+        if w["_ok"]:
+            rows = w.get("stocks") or []
+            check("with more than one name in it", len(rows) >= 2, len(rows))
+            check("biggest mover first — that is the one he wants",
+                  all(abs(rows[i].get("percent") or 0) >= abs(rows[i + 1].get("percent") or 0)
+                      for i in range(len(rows) - 1)),
+                  [(r.get("symbol"), r.get("percent")) for r in rows])
+
         # --- and it survives being asked twice in a row (rate limiting) -------
         t0 = time.time()
         two = await asyncio.gather(tool(c, "get_stock_quote", symbol="MSFT"),
                                    tool(c, "get_stock_quote", symbol="AMZN"))
         check("two at once are both answered, not throttled into an error",
               all(x["_ok"] for x in two), [x.get("_error") for x in two])
-        check("and they were spaced out rather than fired together",
-              time.time() - t0 > 1.0, f"{round(time.time() - t0, 2)}s")
+        # they may now go together — the limiter bursts and only waits when the
+        # last minute is genuinely full, because serialising cost five seconds
+        # on a five-stock answer
+        check("...and quickly, not one per second",
+              time.time() - t0 < 4.0, f"{round(time.time() - t0, 2)}s")
 
     # --- and the whole way through, by asking him ----------------------------
     ev: list = []

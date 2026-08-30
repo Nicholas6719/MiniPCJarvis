@@ -117,6 +117,21 @@ DEFAULTS: dict[str, Any] = {
     # stuck-state watchdog can't let a turn hang). Confusables score 0.00-0.04.
     # semantic_endpoint: end the turn when the SENTENCE is finished, not when
     # the room goes quiet (audio/endpoint.py). Falls back to the fixed window.
+    "markets": {
+        # The names he actually holds or follows. They do NOT narrow what he
+        # hears about — the news-driven pass still surfaces whatever experts are
+        # discussing, owned or not. This list only lowers the bar for
+        # interrupting him: a 5% move in something of his is worth a message.
+        "watchlist": ["NVDA", "AAPL", "SPCX", "AMC", "TSLA"],
+        "watchlist_alert_percent": 5.0,
+    },
+    "presence": {
+        # He withdraws when he is not needed: after this many quiet minutes he
+        # minimises himself and sleeps. Sleep is his working shift, and his name
+        # brings him back to the front from behind anything.
+        "auto_sleep": True,
+        "idle_sleep_minutes": 2,
+    },
     "wake": {"mode": "both", "threshold": 0.60, "semantic_endpoint": True},
     "vision": {
         "model": r"C:\AI\models\gemma-3-4b-it-q4_0.gguf",

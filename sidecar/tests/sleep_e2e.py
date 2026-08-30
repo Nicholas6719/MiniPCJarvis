@@ -127,6 +127,39 @@ async def main() -> int:
     check("typing while asleep is accepted, not refused as busy", r.get("ok") is True)
     await wait_state("idle", 90)
 
+    # --- he withdraws on his own, and his name is a summons -------------------
+    # Sleep is his shift, not an off switch: working at the PC should not mean
+    # working around him. The timer is shortened for the test and put back after.
+    httpx.patch(BASE + "/config", headers=H,
+                json={"presence": {"auto_sleep": True, "idle_sleep_minutes": 0.15}},
+                timeout=10)
+    try:
+        httpx.post(BASE + "/text", headers=H, json={"text": "what time is it"}, timeout=15)
+        await wait_state("idle", 90)
+        check("he goes to sleep by himself once he is not needed",
+              await wait_state("sleeping", 60))
+        await asyncio.sleep(1.5)
+        check("...and put himself out of the way", minimized() in (True, None))
+
+        audio = phrase("Hey Jarvis, what time is it?")
+        httpx.post(BASE + "/debug/inject_audio", headers=H,
+                   json={"audio_b64": base64.b64encode(audio.tobytes()).decode()},
+                   timeout=30)
+        woke = False
+        t0 = time.time()
+        while time.time() - t0 < 45:
+            if state() != "sleeping":
+                woke = True
+                break
+            await asyncio.sleep(0.4)
+        check("his name brings him back from a sleep he chose himself", woke)
+        await wait_state("idle", 90)
+        await asyncio.sleep(1.5)
+        check("and his window is in front again", minimized() in (False, None))
+    finally:
+        httpx.patch(BASE + "/config", headers=H,
+                    json={"presence": {"idle_sleep_minutes": 2}}, timeout=10)
+
     lt.cancel()
     print("\n" + ("SLEEP E2E: PASS" if not fails else f"SLEEP E2E: FAIL {fails}"))
     return 1 if fails else 0

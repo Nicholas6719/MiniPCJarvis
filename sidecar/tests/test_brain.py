@@ -102,6 +102,10 @@ CASES = [
     ("what is the price of an RTX 5090", None),
     ("what do analysts say about tesla", "analyst"), ("is nvidia a buy", "analyst"),
     ("how's the market doing", "markets"), ("how are the markets", "markets"),
+    # HIS stocks are a different question from THE market, and the two sit close
+    # enough in phrasing that it is worth pinning them apart
+    ("how are my stocks doing", "watchlist"), ("how's my portfolio", "watchlist"),
+    ("check my stocks", "watchlist"),
     ("what's in the news", "news"), ("tell me the tech news", "news"),
     ("any breaking news", "breaking"),
 ]

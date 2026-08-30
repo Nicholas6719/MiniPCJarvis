@@ -171,6 +171,7 @@ class Orchestrator:
         self._watchdog_task: asyncio.Task | None = None
         self._preroll: np.ndarray | None = None     # audio from before the wake word fired
         self._heard_text: str | None = None         # transcript the endpoint check already produced
+        self._last_active: float = time.time()      # when he was last needed, for auto-sleep
         self._clarify: clarify.Pending | None = None  # a question asked, answers already fetching
         self._end_silence: tuple[float, float] = (0.0, 0.0)   # (waited, budget) of the last turn
         self._armed_until: float = 0.0               # conversation window (no wake word needed)
@@ -188,6 +189,49 @@ class Orchestrator:
             await bus.emit("awake", summary="back from sleep")
         except Exception:
             log.exception("could not come back from sleep")
+
+    async def _idle_watch(self) -> None:
+        """Withdraw when he is not needed.
+
+        After a couple of quiet minutes he minimises himself and goes to sleep,
+        so working at the PC does not mean working around him. Sleep is his
+        SHIFT, not an off switch — the night school and the proactive watch run
+        there — and his name brings him straight back to the front.
+
+        "Idle" means JARVIS is idle, not the machine: an hour in a spreadsheet is
+        exactly when he should be out of the way.
+        """
+        while True:
+            await asyncio.sleep(2)
+            try:
+                # anything that is not sitting still counts as being needed
+                if self.sm.state is not State.IDLE:
+                    self._last_active = time.time()
+                    continue
+                if not config.get("presence", "auto_sleep", default=True):
+                    continue
+                mins = float(config.get("presence", "idle_sleep_minutes", default=2))
+                if mins <= 0:
+                    continue
+                # never vanish in the middle of something, however quiet it looks
+                from dictation import dictation as _dict
+                if registry.has_pending or self.armed or _dict.active                         or self._clarify is not None:
+                    self._last_active = time.time()
+                    continue
+                if time.time() - self._last_active < mins * 60:
+                    continue
+                log.info("idle %.0f min - minimising and going to sleep", mins)
+                from tools.windows_tools import enter_sleep_mode
+                await asyncio.to_thread(enter_sleep_mode)
+                self._armed_until = 0.0
+                await bus.emit("conversation", armed=False)
+                await bus.emit("sleep", reason="idle", after_minutes=mins)
+                await self.sm.to(State.SLEEPING, force=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("idle watch failed")
+                await asyncio.sleep(30)
 
     async def wake_if_sleeping(self) -> bool:
         """Any deliberate approach — hotkey, tray, a typed turn — also ends sleep."""
@@ -248,6 +292,7 @@ class Orchestrator:
         self._watchdog_task = asyncio.create_task(self._llm_watchdog())
         self._device_task = asyncio.create_task(self._device_watch())
         self._stuck_task = asyncio.create_task(self._stuck_watchdog())
+        self._idle_task = asyncio.create_task(self._idle_watch())
         asyncio.create_task(self._warm_prompts())
         asyncio.create_task(tts.warm_phrases())
         if config.get("audio", "boot_sound", default=True):
@@ -526,6 +571,8 @@ class Orchestrator:
                    getattr(self, "_device_task", None), getattr(self, "_turn_task", None)):
             if _t is not None and not _t.done():
                 _t.cancel()
+        if getattr(self, "_idle_task", None):
+            self._idle_task.cancel()
         if self._wake_task:
             self._wake_task.cancel()
         if self._loop_task:
