@@ -4,12 +4,20 @@ The whole proactive design rests on this file. An assistant that reports
 everything is one you stop reading inside a day, and then it is worse than
 useless, because the one message that mattered is buried in the noise.
 
-The rule Nicholas gave, in his words: *"I don't need to hear about a road closure
-in Ohio, but if there is major news like a gas leak in an Ohio facility, I wanna
-know about it."* So distance is not the test — SEVERITY is. What proximity
-changes is the bar: a road closure in Natick is worth a line in the morning
-brief precisely because it is his road; the same closure in Ohio is worth
-nothing to him at all.
+**Distance IS the test now** — see `local_only()`. Nicholas ran the other way for
+a day and came back with: *"I've been getting WAY too many news reports... I want
+the same type of emergency notifications/alerts but let's keep all news local."*
+A California wildfire and a Grand Canyon flood had both reached his phone.
+
+The tiers below are unchanged and still decide how loud a story is; `local_only()`
+decides, before any of them, whether it is his at all. Read them with that gate in
+mind: everything past this point assumes the story already passed it.
+
+The earlier rule, kept because one config line restores it and because it explains
+why the tiers are shaped the way they are: *"I don't need to hear about a road
+closure in Ohio, but if there is major news like a gas leak in an Ohio facility, I
+wanna know about it."* Under that rule severity beat distance. Under this one,
+proximity comes first and severity sorts what remains.
 
 Four tiers, and the same four everywhere:
 
@@ -106,6 +114,83 @@ NATIONAL_WEIGHT = re.compile(
     r"pentagon|war|invasion|missile|strike[sd]?|sanctions|treaty|state of emergency|martial law|"
     r"recession|market crash|shutdown|impeach\w*|election|indict\w+)\b", re.I)
 
+# Not an emergency, but it changes what he can do today: the power is out, the
+# road is shut, the water is not drinkable. This is the ONLY non-emergency reason
+# to interrupt him, and it exists because of what local-only did to the tiers.
+#
+# Going local-only nearly backfired: with his towns on a deliberately low bar and
+# nothing else coming in, "Sudbury police to host e-bike safety presentation" and
+# "Natick Mall to add three new stores" were both ALERTs. He would have traded
+# national noise for town-notice noise. His words were "the same type of EMERGENCY
+# notifications", so his town gets a lower bar for what reaches the brief, not a
+# lower bar for what interrupts him.
+DISRUPTION = re.compile(
+    r"\b(?:power outage|outage|blackout|water main|boil water|no water|"
+    r"road closed|closure|closed|shut down|shutdown|detour|"
+    r"schools? closed|cancell?ed|suspended|delays?|"
+    r"evacuat\w+|shelter|curfew|state of emergency|"
+    r"service (?:disruption|change)|no service)\b", re.I)
+
+# --- the ONLY reason a distant story reaches him -------------------------------
+# His words, 2026-08-30: *"I only want the absolute emergencies from other places,
+# something everyone in the country needs to know or hear about."*
+#
+# That bar is much higher than "dangerous". A wildfire across two California
+# counties and a flash flood at the Grand Canyon with twenty missing are both real
+# emergencies, and both pinged him, and neither is something the country needs to
+# know. So this is not "is it serious" - it is "would this be the thing everyone is
+# talking about tonight".
+#
+# It also answers his gas-leak question honestly: a gas leak in Arizona that
+# evacuates 300 homes does NOT clear this bar, even though he named it, because it
+# is not something everyone in the country needs to hear about.
+
+# Things that ARE the emergency, needing no second word to prove it. Keeping
+# these apart matters: when they were lumped in with the reach words below and
+# made to prove themselves with a hazard term too, "Nationwide grid failure leaves
+# millions without power" came out silent - no hazard word in it, and no death yet.
+SYSTEMIC = re.compile(
+    r"\b(?:nuclear (?:plant|reactor|meltdown|accident)|radiation leak|"
+    r"pandemic|grid (?:collapse|failure)|nationwide (?:blackout|outage)|"
+    r"national emergency|martial law)\b", re.I)
+
+# Reach, rather than severity. These say a thing is everywhere; something else
+# still has to say it is bad.
+NATIONWIDE = re.compile(
+    r"\b(?:nationwide|across the (?:country|nation)|the entire country|"
+    r"national guard deployed|every state)\b", re.I)
+
+# An attack on the country, rather than a dangerous thing that happened in it.
+ATTACK = re.compile(
+    r"\b(?:terror(?:ist)? attack|act of terror|assassinat\w+|"
+    r"declares? war|at war with|invasion of|invaded|"
+    r"missile (?:strike|attack)s?|nuclear (?:strike|attack))\b", re.I)
+
+# A toll so large it is the news everywhere. "Dozens" is not this: dozens die in
+# this country most weeks, and he said ABSOLUTE emergencies.
+CATASTROPHIC_TOLL = re.compile(
+    r"\b(?:hundreds|thousands|scores)\s+(?:of\s+)?(?:people\s+)?"
+    r"(?:are\s+)?(?:dead|killed|died|feared dead)\b"
+    r"|\bmass casualt\w+"
+    r"|\bdeath toll\s+(?:rises|climbs|passes|tops|reaches)\s+"
+    r"(?:past\s+|above\s+|over\s+)?(?:hundreds|thousands|[1-9]\d{2,})", re.I)
+
+
+def national_emergency(text: str) -> bool:
+    """Would everyone in the country need to hear about this?
+
+    Deliberately narrow, and measured against a live wire rather than imagined:
+    a first attempt at this used a "man-made hazard" keyword list and matched a
+    Trump/NBC story, a Visa/Mastercard announcement and a West Bank report. The
+    word "attack" alone is worthless. Every rule here needs national reach, an
+    attack on the country, or a toll in the hundreds.
+    """
+    return bool(SYSTEMIC.search(text) or ATTACK.search(text)
+                or CATASTROPHIC_TOLL.search(text)
+                or (NATIONWIDE.search(text) and (HAZARD.search(text)
+                                                 or FATALITY.search(text))))
+
+
 # --- the everyday, which is only interesting when it is HIS everyday ----------
 ROUTINE = re.compile(
     r"\b(?:road closure|lane closure|traffic|detour|construction|road work|"
@@ -127,6 +212,27 @@ def is_local(story: dict) -> tuple[bool, bool]:
     return (town or bool(REGION_RE.search(t))), town
 
 
+def local_only() -> bool:
+    """Whether news has to be near him to count at all.
+
+    He turned this on himself, on 2026-08-30, after a day of living with the
+    alternative: *"I've been getting WAY too many news reports... I want the same
+    type of emergency notifications/alerts but let's keep all news local."*
+
+    That reverses what he asked for earlier - a gas leak at an Ohio facility, and
+    "I need to be the first to know what's going on" - and the reversal is the
+    correct call, because he is the one who had to read the results. A Ross Fire
+    in California and a Grand Canyon flash flood were both real alerts on his
+    phone, and neither was any of his business.
+
+    The EMERGENCY machinery is untouched: tiers, escalation, quiet-hours
+    exemption. What changed is the catchment. Set `briefing.news_scope` to
+    "national" to have the old behaviour back in one line.
+    """
+    from config import config
+    return str(config.get("briefing", "news_scope", default="local")).lower() != "national"
+
+
 def classify_news(story: dict) -> tuple[str, str]:
     """(tier, why). `story` is any dict with a headline and ideally a summary."""
     text = _text_of(story).strip()
@@ -134,6 +240,18 @@ def classify_news(story: dict) -> tuple[str, str]:
         return NONE, "nothing to read"
 
     near, own_town = is_local(story)
+
+    # Everything below decides how loud a story is. This decides whether it is
+    # his at all, and it comes first so nothing downstream can promote its way
+    # past it - a wildfire two thousand miles away is still a wildfire, and the
+    # hazard rules would happily wake him for it.
+    if not near and local_only():
+        # One door stays open, and only one: the thing everyone in the country
+        # is going to hear about. Everything else that happens elsewhere - and
+        # that is nearly all of it - stops here.
+        if national_emergency(text):
+            return URGENT, "the whole country needs to know this"
+        return NONE, "not local, and not something the country needs to know"
     hazard = bool(HAZARD.search(text))
     violence = bool(VIOLENCE.search(text))
     danger = hazard or violence
@@ -179,10 +297,14 @@ def classify_news(story: dict) -> tuple[str, str]:
     if weighty:
         return NOTABLE, "national, but not breaking"
 
-    # His own towns get a lower bar — but not no bar. A ribbon cutting is still
-    # a ribbon cutting.
+    # His own towns get a lower bar for being MENTIONED — not for interrupting
+    # him. The only non-emergency worth a ping is something that changes his day:
+    # the road is shut, the power is out, the water is not drinkable. A new dean
+    # and a mall opening three stores wait for the brief like everything else.
+    if own_town and DISRUPTION.search(text) and not routine:
+        return ALERT, "his own town, and it changes his day"
     if own_town and not routine:
-        return ALERT, "his own town"
+        return NOTABLE, "his own town, but not an emergency"
     if own_town:
         return NOTABLE, "local colour"
     if near and not routine:

@@ -121,13 +121,22 @@ DEFAULTS: dict[str, Any] = {
         "enabled": True,
         # Agreed 2026-08-30. Quiet hours suppress these and nothing else.
         "times": ["07:30", "12:30", "16:15", "20:00"],
-        "watch_minutes": 10,
+        # Two clocks. Emergencies are checked twice as often as prices,
+        # because they are a different job with a different cost: the news
+        # sweep is keyless RSS, the market half is rate-limited Finnhub.
+        "emergency_minutes": 5,      # the news/emergency sweep
+        "watch_minutes": 10,         # the market sweep
         "alert_max_age_minutes": 180,
         # A digest at 22:00 is an intrusion; one at 07:30 is his morning. This
         # is deliberately NOT the proactive window (which ends at 08:00) — the
         # first brief of the day is at 07:30 and must not be suppressed by it.
         "quiet_start": "22:00",
         "quiet_end": "07:00",
+        # "local" | "national". He asked for local-only on 2026-08-30 after a day
+        # of the alternative: a California wildfire and a Grand Canyon flood both
+        # reached his phone and neither was his business. The alerting itself is
+        # unchanged - this only decides what is close enough to count.
+        "news_scope": "local",
         # Massachusetts, weighted to the five towns he named. The whole
         # state is wanted; these come first.
         "local_places": ["Framingham MA", "Sudbury MA", "Marlborough MA",

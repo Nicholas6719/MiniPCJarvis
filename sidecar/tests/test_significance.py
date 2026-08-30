@@ -4,9 +4,17 @@ The load-bearing test of the whole proactive design. If this gets it wrong in on
 direction he stops reading the briefs; in the other, he misses the thing that
 mattered.
 
-His rule, verbatim: *"I don't need to hear about a road closure in Ohio, but if
-there is major news like a gas leak in an Ohio facility, I wanna know about it."*
-Both of those are checked below, by name.
+His rule, as of 2026-08-30 and verbatim: *"I've been getting WAY too many news
+reports... I want the same type of emergency notifications/alerts but let's keep
+all news local."* The first block below is exactly that - the four real headlines
+that made him say it, all now silent, and the local emergencies that must still
+get through unchanged.
+
+The second block checks the wider setting he is NOT on (`briefing.news_scope =
+"national"`), including his earlier rule: *"I don't need to hear about a road
+closure in Ohio, but if there is major news like a gas leak in an Ohio facility, I
+wanna know about it."* It is kept because the tiers did not change and one line
+brings it back.
 
 Run: python tests/test_significance.py
 """
@@ -14,10 +22,21 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import significance  # noqa: E402
 from significance import (ALERT, NONE, NOTABLE, URGENT, classify_market,  # noqa: E402
                           classify_news)
 
 fails = []
+
+
+def scope(mode: str) -> None:
+    """Switch between his setting and the wider one, without a config file.
+
+    He runs LOCAL. The national expectations below are kept and still checked,
+    because the machinery is unchanged and one config line brings it back - but
+    they are no longer what his phone does.
+    """
+    significance.local_only = lambda: mode != "national"
 
 
 def check(name, cond, detail=""):
@@ -31,6 +50,91 @@ def tier(headline, summary=""):
 
 
 def main() -> int:
+    # ==========================================================================
+    # HIS SETTING: local only. Everything in this block is what his phone does.
+    # ==========================================================================
+    scope("local")
+
+    # The ones that actually reached him on 2026-08-30 and made him say "WAY too
+    # many news reports". Every one is real, serious, and none of it is his.
+    # The gas leaks are here by his own instruction: he named an Arizona gas leak
+    # and asked whether it survives. It does not - it is not something everyone in
+    # the country needs to hear about, which is the bar he set.
+    for far in ("Ross Fire burns 85,000 acres, leaves destruction across 2 counties",
+                "Grand Canyon flash floods leave more than 20 missing, dozens evacuated",
+                "Gas leak at Ohio chemical facility forces evacuation of 300 homes",
+                "Gas leak in Arizona forces evacuation of 300 homes",
+                "Tornado kills 14 in Oklahoma, hundreds injured",
+                "Hurricane makes landfall in Florida, state of emergency declared",
+                "Power outage affects 40,000 in Denver",
+                "Small explosion reported at a warehouse in Nevada",
+                "Israeli settlers stage new attack on home in West Bank's Qusra",
+                "Visa, Mastercard launch international card payments in Syria"):
+        check(f"silent: {far[:44]!r}", tier(far) == NONE, tier(far))
+
+    # ...and the one door left open: *"the absolute emergencies from other places,
+    # something everyone in the country needs to know or hear about."*
+    for huge in ("Terrorist attack at Chicago airport leaves dozens dead",
+                 "President assassinated in Dallas",
+                 "Nuclear plant meltdown prompts evacuation in Pennsylvania",
+                 "Nationwide grid failure leaves millions without power",
+                 "CDC declares pandemic as new virus spreads",
+                 "US declares war after missile strike on naval base",
+                 "Mass casualty incident at Los Angeles stadium",
+                 "Hundreds dead as earthquake levels city"):
+        check(f"reaches him: {huge[:42]!r}", tier(huge) == URGENT, tier(huge))
+
+    # A national emergency is not proven by a scary word. An early version of this
+    # used a "man-made hazard" keyword list and matched a Trump/NBC story, a
+    # Visa/Mastercard announcement and a West Bank report - "attack" alone is
+    # worthless. These are the shapes that must NOT be mistaken for one.
+    for notreally in ("Trump criticizes NBC over election comment",
+                      "Analysts attack the Fed's latest projections",
+                      "Company recalls 4,000 units over faulty wiring",
+                      "Storm knocks out power for 12,000 in Ohio"):
+        check(f"not an emergency: {notreally[:36]!r}",
+              tier(notreally) == NONE, tier(notreally))
+
+    # ...while the emergency machinery near him is untouched. This is the whole
+    # point of the change: quieter, not deafer.
+    check("an active shooter in Framingham still wakes him",
+          tier("Police respond to active shooter report in Framingham") == URGENT)
+    check("a Boston hazmat call still reaches him",
+          tier("Boston hazmat team responds to chemical exposure at Mass General")
+          in (URGENT, ALERT))
+    check("a death in a Mass. home still reaches him",
+          tier("Man held without bail after woman found dead in Mass. home")
+          in (URGENT, ALERT))
+    check("the MBTA death he was sent is still his news",
+          tier("Teen dies after fall at Massachusetts Bay Transportation Authority "
+               "train station") in (URGENT, ALERT))
+    check("a Natick fatal crash still wakes him",
+          tier("Fatal crash closes Route 9 in Natick") in (URGENT, ALERT))
+
+    # Going local-only nearly backfired here. With his towns on a low bar and
+    # nothing else arriving, every town notice became an ALERT - he would have
+    # swapped national noise for Sudbury noise. His town gets a lower bar for
+    # being MENTIONED, not for interrupting him.
+    for townish in ("Sudbury police to host e-bike safety presentation",
+                    "Framingham State University announces new dean",
+                    "Natick Mall to add three new stores this fall",
+                    "Marlborough approves budget for new sidewalk project",
+                    "Maynard restaurant wins regional award"):
+        check(f"waits for the brief: {townish[:38]!r}",
+              tier(townish) == NOTABLE, tier(townish))
+
+    # ...but anything that changes what he can actually do today does ping.
+    for real in ("Sudbury schools closed after water main break",
+                 "Power outage affects 4,000 in Framingham",
+                 "Boil water order issued for Natick"):
+        check(f"pings him: {real[:38]!r}", tier(real) in (URGENT, ALERT), tier(real))
+
+    # ==========================================================================
+    # THE WIDER SETTING (briefing.news_scope = "national"), which he is not on.
+    # Kept because the tiers themselves did not change and he may want it back.
+    # ==========================================================================
+    scope("national")
+
     # --- his own words, both halves -------------------------------------------
     check("a road closure in Ohio is not news to him",
           tier("Route 33 lane closure in Columbus, Ohio through Friday") == NONE,
@@ -97,6 +201,8 @@ def main() -> int:
           tier("British woman killed in stabbing at German railway station"))
     check("...but a mass casualty abroad does",
           tier("Mass casualty incident at German railway station, dozens dead") == URGENT)
+
+    scope("local")            # back to his actual setting
 
     # --- how the local press actually writes his state -------------------------
     # "mass." was matched with a leading space so that "mass shooting" would not

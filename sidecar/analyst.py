@@ -121,7 +121,26 @@ DIP_PCT = -2.0           # sold off enough that a positive view is actionable
 # Finnhub returns filing names: "Amazon.Com Inc", "Nvidia Corp", "Advanced Micro
 # Devices". Spoken aloud those are wrong - nobody says "Amazon dot com ink" - and
 # this is a speech-first assistant before it is a screen.
-SUFFIX = re.compile(r"\s*\b(?:inc|corp|corporation|co|company|ltd|limited|plc|holdings?|group|sa|nv|ag|the)\b\.?" * 1 + r"\s*$", re.I)
+SUFFIX = re.compile(
+    r"\s*\b(?:inc|corp|corporation|co|company|ltd|limited|plc|"
+    r"holdings?|hldgs?|hlds|techn|tech|group|grp|sa|nv|ag|the)\b\.?\s*$", re.I)
+
+
+# Some filing names survive every general rule and still come out wrong. "Amc
+# Entertainment Hlds-Cl A" and "Space Exploration Techn-Cl A" both reached his
+# phone looking like that. A short explicit table beats inventing more rules.
+NAME_BY_TICKER = {
+    "AMC": "AMC Entertainment", "SPCX": "SpaceX", "NVDA": "Nvidia",
+    "AAPL": "Apple", "TSLA": "Tesla", "AMZN": "Amazon", "MSFT": "Microsoft",
+    "GOOGL": "Alphabet", "GOOG": "Alphabet", "META": "Meta", "BRK.B": "Berkshire",
+    "SPY": "the S&P 500", "QQQ": "the Nasdaq 100", "DIA": "the Dow",
+}
+
+
+def display_name(symbol: str, name: str = "") -> str:
+    """What to call a company in front of him: the table first, then the rules."""
+    fixed = NAME_BY_TICKER.get(str(symbol or "").upper())
+    return fixed if fixed else speakable(name or symbol)
 
 
 def speakable(name: str) -> str:

@@ -67,6 +67,12 @@ class Briefing:
         self._seen: dict[str, float] = {}    # headline -> when it was judged
         self._last_brief: str = ""           # "2026-08-30 07:30", so it fires once
         self._last_watch: float = 0.0
+        # Two clocks: emergencies are checked more often than prices are.
+        self._last_news: float = 0.0
+        self._last_market: float = 0.0
+        # Consecutive failed news sweeps, used to back off rather than hammer a
+        # feed that is refusing us.
+        self._feed_fails: int = 0
         # "Breaking" means new since he last looked, not everything in the feed
         # right now. On the first pass after a restart the watch only LEARNS what
         # is already out there — otherwise every restart dumps the day's news at
@@ -113,16 +119,45 @@ class Briefing:
         if _in_quiet_hours(now):
             log.info("brief due at %s but it is quiet hours - holding", stamp)
             return
-        text = await self.compose_brief()
+        # Composed once, shaped twice: sentences for the ear, bullets for the eye.
+        sections = await self._sections()
+        text = await self.compose_brief(sections)
+        written = await self.compose_brief_written(sections)
         if text:
-            await delivery.deliver(text, tier=BRIEF, key=f"brief:{stamp}")
+            await delivery.deliver(text, tier=BRIEF, key=f"brief:{stamp}",
+                                   written=written)
 
     async def _maybe_watch(self) -> None:
-        gap = float(config.get("briefing", "watch_minutes", default=10)) * 60
-        if time.time() - self._last_watch < gap:
+        """Two lanes, two clocks. Emergencies are not the same job as prices.
+
+        He asked whether emergencies could be checked every five minutes without
+        everything else running that often. They can, because the halves cost
+        different things: the news sweep is 7 keyless RSS fetches (~6s), while the
+        market half is Finnhub, which is rate-limited to 60 calls a minute and is
+        pointless to poll between prints. Splitting them makes emergencies twice
+        as fresh AND cuts the market calls in half.
+        """
+        now = time.time()
+        news_gap = float(config.get("briefing", "emergency_minutes", default=5)) * 60
+        # If the feed starts refusing us, slow down instead of hammering it. A
+        # silent throttle would look exactly like a quiet news day, which is the
+        # worst possible failure for something whose job is to notice emergencies.
+        news_gap *= 1 + min(self._feed_fails, 5)
+        market_gap = float(config.get("briefing", "watch_minutes", default=10)) * 60
+
+        found: list[tuple[str, str, str]] = []
+        ran = False
+        if now - self._last_news >= news_gap:
+            self._last_news = now
+            ran = True
+            found += await self.scan(news=True, market=False)
+        if now - self._last_market >= market_gap:
+            self._last_market = now
+            ran = True
+            found += await self.scan(news=False, market=True)
+        if not ran:
             return
-        self._last_watch = time.time()
-        found = await self.scan()
+
         if not self._primed:
             self._primed = True
             log.info("watch primed with %d item(s) already out there - none sent",
@@ -133,9 +168,17 @@ class Briefing:
 
     # ---------- the watch ----------
 
-    async def scan(self) -> list[tuple[str, str, str]]:
-        """Everything that will not wait, as (text, tier, key)."""
+    async def scan(self, *, news: bool = True,
+                   market: bool = True) -> list[tuple[str, str, str]]:
+        """Everything that will not wait, as (text, tier, key).
+
+        The halves are separable so the two lanes above can run at their own
+        pace; called with no arguments it still does both, which is what
+        /debug/brief and the gates use.
+        """
         out: list[tuple[str, str, str]] = []
+        if not news:
+            return list(await self._market_moves()) if market else out
         max_age = float(config.get("briefing", "alert_max_age_minutes", default=180))
         for story in await self._fresh_stories():
             tier, why = classify_news(story)
@@ -166,7 +209,8 @@ class Briefing:
                 near, _town = is_local(story)
                 if near or NATIONAL_WEIGHT.search(head):
                     self._held.append({"kind": "news", "text": head, "why": why})
-        out.extend(await self._market_moves())
+        if market:
+            out.extend(await self._market_moves())
         self._forget_old()
         return out
 
@@ -217,6 +261,12 @@ class Briefing:
     async def _fresh_stories(self) -> list[dict]:
         from tools.news_tools import get_breaking_news, get_news
         stories: list[dict] = []
+        # The national wire is ALWAYS read, even on local-only. An earlier version
+        # skipped it to save the call, which quietly closed the one door he asked
+        # to keep open: "the absolute emergencies from other places". A national
+        # emergency he never fetches is one he never hears about. The classifier
+        # throws away everything that is not one - which, measured on two live
+        # wires, was all 110 stories.
         try:
             national = await get_breaking_news(count=8)
             stories += (national.get("items") or national.get("latest") or [])
@@ -229,6 +279,21 @@ class Briefing:
                 stories += (local.get("items") or [])
             except Exception:
                 log.debug("local scan failed for %s", place, exc_info=True)
+
+        # A sweep that returns nothing is a sweep that found nothing OR a feed
+        # that has started refusing us, and from here those look identical. Both
+        # are answered the same way - check less often for a while - because
+        # hammering a throttling feed every five minutes is how a throttle
+        # becomes a block, and a blocked feed reads as a permanently quiet world.
+        if stories:
+            if self._feed_fails:
+                log.info("news feed answering again after %d empty sweep(s)",
+                         self._feed_fails)
+            self._feed_fails = 0
+        else:
+            self._feed_fails += 1
+            log.warning("news sweep came back empty (%d in a row) - backing off",
+                        self._feed_fails)
         return self._dedupe(stories)
 
     async def _market_moves(self) -> list[tuple[str, str, str]]:
@@ -272,77 +337,153 @@ class Briefing:
 
     # ---------- the brief ----------
 
-    async def compose_brief(self) -> str:
-        """What he gets at 07:30. Short, and honest about a quiet day."""
-        parts: list[str] = []
+    # ---------- the brief ----------
+    #
+    # Built ONCE as sections, rendered TWICE. He got a 300-word paragraph on his
+    # phone and said: "way too cluttered and not easy to read at all. I should get
+    # clear and concise bullet points!" He was right, and the cause was structural:
+    # one string was written to be SPOKEN and then sent verbatim to Telegram.
+    # Speech wants flowing sentences; a phone wants short lines you can scan. The
+    # same text cannot be both, so it is no longer asked to be.
 
-        from analyst import speakable
+    @staticmethod
+    def _tidy(headline: str) -> str:
+        """A headline as it should appear, not as the CMS emitted it.
+
+        Real examples from his brief: a poll headline ending "Democratic Primary -"
+        rendered as "Primary -;" once punctuation was appended, and several arrive
+        with trailing dashes, pipes or the outlet's own name.
+        """
+        import re as _re
+        h = _re.sub(r"\s+", " ", str(headline or "")).strip()
+        h = _re.sub(r"[\s\-–—|:;,]+$", "", h)
+        return h
+
+    @staticmethod
+    def _pct(value) -> tuple[str, str]:
+        """(spoken, written) for one percentage.
+
+        They differ on purpose. A screen wants "-4.58%", which is scannable in a
+        column; a voice reading that says "minus four point five eight percent"
+        and sounds like a machine. The first version of this shared one string
+        and the spoken brief inherited the screen's minus signs and separators.
+        """
+        v = float(value or 0)
+        return (f"{'up' if v >= 0 else 'down'} {abs(v):.2f}%",
+                f"{'+' if v >= 0 else '-'}{abs(v):.2f}%")
+
+    async def _sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+        """The brief as titled groups, each line held as (spoken, written).
+
+        The single source of truth for both renderings, so the phone and the
+        voice can never disagree, and so the market and news calls happen once.
+        """
+        from analyst import display_name
         from tools.market_tools import get_market_movers, get_watchlist
+        out: list[tuple[str, list[tuple[str, str]]]] = []
+
         try:
             movers = await get_market_movers()
             rows = movers.get("markets") or []
             if rows:
-                parts.append("Markets: " + "; ".join(
-                    f"{m['name']} {'up' if (m.get('percent') or 0) >= 0 else 'down'} "
-                    f"{abs(m.get('percent') or 0)}%" for m in rows) + ".")
+                said, shown = [], []
+                for m in rows:
+                    name = display_name(m.get("symbol"), m.get("name"))
+                    spoken, written = self._pct(m.get("percent"))
+                    said.append(f"{name} {spoken}")
+                    shown.append(f"{name} {written}")
+                out.append(("Markets", [("; ".join(said), " · ".join(shown))]))
         except Exception:
             log.debug("brief: markets failed", exc_info=True)
+
         try:
             mine = await get_watchlist()
             rows = mine.get("stocks") or []
             if rows:
-                # Spoken like a person says them. Without this the same brief
-                # said "Nvidia Corp" here and "Nvidia" in the take below, and
-                # read "Amc Entertainment Hlds-Cl A" out loud.
-                parts.append("Yours: " + "; ".join(
-                    f"{speakable(r['name'])} "
-                    f"{'up' if (r.get('percent') or 0) >= 0 else 'down'} "
-                    f"{abs(r.get('percent') or 0)}%" for r in rows[:5]) + ".")
+                lines = []
+                for r in rows[:5]:
+                    name = display_name(r.get("symbol"), r.get("name"))
+                    spoken, written = self._pct(r.get("percent"))
+                    lines.append((f"{name} {spoken}", f"{name} {written}"))
+                out.append(("Yours", lines))
         except Exception:
             log.debug("brief: watchlist failed", exc_info=True)
 
-        # What the market people are talking about, and what to make of it. This
-        # is the half he actually asked for - the numbers above are context, and
-        # a brief that stopped at them would be the data dump he rejected.
+        # The judgement, which is the half he actually asked for. Already prose,
+        # so it reads and speaks the same way.
         try:
             from analyst import analyst
             rows = await analyst.take()
             if rows:
-                parts.append("Talked about: "
-                             + ", ".join(r["name"] for r in rows) + ".")
-                parts += [r["line"] for r in rows[:2]]
+                out.append(("Worth a look", [(r["line"], r["line"]) for r in rows[:2]]))
         except Exception:
             log.debug("brief: market take failed", exc_info=True)
 
         stories = await self._fresh_stories()
         ranked: list[tuple[str, dict]] = []
-        for s in stories:
-            tier, _ = classify_news(s)
+        for st in stories:
+            tier, _ = classify_news(st)
             if tier != NONE:
-                ranked.append((tier, s))
-        order = {URGENT: 0, ALERT: 1}
-        ranked.sort(key=lambda p: order.get(p[0], 2))
-        seen_heads: set[str] = set()
-        lines = []
-        for _tier, s in ranked[:4]:
-            head = str(s.get("headline") or "").strip()
-            if not head or head.lower() in seen_heads:
+                ranked.append((tier, st))
+        ranked.sort(key=lambda pair: {URGENT: 0, ALERT: 1}.get(pair[0], 2))
+        seen: set[str] = set()
+        news: list[tuple[str, str]] = []
+        for _tier, st in ranked:
+            head = self._tidy(st.get("headline"))
+            if not head or head.lower() in seen:
                 continue
-            seen_heads.add(head.lower())
-            lines.append(f"{head} ({s.get('source') or 'the news'})")
-        if lines:
-            parts.append("News: " + "; ".join(lines) + ".")
+            seen.add(head.lower())
+            line = f"{head} ({st.get('source') or 'the news'})"
+            news.append((line, line))
+            if len(news) == 3:          # three is a brief; five is a newsletter
+                break
+        if news:
+            out.append(("News", news))
 
         if self._held:
-            extra = [h["text"] for h in self._held[-3:]]
+            extra = [self._tidy(h["text"]) for h in self._held[-2:]]
             self._held.clear()
-            parts.append("Also: " + "; ".join(extra) + ".")
+            out.append(("Also", [(e, e) for e in extra if e]))
+        return out
 
-        if not parts:
+    async def compose_brief(self, sections=None) -> str:
+        """The spoken brief: flowing sentences, because he is hearing it.
+
+        Pass `sections` to render a brief already built. Building it twice would
+        double every market and news call AND silently disagree with itself: the
+        held roll-up is consumed on the first build, so the second rendering would
+        be missing the "Also" group he had just been read.
+        """
+        sections = await self._sections() if sections is None else sections
+        if not sections:
             return "Nothing worth reporting, sir."
-        text = " ".join(p.rstrip() for p in parts)
+        parts = []
+        for title, lines in sections:
+            if not lines:
+                continue
+            body = "; ".join(spoken.rstrip(" .") for spoken, _written in lines)
+            parts.append(f"{title}: {body}.")
         import re as _re
-        return _re.sub(r"\.\.+", ".", text)
+        return _re.sub(r"\.\.+", ".", " ".join(parts)) or "Nothing worth reporting, sir."
+
+    async def compose_brief_written(self, sections=None) -> str:
+        """The same brief for a screen: headed groups of one-line bullets.
+
+        Deliberately plain text - no Markdown. Telegram would need every dash,
+        dot and parenthesis in a news headline escaped, and one missed character
+        makes the whole message fail to send rather than merely look wrong.
+        """
+        sections = await self._sections() if sections is None else sections
+        if not sections:
+            return "Nothing worth reporting, sir."
+        blocks = []
+        for title, lines in sections:
+            if not lines:
+                continue
+            body = "\n".join(f"\u2022 {written.rstrip(' .')}"
+                             for _spoken, written in lines)
+            blocks.append(f"{title.upper()}\n{body}")
+        return "\n\n".join(blocks)
 
 
 briefing = Briefing()

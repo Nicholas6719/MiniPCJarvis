@@ -93,9 +93,17 @@ class Delivery:
         return False
 
     async def deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
-                      subject: str = "") -> dict:
-        """Say it, send it, or hold it. Returns what was actually done."""
+                      subject: str = "", written: str = "") -> dict:
+        """Say it, send it, or hold it. Returns what was actually done.
+
+        `written` is the same message shaped for a screen. Speech wants flowing
+        sentences; a phone wants short lines you can scan. He was sent a 300-word
+        spoken paragraph and told us so: "way too cluttered and not easy to read".
+        When a caller supplies both, the ear gets `text` and the eye gets
+        `written`; when it does not, nothing changes.
+        """
         text = (text or "").strip()
+        written = (written or "").strip()
         if not text:
             return {"delivered": "nothing", "why": "empty"}
         if tier not in _TIERS:
@@ -120,7 +128,7 @@ class Delivery:
             # audio gone) — the phone is better than losing it
         if telegram_available():
             from remote_telegram import telegram
-            await telegram.send_proactive(text, tier=tier, subject=subject)
+            await telegram.send_proactive(written or text, tier=tier, subject=subject)
             await bus.emit("proactive", text=text, tier=tier, channel="telegram",
                            subject=subject)
             return {"delivered": "telegram", "tier": tier,

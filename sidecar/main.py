@@ -825,11 +825,18 @@ async def debug_brief(body: dict, x_jarvis_token: str | None = Header(None)):
         found = await briefing.scan()
         return {"would_send": [{"text": t, "tier": tier} for t, tier, _ in found],
                 "held_for_next_brief": len(briefing._held)}
-    text = await briefing.compose_brief()
+    # Both shapes, from ONE build. Returning only the spoken form made this
+    # endpoint useless for the thing he actually complained about - the brief on
+    # his phone - and a verification tool that cannot see the output it is meant
+    # to verify is worse than none.
+    sections = await briefing._sections()
+    text = await briefing.compose_brief(sections)
+    written = await briefing.compose_brief_written(sections)
     if body.get("send"):
         from delivery import BRIEF, delivery
-        return {"brief": text, "delivery": await delivery.deliver(text, tier=BRIEF)}
-    return {"brief": text, "sent": False}
+        return {"brief": text, "written": written,
+                "delivery": await delivery.deliver(text, tier=BRIEF, written=written)}
+    return {"brief": text, "written": written, "sent": False}
 
 
 @app.post("/debug/telegram")
