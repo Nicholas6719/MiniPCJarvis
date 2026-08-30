@@ -107,6 +107,25 @@ def main() -> int:
           len(b4._dedupe([story("Gas leak in Natick"),
                           story("Nvidia falls after earnings")])) == 2)
 
+    # --- NOTABLE means "waits for the brief", not "belongs in the brief" ------
+    # Both of these are real, and both filled the first brief he would have got.
+    b6 = br.Briefing()
+    b6._primed = True
+    b6._market_moves = lambda: _fake_moves()
+    b6._fresh_stories = lambda: _fake_stories([
+        story("Man Utd pay tribute to 'proud Red' officer who died in A66 crash"),
+        story("Football Adds Former Minuteman Kevin Coyle To Defensive Staff"),
+        story("Mass. awards $17.9 million to improve health in 31 communities"),
+    ])
+    asyncio.run(b6.scan())
+    rolled = " | ".join(h["text"] for h in b6._held)
+    check("a UK football tribute does not reach his morning",
+          "A66" not in rolled, rolled)
+    check("...and neither does a college football staff hire",
+          "Defensive Staff" not in rolled, rolled)
+    check("...but something from his own state does",
+          "Mass." in rolled, rolled)
+
     # --- a quiet day is allowed to be quiet ----------------------------------
     b5 = br.Briefing()
     b5._fresh_stories = lambda: _fake_stories([])

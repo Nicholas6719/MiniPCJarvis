@@ -427,6 +427,14 @@ def say_article(_s: dict, res: dict) -> str:
     return f"Opening it: {title}." if title else "Opening it now."
 
 
+def say_take(_s: dict, res: dict) -> str:
+    """The market view. Already composed as speech by analyst.py - do not rebuild
+    it here, or the judgement decays back into the list of prices he rejected."""
+    if "error" in res:
+        return res["error"]
+    return res.get("spoken") or "I couldn't get a read on the market right now."
+
+
 def say_watchlist(_s: dict, res: dict) -> str:
     """His own names, biggest mover first — that is the one he wants to hear."""
     if "error" in res:
@@ -1335,6 +1343,14 @@ SKILLS: list[Skill] = [
         "how are my positions", "how's my watchlist", "check my portfolio",
         "how are my shares doing"],
         speak=say_watchlist),
+    Skill("market_take", "market_take", [
+        "what are experts saying about the market", "what stocks should i watch",
+        "what should i be watching today", "what are people talking about in the market",
+        "what stocks are experts talking about", "what's moving today",
+        "give me your market take", "what do analysts like right now",
+        "any stocks worth looking at", "is now a good time to buy",
+        "what's worth buying", "what are the top stocks today"],
+        speak=say_take),
     Skill("markets", "get_market_movers", [
         "how's the market doing", "how are the markets", "how did the market close",
         "what's the market doing today", "how's the stock market", "are the markets up",

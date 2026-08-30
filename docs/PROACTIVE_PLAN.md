@@ -218,6 +218,42 @@ Five things only showed up by looking at real output, and are worth remembering:
 `/debug/brief` composes a brief (or runs the watch) WITHOUT sending anything.
 Build against that, not against his phone.
 
+- **Phase 3 — DONE.** `analyst.py` + `market_take` tool + the `market_take` skill,
+  folded into every brief. His test of it was one sentence — *"Nvidia is up right
+  now, so you shouldn't buy in"* — so a stance is a VIEW plus TIMING, never a
+  price. Analysts supply the view (Finnhub consensus, attributed and counted),
+  today's move supplies the timing, and the verdict rules are mechanical on
+  purpose: an LLM inventing conviction about his money is the one thing this must
+  not do. Every reply ends "not advice", and the gate asserts no imperative ever
+  reaches him.
+
+  Where the names come from is the hard part, and four live runs rewrote it:
+
+  1. Finnhub's free news carries NO ticker tags (`related` is empty on all 100
+     items), so names are read out of headlines.
+  2. Bare capitalised words are not tickers. `AS` (Amer Sports) came from
+     "rallies AS analyst upgrade", `AD` (Array Digital) from "week ahead". Both
+     are real US listings, so confirming the listing did not help.
+  3. Worse, symbols COLLIDE across exchanges. "Analysts recommend buying Kotak
+     Mahindra Bank, AU SFB, BDL, Kaynes Tech" is an Indian headline; BDL is
+     Bharat Dynamics there and Flanigan's Enterprises — a Florida restaurant
+     chain — here. He was told experts were discussing a restaurant chain.
+     Evidence is GRADED now: tagged `(NVDA)`, beside the word "Stock", or a known
+     name is trusted at one mention; a bare word in a list needs two. And nothing
+     without analyst coverage can be something "experts are talking about".
+  4. Filing names are not speech. `speakable()` turns "Amazon.Com Inc" into
+     "Amazon" and "Backblaze Inc-A" into "Backblaze", and the brief now uses it
+     everywhere so it stops saying "Nvidia Corp" and "Nvidia" in one breath.
+
+  Two bugs the briefing gate found on the way:
+
+  - `is_local` matched `" mass."` with a LEADING SPACE (to dodge "mass
+    shooting"), so any headline starting "Mass." — the local house style — was
+    not local at all. Word boundaries now; both cases covered.
+  - NOTABLE means "waits for the brief", not "belongs in it". A Manchester United
+    tribute and a UMass football staff hire filled the first roll-up. A held item
+    must be near him or nationally weighty.
+
 ## Order of work
 
 1. Phase 1 — idle sleep and summon. Smallest, most visible, mostly exists.

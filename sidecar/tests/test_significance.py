@@ -98,6 +98,20 @@ def main() -> int:
     check("...but a mass casualty abroad does",
           tier("Mass casualty incident at German railway station, dozens dead") == URGENT)
 
+    # --- how the local press actually writes his state -------------------------
+    # "mass." was matched with a leading space so that "mass shooting" would not
+    # read as Massachusetts. That also made a headline STARTING with "Mass." -
+    # the local house style - not local at all, and it was dropped from his brief.
+    from significance import is_local  # noqa: E402
+    check("a headline starting 'Mass.' is his state",
+          is_local({"headline": "Mass. awards $17.9 million to 31 communities"})[0])
+    check("...and 'mass shooting' still is not",
+          not is_local({"headline": "Mass shooting reported in Denver"})[0])
+    check("...nor 'mass casualty'",
+          not is_local({"headline": "Mass casualty incident in Berlin"})[0])
+    check("a town name still wins outright",
+          is_local({"headline": "Fatal crash closes Route 9 in Natick"}) == (True, True))
+
     # --- an empty story is not a story ----------------------------------------
     check("nothing is not something", classify_news({})[0] == NONE)
 

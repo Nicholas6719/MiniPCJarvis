@@ -245,6 +245,24 @@ async def get_market_movers() -> dict:
     return {"markets": out, "as_of": dt.datetime.now().strftime("%H:%M")}
 
 
+async def _market_take() -> dict:
+    """The spoken market view. The judgement lives in analyst.py; this exposes it
+    with the rest of the market tools so the model can reach it."""
+    from analyst import analyst
+    rows = await analyst.take()
+    if not rows:
+        return {"spoken": "I couldn't get a read on what the market is talking "
+                          "about right now.", "count": 0, "stocks": []}
+    spoken = " ".join(
+        [f"The names in the conversation today: "
+         f"{', '.join(r['name'] for r in rows)}."]
+        + [r["line"] for r in rows[:3]]
+        + ["That is what analysts are saying, not advice."])
+    return {"spoken": spoken, "count": len(rows),
+            "stocks": [{k: r[k] for k in ("symbol", "name", "price", "percent",
+                                          "held", "verdict")} for r in rows]}
+
+
 def register_all() -> None:
     registry.register(Tool(
         name="get_stock_quote",
@@ -263,6 +281,14 @@ def register_all() -> None:
             "symbol": {"type": "string", "description": "ticker or company name"}},
             "required": ["symbol"]},
         risk=Risk.SAFE, handler=get_analyst_view, timeout=25))
+    registry.register(Tool(
+        name="market_take",
+        description="What the market is talking about today and what analysts make "
+                    "of it, as a judgement rather than a list of prices. Use for "
+                    "'what should I be watching', 'what are experts saying', "
+                    "'what stocks are people talking about', 'is now a good time to buy'.",
+        parameters={"type": "object", "properties": {}},
+        risk=Risk.SAFE, handler=_market_take, timeout=90))
     registry.register(Tool(
         name="get_company_news",
         description="Recent news headlines about one company.",

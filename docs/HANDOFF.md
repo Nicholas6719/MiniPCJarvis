@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-08-26.
+Updated: 2026-08-30.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -1047,6 +1047,47 @@ in the build.
 
 His actual data was repaired by hand: ids 166 and 167 cancelled, one daily 21:00 reminder
 in their place.
+
+## 2026-08-30: he now works a shift, and has an opinion
+
+Phases 2 and 3 of `docs/PROACTIVE_PLAN.md` are in. Four modules, four gates, all
+wired into `scripts/build_sidecar.cmd`:
+
+    delivery.py       WHERE it goes  - present at the PC, or Telegram
+    significance.py   WHETHER to say - four tiers, rules not a model
+    briefing.py       WHEN           - 4 briefs a day + a 10-minute watch
+    analyst.py        WHAT to make of it - a stance, not a data dump
+
+Build against `/debug/brief` and `/debug/tool {"tool":"market_take"}`. Both compose
+the real thing and send NOTHING. Every bug below was found through them rather
+than by messaging his phone, which is the only sane way to develop this.
+
+**Things that were true and are worth not rediscovering:**
+
+- His 07:30 brief sat INSIDE the proactive quiet window (which ends 08:00), so it
+  would have been suppressed every day. Briefing keeps its own window, 22:00-07:00
+  (`briefing.quiet_start/quiet_end`). Two of his own decisions conflicted.
+- The watch must PRIME on its first pass, or every restart dumps the whole feed at
+  him as breaking news.
+- `is_local` matched `" mass."` with a leading space to dodge "mass shooting" -
+  which meant a headline STARTING "Mass." was not local. Word boundaries now
+  (`REGION_RE`/`TOWN_RE`).
+- Finnhub free tier: `/news?category=general` returns 100 items with `related`
+  EMPTY on every one. There is no ticker tagging. Names come from headlines.
+- Ticker symbols COLLIDE across exchanges, and a US-listing check cannot catch it.
+  BDL is Bharat Dynamics in Bombay and Flanigan's Enterprises (a Florida
+  restaurant chain) here, and he was told experts were discussing the restaurant.
+  Evidence is graded in `analyst.candidates()`: tagged `(NVDA)`, adjacent to
+  "Stock", or a known name = trusted at one mention; a bare word in a list needs
+  two. Plus: no analyst coverage, not in the take.
+- Finnhub returns filing names. `analyst.speakable()` is used EVERYWHERE a company
+  is spoken, or the same brief says "Nvidia Corp" and "Nvidia" in one breath.
+- The market take must never carry an imperative. Gated in `test_analyst.py` and
+  `market_e2e.py`; every reply ends "not advice".
+
+**Still unverified:** whether the wake word really takes foreground from a focused
+Excel window. Windows resists foreground steals and the ALT-key nudge is a
+workaround. He was asked to try it by hand.
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en

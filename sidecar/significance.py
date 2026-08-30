@@ -37,8 +37,18 @@ NONE = ""
 # Middlesex County, Massachusetts. The five towns he named come first; the state
 # is still local, and Boston is close enough to matter to him.
 HOME_TOWNS = ("framingham", "sudbury", "marlborough", "marlboro", "maynard", "natick")
-HOME_REGION = ("massachusetts", "middlesex", " mass.", "boston", "metrowest",
+HOME_REGION = ("massachusetts", "middlesex", "mass.", "boston", "metrowest",
                "worcester", "cambridge", "somerville", "newton", "waltham")
+
+# "mass." was written " mass." with a leading space, to keep "mass shooting" and
+# "mass casualty" from reading as Massachusetts. It also meant a headline that
+# STARTS with "Mass." - which is exactly how the local press writes it - was not
+# local at all: "Mass. awards $17.9 million to improve health in 31 communities"
+# was foreign news to him. A word boundary does the same job without the hole.
+REGION_RE = re.compile(
+    "|".join(r"\b" + re.escape(term) for term in HOME_REGION), re.I)
+TOWN_RE = re.compile(
+    "|".join(r"\b" + re.escape(town) + r"\b" for town in HOME_TOWNS), re.I)
 
 # --- life and limb ------------------------------------------------------------
 # The things he named: active shooters, earthquakes, tragedies. Anything here is
@@ -112,9 +122,9 @@ def _text_of(story: dict) -> str:
 
 def is_local(story: dict) -> tuple[bool, bool]:
     """(near him at all, one of his five towns)."""
-    t = _text_of(story).lower()
-    town = any(name in t for name in HOME_TOWNS)
-    return (town or any(name in t for name in HOME_REGION)), town
+    t = _text_of(story)
+    town = bool(TOWN_RE.search(t))
+    return (town or bool(REGION_RE.search(t))), town
 
 
 def classify_news(story: dict) -> tuple[str, str]:

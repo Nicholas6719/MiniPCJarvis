@@ -155,7 +155,17 @@ class Briefing:
                 src = story.get("source") or "the news"
                 out.append((f"{head} — {src}.", tier, key))
             else:
-                self._held.append({"kind": "news", "text": head, "why": why})
+                # NOTABLE means "waits for the brief", not "belongs in the brief".
+                # The first real brief rolled up a Manchester United tribute to an
+                # officer killed on the A66 and a UMass football staff hire. Both
+                # are correctly NOTABLE - neither is worth his morning. A held item
+                # has to be near him or carry national weight; a distant one-off
+                # death stays classified so a direct question still answers, but it
+                # does not get to crowd the roll-up.
+                from significance import NATIONAL_WEIGHT, is_local
+                near, _town = is_local(story)
+                if near or NATIONAL_WEIGHT.search(head):
+                    self._held.append({"kind": "news", "text": head, "why": why})
         out.extend(await self._market_moves())
         self._forget_old()
         return out
@@ -266,6 +276,7 @@ class Briefing:
         """What he gets at 07:30. Short, and honest about a quiet day."""
         parts: list[str] = []
 
+        from analyst import speakable
         from tools.market_tools import get_market_movers, get_watchlist
         try:
             movers = await get_market_movers()
@@ -280,11 +291,28 @@ class Briefing:
             mine = await get_watchlist()
             rows = mine.get("stocks") or []
             if rows:
+                # Spoken like a person says them. Without this the same brief
+                # said "Nvidia Corp" here and "Nvidia" in the take below, and
+                # read "Amc Entertainment Hlds-Cl A" out loud.
                 parts.append("Yours: " + "; ".join(
-                    f"{r['name']} {'up' if (r.get('percent') or 0) >= 0 else 'down'} "
+                    f"{speakable(r['name'])} "
+                    f"{'up' if (r.get('percent') or 0) >= 0 else 'down'} "
                     f"{abs(r.get('percent') or 0)}%" for r in rows[:5]) + ".")
         except Exception:
             log.debug("brief: watchlist failed", exc_info=True)
+
+        # What the market people are talking about, and what to make of it. This
+        # is the half he actually asked for - the numbers above are context, and
+        # a brief that stopped at them would be the data dump he rejected.
+        try:
+            from analyst import analyst
+            rows = await analyst.take()
+            if rows:
+                parts.append("Talked about: "
+                             + ", ".join(r["name"] for r in rows) + ".")
+                parts += [r["line"] for r in rows[:2]]
+        except Exception:
+            log.debug("brief: market take failed", exc_info=True)
 
         stories = await self._fresh_stories()
         ranked: list[tuple[str, dict]] = []

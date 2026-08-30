@@ -145,6 +145,52 @@ async def main() -> int:
             async for m in ws:
                 ev.append(json.loads(m))
 
+    # --- the market take, against the live press ------------------------------
+    # He asked for judgement, not a data dump, so the shape of the answer is the
+    # thing being tested. It must name stocks, take a position on them, and admit
+    # what it is. Live runs of this put a Florida restaurant chain and two English
+    # words (AS, AD) in front of him, so the sanity checks are not ceremonial.
+    async with httpx.AsyncClient(timeout=180) as c:
+        take = await tool(c, "market_take")
+    if not take["_ok"]:
+        check("the market take comes back", False, take)
+    else:
+        r = take.get("result") or take
+        rows, spoken = (r.get("stocks") or []), str(r.get("spoken") or "")
+        check("it names stocks it can actually find", bool(rows), r)
+        check("it says what analysts think, not just a price",
+              any(w in spoken for w in ("analysts say", "say sell", "analysts are split",
+                                        "no analyst")), spoken[:160])
+        check("it admits it is not advice", "not advice" in spoken, spoken[-80:])
+        check("it never tells him what to do",
+              not any(w in spoken.lower() for w in
+                      ("you should", "i recommend", "guaranteed")), spoken[:160])
+        check("it keeps to the eight names he asked for", len(rows) <= 8, len(rows))
+        for row in rows:
+            check(f"{row.get('symbol')} is a real company, not a word",
+                  bool(str(row.get("name") or "").strip())
+                  and str(row.get("name")).upper() != str(row.get("symbol")).upper(),
+                  row)
+            check(f"{row.get('symbol')} carries a verdict",
+                  bool(str(row.get("verdict") or "").strip()), row)
+
+    # --- and that asking for it actually reaches it ---------------------------
+    # The reflex router is a kNN over seed phrases, so neighbouring skills can
+    # steal each other's questions: "what stocks should I watch" sits very close
+    # to "check my stocks", which is a different tool with a different answer.
+    async with httpx.AsyncClient(timeout=60) as c:
+        for text, want in (
+                ("what should i be watching today", "market_take"),
+                ("what are experts saying about the market", "market_take"),
+                ("what stocks are experts talking about", "market_take"),
+                ("is now a good time to buy", "market_take"),
+                ("how are my stocks doing", "watchlist"),
+                ("check my portfolio", "watchlist"),
+                ("how is the market doing", "markets")):
+            got = (await c.post(f"{BASE}/brain/classify", headers=H,
+                                json={"text": text})).json().get("skill")
+            check(f"{text!r} reaches {want}", got == want, got)
+
     lt = asyncio.create_task(listen())
     await asyncio.sleep(1)
     async with httpx.AsyncClient(timeout=120) as c:
