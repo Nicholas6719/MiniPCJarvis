@@ -729,6 +729,30 @@ def slots_images(t: str) -> dict | None:
     return out
 
 
+# "every night at 9" is a STANDING reminder, not one Sunday evening. Without
+# this it was set once, for the next 9 pm, and the confirmation said "Sunday" —
+# so the only way to get a daily reminder was to notice and argue about it.
+_RECURRING = (
+    (re.compile(r"\bevery\s+(?:week)?day\b|\bevery\s+(?:night|evening|morning|"
+                r"afternoon)\b|\b(?:daily|each\s+day|each\s+night|every\s+single\s+day)\b"
+                r"|\bevery\s+day\b", re.I), "daily"),
+    (re.compile(r"\bevery\s+week\b|\bweekly\b|\bevery\s+(?:monday|tuesday|wednesday|"
+                r"thursday|friday|saturday|sunday)\b", re.I), "weekly"),
+    (re.compile(r"\bevery\s+weekday\b|\bon\s+weekdays\b|\bweekdays\b|"
+                r"\bmonday\s+(?:to|through)\s+friday\b", re.I), "weekdays"),
+)
+
+
+def _recurrence_in(t: str) -> str:
+    # weekdays is checked last because "every weekday" also matches the daily
+    # pattern's "every day"; the most specific reading should win
+    found = "none"
+    for pat, name in _RECURRING:
+        if pat.search(t):
+            found = name
+    return found
+
+
 def slots_reminder(t: str) -> dict | None:
     out: dict = {}
     m = re.search(r"\bin\s+(\d{1,3}|[a-z]+)\s+(minute|minutes|min|mins|hour|hours|hr)\b", t)
@@ -753,12 +777,36 @@ def slots_reminder(t: str) -> dict | None:
         out["at_time"] = f"{h:02d}:{mi:02d}"
         if re.search(r"\btomorrow\b", t):
             out["date"] = (dt.date.today() + dt.timedelta(days=1)).isoformat()
+        else:
+            # "every Monday at 9" has to START on a Monday, or the weekly
+            # repeat lands on whatever day it happened to be set — it read
+            # back "every Sunday" for a reminder asked for on Mondays.
+            days = ("monday", "tuesday", "wednesday", "thursday",
+                    "friday", "saturday", "sunday")
+            named = next((i for i, d in enumerate(days)
+                          if re.search(r"\b" + d + r"s?\b", t, re.I)), None)
+            if named is not None:
+                today = dt.date.today()
+                ahead = (named - today.weekday()) % 7
+                if ahead == 0 and (h, mi) <= (dt.datetime.now().hour,
+                                              dt.datetime.now().minute):
+                    ahead = 7                      # today's has already gone
+                out["date"] = (today + dt.timedelta(days=ahead)).isoformat()
     m = re.search(r"\b(?:to|that)\s+(.+?)(?:\s+(?:in|at|for|by)\s+\d\S*.*)?[.!?]*$", t)
     text = m.group(1).strip() if m else ""
     text = re.sub(r"^(?:remind me to|remind me|to)\s+", "", text).strip()
+    # "every night" belongs to the schedule, not to the thing being remembered
+    text = re.sub(r"\b(?:every|each)\s+(?:single\s+)?"
+                  r"(?:day|night|evening|morning|afternoon|week|weekday)\b\s*", "",
+                  text, flags=re.I).strip(" ,")
+    # politeness is addressed to him, not part of what he is holding on to
+    text = re.sub(r"\s*\b(?:please|thanks|thank you)\b\s*$", "", text, flags=re.I).strip(" ,")
     if not text:
         return None
     out["text"] = text
+    rec = _recurrence_in(t)
+    if rec != "none":
+        out["recurrence"] = rec
     return out
 
 
@@ -833,6 +881,11 @@ def screen_direct(text: str) -> bool:
 def say_reminder(slots: dict, res: dict) -> str:
     if "error" in res:
         return "I couldn't set that reminder."
+    # Say what was STORED, never what was asked for. He was once told "9:00 PM
+    # daily" for a reminder actually sitting at 3:46 PM, which is worse than
+    # setting it wrong: he had no reason to check.
+    if res.get("spoken"):
+        return str(res["spoken"])
     due = str(res.get("due", ""))          # "Saturday 18:00" from set_reminder
     try:
         day, hm = due.split()

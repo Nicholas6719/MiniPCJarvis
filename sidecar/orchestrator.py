@@ -806,6 +806,14 @@ class Orchestrator:
         self._arm_conversation()
 
     async def _converse(self, text: str, t_start: float) -> None:
+        # Just his NAME and nothing else. By voice this is handled up in the turn
+        # ("he only said the wake word — acknowledge and listen"), but a typed
+        # "Jarvis" reached here with the name stripped off, leaving an empty
+        # string for the router to match — and an empty string is nearest to
+        # something. Over Telegram it came back "It's 7:46 AM, sir."
+        if not WAKE_PHRASE.sub("", text or "", count=1).strip():
+            await self._say_and_finish("At your service, sir.", text, t_start, "attention")
+            return
         memory.log_turn("user", text)
         facts.reset_evidence()
         # ---- a question he was asked is still open: this may be the answer ----

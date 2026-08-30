@@ -1018,6 +1018,36 @@ Three different modules (_ctypes.pyd, ntdll.dll, ucrtbase.dll) with the same fau
 is the signature of heap corruption — the crash surfaces wherever the damaged allocation
 is next touched, so the module tells you nothing about the culprit.
 
+## 2026-08-30: three bugs in four lines of a real Telegram exchange
+
+    > Remind me every night at 9 pm to wear my retainers please
+    < Reminder set for 9:00 PM Sunday.        <- ONE Sunday, not every night
+    > Not just Sunday, every night
+    < Reminder set for 9:00 PM daily.         <- untrue: it had stored 3:46 PM
+
+1. **"every night" was dropped.** `slots_reminder` read the time and ignored the
+   repetition entirely — there was no recurrence extraction in it at all. It now reads
+   every night / every day / every weekday / every Monday, strips the schedule words out
+   of the reminder TEXT (he was being reminded to "every night wear my retainers"), and
+   drops trailing politeness. A named weekday also sets the START date, or "every Monday"
+   began on whichever day it was set and read back "every Sunday".
+2. **Correcting it left both.** His scheduler held two rows, the one-off and the daily.
+   `set_reminder` now REPLACES a pending reminder whose text matches.
+3. **He said something untrue, and that is the worst of the three.** The stored row was
+   3:46 PM; the model narrated its own intention rather than the result. The confirmation
+   sentence is now built inside `set_reminder` from the values actually written, returned
+   as `spoken`, and `say_reminder` prefers it. Being told the wrong time is worse than
+   being set the wrong time — there is nothing to notice.
+
+**A bare "Jarvis" typed at him answered with the time.** By voice this is handled in the
+turn ("he only said the wake word — acknowledge and listen"), but the text path stripped
+the name and handed an EMPTY string to the router, and an empty string is nearest to
+something. `_converse` now answers "At your service, sir." Gate: `tests/test_reminders.py`,
+in the build.
+
+His actual data was repaired by hand: ids 166 and 167 cancelled, one daily 21:00 reminder
+in their place.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

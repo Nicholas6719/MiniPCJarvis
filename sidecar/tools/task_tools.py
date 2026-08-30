@@ -33,9 +33,50 @@ def set_reminder(text: str, minutes_from_now: int | None = None,
         return {"error": "need minutes_from_now or at_time"}
     if recurrence not in ("none", "daily", "weekdays", "weekly"):
         recurrence = "none"
+
+    # Asking for the same thing again REPLACES it. Correcting a reminder ("not
+    # just Sunday — every night") otherwise left the first one in place and he
+    # ended up with two, one of them wrong, with no way to see either.
+    replaced = 0
+    key = _normalise(text)
+    for t in scheduler.list_pending():
+        if _normalise(t["text"]) == key:
+            if scheduler.cancel(t["id"]):
+                replaced += 1
+
     tid = scheduler.add(text, due.timestamp(), recurrence)
-    return {"id": tid, "text": text,
-            "due": due.strftime("%A %H:%M"), "recurrence": recurrence}
+    out = {"id": tid, "text": text,
+           "due": due.strftime("%A %H:%M"), "recurrence": recurrence,
+           "spoken": _confirm(text, due, recurrence)}
+    if replaced:
+        out["replaced"] = replaced
+    return out
+
+
+def _normalise(s: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", (s or "").lower()).strip()
+
+
+def _confirm(text: str, due: dt.datetime, recurrence: str) -> str:
+    """The sentence he hears, built from what was actually stored.
+
+    He was once told "9:00 PM daily" for a reminder sitting at 3:46 PM. Being
+    told the wrong time is worse than being set the wrong time, because there is
+    nothing to notice.
+    """
+    when = due.strftime("%I:%M %p").lstrip("0")
+    if recurrence == "daily":
+        return f"Reminder set for {when}, every day."
+    if recurrence == "weekdays":
+        return f"Reminder set for {when}, every weekday."
+    if recurrence == "weekly":
+        return f"Reminder set for {when}, every {due.strftime('%A')}."
+    today = dt.datetime.now().date()
+    if due.date() == today:
+        return f"Reminder set for {when} today."
+    if due.date() == today + dt.timedelta(days=1):
+        return f"Reminder set for {when} tomorrow."
+    return f"Reminder set for {when} {due.strftime('%A')}."
 
 
 def list_reminders() -> dict:

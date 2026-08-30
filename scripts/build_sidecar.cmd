@@ -19,6 +19,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_clarify.py || (echo CLARIFY TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_output_watch.py || (echo OUTPUT WATCH TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_voice_note.py || (echo VOICE NOTE TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_reminders.py || (echo REMINDER TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\sleep_coverage.py || (echo SLEEP TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\speech_symbols.py || (echo SPEECH TEST FAILED & exit /b 1)
 .venv\Scripts\pyinstaller jarvis-sidecar.spec --noconfirm --distpath dist --workpath build > "%TEMP%\pyi.log" 2>&1 || (echo PYINSTALLER FAILED & exit /b 1)
