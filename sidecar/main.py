@@ -778,6 +778,23 @@ async def debug_audio_playing(body: dict, x_jarvis_token: str | None = Header(No
     return {"ok": True, "pretending_audio_plays": on}
 
 
+@app.post("/debug/forget_secret")
+async def debug_forget_secret(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): drop a secret from THIS session's memory.
+
+    Simulates what a restart storm does — the sidecar comes back with nothing and
+    tells the user to add a key that is already in Credential Manager. The Rust
+    supervisor should notice within its 20 s tick and push it back; this is the
+    only way to prove that it does.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    name = str(body.get("name") or "")
+    had = bool(secrets.pop(name, None))
+    return {"ok": True, "forgot": name, "had_it": had}
+
+
 @app.post("/debug/telegram")
 async def debug_telegram(body: dict, x_jarvis_token: str | None = Header(None)):
     """Dev/test only (JARVIS_DEBUG=1): hand the bridge an update as though it had

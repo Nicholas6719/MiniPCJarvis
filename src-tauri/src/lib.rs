@@ -44,6 +44,43 @@ fn push_secret_async(sc: Arc<Sidecar>, name: String, value: String) {
     });
 }
 
+/// Which secrets the sidecar currently holds. It keeps them in memory only, so a
+/// restart it did not tell us about leaves it with none — and it then behaves
+/// exactly like a machine that never had a key, telling the user to add one that
+/// is already in Credential Manager.
+async fn sidecar_secret_names(sc: &Sidecar) -> Option<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct Held {
+        present: Vec<String>,
+    }
+    let client = reqwest::Client::new();
+    let r = client
+        .get(format!("http://127.0.0.1:{}/secrets", sc.info.port))
+        .header("X-Jarvis-Token", &sc.info.token)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .ok()?;
+    r.json::<Held>().await.ok().map(|h| h.present)
+}
+
+/// Push anything it is missing. Cheap, and the only way a lost key ever comes
+/// back without the user restarting the app on a hunch.
+async fn reconcile_secrets(sc: &Arc<Sidecar>) {
+    let Some(held) = sidecar_secret_names(sc).await else {
+        return;
+    };
+    for name in credentials::KNOWN_SECRETS {
+        if held.iter().any(|h| h == name) {
+            continue;
+        }
+        if let Some(v) = credentials::get_secret(name) {
+            eprintln!("[jarvis] sidecar was missing {name} — pushing it again");
+            push_secret_async(sc.clone(), name.to_string(), v);
+        }
+    }
+}
+
 async fn sidecar_post(sc: &Sidecar, path: &str) {
     let client = reqwest::Client::new();
     let _ = client
@@ -86,6 +123,10 @@ pub fn run() {
             loop {
                 tokio::time::sleep(Duration::from_secs(20)).await;
                 if sc3.is_alive() {
+                    // Alive is not the same as equipped: a restart we did not
+                    // perform (or one past the give-up budget below) leaves it
+                    // running with no secrets at all.
+                    reconcile_secrets(&sc3).await;
                     continue;
                 }
                 recent_restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
