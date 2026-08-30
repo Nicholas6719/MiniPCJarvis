@@ -36,13 +36,22 @@ def to_pcm16k(data: bytes) -> np.ndarray:
             resampler = av.AudioResampler(format="flt", layout="mono", rate=RATE)
             chunks: list[np.ndarray] = []
             total = 0
+            capped = False
             for frame in container.decode(stream):
                 for out in resampler.resample(frame):
                     arr = out.to_ndarray().reshape(-1).astype(np.float32)
                     chunks.append(arr)
                     total += len(arr)
                     if total > RATE * MAX_SECONDS:
+                        capped = True
                         break
+                if capped:
+                    # the break above only left the INNER loop, so the cap was
+                    # no cap at all: 20 MB of Opus is about an hour of audio,
+                    # and an hour at 16 kHz float32 is a quarter of a gigabyte
+                    log.warning("voice note longer than %ds - taking the first part",
+                                MAX_SECONDS)
+                    break
             # the resampler holds a tail back until it is flushed
             for out in resampler.resample(None):
                 chunks.append(out.to_ndarray().reshape(-1).astype(np.float32))

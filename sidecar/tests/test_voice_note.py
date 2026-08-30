@@ -48,6 +48,18 @@ def main() -> int:
     check("nothing clips", peak <= 1.0, peak)
     check("a quiet phone recording is brought up to a usable level", peak > 0.5, peak)
 
+    # --- a very long recording is cut, not swallowed whole ---------------------
+    # The cap used to break only the inner loop, which is no cap at all.
+    import audio.decode as dec
+    was = dec.MAX_SECONDS
+    dec.MAX_SECONDS = 1
+    try:
+        short = dec.to_pcm16k(raw)
+        check("a recording past the cap is truncated, not decoded in full",
+              len(short) < len(a), f"{len(short)/RATE:.2f}s vs {len(a)/RATE:.2f}s")
+    finally:
+        dec.MAX_SECONDS = was
+
     # --- rubbish must be refused, not fed to the recogniser -------------------
     for bad, label in ((b"", "nothing at all"),
                        (b"this is not audio", "junk bytes"),

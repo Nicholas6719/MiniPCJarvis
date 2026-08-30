@@ -372,7 +372,27 @@ but the user's folder was empty; log files diverge.
   A single short phrase is too little work to fan across cores, and it leaves the CPU to
   llama-server. Knob: `brain.embed_threads`.
 
-## WHERE THINGS STAND (2026-08-26 morning) — resume here
+## WHERE THINGS STAND (2026-08-29 evening) — resume here
+
+Everything below this section is history, newest sections near the bottom. Today:
+
+- **All 17 suites green.** `scripts/suites.ps1` keeps every test's full output in
+  `.agent/logs/suite_<name>.log` — read that before theorising about a failure.
+- **Markets are live** (Finnhub key in Credential Manager), **voice notes work from
+  Telegram**, a vague question is **clarified with both answers already fetching**, and
+  **tickers reach the market tools** instead of being answered off a scraped web page.
+- **The room-audio guard is OFF and must stay off** until somebody works out why it
+  corrupts the heap in the packaged build. Read the top of `audio/output_watch.py`: it
+  lists what has already been ruled out, which is most of the obvious things.
+- **`tests/soak_e2e.py` is the only test that asks whether the process SURVIVED.** Every
+  feature test can stay green while the sidecar crash-loops underneath them — that
+  happened all of 2026-08-29. If something is mysteriously flaky, check the Windows
+  Application event log for jarvis-sidecar faults before anything else.
+- OPEN, needs a Rust build (deliberately not done with the user away): the supervisor
+  should re-push secrets it finds missing, because a crash loop can leave the sidecar
+  without the Finnhub key while Credential Manager still has it.
+
+## Superseded pointer (2026-08-26 morning)
 - The full HUD redesign is BUILT, INSTALLED and pushed (commits a671cdc..8131e6f).
   All release suites green. Design source of truth:
   `Jarvis UI mockup improvements/design_handoff_jarvis_hud/README.md`.
