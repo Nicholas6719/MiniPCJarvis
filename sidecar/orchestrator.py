@@ -24,6 +24,7 @@ from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
 import clarify
 from brain.router import brain
+from lastseen import last_seen
 from brain.facts import facts
 import collections
 import re as _re
@@ -958,6 +959,7 @@ class Orchestrator:
             await self.sm.to(State.SEARCHING if skill.tool in ("web_search", "research")
                              else State.EXECUTING, force=True)
             result = await registry.execute(skill.tool, args)
+            last_seen.note_result(result.get("result") if isinstance(result, dict) else result)
             call_id = "reflex-" + uuid.uuid4().hex[:8]
             messages.append({"role": "assistant", "content": None, "tool_calls": [
                 {"id": call_id, "type": "function",
@@ -1071,9 +1073,11 @@ class Orchestrator:
             await queue.put(clean_for_speech(reply))
         if skill.tool and prefetched is not None:
             res = prefetched if isinstance(prefetched, dict) else {"value": prefetched}
+            last_seen.note_result(res)
         elif skill.tool:
             await self.sm.to(State.EXECUTING, force=True)
             out = await registry.execute(skill.tool, args)
+            last_seen.note_result(out.get("result"))
             if out.get("ok"):
                 res = out.get("result")
             else:
@@ -1262,6 +1266,7 @@ class Orchestrator:
             await task
         except asyncio.CancelledError:
             pass
+        last_seen.note_reply(reply)
         if reply:
             from brain.skills import without_honorific
             self._history.append({"role": "user", "content": text})
@@ -1606,6 +1611,7 @@ class Orchestrator:
                          else State.EXECUTING)
                 await self.sm.to(state, force=True)
                 result = await registry.execute(tc["name"], tc["arguments"])
+                last_seen.note_result(result.get("result"))
                 used_tools.append((tc["name"], bool(result.get("ok"))))
                 if result.get("declined") or result.get("unconfirmed"):
                     # the user said no (or nothing): acknowledge and stop - never re-ask

@@ -104,6 +104,11 @@ CASES = [
     ("how's the market doing", "markets"), ("how are the markets", "markets"),
     # HIS stocks are a different question from THE market, and the two sit close
     # enough in phrasing that it is worth pinning them apart
+    # the handoff: "it" is whatever he was just told about
+    ("send it to my phone", "to_phone"), ("send that to me", "to_phone"),
+    ("give me the article", "article"), ("open that story", "article"),
+    # ...and an article is not an application
+    ("open notepad", "open_app"), ("open spotify", "open_app"),
     ("how are my stocks doing", "watchlist"), ("how's my portfolio", "watchlist"),
     ("check my stocks", "watchlist"),
     ("what's in the news", "news"), ("tell me the tech news", "news"),

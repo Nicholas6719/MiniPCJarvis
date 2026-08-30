@@ -23,7 +23,7 @@ from memory.store import memory
 from orchestrator import orchestrator
 from state_machine import State
 from tasks.scheduler import scheduler
-from tools import (builtin, browser_tools, memory_tools, task_tools,
+from tools import (builtin, browser_tools, handoff, memory_tools, task_tools,
                    vision_tools, web_tools, windows_tools)
 from tools.registry import registry
 
@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
     task_tools.register_all()
     vision_tools.register_all()
     browser_tools.register_all()
+    handoff.register_all()
     from tools import file_tools, market_tools, news_tools, weather
     file_tools.register_all()
     weather.register_all()
@@ -67,12 +68,20 @@ async def lifespan(app: FastAPI):
                            description="test-only confirmation-gated no-op",
                            parameters={"type": "object", "properties": {}, "required": []},
                            risk=Risk.MEDIUM, handler=_debug_confirm))
-    scheduler.announce = orchestrator.announce
+    # Everything JARVIS says on his own initiative goes through delivery, which
+    # decides where he is and therefore whether to speak it or send it.
+    from delivery import ALERT, delivery
+    delivery.orchestrator = orchestrator
+
+    async def _announce_alert(text: str) -> None:
+        await delivery.deliver(text, tier=ALERT)
+
+    scheduler.announce = _announce_alert
     scheduler.start()
     from mcp_client import mcp_manager
     asyncio.create_task(mcp_manager.start())
     from proactive import proactive
-    proactive.announce = orchestrator.announce
+    proactive.announce = _announce_alert
     proactive.start()
     from brain.router import brain
 

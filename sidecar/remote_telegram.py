@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets as pysecrets
+import time
 from pathlib import Path
 
 import httpx
@@ -67,6 +68,8 @@ class TelegramBridge:
         self._collect: dict | None = None
         self._turn_done: asyncio.Event | None = None
         self._client: httpx.AsyncClient | None = None
+        # urgent messages awaiting acknowledgement, token -> {text, at, sent}
+        self._urgent: dict[str, dict] = {}
 
     # ------------------------------------------------------------- lifecycle
     def start(self, orchestrator) -> None:
@@ -201,6 +204,10 @@ class TelegramBridge:
                     ok = registry.resolve_confirmation(cid, ans == "yes")
                     await self._api("answerCallbackQuery", callback_query_id=cq["id"],
                                     text="Done." if ok else "That question expired.")
+                elif data.startswith("ack:"):
+                    self._urgent.pop(data.split(":", 1)[1], None)
+                    await self._api("answerCallbackQuery", callback_query_id=cq["id"],
+                                    text="Noted, sir.")
                 elif data.startswith("clarify:"):
                     # tapping "The stock" is exactly saying it — it goes back in
                     # as the next thing he said, and the answer for it is already
@@ -238,6 +245,7 @@ class TelegramBridge:
         if text == "/start":
             await self._send("At your service. Ask me anything you would at the PC.")
             return
+        self.acknowledge_all()        # he is looking at his phone; stop chasing
         await self._remote_turn(text)
 
     # ------------------------------------------------------------- the turn
@@ -245,12 +253,11 @@ class TelegramBridge:
         """Bus listener (sync): collect what a remote turn produces; forward
         reminders and proactive alerts even when no turn is running."""
         kind = evt.get("kind")
-        if kind == "task_due":
-            spawn(self._send(f"Reminder, sir: {evt.get('text', '')}"), name="tg-reminder")
-            return
-        if kind == "proactive":
-            spawn(self._send(str(evt.get("text") or evt.get("alert") or "")), name="tg-proactive")
-            return
+        # Reminders and proactive alerts are NOT forwarded from here any more.
+        # delivery.py decides where they go — speak them if he is at the machine,
+        # send them if he is not — and it calls send_proactive() itself. Echoing
+        # them here as well sent everything twice, once to the room and once to
+        # the phone, whether or not he was in the room.
         c = self._collect
         if c is None:
             return
@@ -317,6 +324,55 @@ class TelegramBridge:
         # otherwise invisible, and he is not in the room to notice.
         await self._send(f"“{heard}”")
         return heard
+
+    async def send_proactive(self, text: str, tier: str = "notable",
+                             subject: str = "") -> None:
+        """Something he did not ask for, reaching him where he is.
+
+        Urgent carries an acknowledge button and keeps asking until he taps it:
+        the whole point of the tier is that it must not be missed. Everything
+        else is said once.
+        """
+        chat = config.get("remote", "telegram_chat_id", default=None)
+        if not chat or not text:
+            return
+        if tier != "urgent":
+            await self._send(text)
+            return
+        token = pysecrets.token_hex(4)
+        self._urgent[token] = {"text": text, "at": time.time(), "sent": 1}
+        await self._api("sendMessage", chat_id=chat, text=text,
+                        reply_markup={"inline_keyboard": [[
+                            {"text": "Got it", "callback_data": f"ack:{token}"}]]})
+        spawn(self._chase(token), name="tg-urgent-chase")
+
+    async def _chase(self, token: str) -> None:
+        """Keep asking until he acknowledges.
+
+        Telegram bots cannot place calls — there is no such method in the Bot
+        API — so this is the honest substitute Nicholas chose: repeat, on a
+        widening interval, and stop the moment he answers. His phone is never
+        silenced, which is the one weakness of doing it this way.
+        """
+        chat = config.get("remote", "telegram_chat_id", default=None)
+        for wait in (300, 300, 600):               # 5 min, 5 min, 10 min
+            await asyncio.sleep(wait)
+            item = self._urgent.get(token)
+            if not item:
+                return                              # acknowledged, or replied to
+            item["sent"] += 1
+            await self._api(
+                "sendMessage", chat_id=chat,
+                text=f"Still unanswered, sir — {item['text']}",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "Got it", "callback_data": f"ack:{token}"}]]})
+        self._urgent.pop(token, None)
+
+    def acknowledge_all(self) -> int:
+        """Any message from him counts as having seen it."""
+        n = len(self._urgent)
+        self._urgent.clear()
+        return n
 
     async def _send_choice(self, evt: dict) -> None:
         """Ask which reading he meant — one tap, no typing. Both answers are

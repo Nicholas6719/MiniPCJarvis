@@ -414,6 +414,19 @@ def say_analyst(slots: dict, res: dict) -> str:
     return line
 
 
+def say_to_phone(_s: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    return "Sent to your phone, sir."
+
+
+def say_article(_s: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    title = (res.get("title") or "").strip()
+    return f"Opening it: {title}." if title else "Opening it now."
+
+
 def say_watchlist(_s: dict, res: dict) -> str:
     """His own names, biggest mover first — that is the one he wants to hear."""
     if "error" in res:
@@ -1306,6 +1319,16 @@ SKILLS: list[Skill] = [
         "what's the price target on microsoft", "do analysts like amazon",
         "what are the analyst recommendations for google", "is tesla a good buy according to analysts"],
         slots=slots_analyst, speak=say_analyst),
+    Skill("to_phone", "send_to_phone", [
+        "send it to my phone", "send that to my phone", "send it to me",
+        "send that to me", "send it through telegram", "text it to me",
+        "send me that on telegram", "put that on my phone", "send it over"],
+        speak=say_to_phone),
+    Skill("article", "open_article", [
+        "give me the article", "open the article", "pull up the article",
+        "show me the source", "open that story", "pull it up",
+        "let me read it", "open the link", "show me the full story"],
+        speak=say_article),
     Skill("watchlist", "get_watchlist", [
         "how are my stocks doing", "how's my portfolio", "how is my portfolio doing",
         "check my stocks", "how are my stocks", "what are my stocks doing",
