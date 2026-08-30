@@ -112,9 +112,16 @@ async def _fetch_feed(client: httpx.AsyncClient, source: str, url: str) -> list[
         title = _clean(get("title"))
         if not title:
             continue
+        # _parse_date normalises to naive UTC, so this must compare against UTC.
+        # Comparing against local time made every story four hours younger than
+        # it was, and anything published in the last four hours looked like it
+        # came from the future.
+        age_min = (max(0, int((dt.datetime.utcnow() - when).total_seconds() // 60))
+                   if when is not None else None)
         out.append({"headline": title, "source": source, "url": link,
                     "summary": _clean(get("description") or get("summary"))[:220],
-                    "when": _age(when), "_ts": when or dt.datetime.min})
+                    "when": _age(when), "age_minutes": age_min,
+                    "_ts": when or dt.datetime.min})
     return out
 
 

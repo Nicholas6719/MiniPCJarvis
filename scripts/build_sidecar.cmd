@@ -23,6 +23,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_delivery.py || (echo DELIVERY TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_handoff.py || (echo HANDOFF TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_significance.py || (echo SIGNIFICANCE TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_briefing.py || (echo BRIEFING TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\sleep_coverage.py || (echo SLEEP TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\speech_symbols.py || (echo SPEECH TEST FAILED & exit /b 1)
 .venv\Scripts\pyinstaller jarvis-sidecar.spec --noconfirm --distpath dist --workpath build > "%TEMP%\pyi.log" 2>&1 || (echo PYINSTALLER FAILED & exit /b 1)

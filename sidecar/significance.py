@@ -64,9 +64,12 @@ VIOLENCE = re.compile(
 # Someone died. Not every death is his business — a fatal crash in Oregon is
 # not — but a death near home is never a footnote, and "fatal" on its own was
 # reading as ordinary news because no word in it names a hazard.
+# NOT `dead\w*` — that matches "deadline", and a tax deadline is not a death.
+# But "killing" and "deadly" must be here: three real headlines about one
+# Framingham killing used those words and none of them registered as a death.
 FATALITY = re.compile(
-    r"\b(?:killed|kills|dead|deaths?|die[sd]|dying|fatal\w*|casualt\w+|"
-    r"body found|bodies|homicide|murder|"
+    r"\b(?:kill\w*|dead|deadly|deaths?|die[sd]|dying|fatal\w*|casualt\w+|"
+    r"body found|bodies|homicide|murder\w*|manslaughter|"
     r"house fire|structure fire|building fire)\b", re.I)
 
 # Many. What makes a distant tragedy national news.

@@ -190,6 +190,34 @@ Deferred by agreement. The shape, recorded so it is not lost:
 
 ---
 
+## Built so far (2026-08-30)
+
+- **Phase 1 — DONE.** He minimises and sleeps after two quiet minutes; his name
+  restores him to the front. `presence.idle_sleep_minutes`, gated in `sleep_e2e`.
+  UNVERIFIED: whether the foreground grab really beats a focused Excel window.
+  Windows resists it and the ALT-key nudge is a workaround, not a guarantee —
+  Nicholas has been asked to try it by hand.
+- **Phase 2 — DONE.** `delivery.py` (where), `significance.py` (whether),
+  `briefing.py` (when), `lastseen.py` + `tools/handoff.py` (what "it" means).
+  Gates: test_delivery, test_significance, test_briefing, test_handoff.
+
+Five things only showed up by looking at real output, and are worth remembering:
+
+1. His 07:30 brief would NEVER have fired — the proactive quiet window ends at
+   08:00. Briefing keeps its own (22:00-07:00). Two of his own decisions
+   conflicted and nothing but the gate noticed.
+2. The watch fired on startup and treated the whole feed as breaking, so every
+   restart would have dumped the day at him. It PRIMES on the first pass now.
+3. Nothing older than `alert_max_age_minutes` (180) can raise an alert.
+4. One Framingham killing filled a brief four times, four outlets, four
+   wordings, almost no shared words. Same town + a death on the same day now
+   collapses to one story.
+5. "Killing" and "deadly" were not recognised as deaths at all, so those same
+   headlines did not register as fatalities. Fixed without matching "deadline".
+
+`/debug/brief` composes a brief (or runs the watch) WITHOUT sending anything.
+Build against that, not against his phone.
+
 ## Order of work
 
 1. Phase 1 — idle sleep and summon. Smallest, most visible, mostly exists.

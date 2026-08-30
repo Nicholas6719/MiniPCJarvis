@@ -82,6 +82,11 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(mcp_manager.start())
     from proactive import proactive
     proactive.announce = _announce_alert
+
+    # His shift: four briefs a day, and a quiet watch between them for the
+    # things that will not wait. delivery decides where each one goes.
+    from briefing import briefing
+    briefing.start()
     proactive.start()
     from brain.router import brain
 
@@ -802,6 +807,29 @@ async def debug_forget_secret(body: dict, x_jarvis_token: str | None = Header(No
     name = str(body.get("name") or "")
     had = bool(secrets.pop(name, None))
     return {"ok": True, "forgot": name, "had_it": had}
+
+
+@app.post("/debug/brief")
+async def debug_brief(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only (JARVIS_DEBUG=1): compose a brief, or run the watch, and by
+    default DO NOT send it anywhere.
+
+    Building this without a way to look at the output would have meant testing
+    by sending real messages to his phone, over and over, all day.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from briefing import briefing
+    if body.get("watch"):
+        found = await briefing.scan()
+        return {"would_send": [{"text": t, "tier": tier} for t, tier, _ in found],
+                "held_for_next_brief": len(briefing._held)}
+    text = await briefing.compose_brief()
+    if body.get("send"):
+        from delivery import BRIEF, delivery
+        return {"brief": text, "delivery": await delivery.deliver(text, tier=BRIEF)}
+    return {"brief": text, "sent": False}
 
 
 @app.post("/debug/telegram")

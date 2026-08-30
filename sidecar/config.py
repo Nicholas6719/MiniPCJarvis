@@ -117,6 +117,22 @@ DEFAULTS: dict[str, Any] = {
     # stuck-state watchdog can't let a turn hang). Confusables score 0.00-0.04.
     # semantic_endpoint: end the turn when the SENTENCE is finished, not when
     # the room goes quiet (audio/endpoint.py). Falls back to the fixed window.
+    "briefing": {
+        "enabled": True,
+        # Agreed 2026-08-30. Quiet hours suppress these and nothing else.
+        "times": ["07:30", "12:30", "16:15", "20:00"],
+        "watch_minutes": 10,
+        "alert_max_age_minutes": 180,
+        # A digest at 22:00 is an intrusion; one at 07:30 is his morning. This
+        # is deliberately NOT the proactive window (which ends at 08:00) — the
+        # first brief of the day is at 07:30 and must not be suppressed by it.
+        "quiet_start": "22:00",
+        "quiet_end": "07:00",
+        # Massachusetts, weighted to the five towns he named. The whole
+        # state is wanted; these come first.
+        "local_places": ["Framingham MA", "Sudbury MA", "Marlborough MA",
+                         "Maynard MA", "Natick MA", "Massachusetts"],
+    },
     "markets": {
         # The names he actually holds or follows. They do NOT narrow what he
         # hears about — the news-driven pass still surfaces whatever experts are
