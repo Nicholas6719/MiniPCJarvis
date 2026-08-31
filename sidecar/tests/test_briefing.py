@@ -40,8 +40,13 @@ class Recorder:
     def __init__(self):
         self.sent = []
 
-    async def deliver(self, text, tier="notable", *, key="", subject=""):
-        self.sent.append((tier, text))
+    async def deliver(self, text, tier="notable", *, key="", subject="",
+                      written=""):
+        # `written` matters: the brief is composed once and rendered twice, and a
+        # stub that did not accept it hid the fact that no earlier test ever
+        # reached a real delivery - they all fired during quiet hours.
+        self.sent.append((tier, text, key))
+        self.last_written = written
         return {"delivered": "recorded"}
 
 
@@ -292,6 +297,43 @@ def main() -> int:
     check("...and the voice says it too", "couldn't reach" in said_d, said_d)
     check("what DID arrive is still reported",
           "Apple" in shown_d and "Nasdaq" in shown_d, shown_d)
+
+    # --- a brief must not depend on being LOOKED AT during its own minute ----
+    # On 2026-08-31 his 12:30 brief never arrived. The loop was alive - alerts
+    # went out at 12:35 and 12:46 - but the schedule test was
+    # `now.strftime("%H:%M") in times`, and once the watch began reading and
+    # summarising articles a tick took 30-60s. With a flat sleep(60) after it,
+    # the real period became 90-120s and every other minute went unobserved.
+    async def _slot(at, fresh=True, made=None):
+        bD = made or br.Briefing()
+        async def compose(sections=None):
+            return "brief"
+        bD.compose_brief = compose
+        bD.compose_brief_written = compose
+        bD._sections = lambda: compose()
+        br._now = lambda: at
+        rec.sent.clear()
+        await bD._maybe_brief()
+        return list(rec.sent), bD
+
+    kept = br.Briefing()
+    got, kept = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 29), made=kept))
+    check("nothing fires before the slot", got == [], got)
+    got, kept = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 30), made=kept))
+    check("the slot fires when it comes due", len(got) == 1, got)
+    got, kept = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 31), made=kept))
+    check("...and does not fire twice", got == [], got)
+
+    # the case that actually failed: nobody looked during 12:30
+    got, _ = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 47)))
+    check("a slot missed by a drifting clock is still delivered",
+          len(got) == 1 and "12:30" in got[0][2], got)
+
+    # ...but not resurrected hours later
+    got, _ = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 58)))
+    check("...and not once it is stale", got == [], got)
+    got, _ = asyncio.run(_slot(dt.datetime(2026, 8, 31, 3, 0)))
+    check("nothing fires when nothing is due", got == [], got)
 
     # --- a quiet day is allowed to be quiet ----------------------------------
     b5 = br.Briefing()

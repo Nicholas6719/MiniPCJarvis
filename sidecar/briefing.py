@@ -65,7 +65,11 @@ class Briefing:
         self._task: asyncio.Task | None = None
         self._held: list[dict] = []          # NOTABLE items awaiting a brief
         self._seen: dict[str, float] = {}    # headline -> when it was judged
-        self._last_brief: str = ""           # "2026-08-30 07:30", so it fires once
+        self._last_brief: str = ""           # kept for anything still reading it
+        # Slots already delivered, as "2026-08-31 12:30". A set rather than one
+        # value: two slots can come due close together after a restart, and the
+        # single value let the second overwrite the first.
+        self._done_slots: set[str] = set()
         self._last_watch: float = 0.0
         # Two clocks: emergencies are checked more often than prices are.
         self._last_news: float = 0.0
@@ -107,15 +111,58 @@ class Briefing:
                 raise
             except Exception:
                 log.exception("briefing tick failed")
-            await asyncio.sleep(TICK_S)
+            # Sleep to the next minute BOUNDARY. A flat sleep(60) after work
+            # that takes 30-60s drifts, and a drifting clock is what stopped his
+            # 12:30 brief being noticed at all.
+            now_t = time.time()
+            await asyncio.sleep(max(5.0, TICK_S - (now_t % TICK_S)))
 
     async def _maybe_brief(self) -> None:
+        """Has a brief come due since the last look?
+
+        NOT "is the clock reading exactly 12:30". That was the old test, and on
+        2026-08-31 his 12:30 brief never arrived: the loop was alive - alerts
+        went out at 12:35 and 12:46 - but it never OBSERVED the minute. The tick
+        does its work and then sleeps 60s, and once the watch started reading and
+        summarising articles that work took 30-60s, so the real period became 90
+        to 120 seconds and every other minute went unseen. A schedule that has to
+        be looked at during the right sixty seconds is a schedule that will
+        eventually be missed.
+
+        So a slot fires if it is PAST and has not been done today. `grace_minutes`
+        bounds how late is still worth sending - a 12:30 brief at 12:47 is fine,
+        at four o'clock it is history.
+        """
         now = _now()
-        stamp = now.strftime("%Y-%m-%d %H:%M")
         times = config.get("briefing", "times", default=DEFAULT_TIMES) or DEFAULT_TIMES
-        if now.strftime("%H:%M") not in times or self._last_brief == stamp:
+        grace = float(config.get("briefing", "grace_minutes", default=25) or 25)
+        today = now.strftime("%Y-%m-%d")
+        due = None
+        for slot in times:
+            stamp = f"{today} {slot}"
+            if stamp in self._done_slots:
+                continue
+            try:
+                at = dt.datetime.combine(
+                    now.date(), dt.datetime.strptime(str(slot), "%H:%M").time())
+            except ValueError:
+                continue
+            late = (now - at).total_seconds() / 60.0
+            if 0 <= late <= grace:
+                due = (stamp, slot, late)
+                break
+            if late > grace:
+                # missed it entirely (asleep, restarting, a long outage). Mark it
+                # done so it cannot ambush him hours later.
+                self._done_slots.add(stamp)
+        if due is None:
             return
-        self._last_brief = stamp
+        stamp, slot, late = due
+        self._done_slots.add(stamp)
+        if len(self._done_slots) > 40:
+            self._done_slots = set(list(self._done_slots)[-20:])
+        if late > 1.5:
+            log.info("brief for %s is %.0f min late - sending anyway", slot, late)
         if _in_quiet_hours(now):
             log.info("brief due at %s but it is quiet hours - holding", stamp)
             return

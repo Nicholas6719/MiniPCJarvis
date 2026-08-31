@@ -124,6 +124,11 @@ DEFAULTS: dict[str, Any] = {
         # Two clocks. Emergencies are checked twice as often as prices,
         # because they are a different job with a different cost: the news
         # sweep is keyless RSS, the market half is rate-limited Finnhub.
+        # How late a missed brief may still be sent. The loop cannot be
+        # trusted to look at the clock during the exact minute a brief is
+        # due - his 12:30 on 2026-08-31 was never observed - so a slot
+        # fires if it is past and undelivered, up to this many minutes.
+        "grace_minutes": 25,
         "emergency_minutes": 5,      # the news/emergency sweep
         "watch_minutes": 10,         # the market sweep
         "alert_max_age_minutes": 180,
