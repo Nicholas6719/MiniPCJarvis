@@ -196,7 +196,16 @@ class TelegramBridge:
         # -- inline confirmation buttons ------------------------------------
         if "callback_query" in u:
             cq = u["callback_query"]
-            if allowed and cq.get("from", {}).get("id") == allowed:
+            # A button press has to be recognised as HIS, and the old test asked
+            # whether the USER id equalled the CHAT id. Those are the same number
+            # in a private chat and different everywhere else, and the value is
+            # stored as whatever Telegram first sent - so a type or shape mismatch
+            # silently dropped every tap. On 2026-08-31 he tapped "Got it" three
+            # times and was chased anyway. Accept either identifier, compared as
+            # text so 12345 and "12345" cannot disagree.
+            who = {str(cq.get("from", {}).get("id")),
+                   str((cq.get("message") or {}).get("chat", {}).get("id"))}
+            if allowed and str(allowed) in who:
                 data = cq.get("data", "")
                 if data.startswith("confirm:"):
                     _, cid, ans = data.split(":", 2)
@@ -205,7 +214,10 @@ class TelegramBridge:
                     await self._api("answerCallbackQuery", callback_query_id=cq["id"],
                                     text="Done." if ok else "That question expired.")
                 elif data.startswith("ack:"):
-                    self._urgent.pop(data.split(":", 1)[1], None)
+                    tok = data.split(":", 1)[1]
+                    had = self._urgent.pop(tok, None)
+                    log.info("telegram ack %s - %s", tok,
+                             "chase stopped" if had else "nothing was pending")
                     await self._api("answerCallbackQuery", callback_query_id=cq["id"],
                                     text="Noted, sir.")
                 elif data.startswith("clarify:"):
@@ -215,6 +227,9 @@ class TelegramBridge:
                     choice = data.split(":", 1)[1]
                     await self._api("answerCallbackQuery", callback_query_id=cq["id"])
                     spawn(self._remote_turn(choice), name="tg-clarify")
+            elif allowed:
+                log.warning("telegram: ignoring a button press from %s (paired to %s)",
+                            who, allowed)
             return
         msg = u.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
@@ -344,6 +359,8 @@ class TelegramBridge:
         await self._api("sendMessage", chat_id=chat, text=text,
                         reply_markup={"inline_keyboard": [[
                             {"text": "Got it", "callback_data": f"ack:{token}"}]]})
+        log.info("telegram urgent %s sent, chasing until acknowledged: %r",
+                 token, text[:70])
         spawn(self._chase(token), name="tg-urgent-chase")
 
     async def _chase(self, token: str) -> None:
@@ -359,6 +376,7 @@ class TelegramBridge:
             await asyncio.sleep(wait)
             item = self._urgent.get(token)
             if not item:
+                log.info("telegram chase %s stopping - he acknowledged it", token)
                 return                              # acknowledged, or replied to
             item["sent"] += 1
             await self._api(
@@ -366,11 +384,14 @@ class TelegramBridge:
                 text=f"Still unanswered, sir — {item['text']}",
                 reply_markup={"inline_keyboard": [[
                     {"text": "Got it", "callback_data": f"ack:{token}"}]]})
-        self._urgent.pop(token, None)
+        if self._urgent.pop(token, None):
+            log.info("telegram chase %s giving up - never acknowledged", token)
 
     def acknowledge_all(self) -> int:
         """Any message from him counts as having seen it."""
         n = len(self._urgent)
+        if n:
+            log.info("telegram: he replied, so %d chase(s) stop", n)
         self._urgent.clear()
         return n
 

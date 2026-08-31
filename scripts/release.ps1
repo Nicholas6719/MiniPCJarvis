@@ -85,11 +85,21 @@ Start-Sleep 15
 if ($SkipTests) { exit 0 }
 Set-Location "$root\sidecar"
 $env:PYTHONIOENCODING = 'utf-8'
-$failed = 0
-foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py", "sleep_e2e.py", "research_e2e.py", "filler_e2e.py", "voice_ux_e2e.py", "hud_e2e.py", "facts_e2e.py")) {
-    & $log "== $t"
-    & .\.venv\Scripts\python.exe "tests\$t" $port $tok 2>&1 | Select-Object -Last 4
-    if ($LASTEXITCODE -ne 0 -and $t -notin @("filler_e2e.py", "general_e2e.py", "voice_ux_e2e.py")) { $failed++ }
+# ONE list of suites, not two. This kept its own shorter list and had quietly
+# drifted seven suites behind scripts\suites.ps1 - missing soak_e2e, which is
+# what caught the audio crash on 2026-08-31, and market_e2e, which caught the
+# Finnhub retry regressions. A release gate weaker than the ad-hoc check is worse
+# than no release gate, because it is the one you trust.
+#
+# Telegram runs HERE and not in the ad-hoc suite: it sends real messages to his
+# phone, which is right for a release and wrong every ten minutes.
+[IO.File]::WriteAllText("$root\.agent\session.txt", "$port $tok")
+$env:JARVIS_TELEGRAM_E2E = "1"
+try {
+    & "$root\scripts\suites.ps1"
+    $failed = $LASTEXITCODE
+} finally {
+    Remove-Item Env:\JARVIS_TELEGRAM_E2E -ErrorAction SilentlyContinue
 }
 & $log ("RELEASE " + $(if ($failed -eq 0) { "OK" } else { "FAILED ($failed suites)" }))
 exit $failed

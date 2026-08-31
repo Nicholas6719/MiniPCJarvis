@@ -137,6 +137,40 @@ def main() -> int:
         dv.is_present, dv.telegram_available = real_present, real_avail
         sys.modules.pop("remote_telegram", None)
 
+    # --- what he is told unprompted is part of the conversation --------------
+    # He got a Nepal alert at 1:42 on 2026-08-31, asked "Any updates on that?" at
+    # 1:53, and was told "I can't pull the current weather data right now." The
+    # model was not confused - proactive messages never entered the history, so
+    # the newest thing it could see was a weather question from 1:34, and "that"
+    # honestly meant the weather.
+    import sys as _sys
+    import types as _types
+
+    import delivery as _dl
+    noted = []
+
+    class _FakeOrch:
+        def note_proactive(self, text):
+            noted.append(text)
+
+    fake_mod = _types.ModuleType("orchestrator")
+    fake_mod.orchestrator = _FakeOrch()
+    real_mod = _sys.modules.get("orchestrator")
+    _sys.modules["orchestrator"] = fake_mod
+    try:
+        _dl._remember_proactive("Two people were shot in Brockton — WCVB.")
+        check("a proactive item joins the conversation", len(noted) == 1, noted)
+        check("...with what he was actually told", "Brockton" in noted[0], noted)
+        noted.clear()
+        _dl._remember_proactive("   ")
+        _dl._remember_proactive("")
+        check("empty announcements are not recorded", noted == [], noted)
+    finally:
+        if real_mod is not None:
+            _sys.modules["orchestrator"] = real_mod
+        else:
+            _sys.modules.pop("orchestrator", None)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

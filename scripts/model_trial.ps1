@@ -4,7 +4,19 @@ param([string]$Model)
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $p = Get-CimInstance Win32_Process -Filter "name='jarvis-sidecar.exe'"
 $port = [regex]::Match($p.CommandLine, '--port (\d+)').Groups[1].Value
+# The token is passed to the sidecar on STDIN (--token-stdin), not on the command
+# line, so reading it from the command line silently produced an empty string and
+# every call in this script came back "bad token". Same fallback quick.ps1 uses.
 $tok = [regex]::Match($p.CommandLine, '--token ([0-9a-f]+)').Groups[1].Value
+if (-not $tok) {
+    $tf = "$env:APPDATA\JARVIS\session.token"
+    if (Test-Path $tf) { $tok = (Get-Content $tf -Raw).Trim() }
+}
+if (-not $tok) {
+    $sf = "$root\.agent\session.txt"
+    if (Test-Path $sf) { $tok = ((Get-Content $sf -Raw).Trim() -split '\s+')[1] }
+}
+if (-not $tok) { Write-Host "could not find the session token - is JARVIS running?"; exit 1 }
 $H = @{ 'X-Jarvis-Token' = $tok }
 Write-Host "[$(Get-Date -Format HH:mm:ss)] switching :$port to $Model"
 $r = Invoke-RestMethod "http://127.0.0.1:$port/config" -Method Patch -Headers $H -ContentType 'application/json' -Body (@{ llm = @{ active_model = $Model } } | ConvertTo-Json) -TimeoutSec 400

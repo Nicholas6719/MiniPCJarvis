@@ -84,6 +84,28 @@ def main() -> int:
                  "Hundreds dead as earthquake levels city"):
         check(f"reaches him: {huge[:42]!r}", tier(huge) == URGENT, tier(huge))
 
+    # --- somebody else's country is not "the country" -------------------------
+    # On 2026-08-31 at 1:42pm he was sent "Nepal rescuers blast hillside in search
+    # of hydropower workers" and then chased about it twice. The BBC summary said
+    # hundreds dead, which is exactly what CATASTROPHIC_TOLL is for - so the rule
+    # fired as designed, and the design was wrong. "Everyone in THE COUNTRY needs
+    # to know" means his country.
+    for abroad, summ in (
+            ("Nepal rescuers blast hillside in search of hydropower workers",
+             "Hundreds dead as floods sweep the valley."),
+            ("Nepal flash flooding death toll rises past 800", ""),
+            ("Hundreds dead in Pakistan earthquake", ""),
+            ("Mass casualty incident at German railway station", ""),
+            ("Thousands killed as cyclone hits Bangladesh", "")):
+        got = classify_news({"headline": abroad, "summary": summ})[0]
+        check(f"not his emergency: {abroad[:40]!r}", got == NONE, got)
+
+    # ...but a foreign dateline that IS his country's news still counts
+    check("a US strike abroad is still national news",
+          tier("US declares war after missile strike on naval base") == URGENT)
+    check("a catastrophe at home is unaffected",
+          tier("Hundreds dead as tornado levels Joplin") == URGENT)
+
     # A national emergency is not proven by a scary word. An early version of this
     # used a "man-made hazard" keyword list and matched a Trump/NBC story, a
     # Visa/Mastercard announcement and a West Bank report - "attack" alone is

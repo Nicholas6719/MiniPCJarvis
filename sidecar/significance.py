@@ -176,6 +176,32 @@ CATASTROPHIC_TOLL = re.compile(
     r"(?:past\s+|above\s+|over\s+)?(?:hundreds|thousands|[1-9]\d{2,})", re.I)
 
 
+# Somewhere else's country. "Everyone in THE COUNTRY needs to know" means his
+# country: a Nepal landslide rescue is a tragedy and front-page news, and it is
+# not something every American needs to hear about at 1:42 in the afternoon.
+# He was sent one on 2026-08-31 - the BBC summary said hundreds dead, which is
+# exactly what CATASTROPHIC_TOLL is for, so the rule fired as designed and the
+# design was wrong.
+FOREIGN = re.compile(
+    r"\b(?:nepal|india|pakistan|bangladesh|china|chinese|japan|korea|vietnam|"
+    r"thailand|indonesia|philippines|myanmar|afghanistan|iran|iraq|syria|israel|"
+    r"gaza|lebanon|turkey|turkiye|egypt|libya|sudan|nigeria|kenya|ethiopia|"
+    r"somalia|congo|ghana|morocco|algeria|russia|russian|ukraine|poland|germany|"
+    r"german|france|french|spain|spanish|italy|italian|greece|britain|british|"
+    r"england|scotland|wales|ireland|netherlands|dutch|belgium|sweden|norway|"
+    r"denmark|finland|brazil|argentina|chile|peru|colombia|venezuela|mexico|"
+    r"mexican|haiti|cuba|canada|canadian|australia|australian|new zealand|"
+    r"south africa|saudi|yemen|qatar|dubai|emirates|kabul|tehran|moscow|beijing|"
+    r"tokyo|seoul|mumbai|delhi|karachi|cairo|lagos|nairobi|paris|berlin|madrid|"
+    r"rome|athens|london|dublin|kyiv|kiev|gaza strip|west bank)\b", re.I)
+
+# ...unless it is his country too. "US strikes", "American hostages" - those are
+# foreign datelines that are still national news here.
+OURS = re.compile(
+    r"\b(?:u\.?s\.?|usa|america|american|americans|washington|pentagon|"
+    r"white house|congress|federal|nationwide|homeland)\b", re.I)
+
+
 def national_emergency(text: str) -> bool:
     """Would everyone in the country need to hear about this?
 
@@ -185,6 +211,11 @@ def national_emergency(text: str) -> bool:
     word "attack" alone is worthless. Every rule here needs national reach, an
     attack on the country, or a toll in the hundreds.
     """
+    # Somebody else's country, with nothing tying it to his: not his emergency,
+    # however large. This is the Nepal case - real, enormous, and not something
+    # every American needs on their phone in the middle of the afternoon.
+    if FOREIGN.search(text) and not OURS.search(text):
+        return False
     return bool(SYSTEMIC.search(text) or ATTACK.search(text)
                 or CATASTROPHIC_TOLL.search(text)
                 or (NATIONWIDE.search(text) and (HAZARD.search(text)

@@ -73,6 +73,22 @@ def telegram_available() -> bool:
     return bool(config.get("remote", "telegram_chat_id", default=None))
 
 
+def _remember_proactive(text: str) -> None:
+    """Put what he was just told into the conversation, wherever it went.
+
+    Without this a follow-up has nothing to attach to: "Any updates on that?"
+    reached back past a Nepal alert to a weather question twenty minutes older,
+    because only the weather had ever been part of the conversation.
+    """
+    if not (text or "").strip():
+        return          # nothing was said, so there is nothing to remember
+    try:
+        from orchestrator import orchestrator
+        orchestrator.note_proactive(text)
+    except Exception:
+        log.debug("could not record the proactive item", exc_info=True)
+
+
 class Delivery:
     """Routes everything JARVIS says on his own initiative."""
 
@@ -121,6 +137,7 @@ class Delivery:
         if present:
             spoke = await self._speak(text, interrupt=tier in (ALERT, URGENT))
             if spoke:
+                _remember_proactive(text)
                 await bus.emit("proactive", text=text, tier=tier, channel="voice",
                                subject=subject)
                 return {"delivered": "spoken", "tier": tier}
@@ -129,6 +146,7 @@ class Delivery:
         if telegram_available():
             from remote_telegram import telegram
             await telegram.send_proactive(written or text, tier=tier, subject=subject)
+            _remember_proactive(text)
             await bus.emit("proactive", text=text, tier=tier, channel="telegram",
                            subject=subject)
             return {"delivered": "telegram", "tier": tier,

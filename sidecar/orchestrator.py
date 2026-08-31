@@ -459,6 +459,32 @@ class Orchestrator:
 
     # ---------- proactive announcements ----------
 
+    def note_proactive(self, text: str) -> None:
+        """Something JARVIS said unprompted belongs in the conversation too.
+
+        On 2026-08-31 he was sent a Nepal alert at 1:42, then asked "Any updates
+        on that?" at 1:53 and was told "I can't pull the current weather data
+        right now." The model was not confused - it was correct about what it
+        could see. Proactive messages never entered `_history`, so the last thing
+        JARVIS believed they had discussed was a weather question from 1:34, and
+        "that" honestly meant the weather.
+
+        Anything he is told is a thing he can ask about next. It goes in the
+        history like any other turn.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        self._history.append({"role": "assistant", "content": text})
+        self._history = self._history[-20:]
+        try:
+            from lastseen import last_seen
+            last_seen.note_reply(text)
+        except Exception:
+            log.debug("could not remember the proactive item", exc_info=True)
+
+
+
     async def announce(self, text: str) -> None:
         from brain.skills import honorific as _hon
         text = _hon(text, kind="alert")
