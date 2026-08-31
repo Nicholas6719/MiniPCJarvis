@@ -451,6 +451,13 @@ class Briefing:
                     spoken, written = self._pct(m.get("percent"))
                     said.append(f"{name} {spoken}")
                     shown.append(f"{name} {written}")
+                gap = movers.get("missing") or []
+                if gap:
+                    # Say what is absent. Reporting one index as though it were
+                    # the market is how a brief becomes misleading rather than
+                    # merely short.
+                    said.append(f"no data for {', '.join(gap)}")
+                    shown.append(f"(no data: {', '.join(gap)})")
                 out.append(("Markets", [("; ".join(said), " · ".join(shown))]))
         except Exception:
             log.debug("brief: markets failed", exc_info=True)
@@ -464,6 +471,10 @@ class Briefing:
                     name = display_name(r.get("symbol"), r.get("name"))
                     spoken, written = self._pct(r.get("percent"))
                     lines.append((f"{name} {spoken}", f"{name} {written}"))
+                gap = mine.get("missing") or []
+                if gap:
+                    note = ("couldn't reach " + ", ".join(gap))
+                    lines.append((note, f"({note})"))
                 out.append(("Yours", lines))
         except Exception:
             log.debug("brief: watchlist failed", exc_info=True)

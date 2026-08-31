@@ -25,6 +25,9 @@ from audio.speech_text import clean_for_speech, strip_markdown
 import clarify
 from brain.router import brain
 from lastseen import last_seen
+from linkguard import (LinkLedger, check as link_check,
+                       explain as link_explain, price_caveat,
+                       supply as link_supply, wanted_links)
 from brain.facts import facts
 import collections
 import re as _re
@@ -40,6 +43,9 @@ from tools.registry import registry
 from tools.shortlist import shortlist
 
 log = logging.getLogger("jarvis.orchestrator")
+
+# What the tools actually returned this turn. Nothing else may be linked.
+link_ledger = LinkLedger()
 
 WAKE_PHRASE = _re.compile(r"^\s*(?:hey|hi|ok|okay|yo)?[,\s]*(?:jarvis|jarves|jarvus|jovis|jervis|javis|jarvi)[,.!?\s]*", _re.I)
 # explicit requests to go online: the model must not answer from memory
@@ -859,6 +865,8 @@ class Orchestrator:
         # "Jarvis" reached here with the name stripped off, leaving an empty
         # string for the router to match — and an empty string is nearest to
         # something. Over Telegram it came back "It's 7:46 AM, sir."
+        # A new turn: forget which links the LAST one was allowed to mention.
+        link_ledger.clear()
         if not WAKE_PHRASE.sub("", text or "", count=1).strip():
             await self._say_and_finish("At your service, sir.", text, t_start, "attention")
             return
@@ -960,6 +968,7 @@ class Orchestrator:
                              else State.EXECUTING, force=True)
             result = await registry.execute(skill.tool, args)
             last_seen.note_result(result.get("result") if isinstance(result, dict) else result)
+            link_ledger.note(result)
             call_id = "reflex-" + uuid.uuid4().hex[:8]
             messages.append({"role": "assistant", "content": None, "tool_calls": [
                 {"id": call_id, "type": "function",
@@ -1003,6 +1012,25 @@ class Orchestrator:
                 await speaker_task
             except asyncio.CancelledError:
                 pass
+
+        # THE GATE. Every URL here has to have come out of a tool this turn.
+        # He asked for Amazon links, JARVIS ran six real searches, ignored all
+        # sixty results and invented the ASINs - including "B08XYZ1234", which is
+        # a placeholder wearing a product's clothes. A missing link disappoints
+        # him; a fabricated one costs him the trust he has in every other link.
+        if full_reply:
+            full_reply, invented = link_check(full_reply, link_ledger)
+            if invented:
+                log.warning("blocked %d invented link(s) the model made up: %s",
+                            len(invented), ", ".join(invented[:4]))
+                full_reply += link_explain(invented)
+            # Blocking the fakes is half of it. If he ASKED for links and now has
+            # none, hand him the ones the searches really returned - otherwise he
+            # is back where he started and has to ask a second time.
+            if wanted_links(text):
+                full_reply = link_supply(full_reply, link_ledger)
+            # And a price nobody looked up is not a fact about today.
+            full_reply = price_caveat(full_reply, link_ledger)
 
         if full_reply:
             from brain.skills import without_honorific
@@ -1074,10 +1102,12 @@ class Orchestrator:
         if skill.tool and prefetched is not None:
             res = prefetched if isinstance(prefetched, dict) else {"value": prefetched}
             last_seen.note_result(res)
+            link_ledger.note(res)
         elif skill.tool:
             await self.sm.to(State.EXECUTING, force=True)
             out = await registry.execute(skill.tool, args)
             last_seen.note_result(out.get("result"))
+            link_ledger.note(out)
             if out.get("ok"):
                 res = out.get("result")
             else:
@@ -1612,6 +1642,7 @@ class Orchestrator:
                 await self.sm.to(state, force=True)
                 result = await registry.execute(tc["name"], tc["arguments"])
                 last_seen.note_result(result.get("result"))
+                link_ledger.note(result)
                 used_tools.append((tc["name"], bool(result.get("ok"))))
                 if result.get("declined") or result.get("unconfirmed"):
                     # the user said no (or nothing): acknowledge and stop - never re-ask

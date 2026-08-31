@@ -278,8 +278,17 @@ def classify_news(story: dict) -> tuple[str, str]:
     # Life-safety on his doorstep is the case the whole tier exists for.
     if danger and own_town:
         return URGENT, "something dangerous in one of his towns"
-    if danger and near:
+    # In the state but not his town, the two kinds of danger part company. A
+    # HAZARD is a thing loose in the environment - a gas leak, an earthquake, a
+    # chemical fire - and it can travel, so it still wakes him. VIOLENCE is
+    # person-level and does not: two people were shot in Brockton on 2026-08-31,
+    # forty minutes away, and it reached him as URGENT with escalating pings that
+    # kept asking until he tapped "Got it". He could do nothing with it at 6 a.m.
+    # That is how an alarm teaches you to ignore it.
+    if hazard and near:
         return URGENT, "something dangerous close to home"
+    if danger and near:
+        return ALERT, "violence in the state, but not his town"
     # Distant, but big enough that distance stops mattering. MANY or CATASTROPHE
     # rather than `scale`, which contains the fatality words and so promoted
     # every distant death to something worth waking him for.

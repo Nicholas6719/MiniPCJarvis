@@ -259,6 +259,40 @@ def main() -> int:
     check("an unrelated local story still gets through",
           not bB._seen_before("Power outage affects 4,000 in Framingham"))
 
+    # --- a short brief must not pass for a complete one -----------------------
+    # His 07:30 brief on 2026-08-31 said "MARKETS: the Nasdaq 100 -0.65%" and
+    # "YOURS: Apple +1.63%" while Finnhub was throwing 503s - 58 of them inside
+    # that one brief. Four of his five holdings and two of the three indices had
+    # simply failed. Read plainly, it said he owns one stock. Silence about a gap
+    # is worse than the gap.
+    bC = br.Briefing()
+    bC._fresh_stories = lambda: _fake_stories([])
+
+    async def _degraded():
+        import tools.market_tools as mt
+        mt.get_market_movers = lambda: _fake_dict({
+            "markets": [{"symbol": "QQQ", "name": "the Nasdaq 100", "percent": -0.65}],
+            "missing": ["the S&P 500", "the Dow"]})
+        mt.get_watchlist = lambda: _fake_dict({
+            "stocks": [{"symbol": "AAPL", "name": "Apple Inc", "percent": 1.63}],
+            "missing": ["NVDA", "AMC", "TSLA", "SPCX"]})
+        import analyst as _an
+        _an.analyst.take = lambda limit=8: _fake_take_empty()
+        secs = await bC._sections()
+        return await bC.compose_brief_written(secs), await bC.compose_brief(secs)
+
+    _real_take2 = __import__("analyst").analyst.take
+    shown_d, said_d = asyncio.run(_degraded())
+    __import__("analyst").analyst.take = _real_take2
+
+    check("the missing indices are named", "the S&P 500" in shown_d and "the Dow" in shown_d,
+          shown_d)
+    check("the unreachable holdings are named",
+          all(t in shown_d for t in ("NVDA", "AMC", "TSLA", "SPCX")), shown_d)
+    check("...and the voice says it too", "couldn't reach" in said_d, said_d)
+    check("what DID arrive is still reported",
+          "Apple" in shown_d and "Nasdaq" in shown_d, shown_d)
+
     # --- a quiet day is allowed to be quiet ----------------------------------
     b5 = br.Briefing()
     b5._fresh_stories = lambda: _fake_stories([])
@@ -301,6 +335,10 @@ async def _fake_moves():
 
 async def _fake_dict(d):
     return d
+
+
+async def _fake_take_empty():
+    return []
 
 
 async def _fake_take():

@@ -41,6 +41,34 @@ _calls: list[float] = []     # timestamps of recent calls, newest last
 _lock = asyncio.Lock()
 
 
+# --- when the service is simply down --------------------------------------------
+# Retrying a 503 is right when Finnhub hiccups and wrong when it is having an
+# outage: retries TRIPLE the call volume, the 55-per-minute budget above empties,
+# and _rate_limit then holds every later call for up to a minute. On 2026-08-31
+# that turned "some quotes missing" into "get_watchlist timed out" at 25 seconds
+# - strictly worse than the gap it was meant to close.
+#
+# So the retry is only for the hiccup. Once failures dominate, the breaker opens
+# and every call takes exactly one shot and reports honestly.
+_recent: list[bool] = []       # True = a 5xx, newest last
+_breaker_until: float = 0.0
+_BREAKER_S = 90.0
+
+
+def _note_outcome(bad: bool) -> None:
+    global _breaker_until
+    _recent.append(bad)
+    del _recent[:-6]
+    if len(_recent) >= 4 and sum(_recent) >= 4 and time.time() >= _breaker_until:
+        _breaker_until = time.time() + _BREAKER_S
+        log.warning("finnhub looks down (%d of last %d failed) - no retries for %ds",
+                    sum(_recent), len(_recent), int(_BREAKER_S))
+
+
+def _retries_allowed() -> bool:
+    return time.time() >= _breaker_until
+
+
 async def _rate_limit() -> None:
     while True:
         async with _lock:
@@ -58,19 +86,42 @@ async def _get(path: str, **params) -> dict | list | None:
     key = secrets.get("finnhub_api_key")
     if not key:
         return None
-    await _rate_limit()
-    try:
-        async with httpx.AsyncClient(timeout=12) as c:
-            r = await c.get(f"{BASE}{path}", params={**params, "token": key})
-            if r.status_code == 429:
-                return {"_error": "Finnhub is rate-limiting us; try again in a moment."}
-            if r.status_code == 401:
-                return {"_error": "Finnhub rejected the API key — it may need replacing in Settings."}
-            r.raise_for_status()
-            return r.json()
-    except Exception as e:
-        log.warning("finnhub %s failed: %s", path, e)
-        return {"_error": f"the market data service didn't answer ({type(e).__name__})"}
+    # Finnhub throws 503s in bursts - 245 of them on 2026-08-31, which is what
+    # reduced his 07:30 brief to one index and one holding. A 503 is the service
+    # coughing, not an answer, so give it two more chances with a short pause
+    # before reporting the gap.
+    last = "unknown"
+    for attempt in range(3):
+        await _rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=12) as c:
+                r = await c.get(f"{BASE}{path}", params={**params, "token": key})
+                if r.status_code == 429:
+                    return {"_error": "Finnhub is rate-limiting us; try again in a moment."}
+                if r.status_code == 401:
+                    return {"_error": "Finnhub rejected the API key — it may need replacing in Settings."}
+                if r.status_code in (500, 502, 503, 504):
+                    _note_outcome(True)
+                    if attempt < 2 and _retries_allowed():
+                        last = f"HTTP {r.status_code}"
+                        await asyncio.sleep(0.15 * (attempt + 1))
+                        continue
+                    return {"_error": f"the market data service is down "
+                                      f"(HTTP {r.status_code})"}
+                r.raise_for_status()
+                _note_outcome(False)
+                return r.json()
+        except Exception as e:
+            # NOT retried. A 503 is refused instantly, so trying again costs
+            # nothing; a timeout has already spent the full 12 seconds, and
+            # three of those blew straight through the tool's own 25s budget -
+            # get_watchlist took 18.6s and market_take timed out completely.
+            # Retrying the cheap failure fixes the burst; retrying the expensive
+            # one just moves the outage from "missing data" to "no answer".
+            log.warning("finnhub %s failed: %s", path, e)
+            return {"_error": f"the market data service didn't answer ({type(e).__name__})"}
+    log.warning("finnhub %s failed after 3 tries: %s", path, last)
+    return {"_error": f"the market data service didn't answer ({last})"}
 
 
 def _err(data) -> str | None:
@@ -87,11 +138,48 @@ def _looks_like_ticker(q: str) -> bool:
     return q.isupper() and 1 <= len(q) <= 5 and q.isalpha()
 
 
+def _seed_known_names() -> None:
+    """Teach the resolver the household names before it ever needs the network.
+
+    Finnhub's /search went down with everything else on 2026-08-31, and the
+    resolver had no other way to know what "Tesla" is - so a question about a
+    stock he owns came back "I couldn't find a listed company called Tesla", and
+    AMD was reported to him as a company literally named "AMD".
+
+    Needing a remote service to recognise Tesla is a poor dependency. These are
+    the names the press and he actually use; the search is still there for
+    everything else.
+    """
+    from analyst import BY_NAME, NAME_BY_TICKER
+    pretty = {
+        "AMD": "Advanced Micro Devices", "GS": "Goldman Sachs", "JPM": "JPMorgan",
+        "LLY": "Eli Lilly", "GM": "General Motors", "F": "Ford", "BA": "Boeing",
+        "NKE": "Nike", "DIS": "Disney", "SBUX": "Starbucks", "PFE": "Pfizer",
+        "WMT": "Walmart", "COST": "Costco", "INTC": "Intel", "MU": "Micron",
+        "CRM": "Salesforce", "ORCL": "Oracle", "QCOM": "Qualcomm", "ARM": "Arm",
+        "SMCI": "Super Micro", "HOOD": "Robinhood", "SPOT": "Spotify",
+        "ABNB": "Airbnb", "UBER": "Uber", "SHOP": "Shopify", "SNOW": "Snowflake",
+        "CRWD": "CrowdStrike", "RIVN": "Rivian", "LCID": "Lucid", "COIN": "Coinbase",
+        "MRNA": "Moderna", "PLTR": "Palantir", "AVGO": "Broadcom", "NFLX": "Netflix",
+    }
+    for word, ticker in BY_NAME.items():
+        label = (NAME_BY_TICKER.get(ticker) or pretty.get(ticker)
+                 or word.title())
+        entry = (ticker, label)
+        _NAMES.setdefault(word, entry)
+        _NAMES.setdefault(ticker.lower(), entry)
+
+
 async def _resolve_symbol(name: str) -> tuple[str, str] | None:
     """'apple' -> ('AAPL', 'Apple Inc'), and 'AAPL' -> ('AAPL', 'Apple Inc') too."""
     q = (name or "").strip()
     if not q:
         return None
+    if not _NAMES:
+        try:
+            _seed_known_names()
+        except Exception:
+            log.debug("could not seed known names", exc_info=True)
     hit = _NAMES.get(q.lower())
     if hit:
         return hit
@@ -215,16 +303,21 @@ async def get_watchlist() -> dict:
     names = config.get("markets", "watchlist", default=[]) or []
     if not names:
         return {"error": "You haven't given me a list of stocks to follow yet, sir."}
-    out = []
+    out, missing = [], []
     for sym in names[:12]:
         q = await get_stock_quote(sym)
-        if not q.get("error"):
+        if q.get("error"):
+            missing.append(str(sym).upper())
+        else:
             out.append(q)
     if not out:
         return {"error": NO_KEY if not secrets.get("finnhub_api_key")
                 else "None of your stocks came back just now."}
     out.sort(key=lambda q: abs(q.get("percent") or 0), reverse=True)
-    return {"count": len(out), "stocks": out}
+    # A silently shortened list is a lie by omission. His 07:30 brief said
+    # "YOURS: Apple +1.63%" while four of his five holdings had simply failed,
+    # which reads as "you own one stock" rather than "I could not reach four".
+    return {"count": len(out), "stocks": out, "missing": missing}
 
 
 async def get_market_movers() -> dict:
@@ -242,7 +335,9 @@ async def get_market_movers() -> dict:
                         "percent": round(float(q.get("dp") or 0), 2)})
     if not out:
         return {"error": "no market data came back."}
-    return {"markets": out, "as_of": dt.datetime.now().strftime("%H:%M")}
+    missing = [names[s2] for s2 in names if s2 not in {m["symbol"] for m in out}]
+    return {"markets": out, "missing": missing,
+            "as_of": dt.datetime.now().strftime("%H:%M")}
 
 
 async def _market_take() -> dict:

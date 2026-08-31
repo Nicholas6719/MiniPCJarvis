@@ -1120,6 +1120,18 @@ def say_thanks(_s: dict, _r: dict) -> str:
     return _r2.choice(["Of course.", "My pleasure.", "Anytime.", "Of course, sir."])
 
 
+def say_go_ahead(_s: dict, _r: dict) -> str:
+    """He has announced a question, not asked one.
+
+    "I have a question for you!" came back "Spiders have eight legs." - an answer
+    to a question he had not asked yet, pulled out of nowhere. A person hearing
+    someone wind up to ask something says "go ahead", and waits.
+    """
+    import random as _r3
+    return _r3.choice(["Of course, sir.", "Go ahead, sir.", "Ask away, sir.",
+                       "I'm listening, sir."])
+
+
 def say_story_time(_s: dict, _r: dict) -> str:
     """"When was that?" about the thing he was just told.
 
@@ -1180,6 +1192,13 @@ def say_provenance(_s: dict, _r: dict) -> str:
 
 
 SKILLS: list[Skill] = [
+    Skill("go_ahead", None, [
+        "i have a question for you", "i have a question", "can i ask you something",
+        "question for you", "quick question", "i want to ask you something",
+        "got a question for you", "let me ask you something", "can i ask you a question",
+        "i need to ask you something", "i wanted to ask you something",
+        "are you there", "you awake", "you around"],
+        speak=say_go_ahead),
     Skill("story_time", None, [
         "when was that", "when did that happen", "when did this happen",
         "how long ago was that", "when was this", "what time did that happen",

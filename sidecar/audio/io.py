@@ -184,6 +184,13 @@ class Microphone:
             self._stream = None
 
 
+# Output streams whose writer thread never came back. They are kept - not
+# closed, not dropped - because a stream freed while a PortAudio thread is
+# still inside it takes the process down with no traceback. A handful of
+# leaked handles over a session is the cheapest possible price for that.
+_ORPHANS: list = []
+
+
 class SpeakerStalled(RuntimeError):
     """The output device stopped accepting audio (unplugged / slept / switched)."""
 
@@ -277,22 +284,35 @@ class Speaker:
         """
         got = self._wlock.acquire(timeout=self._LOCK_WAIT_S)
         try:
-            try:
-                stream.close()
-            except Exception:
-                pass
+            if got:
+                # The writer is out. Ours to close.
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            else:
+                # ABANDONED, and that has to mean it. The first version of this
+                # said "abandoning" in the log and then called stream.close()
+                # anyway, on both paths - closing a PortAudio stream while
+                # another thread is still blocked inside write() on it frees a C
+                # resource out from under that thread. On 2026-08-31 at 07:01 the
+                # device died again, this fix held the event loop open exactly as
+                # intended, and then the process died anyway with no traceback,
+                # twenty seconds later. Not closing costs a handle and a thread.
+                # Closing costs the process.
+                _ORPHANS.append(stream)   # and keep it alive: letting the GC
+                # finalise it would close it just as surely, only later and less
+                # predictably, with the writer still inside.
+                log.warning("audio: writer thread still stuck after %s; abandoning "
+                            "the stream (%d orphaned so far) rather than blocking "
+                            "the loop or closing it underneath the writer",
+                            how, len(_ORPHANS))
             if self._stream is stream:
                 self._stream = None
                 self._rate = None
         finally:
             if got:
                 self._wlock.release()
-        if not got:
-            # Abandoned, not closed: the writer thread still owns it and will
-            # release it whenever the driver lets go. Next play reopens against
-            # the current default device.
-            log.warning("audio: writer thread still stuck after %s; abandoning the "
-                        "stream rather than blocking the loop", how)
 
     def abort(self) -> None:
         """Immediately stop output (drops buffered audio). Never blocks."""

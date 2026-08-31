@@ -112,6 +112,39 @@ def main() -> int:
     stream2.released.set()
     t2.join(timeout=3)
 
+    # --- and abandoned must MEAN abandoned -----------------------------------
+    # The first version of the fix logged "abandoning the stream" and then called
+    # stream.close() anyway, on both paths. Closing a PortAudio stream while
+    # another thread is blocked inside write() on it frees a C resource out from
+    # under that thread. On 2026-08-31 at 07:01 the device failed again, the
+    # event loop stayed up exactly as designed - and the process then died 20
+    # seconds later with no traceback. Not closing costs a handle; closing costs
+    # the whole process.
+    from audio.io import _ORPHANS
+    spk5 = Speaker()
+    stuck = StuckStream(abort_works=False)
+    spk5._stream, spk5._rate = stuck, 24000
+    holding5 = threading.Event()
+
+    def writer5():
+        with spk5._wlock:
+            holding5.set()
+            stuck.released.wait(timeout=8)
+
+    t5 = threading.Thread(target=writer5, daemon=True)
+    t5.start()
+    holding5.wait(timeout=3)
+    before = len(_ORPHANS)
+    spk5.abort()
+    check("a stream is NOT closed under a live writer", not stuck.closed,
+          f"closed={stuck.closed}")
+    check("...it is kept alive so the GC cannot close it either",
+          len(_ORPHANS) == before + 1, len(_ORPHANS))
+    check("...and the orphan is the very stream we abandoned",
+          _ORPHANS[-1] is stuck)
+    stuck.released.set()
+    t5.join(timeout=3)
+
     # --- the healthy path still closes properly ------------------------------
     spk3 = Speaker()
     good = StuckStream(abort_works=True)
