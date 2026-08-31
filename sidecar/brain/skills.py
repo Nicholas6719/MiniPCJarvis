@@ -1120,6 +1120,51 @@ def say_thanks(_s: dict, _r: dict) -> str:
     return _r2.choice(["Of course.", "My pleasure.", "Anytime.", "Of course, sir."])
 
 
+def say_story_time(_s: dict, _r: dict) -> str:
+    """"When was that?" about the thing he was just told.
+
+    He asked it straight after an alert and got "That question came up earlier
+    today." - the router had matched it to PROVENANCE, which answers "when did
+    YOU learn this", so "that" resolved to his own question instead of the news.
+
+    Two honesty rules here:
+      * this reports when the story was PUBLISHED, not when the event happened.
+        Those are different, often by hours, and claiming the second when only
+        the first is known is exactly the kind of confident wrong answer that
+        makes an assistant untrustworthy about news.
+      * if the subject has gone stale, or was never a story, say so plainly and
+        let provenance answer instead of guessing.
+    """
+    from lastseen import last_seen
+    if last_seen.stale or not last_seen.links:
+        return say_provenance(_s, _r)
+    link = last_seen.links[0]
+    title = str(link.get("title") or "").strip()
+    src = str(link.get("source") or "").strip()
+    age = link.get("age_minutes")
+    when = str(link.get("when") or "").strip()
+
+    if isinstance(age, (int, float)) and age >= 0:
+        mins = int(age)
+        if mins < 90:
+            ago = f"about {max(1, mins)} minutes ago"
+        elif mins < 48 * 60:
+            hours = round(mins / 60)
+            ago = "about an hour ago" if hours == 1 else f"about {hours} hours ago"
+        else:
+            ago = f"about {round(mins / 1440)} days ago"
+    elif when:
+        ago = when
+    else:
+        return (f"I don't have a time on that one, sir - only that {src} carried it."
+                if src else "I don't have a time on that one, sir.")
+
+    lead = f"That was published {ago}"
+    if title:
+        lead += f": {title.rstrip('.')}"
+    return f"{lead}." + (f" That's {src}." if src else "")
+
+
 def say_provenance(_s: dict, _r: dict) -> str:
     """He never volunteers sources (user's rule) — but must answer for them."""
     from brain.facts import facts as _facts
@@ -1135,6 +1180,12 @@ def say_provenance(_s: dict, _r: dict) -> str:
 
 
 SKILLS: list[Skill] = [
+    Skill("story_time", None, [
+        "when was that", "when did that happen", "when did this happen",
+        "how long ago was that", "when was this", "what time did that happen",
+        "how recent is that", "when did that come out", "how old is that story",
+        "when was that reported"],
+        speak=say_story_time),
     Skill("provenance", None, [
         "how do you know that", "what's your source", "where did you get that",
         "says who", "where did that come from", "what is your source for that",

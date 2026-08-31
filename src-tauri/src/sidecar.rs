@@ -119,6 +119,24 @@ impl Sidecar {
         }
     }
 
+    /// Does it actually ANSWER? `is_alive` only asks whether the process still
+    /// exists, which is a different question and a much weaker one: on
+    /// 2026-08-30 a dead audio device deadlocked the sidecar's event loop, and
+    /// because the process was still there the supervisor watched it be frozen
+    /// for forty minutes without ever restarting it. He had no assistant and
+    /// nothing noticed. Liveness is answering, not existing.
+    pub async fn is_responding(&self) -> bool {
+        let client = reqwest::Client::new();
+        matches!(
+            client
+                .get(format!("http://127.0.0.1:{}/health", self.info.port))
+                .timeout(Duration::from_secs(3))
+                .send()
+                .await,
+            Ok(resp) if resp.status().is_success()
+        )
+    }
+
     pub async fn wait_healthy(&self, timeout: Duration) -> bool {
         let url = format!("http://127.0.0.1:{}/health", self.info.port);
         let client = reqwest::Client::new();

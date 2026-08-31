@@ -1089,6 +1089,64 @@ than by messaging his phone, which is the only sane way to develop this.
 Excel window. Windows resists foreground steals and the ALT-key nudge is a
 workaround. He was asked to try it by hand.
 
+## 2026-08-30 (night): the freeze, and the watchdog that could not see it
+
+He said "audit the code base". The audit found the thing that had frozen his
+JARVIS earlier the same evening, and a second bug that turned it from a glitch
+into forty minutes of silence. Both are fixed; both have gates.
+
+**1. Event-loop deadlock in `audio/io.py`.** `play_chunk` wraps PortAudio's
+blocking write in `to_thread` + `wait_for`, which is correct. What was not
+correct is what happened on timeout: it called `abort()`, and `abort()` did
+`with self._wlock:` - ON THE EVENT LOOP THREAD - while the writer thread still
+held that lock, stuck inside `stream.write()` on a dead output device.
+`stream.abort()` is supposed to free it and, on a device that has gone away,
+does not always manage it. The comment on the line read "writer has returned;
+safe to close". It had not. `close()` had the same bug, reachable from
+`_ensure()`.
+
+Result: no speech, no HTTP, no wake word, process alive, 19:40 to 20:21.
+
+Both now go through `Speaker._release()`, which waits `_LOCK_WAIT_S` (0.75s) and
+then ABANDONS the stream rather than blocking. A leaked handle costs a handle; a
+blocked event loop costs the whole assistant. Gated: `tests/test_audio_io.py`
+holds the lock exactly as a stuck writer does and asserts abort/close return.
+
+**2. The supervisor could not tell "frozen" from "fine".** `Sidecar::is_alive()`
+was `matches!(child.try_wait(), Ok(None))` - "the process has not exited". A
+wedged sidecar satisfies that forever, so it was never restarted. There is now
+`Sidecar::is_responding()` (GET /health, 3s) and the supervisor rebuilds after 3
+consecutive misses (~60s), reusing `restart()`, which already stop()s the whole
+tree. The crash-loop backoff is unchanged.
+
+`/health` is the ONE unauthenticated route (66 of 67 are token-checked) and it is
+now load-bearing for this. Do not put a token on it.
+
+**How to test a hang** (killing the process only ever proves the OLD path):
+`.agent/scripts/wedge_test.cmd` SUSPENDS every thread of the sidecar - alive by
+every OS measure, answering nothing - and watches for the rebuild. Run it from a
+real-session scheduled task like everything else.
+
+**Audit notes worth keeping:**
+- 66/67 routes authenticated; `_auth` uses `!=` rather than a constant-time
+  compare (negligible on loopback, noted for completeness).
+- All Rust HTTP calls carry timeouts, so the supervisor cannot hang itself.
+- History/turns/_seen are all trimmed; no unbounded growth in hot paths.
+- No unawaited coroutines (AST-checked); the apparent hits are sync `mic.start()`
+  and sqlite `execute()`.
+- 62 `except: pass` with no logging, mostly legitimate Windows fallbacks in
+  windows_tools/uia/window_thumbs - but indistinguishable from real bugs.
+- A hung audio write still LEAKS a thread from the default executor. The
+  deadlock is fixed; the leak is not. Enough of them would starve `to_thread`,
+  which every sync tool handler uses.
+- `scripts/model_trial.ps1` is BROKEN: it parses `--token` from the command
+  line, but the token moved to stdin, so it always reads an empty token.
+
+**Do not run the e2e suites while he is at the machine.** They drive the same
+orchestrator he is talking to; on 2026-08-30 six suites "failed" purely because
+he was using JARVIS at the time. And never start a second deploy while a suite is
+running - the hot-swap pulls the app out from under it.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

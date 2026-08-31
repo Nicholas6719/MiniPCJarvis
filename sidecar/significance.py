@@ -200,6 +200,22 @@ ROUTINE = re.compile(
     r"school committee|library|farmers market)\b", re.I)
 
 
+# The word "death" doing legal or administrative work rather than reporting one.
+# A real alert on his phone: "Lindsay Clancy trial: Does Massachusetts have the
+# death penalty? What sentence could she face if found guilty?" - a court
+# explainer from an Indian outlet, which read as "somebody died close to home"
+# because FATALITY found the word "death" in "death penalty". Nobody had died.
+NOT_A_DEATH = re.compile(
+    r"\bdeath (?:penalty|row|sentence|benefits?|certificate|notice|threats?)\b"
+    r"|\bsentenced to death\b|\blife or death\b|\bdeath with dignity\b"
+    r"|\bdeath tax\b|\bdeath star\b", re.I)
+
+
+def _event_text(text: str) -> str:
+    """The text with non-event uses of death words removed, for FATALITY only."""
+    return NOT_A_DEATH.sub(" ", text)
+
+
 def _text_of(story: dict) -> str:
     return " ".join(str(story.get(k) or "") for k in
                     ("headline", "title", "summary", "description"))
@@ -280,7 +296,7 @@ def classify_news(story: dict) -> tuple[str, str]:
 
     # A death, with no hazard word to announce it. "Fatal MBTA rail incident"
     # names no danger at all and was reading as ordinary local news.
-    if FATALITY.search(text):
+    if FATALITY.search(_event_text(text)):
         if own_town:
             return URGENT, "somebody died in one of his towns"
         if near:

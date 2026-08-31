@@ -254,16 +254,29 @@ class Speaker:
             self._rate = None
             raise SpeakerStalled("the audio output device stopped responding")
 
-    def abort(self) -> None:
-        """Immediately stop output (drops buffered audio)."""
-        stream = self._stream
-        if stream is None:
-            return
+    # How long either of these will wait for the writer thread before deciding
+    # it is never coming back. Short on purpose: this runs on the event loop.
+    _LOCK_WAIT_S = 0.75
+
+    def _release(self, stream, how: str) -> None:
+        """Close a stream without ever blocking the caller.
+
+        THIS IS THE ONE THAT FROZE HIM. Both of these used `with self._wlock:`,
+        guarded by the comment "writer has returned; safe to close" - and on
+        2026-08-30 at 19:40 the writer had NOT returned. A dead output device
+        left PortAudio's blocking write stuck while holding the lock; the
+        timeout handler then tried to take that same lock from the EVENT LOOP
+        THREAD, and the whole assistant stopped: no speech, no HTTP, no wake
+        word, for forty minutes, with the process still running so the
+        supervisor never noticed.
+
+        `stream.abort()` is supposed to unblock the writer. When the device is
+        gone it does not always manage it, so waiting on the lock can never be
+        unbounded. A leaked stream object costs a handle; a blocked event loop
+        costs the entire assistant.
+        """
+        got = self._wlock.acquire(timeout=self._LOCK_WAIT_S)
         try:
-            stream.abort()  # unblocks any in-flight write
-        except Exception:
-            pass
-        with self._wlock:  # writer has returned; safe to close
             try:
                 stream.close()
             except Exception:
@@ -271,6 +284,26 @@ class Speaker:
             if self._stream is stream:
                 self._stream = None
                 self._rate = None
+        finally:
+            if got:
+                self._wlock.release()
+        if not got:
+            # Abandoned, not closed: the writer thread still owns it and will
+            # release it whenever the driver lets go. Next play reopens against
+            # the current default device.
+            log.warning("audio: writer thread still stuck after %s; abandoning the "
+                        "stream rather than blocking the loop", how)
+
+    def abort(self) -> None:
+        """Immediately stop output (drops buffered audio). Never blocks."""
+        stream = self._stream
+        if stream is None:
+            return
+        try:
+            stream.abort()  # asks PortAudio to unblock any in-flight write
+        except Exception:
+            pass
+        self._release(stream, "abort")
 
     def close(self) -> None:
         stream = self._stream
@@ -280,14 +313,7 @@ class Speaker:
             stream.stop()
         except Exception:
             pass
-        with self._wlock:
-            try:
-                stream.close()
-            except Exception:
-                pass
-            if self._stream is stream:
-                self._stream = None
-                self._rate = None
+        self._release(stream, "close")
 
 
 mic = Microphone()

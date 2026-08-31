@@ -245,6 +245,20 @@ def main() -> int:
     check("both shapes come from one build",
           len(secs) == len([t for t, _l in secs]), secs)
 
+    # --- one event, two newsrooms, two HOURS apart ----------------------------
+    # He was told about the same death twice: the MBTA teen in the afternoon
+    # brief, then a memorial piece two hours later. _same_story could always see
+    # it; it was only ever asked within one sweep, never across them.
+    bB = br.Briefing()
+    first = ("Teen dies trying to rescue companion after fall at Massachusetts "
+             "Bay Transportation Authority train station")
+    later = ("Massachusetts teen who died trying to rescue girlfriend remembered "
+             "for putting others before himself")
+    bB._seen["news:" + first[:80].lower()] = __import__("time").time()
+    check("the follow-up is recognised as the same event", bB._seen_before(later))
+    check("an unrelated local story still gets through",
+          not bB._seen_before("Power outage affects 4,000 in Framingham"))
+
     # --- a quiet day is allowed to be quiet ----------------------------------
     b5 = br.Briefing()
     b5._fresh_stories = lambda: _fake_stories([])

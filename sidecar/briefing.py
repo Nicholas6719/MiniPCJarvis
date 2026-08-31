@@ -191,12 +191,27 @@ class Briefing:
                 continue
             head = str(story.get("headline") or "").strip()
             key = f"news:{head[:80].lower()}"
-            if key in self._seen:
+            # Exact key first, then the same event in different words. He was
+            # told about one death twice: "Teen dies trying to rescue companion
+            # after fall at Massachusetts Bay Transportation Authority train
+            # station" in the afternoon brief, then two hours later "Massachusetts
+            # teen who died trying to rescue girlfriend remembered for putting
+            # others before himself". One event, two newsrooms, two pings.
+            # _same_story already knew how to see that; it was only ever being
+            # asked WITHIN a single sweep, never across them.
+            if key in self._seen or self._seen_before(head):
                 continue
             self._seen[key] = time.time()
             if tier in (ALERT, URGENT):
-                src = story.get("source") or "the news"
-                out.append((f"{head} — {src}.", tier, key))
+                # Read the piece and say what happened. He asked for exactly
+                # this: "is Jarvis reading through these like news articles and
+                # then summarizing them into 1-2 sentences". If it cannot be
+                # read, the headline still goes - an alert is never dropped for
+                # want of a summary.
+                from newsroom import spoken_line, summarize
+                said = await summarize(story)
+                self._remember(said)
+                out.append((spoken_line(said), tier, key))
             else:
                 # NOTABLE means "waits for the brief", not "belongs in the brief".
                 # The first real brief rolled up a Manchester United tribute to an
@@ -272,13 +287,26 @@ class Briefing:
             stories += (national.get("items") or national.get("latest") or [])
         except Exception:
             log.debug("national scan failed", exc_info=True)
-        for place in config.get("briefing", "local_places",
-                                default=["Massachusetts"]) or []:
+        # DIRECT publisher feeds, not a Google News search. This is not a
+        # preference: a search feed returns news.google.com redirect links, which
+        # are JavaScript interstitials - fetching one gives 0 characters. Nothing
+        # can be read, summarised, or opened from them, so every local story
+        # arrived as a bare headline no matter what the summariser did.
+        for topic in config.get("briefing", "local_topics",
+                                default=["local", "towns"]) or []:
             try:
-                local = await get_news(query=str(place), count=4)
+                local = await get_news(topic=str(topic), count=8)
                 stories += (local.get("items") or [])
             except Exception:
-                log.debug("local scan failed for %s", place, exc_info=True)
+                log.debug("local scan failed for %s", topic, exc_info=True)
+        # A named-subject search still catches anything the desks missed; its
+        # links are unreadable, so these can only ever be headlines.
+        for place in config.get("briefing", "local_places", default=[]) or []:
+            try:
+                found = await get_news(query=str(place), count=3)
+                stories += (found.get("items") or [])
+            except Exception:
+                log.debug("local search failed for %s", place, exc_info=True)
 
         # A sweep that returns nothing is a sweep that found nothing OR a feed
         # that has started refusing us, and from here those look identical. Both
@@ -346,6 +374,35 @@ class Briefing:
     # Speech wants flowing sentences; a phone wants short lines you can scan. The
     # same text cannot be both, so it is no longer asked to be.
 
+    def _seen_before(self, headline: str) -> bool:
+        """Has he already been told this, however it was worded last time?"""
+        for key in self._seen:
+            if not key.startswith("news:"):
+                continue
+            if self._same_story(headline, key[5:]):
+                return True
+        return False
+
+    @staticmethod
+    def _remember(said: dict) -> None:
+        """Keep the link behind a proactive item, so "give me the article" works.
+
+        Everything he is told unprompted is a thing he can ask about next, and
+        without this the subject of "it" is whatever he last ASKED for - never
+        what JARVIS last volunteered.
+        """
+        url = str(said.get("url") or "")
+        if not url:
+            return
+        try:
+            from lastseen import last_seen
+            last_seen.note_result({"items": [{
+                "headline": said.get("headline"), "url": url,
+                "source": said.get("source"), "when": said.get("when"),
+                "age_minutes": said.get("age_minutes")}]})
+        except Exception:
+            log.debug("could not remember the link", exc_info=True)
+
     @staticmethod
     def _tidy(headline: str) -> str:
         """A headline as it should appear, not as the CMS emitted it.
@@ -354,10 +411,12 @@ class Briefing:
         rendered as "Primary -;" once punctuation was appended, and several arrive
         with trailing dashes, pipes or the outlet's own name.
         """
-        import re as _re
-        h = _re.sub(r"\s+", " ", str(headline or "")).strip()
-        h = _re.sub(r"[\s\-–—|:;,]+$", "", h)
-        return h
+        # One implementation of "how a headline should read", shared with the
+        # summariser. Aggregated feeds append the outlet - "...found guilty? |
+        # Hindustan Times" - and then we appended it again, so the roll-up was
+        # telling him the source twice in one line.
+        from newsroom import _clean_headline
+        return _clean_headline(headline)
 
     @staticmethod
     def _pct(value) -> tuple[str, str]:
@@ -427,16 +486,27 @@ class Briefing:
                 ranked.append((tier, st))
         ranked.sort(key=lambda pair: {URGENT: 0, ALERT: 1}.get(pair[0], 2))
         seen: set[str] = set()
-        news: list[tuple[str, str]] = []
+        picked: list[dict] = []
         for _tier, st in ranked:
             head = self._tidy(st.get("headline"))
             if not head or head.lower() in seen:
                 continue
             seen.add(head.lower())
-            line = f"{head} ({st.get('source') or 'the news'})"
-            news.append((line, line))
-            if len(news) == 3:          # three is a brief; five is a newsletter
+            picked.append(st)
+            if len(picked) == 3:        # three is a brief; five is a newsletter
                 break
+        # The brief says what happened, not what was printed. Read in parallel:
+        # three articles one after another would put ~15s into a brief nobody is
+        # waiting on, and they have nothing to do with each other.
+        news: list[tuple[str, str]] = []
+        if picked:
+            from newsroom import summarize_all
+            for said in await summarize_all(picked, limit=3):
+                self._remember(said)
+                body = said.get("summary") or said.get("headline") or ""
+                src = said.get("source") or "the news"
+                line = f"{body.rstrip(' .')} ({src})"
+                news.append((line, line))
         if news:
             out.append(("News", news))
 

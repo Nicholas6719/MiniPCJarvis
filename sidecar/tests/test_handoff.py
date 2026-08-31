@@ -83,6 +83,49 @@ def main() -> int:
     check("an empty reply changes nothing",
           ls.text == "Something worth sending." and ls.at == when, ls.text)
 
+    # --- "when was that?" --------------------------------------------------
+    # He asked it straight after a news alert and was told "That question came up
+    # earlier today." The router had matched it to PROVENANCE - which answers
+    # "when did YOU learn this" - so "that" resolved to his own question rather
+    # than the story he had just been sent.
+    import os as _os, tempfile as _tf
+    _os.environ.setdefault("JARVIS_DB", _os.path.join(_tf.mkdtemp(), "h.db"))
+    from lastseen import last_seen as _ls
+    from brain.skills import say_story_time
+
+    _ls.clear()
+    _ls.note_result({"items": [{
+        "headline": "Grand Canyon flash floods leave more than 20 missing",
+        "url": "https://www.cbsnews.com/x", "source": "CBS", "age_minutes": 126}]})
+    said = say_story_time({}, {})
+    check("it answers about the STORY, not about the question",
+          "Grand Canyon" in said, said)
+    check("...with how long ago it was", "2 hours ago" in said, said)
+    check("...and never claims the question came up earlier",
+          "question" not in said.lower(), said)
+
+    # publication time is not event time, and it must not pretend otherwise
+    check("it says PUBLISHED, not that the event happened then",
+          "published" in said.lower(), said)
+
+    _ls.links[0]["age_minutes"] = 8
+    check("minutes are read as minutes", "8 minutes ago" in say_story_time({}, {}),
+          say_story_time({}, {}))
+    _ls.links[0]["age_minutes"] = 4300
+    check("days are read as days", "3 days ago" in say_story_time({}, {}),
+          say_story_time({}, {}))
+
+    # no time at all: admit it rather than invent one
+    _ls.links[0]["age_minutes"] = None
+    _ls.links[0]["when"] = ""
+    check("an unknown time is admitted, not guessed",
+          "don't have a time" in say_story_time({}, {}), say_story_time({}, {}))
+
+    # and once "it" has gone stale, provenance answers instead
+    _ls.clear()
+    check("a stale subject falls back rather than inventing",
+          "Grand Canyon" not in say_story_time({}, {}), say_story_time({}, {}))
+
     # --- malformed results must not raise -------------------------------------
     for junk in (None, "a string", 42, [], {"items": None}, {"items": ["not a dict"]}):
         try:

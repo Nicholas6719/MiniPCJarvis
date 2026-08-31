@@ -218,6 +218,23 @@ def main() -> int:
     check("a town name still wins outright",
           is_local({"headline": "Fatal crash closes Route 9 in Natick"}) == (True, True))
 
+    # --- "death" doing legal work is not a death ------------------------------
+    # A real alert on his phone: a Hindustan Times explainer about what sentence
+    # Lindsay Clancy could face read as "somebody died close to home", because
+    # FATALITY found the word "death" inside "death penalty". Nobody had died.
+    for legal in ("Lindsay Clancy trial: Does Massachusetts have the death "
+                  "penalty? What sentence could she face if found guilty?",
+                  "Massachusetts man on death row seeks new trial",
+                  "Suspect received death threats, Boston police say"):
+        check(f"not a death: {legal[:34]!r}", tier(legal) == NOTABLE, tier(legal))
+
+    # ...while a real one near him is untouched
+    check("a real local death still reaches him",
+          tier("Man dies in Framingham house fire") == URGENT)
+    check("a death toll is still a death",
+          tier("Death toll rises to 12 in Massachusetts flooding")
+          in (URGENT, ALERT), tier("Death toll rises to 12 in Massachusetts flooding"))
+
     # --- an empty story is not a story ----------------------------------------
     check("nothing is not something", classify_news({})[0] == NONE)
 

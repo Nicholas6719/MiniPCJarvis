@@ -50,6 +50,30 @@ while ((Get-Date) -lt $deadline) {
     }
     Start-Sleep 3
 }
+
+# /health says "idle" the moment FastAPI binds its socket, which is a long way
+# short of being able to answer. On 2026-08-30 the suites started 34s after that
+# and three of them failed - brain_e2e at 2/8 - purely because the app was not
+# warm yet; every one passed on the same build minutes later. A release that
+# cries wolf is worse than no release check at all, so wait for the subsystems
+# and then make it actually answer something before judging it.
+if ($port) {
+    & $log "waiting for the subsystems"
+    $deadline = (Get-Date).AddSeconds(240)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $dg = Invoke-RestMethod "http://127.0.0.1:$port/diagnostics" -Headers @{'X-Jarvis-Token'=$tok} -TimeoutSec 20
+            if (($dg.checks | Where-Object name -eq 'Wake Word').status -eq 'ok') { break }
+        } catch {}
+        Start-Sleep 5
+    }
+    & $log "warming up (one real turn)"
+    try {
+        Invoke-RestMethod "http://127.0.0.1:$port/text" -Method Post -Headers @{'X-Jarvis-Token'=$tok} `
+            -ContentType 'application/json' -Body (@{ text = "what time is it" } | ConvertTo-Json) -TimeoutSec 120 | Out-Null
+    } catch { & $log "warm-up turn did not complete: $($_.Exception.Message)" }
+    Start-Sleep 5
+}
 if (-not $port) { & $log "APP DID NOT COME UP"; exit 1 }
 [IO.File]::WriteAllText('C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\session.txt', "$port $tok")
 # the wake model loads lazily after boot: the voice suite is a false failure before it's up

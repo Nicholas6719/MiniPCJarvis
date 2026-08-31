@@ -139,8 +139,12 @@ DEFAULTS: dict[str, Any] = {
         "news_scope": "local",
         # Massachusetts, weighted to the five towns he named. The whole
         # state is wanted; these come first.
-        "local_places": ["Framingham MA", "Sudbury MA", "Marlborough MA",
-                         "Maynard MA", "Natick MA", "Massachusetts"],
+        # Publisher desks with REAL article URLs, so stories can be read and
+        # summarised rather than recited. See news_tools.FEEDS.
+        "local_topics": ["local", "towns"],
+        # Extra named searches. Kept small on purpose: these come back with
+        # news.google.com redirect links, which cannot be fetched or opened.
+        "local_places": ["Framingham MA", "Natick MA"],
     },
     "markets": {
         # The names he actually holds or follows. They do NOT narrow what he

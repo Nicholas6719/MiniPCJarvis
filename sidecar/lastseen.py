@@ -54,8 +54,13 @@ class LastSeen:
             if isinstance(url, str) and url.startswith("http"):
                 title = (node.get("title") or node.get("headline")
                          or node.get("name") or "")
+                # Keep WHEN, not just what and where. "When was that?" is one of
+                # the first things a person asks about news they were just told,
+                # and without this the only honest answer was a shrug.
                 out.append({"title": str(title)[:200], "url": url,
-                            "source": str(node.get("source") or "")[:60]})
+                            "source": str(node.get("source") or "")[:60],
+                            "when": str(node.get("when") or "")[:40],
+                            "age_minutes": node.get("age_minutes")})
             for v in node.values():
                 self._walk(v, out, depth + 1)
         elif isinstance(node, list):

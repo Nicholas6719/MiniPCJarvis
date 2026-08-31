@@ -120,15 +120,40 @@ pub fn run() {
         let sc3 = sc.clone();
         tauri::async_runtime::spawn(async move {
             let mut recent_restarts: Vec<std::time::Instant> = Vec::new();
+            // A hung sidecar answers nothing but exits nothing either. One
+            // missed health check can just be a slow moment (a model loading, a
+            // long turn), so it takes three in a row — about a minute — before
+            // we call it wedged and rebuild it.
+            let mut missed_health = 0u8;
+            const WEDGED_AFTER: u8 = 3;
             loop {
                 tokio::time::sleep(Duration::from_secs(20)).await;
                 if sc3.is_alive() {
-                    // Alive is not the same as equipped: a restart we did not
-                    // perform (or one past the give-up budget below) leaves it
-                    // running with no secrets at all.
-                    reconcile_secrets(&sc3).await;
-                    continue;
+                    // Existing is not the same as WORKING. This is the check
+                    // that was missing on 2026-08-30, when a deadlocked event
+                    // loop left him with a silent assistant for forty minutes
+                    // and a supervisor that was perfectly happy about it.
+                    if sc3.is_responding().await {
+                        missed_health = 0;
+                        // Alive is not the same as equipped either: a restart we
+                        // did not perform (or one past the give-up budget below)
+                        // leaves it running with no secrets at all.
+                        reconcile_secrets(&sc3).await;
+                        continue;
+                    }
+                    missed_health = missed_health.saturating_add(1);
+                    if missed_health < WEDGED_AFTER {
+                        eprintln!(
+                            "[jarvis] sidecar not answering ({missed_health}/{WEDGED_AFTER})"
+                        );
+                        continue;
+                    }
+                    // Fall through to the restart path below: restart() already
+                    // stop()s the whole process tree first, so a wedged sidecar
+                    // is torn down and rebuilt exactly like a dead one.
+                    eprintln!("[jarvis] sidecar is wedged — rebuilding it");
                 }
+                missed_health = 0;
                 recent_restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
                 if recent_restarts.len() >= 3 {
                     // crash-looping — stop trying for this 10-minute window

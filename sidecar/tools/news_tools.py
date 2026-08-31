@@ -50,8 +50,25 @@ FEEDS: dict[str, list[tuple[str, str]]] = {
                 ("NASA", "https://www.nasa.gov/rss/dyn/breaking_news.rss")],
     "sports": [("BBC Sport", "https://feeds.bbci.co.uk/sport/rss.xml"),
                ("ESPN", "https://www.espn.com/espn/rss/news")],
+    # His actual area. These are DIRECT publisher feeds, and that matters for
+    # more than provenance: a Google News search feed hands back opaque
+    # news.google.com redirect links that are JavaScript interstitials - fetching
+    # one returns 0 characters of article. Nothing can be read, summarised or
+    # opened from those. These carry the publisher's own URL, so JARVIS can read
+    # the piece and tell him what happened rather than reciting a headline.
+    # Verified reachable 2026-08-30. Patch answers on /feeds/<state>/<town>;
+    # /<state>/<town>/rss is a 404. MetroWest Daily News and the Globe refuse RSS.
     "local": [("WCVB Boston", "https://www.wcvb.com/topstories-rss"),
-              ("Boston.com", "https://www.boston.com/feed/")],
+              ("Boston.com", "https://www.boston.com/feed/"),
+              ("MassLive", "https://www.masslive.com/arc/outboundfeeds/rss/?outputType=xml"),
+              ("WHDH", "https://whdh.com/feed/"),
+              ("NBC10 Boston", "https://www.nbcboston.com/news/local/?rss=y")],
+    # The five towns he named, each from its own desk.
+    "towns": [("Framingham Patch", "https://patch.com/feeds/massachusetts/framingham"),
+              ("Natick Patch", "https://patch.com/feeds/massachusetts/natick"),
+              ("Sudbury Patch", "https://patch.com/feeds/massachusetts/sudbury"),
+              ("Marlborough Patch", "https://patch.com/feeds/massachusetts/marlborough"),
+              ("Maynard Patch", "https://patch.com/feeds/massachusetts/maynard")],
 }
 
 _TAG = re.compile(r"<[^>]+>")
