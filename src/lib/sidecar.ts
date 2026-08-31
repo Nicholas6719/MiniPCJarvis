@@ -15,11 +15,17 @@ export async function sidecarInfo(): Promise<SidecarInfo> {
       info = await invoke<SidecarInfo>("sidecar_info");
     } catch {
       // Browser-based dev (no Tauri): take port/token from the URL.
+      // NOT cached. One transient invoke failure inside the real app used to
+      // pin {port: 8790, token: ""} for the life of the process - the HUD then
+      // talked to the wrong port with no token and never recovered short of a
+      // restart. A dev fallback should not be able to become permanent.
       const params = new URLSearchParams(window.location.search);
-      info = {
+      const fallback = {
         port: Number(params.get("port") ?? 8790),
         token: params.get("token") ?? "",
       };
+      if (!("__TAURI_INTERNALS__" in window)) info = fallback;
+      return fallback;
     }
   }
   return info;
@@ -53,6 +59,12 @@ export function connectEvents(onEvent: (evt: any) => void): () => void {
       } catch {}
     };
     ws.onclose = () => {
+      // Tell the UI the truth. "offline" was only ever the store's initial
+      // value - nothing ever set it - so when the sidecar died or wedged the orb
+      // kept showing whatever it last displayed, indefinitely if the supervisor
+      // gave up. A HUD that looks fine while the backend is gone is worse than
+      // one that looks broken.
+      try { onEvent({ kind: "state", state: "offline" }); } catch {}
       if (!closed) setTimeout(open, 1500);
     };
     ws.onerror = () => ws?.close();

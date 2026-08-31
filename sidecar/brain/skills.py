@@ -170,6 +170,19 @@ def slots_app(t: str) -> dict | None:
         return None  # a website, not an app -> the LLM routes it to open_url
     if re.search(r"\.(?:xlsx?|docx?|pptx?|pdf|txt|md|csv|png|jpe?g|gif|mp[34]|zip|json|log)$", name):
         return None  # a document -> the LLM finds/opens the file instead of launching an app
+    # And finally: IS it an app? The router canonicalises "open|launch|start|run|
+    # put on ..." onto one seed sentence, so it matches at cosine 1.00 and the
+    # threshold never gets a say - "open a bank account", "run a diagnostic" and
+    # "put on a movie" all arrived here as open_app. Worse, open_app speaks
+    # first, so he heard "Opening a bank account." before anything was tried.
+    # A name that matches nothing installed is not an app; refusing the slot
+    # hands the turn to the LLM, which can answer it properly.
+    try:
+        from tools.builtin import looks_launchable
+        if not looks_launchable(name):
+            return None
+    except Exception:
+        pass                      # never let the check itself break the skill
     return {"name": name}
 
 
@@ -1196,8 +1209,11 @@ SKILLS: list[Skill] = [
         "i have a question for you", "i have a question", "can i ask you something",
         "question for you", "quick question", "i want to ask you something",
         "got a question for you", "let me ask you something", "can i ask you a question",
-        "i need to ask you something", "i wanted to ask you something",
-        "are you there", "you awake", "you around"],
+        "i need to ask you something", "i wanted to ask you something"],
+        # NOT "are you there" / "you awake" / "you around" - those are asking
+        # whether he is PRESENT, which is wakeack's job, and adding them here
+        # stole the phrase from it. Caught by tests/test_brain.py, which is
+        # exactly the seed-collision risk a new skill carries.
         speak=say_go_ahead),
     Skill("story_time", None, [
         "when was that", "when did that happen", "when did this happen",

@@ -343,6 +343,12 @@ class Briefing:
                                 default=["local", "towns"]) or []:
             try:
                 local = await get_news(topic=str(topic), count=8)
+                # Provenance beats parsing. A story off WCVB or Natick Patch IS
+                # local, whatever words it happens to contain - and a place name
+                # alone is poor evidence, since the national wire is BBC and Sky
+                # and England has a Boston, a Cambridge and a Worcester too.
+                for it in (local.get("items") or []):
+                    it["_local_feed"] = True
                 stories += (local.get("items") or [])
             except Exception:
                 log.debug("local scan failed for %s", topic, exc_info=True)

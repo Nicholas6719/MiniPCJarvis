@@ -55,11 +55,21 @@ export interface ActivityEntry {
   status?: string;
 }
 
+// A malformed source URL used to throw inside the zustand updater, the throw was
+// swallowed by the socket's catch, and the whole research event vanished - no
+// browser stage, no log line, nothing to debug.
+function _host(u: string): string {
+  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; }
+}
+
 export interface Confirmation {
   confirmId: string;
   tool: string;
   args: any;
   risk: string;
+  // which tool_call this question belongs to, so the card clears when THAT call
+  // resolves - by voice, from the phone, or by the backend's 30s timeout
+  callId?: string;
 }
 
 export interface WebResult { title?: string; url: string; snippet?: string; host?: string }
@@ -301,7 +311,7 @@ export const useStore = create<Store>((set, get) => ({
           }
           return {
             transcript: [
-              ...st.transcript,
+              ...st.transcript.slice(-199),
               { id: evt.id, role: "user", text: evt.text, ts: evt.ts },
             ],
             assistantDraft: "",
@@ -330,11 +340,21 @@ export const useStore = create<Store>((set, get) => ({
             if (chunk) set((st) => ({ assistantDraft: st.assistantDraft + chunk }));
           });
         }
-        // an answer streaming with no visual stage = the prose stage
-        set((st) => ({
-          stage: st.stage ?? { kind: "prose", openedTs: Date.now(), holdUntil: 0, pinned: false },
-          turn: patchStep(st.turn, 3, { status: "active", label: "Speaking it" }),
-        }));
+        // an answer streaming with no visual stage = the prose stage.
+        // ONCE, not per token. The rAF batching above commits the text once a
+        // frame and then this used to fire a full store notification for every
+        // token - 20-40 a second - each one allocating a fresh turn and a fresh
+        // 4-element steps array, re-rendering the prose stage, the run strip and
+        // the visual strip. The batching was doing nothing.
+        set((st) => {
+          const needStage = !st.stage;
+          const step = st.turn?.steps?.[3];
+          if (!needStage && step && step.status === "active") return {};
+          return {
+            stage: st.stage ?? { kind: "prose", openedTs: Date.now(), holdUntil: 0, pinned: false },
+            turn: patchStep(st.turn, 3, { status: "active", label: "Speaking it" }),
+          };
+        });
         break;
       }
       case "turn_done": {
@@ -343,7 +363,7 @@ export const useStore = create<Store>((set, get) => ({
         if (draft.trim()) {
           set((st) => ({
             transcript: [
-              ...st.transcript,
+              ...st.transcript.slice(-199),
               { id: draftId || evt.id, role: "assistant", text: draft, ts: evt.ts },
             ],
             assistantDraft: "",
@@ -363,6 +383,16 @@ export const useStore = create<Store>((set, get) => ({
         break;
       }
       case "tool_call":
+        // A confirmation that resolves ANYWHERE has to take the card with it.
+        // clearConfirmation was only ever called by tapping a button here, so a
+        // question answered by voice, by the phone, or by the 30-second timeout
+        // left "NEEDS YOU" on the screen permanently - which is exactly how
+        // Nicholas found it on 2026-08-31, hours after a test had asked.
+        if (evt.status && evt.status !== "pending") {
+          set((st) => (st.confirmation &&
+                       (!st.confirmation.callId || st.confirmation.callId === evt.call_id)
+                       ? { confirmation: null } : {}));
+        }
         if (evt.status === "pending") {
           set((st) => ({
             turn: patchStep(st.turn, 2, {
@@ -385,11 +415,18 @@ export const useStore = create<Store>((set, get) => ({
           detail: evt.args ?? evt.result,
         });
         break;
+      case "confirmation_answered":
+        // The answer is what dismisses the question. Waiting for the tool to
+        // FINISH left "NEEDS YOU" on screen for the whole execution - up to 90s
+        // for a market take - with the geometry locked radial behind it.
+        set({ confirmation: null });
+        break;
       case "confirmation_required":
         set({
           confirmation: {
             confirmId: evt.confirm_id, tool: evt.tool,
             args: evt.args, risk: evt.risk,
+            callId: evt.call_id,
           },
         });
         push({ id: evt.id, ts: evt.ts, kind: "confirm", summary: `confirmation: ${evt.tool}` });
@@ -413,7 +450,7 @@ export const useStore = create<Store>((set, get) => ({
           if (evt.sources) {
             next.results = evt.sources.map((s: any) => ({
               title: s.title, url: s.url,
-              host: s.url ? new URL(s.url).hostname.replace(/^www\./, "") : "",
+              host: s.url ? _host(s.url).replace(/^www\./, "") : "",
             }));
           }
           return {
@@ -523,7 +560,7 @@ export const useStore = create<Store>((set, get) => ({
       case "announcement":
         set((st) => ({
           transcript: [
-            ...st.transcript,
+            ...st.transcript.slice(-199),
             { id: evt.id, role: "assistant", text: evt.text, ts: evt.ts },
           ],
         }));

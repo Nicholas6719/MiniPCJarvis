@@ -108,6 +108,54 @@ def _best_match(key: str, names) -> str | None:
     return subs[0] if subs else None
 
 
+_LAUNCHABLE_CACHE: tuple[float, set[str]] | None = None
+
+
+def launchable_names(ttl: float = 300.0) -> set[str]:
+    """Every app name this machine could plausibly launch, cheaply.
+
+    Aliases + Start Menu shortcut stems only - the Start Menu rglob measures
+    ~15ms, while the Store-app list costs a 15-SECOND PowerShell call and is left
+    for the actual launch. This exists so the ROUTER can ask "is that even an
+    app?" before committing, without paying for it.
+    """
+    global _LAUNCHABLE_CACHE
+    import time as _t
+    now = _t.time()
+    if _LAUNCHABLE_CACHE and now - _LAUNCHABLE_CACHE[0] < ttl:
+        return _LAUNCHABLE_CACHE[1]
+    names = set(_APP_ALIASES)
+    try:
+        for root in _START_MENUS:
+            if root.exists():
+                for lnk in root.rglob("*.lnk"):
+                    names.add(lnk.stem.lower())
+    except Exception:
+        log.debug("could not index the Start Menu", exc_info=True)
+    names |= {k.lower() for k in _KNOWN_SITES}
+    _LAUNCHABLE_CACHE = (now, names)
+    return names
+
+
+def looks_launchable(name: str) -> bool:
+    """Could "open X" plausibly mean an application?
+
+    The router canonicalises "open|launch|start|run|put on ..." into one seed
+    sentence, which then matches at cosine 1.00 - so "open a bank account", "run
+    a diagnostic" and "put on a movie" all became open_app, and open_app SPEAKS
+    FIRST: he announced "Opening a bank account." before discovering there was no
+    such thing. The regex cannot tell an app from an English sentence; this can.
+    """
+    key = (name or "").strip().lower()
+    if not key or len(key) > 40:
+        return False
+    have = launchable_names()
+    if key in have:
+        return True
+    # a distinctive prefix/substring is fine ("chrome" for "google chrome")
+    return any(key in n or n in key for n in have if len(n) >= 3)
+
+
 def _resolve_app(name: str) -> str | None:
     """Find something launchable for a friendly app name, WITHOUT a shell:
     alias -> Start Menu shortcut -> PATH exe -> Start-search app list (Store apps).
@@ -261,7 +309,14 @@ def close_application(name: str) -> dict:
             continue
         tl = title.lower()
         title_words = set(re.findall(r"[a-z0-9]+", tl))
-        if wpid in pids or any(w in title_words for w in words):
+        # The PROCESS is the evidence. Matching on a word in the title meant
+        # "close code" posted WM_CLOSE to every window with "code" in its name -
+        # unconfirmed, at LOW risk, potentially onto unsaved work. A title is a
+        # last resort now: only when no process matched at all, and only on a
+        # distinctive whole word.
+        if wpid in pids:
+            targets.append((hwnd, wpid))
+        elif not pids and any(len(w) >= 5 and w in title_words for w in words):
             targets.append((hwnd, wpid))
     if not pids and not targets:
         return {"error": f"no running process matched {name}"}
@@ -589,6 +644,20 @@ async def _web_search(query: str, count: int = 5) -> dict:
     return {"query": query, "results": results}
 
 
+def _within(path, root) -> bool:
+    """Is `path` genuinely inside `root`?
+
+    A string prefix test is not a path test: "C:/Users/nicho/Documents_private"
+    starts with "C:/Users/nicho/Documents" and passed the old check. Compare
+    path COMPONENTS, the way file_tools already does.
+    """
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except Exception:
+        return False
+
+
 def read_file(path: str, max_chars: int = 4000) -> dict:
     p = Path(path).expanduser()
     if not p.is_absolute():
@@ -601,7 +670,7 @@ def read_file(path: str, max_chars: int = 4000) -> dict:
         p = p.resolve()
     except OSError:
         return {"error": "invalid path"}
-    if not any(str(p).lower().startswith(str(r.resolve()).lower()) for r in _ALLOWED_READ_ROOTS):
+    if not any(_within(p, r) for r in _ALLOWED_READ_ROOTS):
         return {"error": f"reading outside allowed folders (Documents/Downloads/Desktop/Pictures) "
                          f"is not permitted: {p}"}
     if not p.exists() or not p.is_file():
@@ -668,7 +737,9 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "Application name"}},
             "required": ["name"]},
-        risk=Risk.LOW, handler=close_application))
+        # Closing someone's window can lose their work and cannot be undone.
+        # It asks first, like every other irreversible thing.
+        risk=Risk.MEDIUM, handler=close_application))
     registry.register(Tool(
         name="web_search",
         description="Search the web for current information. Returns titles, URLs and snippets.",

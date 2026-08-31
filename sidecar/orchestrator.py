@@ -164,6 +164,9 @@ class Orchestrator:
         self.vad = StreamingVAD()
         self.metrics = TurnMetrics()
         self._history: list[dict] = []
+        # Where the prompt's history window starts. Advanced in blocks, never per
+        # turn, so the prefix stays byte-identical for the KV cache.
+        self._hist_base: int = 0
         self._turn_task: asyncio.Task | None = None
         self._listen_flag = asyncio.Event()   # push-to-talk pressed / listening on
         self._speak_cancel = asyncio.Event()
@@ -196,6 +199,65 @@ class Orchestrator:
             await bus.emit("awake", summary="back from sleep")
         except Exception:
             log.exception("could not come back from sleep")
+
+    # How long JARVIS may sit in a state that cannot hear his name before we
+    # decide something has gone wrong and put him back. Comfortably longer than
+    # the slowest legitimate turn (a research turn runs ~25s, a brief ~30s).
+    # 120s: comfortably past the longest legitimate operation (market_take has a
+    # 90s tool budget, a research turn ~25s), and short enough that being deaf is
+    # a blip rather than the rest of his afternoon.
+    STUCK_AFTER_S = 120.0
+
+    async def _deaf_watch(self) -> None:
+        """He must never be unable to hear his own name.
+
+        The wake word is only fed in IDLE, WAITING, STARTING and SLEEPING. Nine
+        other states exist, and anything that parks him in one of them - a turn
+        that raised, a confirmation nobody answered, a tool that never returned -
+        leaves him awake, on screen, and deaf. On 2026-08-31 a `press_keys`
+        confirmation from a TEST left him on the "NEEDS YOU" screen; Nicholas
+        woke the display with the wake word, got his window back, and then could
+        not talk to him at all.
+
+        This is the backstop. It does not care WHY he is stuck - the causes will
+        keep differing - only that being unable to hear is never a place he stays.
+        """
+        HEARS = (State.IDLE, State.WAITING, State.STARTING, State.SLEEPING)
+        since = time.time()
+        last = self.sm.state
+        while True:
+            await asyncio.sleep(15)
+            try:
+                now_state = self.sm.state
+                if now_state != last:
+                    last, since = now_state, time.time()
+                    continue
+                if now_state in HEARS:
+                    since = time.time()
+                    continue
+                stuck_for = time.time() - since
+                if stuck_for < self.STUCK_AFTER_S:
+                    continue
+                # Still in the same deaf state, with nothing moving.
+                pending = registry.has_pending
+                log.error("stuck in %s for %.0fs and cannot hear the wake word "
+                          "(pending confirmation: %s) - recovering to IDLE",
+                          now_state.value, stuck_for, pending)
+                if pending:
+                    # An unanswered question is what usually holds it. Treat
+                    # silence as "no" - refusing is always the safe answer.
+                    try:
+                        registry.resolve_latest(False)
+                    except Exception:
+                        log.debug("could not clear the pending confirmation",
+                                  exc_info=True)
+                await self.sm.to(State.IDLE, force=True)
+                await bus.emit("boot", summary="recovered: he can hear you again")
+                last, since = self.sm.state, time.time()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("deaf watch tick failed")
 
     async def _idle_watch(self) -> None:
         """Withdraw when he is not needed.
@@ -300,6 +362,8 @@ class Orchestrator:
         self._device_task = asyncio.create_task(self._device_watch())
         self._stuck_task = asyncio.create_task(self._stuck_watchdog())
         self._idle_task = asyncio.create_task(self._idle_watch())
+        # The backstop: being unable to hear his name is never permanent.
+        self._deaf_task = asyncio.create_task(self._deaf_watch())
         asyncio.create_task(self._warm_prompts())
         asyncio.create_task(tts.warm_phrases())
         if config.get("audio", "boot_sound", default=True):
@@ -662,6 +726,24 @@ class Orchestrator:
                 await asyncio.sleep(0.05)
 
     async def _capture_utterance(self) -> np.ndarray | None:
+        """Capture one utterance, and never leave an endpoint pass running.
+
+        The loop has five exits and only one of them used to cancel
+        `endpoint_task`. A live endpoint pass holds `stt._lock` - the very lock
+        the turn needs a moment later to transcribe - so the leftover Parakeet
+        run competed with the turn's own against the same model. Worse,
+        cancelling an `await asyncio.to_thread` does not stop the worker, so it
+        also kept a default-pool thread busy.
+        """
+        try:
+            return await self._capture_utterance_inner()
+        finally:
+            t = getattr(self, "_endpoint_task", None)
+            if t is not None and not t.done():
+                t.cancel()
+            self._endpoint_task = None
+
+    async def _capture_utterance_inner(self) -> np.ndarray | None:
         """Record until VAD detects end-of-speech, PTT released, or timeout."""
         buf: list[np.ndarray] = []
         speech_frames = 0
@@ -673,6 +755,11 @@ class Orchestrator:
         woke_by_name = False
         new_speech_frames = 0
         endpoint_task: asyncio.Task | None = None
+        self._endpoint_task = None
+        # Cancelled on EVERY exit below, not just one of them: a live endpoint
+        # pass holds stt._lock, which is the lock the turn immediately needs to
+        # transcribe. Leaving it running meant a stray Parakeet pass competing
+        # with the turn's own, against the same model.
         semantic_budget: float | None = None
         # The endpoint check transcribes the utterance to judge it. If nothing
         # more is said afterwards that transcript IS the turn's transcript, and
@@ -731,7 +818,7 @@ class Orchestrator:
                     and not (woke_by_name and new_speech_frames < MIN_SPEECH_FRAMES)
                     and quiet_for > 0.30 and buf):
                 frames_at_decision = speech_frames
-                endpoint_task = asyncio.create_task(
+                endpoint_task = self._endpoint_task = asyncio.create_task(
                     endpoint.decide(np.concatenate(buf), stt, brain))
             if endpoint_task is not None and endpoint_task.done():
                 try:
@@ -980,7 +1067,14 @@ class Orchestrator:
         # Static prefix (persona + tools) is identical every turn -> KV-cache hit.
         # Time + memories ride along inside the latest user message instead.
         messages: list[dict] = [{"role": "system", "content": system_prompt()}]
-        messages += self._history[-10:]
+        # The window START must not move every turn. `self._history[-10:]`
+        # advanced by two entries per turn, so everything after the tool block
+        # was new text and llama.cpp re-processed the lot - the prompt cache
+        # could never hit. Moving the base in BLOCKS makes four turns in five a
+        # pure prefix extension, which is exactly what the cache is for.
+        if len(self._history) - self._hist_base > 16:
+            self._hist_base = len(self._history) - 8
+        messages += self._history[self._hist_base:]
         messages.append({"role": "user", "content": turn_context(mem_ctx, want_honorific()) + chr(10)
                          + (general_hint + chr(10) if general_hint else "") + text})
 
@@ -1069,7 +1163,10 @@ class Orchestrator:
             from brain.skills import without_honorific
             self._history.append({"role": "user", "content": text})
             self._history.append({"role": "assistant", "content": without_honorific(full_reply)})
-            self._history = self._history[-20:]
+            trimmed = len(self._history) - 20
+            if trimmed > 0:
+                self._history = self._history[-20:]
+                self._hist_base = max(0, self._hist_base - trimmed)
             memory.log_turn("assistant", full_reply)
         breakdown = self.metrics.finish()
         latency = int((time.time() - t_start) * 1000)
@@ -1334,7 +1431,10 @@ class Orchestrator:
             from brain.skills import without_honorific
             self._history.append({"role": "user", "content": text})
             self._history.append({"role": "assistant", "content": without_honorific(reply)})
-            self._history = self._history[-20:]
+            trimmed = len(self._history) - 20
+            if trimmed > 0:
+                self._history = self._history[-20:]
+                self._hist_base = max(0, self._hist_base - trimmed)
             memory.log_turn("assistant", reply)
         breakdown = self.metrics.finish()
         breakdown["reflex"] = label

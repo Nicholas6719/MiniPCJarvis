@@ -94,7 +94,12 @@ async def _get(path: str, **params) -> dict | list | None:
     for attempt in range(3):
         await _rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=12) as c:
+            # 6s, not 12. Finnhub's latency is erratic - measured 2026-08-31:
+            # 0.17s to 5.07s for the same call, median 1.65s - and a quote that
+            # takes longer than this is useless in a spoken conversation anyway.
+            # Twelve seconds of a turn spent waiting is worse than saying the
+            # data did not arrive.
+            async with httpx.AsyncClient(timeout=6) as c:
                 r = await c.get(f"{BASE}{path}", params={**params, "token": key})
                 if r.status_code == 429:
                     return {"_error": "Finnhub is rate-limiting us; try again in a moment."}

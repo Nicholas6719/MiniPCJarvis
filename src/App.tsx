@@ -79,13 +79,19 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // don't animate a window nobody is looking at
+  // Don't animate a window nobody is looking at.
+  //
+  // HIDDEN, not merely unfocused. `is-hidden` pauses every animation on the page
+  // (styles.css: `body.is-hidden * { animation-play-state: paused }`), and this
+  // used to set it on `blur` - so alt-tabbing to another app while the HUD sat
+  // fully visible on a second monitor froze the orb mid-spin, in the middle of
+  // JARVIS speaking. Minimising still pauses it, because minimising sets
+  // document.hidden. The old listeners also leaked: only one of the three was
+  // ever removed.
   useEffect(() => {
     const sync = () => document.body.classList.toggle("is-hidden", document.hidden);
     sync();
     document.addEventListener("visibilitychange", sync);
-    window.addEventListener("blur", () => document.body.classList.add("is-hidden"));
-    window.addEventListener("focus", sync);
     return () => document.removeEventListener("visibilitychange", sync);
   }, []);
 

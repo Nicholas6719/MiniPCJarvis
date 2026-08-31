@@ -58,6 +58,29 @@ REGION_RE = re.compile(
 TOWN_RE = re.compile(
     "|".join(r"\b" + re.escape(town) + r"\b" for town in HOME_TOWNS), re.I)
 
+# Says Massachusetts and cannot mean anywhere else.
+ANCHOR_RE = re.compile(r"\bmassachusetts\b|\bmass\.|\bmetrowest\b|\bmiddlesex\b"
+                       r"|\bbay state\b|\b(?:ma|mass)\b(?=[,.]|\s+state)", re.I)
+
+# Place names that are ALSO somewhere else, or something else entirely. The
+# always-scanned national wire is BBC and Sky, so "Cambridge United striker
+# killed in car crash" read as a death close to home, "Worcester man charged over
+# stabbing" as violence in his state, and "Marlboro maker Altria to cut 500 jobs"
+# as news from one of his five towns. A name like this needs corroboration.
+AMBIGUOUS_TOWN_RE = re.compile(r"\bmarlboro\b(?!ugh)", re.I)
+
+# Rejecting every bare "Boston" was too blunt - it cost him a hazmat call at Mass
+# General, a fatal MBTA incident and a Boston police story, all genuinely his.
+# The UK stories give themselves away by their SUBJECT, not their city: football
+# clubs and British idiom. So an ambiguous city stays local unless the text
+# reads as somewhere else.
+ELSEWHERE_RE = re.compile(
+    r"\b(?:united|fc|premier league|championship|relegation|striker|midfielder|"
+    r"gaffer|pub|nhs|mp|borough|parliament|whitehall|pence|"
+    r"britain|british|england|english|scotland|scottish|wales|welsh|ireland|"
+    r"irish|london|manchester|liverpool|leeds|ontario|quebec|sydney|melbourne)\b"
+    r"|£", re.I)
+
 # --- life and limb ------------------------------------------------------------
 # The things he named: active shooters, earthquakes, tragedies. Anything here is
 # a candidate for waking him; how close it is decides between URGENT and ALERT.
@@ -197,9 +220,15 @@ FOREIGN = re.compile(
 
 # ...unless it is his country too. "US strikes", "American hostages" - those are
 # foreign datelines that are still national news here.
+# NOT case-insensitive on the abbreviation. `re.I` made `u\.?s\.?` match the
+# ordinary pronoun "us", and RSS summaries are full of it - "a survivor told us
+# the ground shook" was enough to make a Nepal quake a national emergency again,
+# defeating the FOREIGN rule about an hour after it was written. The country is
+# "US" or "U.S."; the pronoun is not.
 OURS = re.compile(
-    r"\b(?:u\.?s\.?|usa|america|american|americans|washington|pentagon|"
-    r"white house|congress|federal|nationwide|homeland)\b", re.I)
+    r"\b(?:U\.?S\.?|USA)\b"
+    r"|\b(?:america|american|americans|washington|pentagon|"
+    r"white house|congress|federal|nationwide|homeland)\b")
 
 
 def national_emergency(text: str) -> bool:
@@ -253,10 +282,35 @@ def _text_of(story: dict) -> str:
 
 
 def is_local(story: dict) -> tuple[bool, bool]:
-    """(near him at all, one of his five towns)."""
+    """(near him at all, one of his five towns).
+
+    Place names are not evidence on their own. Boston, Cambridge, Worcester and
+    Newton are all English towns too, and the always-scanned national wire is BBC
+    and Sky - so "Cambridge United striker killed in car crash" read as somebody
+    dying close to home, and "Marlboro maker Altria to cut 500 jobs" read as news
+    from one of his five towns.
+
+    Two ways to be local, and an ambiguous name alone is neither:
+      * the story came from one of HIS desks (WCVB, MassLive, the Patch towns) -
+        provenance beats parsing, and it is free;
+      * or the text names Massachusetts unambiguously, or names one of his towns
+        in a form nobody else uses.
+    """
     t = _text_of(story)
+    from_his_desk = bool(story.get("_local_feed"))
+    anchored = bool(ANCHOR_RE.search(t))
+
     town = bool(TOWN_RE.search(t))
-    return (town or bool(REGION_RE.search(t))), town
+    if town and AMBIGUOUS_TOWN_RE.search(t) and not (anchored or from_his_desk):
+        town = False            # "Marlboro maker Altria" is a cigarette company
+
+    if town or from_his_desk or anchored:
+        return True, town
+    # A bare "Boston"/"Cambridge"/"Worcester" is his until the story says
+    # otherwise - England has all three, and the national wire is BBC and Sky.
+    if REGION_RE.search(t) and not ELSEWHERE_RE.search(t):
+        return True, False
+    return False, False
 
 
 def local_only() -> bool:

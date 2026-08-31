@@ -106,6 +106,38 @@ def main() -> int:
     check("a catastrophe at home is unaffected",
           tier("Hundreds dead as tornado levels Joplin") == URGENT)
 
+    # --- a place name is not evidence -----------------------------------------
+    # The always-scanned wire is BBC and Sky, and England has a Boston, a
+    # Cambridge, a Worcester and a Newton. Verified against the real classifier:
+    # "Cambridge United striker killed in car crash" read as somebody dying close
+    # to home, and "Marlboro maker Altria" as one of his five towns.
+    for uk in ("Cambridge United striker killed in car crash",
+               "Worcester man charged over stabbing outside pub",
+               "Boston United sack manager after relegation",
+               "Marlboro maker Altria to cut 500 jobs"):
+        check(f"not his: {uk[:38]!r}", tier(uk) == NONE, tier(uk))
+
+    # ...while a story off one of HIS desks is local whatever it says
+    from_desk = {"headline": "Two hurt in a crash on Route 9", "_local_feed": True}
+    check("a story from his own desk is local", classify_news(from_desk)[0] != NONE,
+          classify_news(from_desk))
+    check("an explicit Massachusetts is local too",
+          tier("Man held without bail after woman found dead in Mass. home")
+          in (URGENT, ALERT))
+    check("and his towns still are",
+          tier("Fatal crash closes Route 9 in Natick") == URGENT)
+
+    # --- "us" the pronoun is not "US" the country -----------------------------
+    # re.I on the abbreviation matched the ordinary word, and RSS summaries are
+    # full of it: "a survivor told us the ground shook" put a Nepal quake back
+    # through the FOREIGN gate about an hour after that gate was written.
+    nepal = {"headline": "Nepal quake: hundreds dead",
+             "summary": "A survivor told us the ground shook for a minute."}
+    check("a pronoun does not make a foreign disaster national",
+          classify_news(nepal)[0] == NONE, classify_news(nepal))
+    check("...but the actual country still does",
+          tier("US declares war after missile strike on naval base") == URGENT)
+
     # A national emergency is not proven by a scary word. An early version of this
     # used a "man-made hazard" keyword list and matched a Trump/NBC story, a
     # Visa/Mastercard announcement and a West Bank report - "attack" alone is

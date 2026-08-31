@@ -47,13 +47,34 @@ class MemoryStore:
             self.db.execute("ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
         self._embedder = None
+        from collections import OrderedDict
+        self._embed_cache: OrderedDict = OrderedDict()
         self._lock = asyncio.Lock()
+
+    # The SAME utterance is embedded three times on every LLM turn - once by
+    # facts.lookup, once by memory.search, once by the tool shortlist - at
+    # ~40-55ms each, on the threads llama-server is trying to use. The router
+    # already keeps a cache like this; this store had none.
+    _EMBED_CACHE_MAX = 256
 
     def _embed(self, texts: list[str]) -> np.ndarray:
         if self._embedder is None:
             from fastembed import TextEmbedding
             self._embedder = TextEmbedding("BAAI/bge-small-en-v1.5")
-        return np.array(list(self._embedder.embed(texts)), dtype=np.float32)
+        cache = self._embed_cache
+        missing = [t for t in texts if t not in cache]
+        if missing:
+            fresh = np.array(list(self._embedder.embed(missing)), dtype=np.float32)
+            for text, vec in zip(missing, fresh):
+                cache[text] = vec
+                cache.move_to_end(text)
+            while len(cache) > self._EMBED_CACHE_MAX:
+                cache.popitem(last=False)
+        out = []
+        for t in texts:
+            cache.move_to_end(t)
+            out.append(cache[t])
+        return np.array(out, dtype=np.float32)
 
     async def embed_texts(self, texts: list[str]) -> np.ndarray:
         """Shared embedder for other stores (the fact store) — one ONNX model in RAM."""
