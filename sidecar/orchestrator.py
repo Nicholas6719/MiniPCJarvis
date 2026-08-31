@@ -26,7 +26,7 @@ import clarify
 from brain.router import brain
 from lastseen import last_seen
 from linkguard import (LinkLedger, check as link_check,
-                       explain as link_explain, price_caveat,
+                       check_captions, explain as link_explain, price_caveat,
                        supply as link_supply, wanted_links)
 from brain.facts import facts
 import collections
@@ -1029,6 +1029,13 @@ class Orchestrator:
             # is back where he started and has to ask a second time.
             if wanted_links(text):
                 full_reply = link_supply(full_reply, link_ledger)
+            # A real link described as something it is not is still a wrong
+            # answer. Where the caption and the source's own title share nothing,
+            # show him what the page actually calls itself.
+            full_reply, mislabelled = check_captions(full_reply, link_ledger)
+            if mislabelled:
+                log.info("annotated %d link(s) whose caption did not match the "
+                         "source's own title", mislabelled)
             # And a price nobody looked up is not a fact about today.
             full_reply = price_caveat(full_reply, link_ledger)
 

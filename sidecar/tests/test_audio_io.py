@@ -145,6 +145,35 @@ def main() -> int:
     stuck.released.set()
     t5.join(timeout=3)
 
+    # --- a stuck write must not eat the pool everything else uses ------------
+    # asyncio.to_thread runs on the DEFAULT executor, which is also where all 58
+    # sync tool handlers run. A write that never returns leaks its thread for
+    # good, so a run of dead output devices would quietly starve the pool until
+    # nothing could read a file or the clipboard - and nobody would connect that
+    # to the speakers. The writer has its own small pool, replaced when its
+    # threads are all lost.
+    import audio.io as aio
+    aio._writer_pool = None
+    aio._writers_lost = 0
+
+    first = aio._writer_executor()
+    check("the writer has a pool of its own", first is not None)
+    check("...which is not the default one",
+          "jarvis-audio-write" in str(first._thread_name_prefix), first)
+    check("...and is reused while healthy", aio._writer_executor() is first)
+
+    aio._writer_lost()
+    check("one lost thread does not throw the pool away",
+          aio._writer_executor() is first, aio._writers_lost)
+
+    aio._writer_lost()                     # now all of them are stuck
+    replacement = aio._writer_executor()
+    check("once every writer is stuck the pool is replaced",
+          replacement is not first)
+    check("...the stuck one is abandoned, never joined",
+          first in aio._ORPHAN_POOLS)
+    check("...and the count resets for the new pool", aio._writers_lost == 0)
+
     # --- the healthy path still closes properly ------------------------------
     spk3 = Speaker()
     good = StuckStream(abort_works=True)

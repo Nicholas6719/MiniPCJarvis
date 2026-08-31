@@ -5,6 +5,8 @@ import asyncio
 import time
 import logging
 
+import concurrent.futures as cf
+
 import numpy as np
 import sounddevice as sd
 
@@ -184,6 +186,45 @@ class Microphone:
             self._stream = None
 
 
+# --- the writer's own threads ---------------------------------------------------
+# A PortAudio write that never returns leaks the thread that made it, for good.
+# asyncio.to_thread uses the DEFAULT executor, which is also where all 58 of the
+# sync tool handlers run - so a handful of dead output devices over a long
+# session would quietly eat that pool until nothing could open a file or read the
+# clipboard, and nobody would connect the two.
+#
+# So the audio writer gets its own small pool. When a write hangs, the worker is
+# written off; once they are all written off, the pool is replaced (the old one
+# is never shut down - its threads are still stuck inside the driver, and joining
+# them is exactly the wait we are refusing to make).
+_WRITER_THREADS = 2
+_writer_pool: "cf.ThreadPoolExecutor | None" = None
+_writers_lost = 0
+
+
+def _writer_executor() -> "cf.ThreadPoolExecutor":
+    global _writer_pool, _writers_lost
+    if _writer_pool is None or _writers_lost >= _WRITER_THREADS:
+        if _writer_pool is not None:
+            log.warning("audio: all %d writer threads are stuck - starting a fresh "
+                        "pool (the old one is abandoned, not joined)", _WRITER_THREADS)
+            _ORPHAN_POOLS.append(_writer_pool)
+        _writer_pool = cf.ThreadPoolExecutor(
+            max_workers=_WRITER_THREADS, thread_name_prefix="jarvis-audio-write")
+        _writers_lost = 0
+    return _writer_pool
+
+
+def _writer_lost() -> None:
+    global _writers_lost
+    _writers_lost += 1
+    log.warning("audio: writer thread %d of %d is stuck in the driver",
+                _writers_lost, _WRITER_THREADS)
+
+
+_ORPHAN_POOLS: list = []
+
+
 # Output streams whose writer thread never came back. They are kept - not
 # closed, not dropped - because a stream freed while a PortAudio thread is
 # still inside it takes the process down with no traceback. A handful of
@@ -252,8 +293,11 @@ class Speaker:
         secs = len(chunk) / float(rate)
         budget = max(5.0, secs * 4 + 3.0)   # generous: only a dead device exceeds this
         try:
-            await asyncio.wait_for(asyncio.to_thread(_write), timeout=budget)
+            loop = asyncio.get_running_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(_writer_executor(), _write), timeout=budget)
         except asyncio.TimeoutError:
+            _writer_lost()      # that thread is not coming back
             log.error("audio write hung (%.1fs of audio, %.0fs budget) — output device "
                       "is not accepting data; aborting and reopening", secs, budget)
             self.abort()          # unblocks the stuck writer thread, closes the stream

@@ -15,8 +15,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from linkguard import (LinkLedger, check, explain, price_caveat,  # noqa: E402
-                       supply, wanted_links)
+from linkguard import (LinkLedger, check, check_captions,  # noqa: E402
+                       explain, price_caveat, supply, wanted_links)
 
 fails = []
 
@@ -143,6 +143,41 @@ def main() -> int:
            price_caveat("Nvidia is at $178.20.", priced))
     check_("a reply with no prices is untouched",
            price_caveat("Nvidia is down today.", bare) == "Nvidia is down today.")
+
+    # --- a REAL link, described as something it is not -----------------------
+    # The gate above proves a URL came out of a tool. It cannot prove the model
+    # captioned it correctly: a search returns a page about beginner 3D printers
+    # and the reply calls it "PLA filament, $30". The link is real; the sentence
+    # is not, and every check up to here is perfectly happy with it.
+    cap = LinkLedger()
+    cap.note({"results": [
+        {"title": "Creality Ender 3 V2 3D Printer",
+         "url": "https://www.amazon.com/dp/B08663TXWS"},
+        {"title": "Best 3D Printers for Beginners 2026",
+         "url": "https://3dprinting.com/beginners/"},
+        {"title": "Cura slicer", "url": "https://ultimaker.com/software/ultimaker-cura"}]})
+    said = ("Creality Ender 3 V2 - $200: https://www.amazon.com/dp/B08663TXWS\n"
+            "PLA filament (1kg) - $30: https://3dprinting.com/beginners/\n"
+            "Cura slicer software - free: https://ultimaker.com/software/ultimaker-cura")
+    annotated, flagged = check_captions(said, cap)
+    check_("the mislabelled link is flagged", flagged == 1, flagged)
+    check_("...and carries what the source actually calls itself",
+           "[Best 3D Printers for Beginners 2026]" in annotated, annotated)
+    check_("a caption that matches its source is left alone",
+           annotated.count("[") == 1, annotated)
+    check_("...including the Cura line",
+           "ultimaker-cura\n" not in annotated + "\n"
+           or "ultimaker-cura [" not in annotated, annotated)
+    check_("the links themselves are never altered",
+           all(u in annotated for u in ("https://www.amazon.com/dp/B08663TXWS",
+                                        "https://3dprinting.com/beginners/",
+                                        "https://ultimaker.com/software/ultimaker-cura")))
+
+    # a source with no title of its own cannot contradict anything
+    untitled = LinkLedger()
+    untitled.note({"items": [{"url": "https://example.com/thing"}]})
+    out_u, n_u = check_captions("Some thing: https://example.com/thing", untitled)
+    check_("a source with no title is not second-guessed", n_u == 0, out_u)
 
     # --- punctuation is not left in ruins ------------------------------------
     out3, _ = check("The printer: https://www.amazon.com/dp/BFAKE .", empty)

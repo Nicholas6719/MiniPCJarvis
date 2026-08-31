@@ -91,6 +91,17 @@ class LinkLedger:
         """Did any tool actually return a price this turn?"""
         return self._saw_price
 
+    def title_for(self, url: str) -> str:
+        """What the SOURCE calls this page, as opposed to what the model called it."""
+        c = _canon(url)
+        hit = self._titled.get(c)
+        if hit:
+            return hit[1]
+        for known, (_orig, title) in self._titled.items():
+            if c.startswith(known) or known.startswith(c):
+                return title
+        return ""
+
     def offer(self, limit: int = 5) -> list[tuple[str, str]]:
         """Real (url, title) pairs, for when he asked for links and got none."""
         out = []
@@ -221,6 +232,52 @@ def supply(reply: str, ledger: LinkLedger, limit: int = 5) -> str:
                 + " I couldn't find links I can stand behind for those, sir.")
     lines = [f"{title or url}: {url}" for url, title in have]
     return reply.rstrip() + "\n\n" + "\n".join(lines)
+
+
+# Words too common to prove that a caption and a page are about the same thing.
+_DULL = {"the", "and", "for", "with", "from", "your", "our", "best", "top", "new",
+         "this", "that", "here", "free", "download", "online", "official", "site",
+         "page", "com", "www", "http", "https", "amazon", "shop", "store", "buy",
+         "price", "prices", "deal", "deals", "review", "reviews", "guide", "how"}
+
+
+def _meaningful(text: str) -> set[str]:
+    return {w for w in re.sub(r"[^a-z0-9 ]", " ", str(text or "").lower()).split()
+            if len(w) > 3 and w not in _DULL}
+
+
+def check_captions(reply: str, ledger: LinkLedger) -> tuple[str, int]:
+    """Does the link point at what he was told it points at?
+
+    The guard above proves a URL came out of a tool. It cannot prove the model
+    described it correctly - a search returns a page about beginner 3D printers
+    and the model captions it "PLA filament, $30", and every check so far is
+    perfectly happy. The link is real, the sentence is not.
+
+    So each surviving link is compared against the title the SOURCE gave itself.
+    Where they share nothing, the source's own title is added rather than the
+    caption being rewritten: a machine guessing at his sentence is how this went
+    wrong in the first place, and he can see both and judge.
+    """
+    if not reply:
+        return reply, 0
+    flagged = 0
+    out_lines = []
+    for line in reply.split("\n"):
+        annotated = line
+        for url in URL_RE.findall(line):
+            title = ledger.title_for(url)
+            if not title:
+                continue
+            caption = line[:line.find(url)]
+            if _meaningful(caption) & _meaningful(title):
+                continue                      # they are talking about the same thing
+            if _meaningful(title) <= _meaningful(caption):
+                continue
+            annotated = annotated.replace(url, f"{url} [{title.strip()}]", 1)
+            flagged += 1
+        out_lines.append(annotated)
+    return "\n".join(out_lines), flagged
 
 
 def price_caveat(reply: str, ledger: LinkLedger) -> str:
