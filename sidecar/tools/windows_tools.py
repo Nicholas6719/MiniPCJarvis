@@ -413,8 +413,134 @@ def enter_sleep_mode() -> dict:
     return {"sleeping": True, "minimized": n}
 
 
+def monitor_blank_after() -> int | None:
+    """How long Windows waits before blanking the screen.
+
+    Returns seconds, or 0 for "never blanks", or None for "could not read it".
+    Those last two are NOT the same answer and collapsing them into 0 made a
+    machine set to never blank look like a machine whose screen was off.
+
+    Read from the ACTIVE power scheme rather than assumed, so it follows his own
+    setting instead of a number hard-coded here that would drift the moment he
+    changed it.
+    """
+    import uuid as _uuid
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", ctypes.c_ulong), ("Data2", ctypes.c_ushort),
+                    ("Data3", ctypes.c_ushort), ("Data4", ctypes.c_ubyte * 8)]
+
+        @classmethod
+        def of(cls, text: str) -> "GUID":
+            u = _uuid.UUID(text)
+            g = cls()
+            g.Data1, g.Data2, g.Data3 = u.time_low, u.time_mid, u.time_hi_version
+            rest = u.bytes[8:]
+            g.Data4 = (ctypes.c_ubyte * 8)(*rest)
+            return g
+
+    VIDEO_SUBGROUP = GUID.of("7516b95f-f776-4464-8c53-06167f40cc99")
+    VIDEO_POWERDOWN = GUID.of("3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e")
+    powrprof = ctypes.windll.powrprof
+    active = ctypes.POINTER(GUID)()
+    if powrprof.PowerGetActiveScheme(None, ctypes.byref(active)) != 0:
+        return None
+    try:
+        value = ctypes.c_ulong(0)
+        # AC first (his is a desktop); fall back to battery for a laptop.
+        for reader in (powrprof.PowerReadACValueIndex,
+                       powrprof.PowerReadDCValueIndex):
+            if reader(None, active, ctypes.byref(VIDEO_SUBGROUP),
+                      ctypes.byref(VIDEO_POWERDOWN), ctypes.byref(value)) == 0 \
+                    and value.value:
+                return int(value.value)
+        return 0
+    finally:
+        ctypes.windll.kernel32.LocalFree(active)
+
+
+def display_is_off() -> bool:
+    """Is the monitor actually dark right now?
+
+    He was explicit: wake the screen ONLY if the screen is asleep. Windows has no
+    plain "is the panel lit" call - the honest one, GUID_CONSOLE_DISPLAY_STATE,
+    needs a window handle and a running message pump - so this infers it from the
+    two things it can read exactly: how long since he last touched the machine,
+    and how long his own power plan waits before blanking.
+
+    Talking to JARVIS is not input, so the idle clock keeps running while he
+    speaks - which is right: a dark screen he has been talking to for a minute is
+    still a dark screen.
+    """
+    blank_after = monitor_blank_after()
+    if blank_after is None:         # could not read the plan: use his setting
+        blank_after = int(config.get("presence", "display_off_after_seconds",
+                                     default=300) or 0)
+    if blank_after <= 0:            # never blanks: there is nothing to wake
+        return False
+    from delivery import user_idle_seconds
+    return user_idle_seconds() >= blank_after
+
+
+def wake_display() -> dict:
+    """Light the monitor back up.
+
+    His monitor blanks after five minutes; the PC itself never sleeps. So the
+    wake-word detector really is listening the whole time - it is explicitly fed
+    while SLEEPING - and he can say the name to a dark screen and be heard. What
+    he could not do was SEE the answer: JARVIS came back to the front of a
+    monitor that was still off.
+
+    Two mechanisms, because on their own neither is reliable:
+
+      * SetThreadExecutionState(ES_DISPLAY_REQUIRED) tells Windows the display is
+        needed, which resets the blank timer. On a panel that is already dark it
+        often is not enough on its own.
+      * a zero-distance mouse move. It is real input as far as Windows is
+        concerned, which is what actually lights the panel, and moving by (0, 0)
+        cannot disturb a drag, a selection, or anything he is doing if the screen
+        was on after all.
+
+    This CANNOT wake a machine that is properly asleep (S3) - at that point the
+    microphone is off too and nothing is listening. It is for a blanked monitor
+    on a running PC, which is his setup.
+    """
+    ES_CONTINUOUS = 0x80000000
+    ES_DISPLAY_REQUIRED = 0x00000002
+    did = []
+    try:
+        ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS | ES_DISPLAY_REQUIRED)
+        # Pulse, not hold: holding it would stop his monitor ever blanking again.
+        ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+        did.append("display-required")
+    except Exception:
+        log.debug("SetThreadExecutionState failed", exc_info=True)
+    try:
+        MOUSEEVENTF_MOVE = 0x0001
+        ctypes.windll.user32.mouse_event(MOUSEEVENTF_MOVE, 0, 0, 0, 0)
+        did.append("input-nudge")
+    except Exception:
+        log.debug("input nudge failed", exc_info=True)
+    return {"woke_display": bool(did), "how": did}
+
+
 def exit_sleep_mode() -> dict:
     """Bring him back and put him in front, from minimised or merely buried."""
+    # The screen first. Restoring the window to a monitor that is still off is
+    # what he actually hit: heard, answered, and invisible.
+    if config.get("presence", "wake_display", default=True):
+        # ONLY if the screen is actually dark - his instruction, and the right
+        # one: a synthetic input event sent to a monitor that is already on is a
+        # small liberty taken with a machine he might be using.
+        # Never let the screen cost him the window either. Waking the monitor is
+        # the nicety; coming back to the front when he calls is the feature, and
+        # a display driver having a bad day must not take that with it.
+        try:
+            if display_is_off():
+                wake_display()
+        except Exception:
+            log.debug("could not wake the display", exc_info=True)
     found = 0
     for hwnd in _our_windows():
         try:

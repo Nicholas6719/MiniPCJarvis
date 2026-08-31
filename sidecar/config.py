@@ -155,6 +155,11 @@ DEFAULTS: dict[str, Any] = {
         "watchlist_alert_percent": 5.0,
     },
     "presence": {
+        # His monitor blanks after five minutes but the PC stays on, so the
+        # wake word is heard the whole time. Waking the panel too means the
+        # answer is visible, not just audible. Cannot wake a sleeping PC -
+        # nothing is listening then either.
+        "wake_display": True,
         # He withdraws when he is not needed: after this many quiet minutes he
         # minimises himself and sleeps. Sleep is his working shift, and his name
         # brings him back to the front from behind anything.
