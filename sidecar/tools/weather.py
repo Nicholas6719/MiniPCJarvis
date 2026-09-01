@@ -63,9 +63,37 @@ async def _home_location() -> tuple[float, float, str] | None:
     return None
 
 
+def _phone_location() -> tuple[float, float, str] | None:
+    """Where his PHONE last said he was, if that is still worth believing.
+
+    Beats the configured home when it exists: "what's the weather" asked from
+    somewhere else should answer about somewhere else. It is deliberately
+    subject to the same staleness window as every other volatile fact — an
+    eight-hour-old fix is not where he is, and quietly using it would be the
+    same class of mistake as the camera claiming to see him after he left.
+    """
+    try:
+        from config import config as _c
+        import volatile
+        window = float(_c.get("location", "stale_after_minutes", default=120))
+        got = volatile.fresh("location", window)
+        if not got:
+            return None
+        v = got["value"]
+        lat, lon = float(v["lat"]), float(v["lon"])
+        return lat, lon, v.get("label") or "your current position"
+    except Exception:
+        log.debug("no usable phone fix", exc_info=True)
+        return None
+
+
 async def get_weather(location: str = "", when: str = "now") -> dict:
     """Current conditions and today's/tomorrow's outlook for a place (default: home)."""
-    loc = await _geocode(location) if location else await _home_location()
+    loc = None
+    if location:
+        loc = await _geocode(location)
+    else:
+        loc = _phone_location() or await _home_location()
     if not loc:
         return {"error": f"I couldn't find a place called {location}" if location else "I don't know where you are yet"}
     lat, lon, label = loc
@@ -80,8 +108,23 @@ async def get_weather(location: str = "", when: str = "now") -> dict:
         j = r.json()
     cur, day = j.get("current", {}), j.get("daily", {})
     idx = 1 if when == "tomorrow" else 0
+    # Live data is spoken with its age, the same rule the market tools follow:
+    # never cached, and never presented as timeless. Open-Meteo stamps the
+    # observation itself, which can trail the request by up to an hour, so the
+    # honest number is the OBSERVATION's age and not the time we asked.
+    obs_age_min = None
+    try:
+        import datetime as _dt
+        t = cur.get("time")
+        if t:
+            obs = _dt.datetime.fromisoformat(t)
+            now_local = _dt.datetime.now(obs.tzinfo) if obs.tzinfo else _dt.datetime.now()
+            obs_age_min = max(0.0, round((now_local - obs).total_seconds() / 60.0, 1))
+    except Exception:
+        log.debug("could not read the observation time", exc_info=True)
     out = {
         "location": label, "units": "F" if unit == "fahrenheit" else "C",
+        "as_of_minutes": obs_age_min,
         "now": {"temp": round(cur.get("temperature_2m", 0)), "feels_like": round(cur.get("apparent_temperature", 0)),
                 "conditions": _CODES.get(cur.get("weather_code", -1), "unsettled"),
                 "humidity": cur.get("relative_humidity_2m"), "wind": round(cur.get("wind_speed_10m", 0)),

@@ -1342,6 +1342,60 @@ so 60 fps is not available at any resolution. 30 is the ceiling and is now the
 target: 7.9 ms per frame all in (decode 4.9 + encode 3.0), 238 ms of each second,
 ~24% of ONE core of sixteen, 3.6 MB/s over loopback.
 
+## 2026-09-01 (evening) — the Evolution, phases 0 and 1
+
+Six new capabilities, worked in phases with a gate between each. What is worth
+not rediscovering:
+
+**Four of the six were already built, and reading the repo first saved the work.**
+`tools/weather.py` already existed — Open-Meteo, keyless, registered — so phase 1
+extended it rather than creating it. `analyze_image()` already ran the Gemma 3 +
+mmproj pipeline phase 3 names, so that phase is a prompt template and an input
+path. `weather._geocode()` already resolves place names through Open-Meteo's free
+geocoder, so **Nominatim is not needed** — no second network dependency, no
+1-req/sec policy, no User-Agent requirement (kept as a fallback, not the first
+reach). And `vision_identity.py` already does face embeddings with SFace.
+
+**insightface was declined, deliberately.** It would duplicate SFace while adding
+a Cython build (MSVC risk on Windows), an opencv dependency that risks the fight
+mediapipe already caused, and — the disqualifying one — a **~300 MB model
+download at RUNTIME to `~/.insightface`**, which breaks both the offline
+guarantee and the bundle-the-models-in-the-spec pattern every other model here
+follows. SFace is already bundled, already gated by 22 tests, and already stores
+embeddings and never images.
+
+**Phase 0's first finding was not in the handoff at all.** `requirements.txt` was
+missing `opencv-python` and `mediapipe` — both installed by hand during the
+camera work that morning, both load-bearing, neither declared. A fresh clone
+could not have rebuilt this project. Nothing new goes into an environment that is
+not reproducible, so that was fixed first.
+
+**`jarvis.db` already has a `tasks` table** and it is reminders and errands.
+Projects got `projects` and `project_steps` of their own; two unrelated features
+writing the same rows is how a nightly retainer reminder ends up in a project
+list.
+
+**`volatile.py` is where phone-derived readings live**, and its one rule is that
+nothing is read back without its age — `fresh()` returns None past its window
+rather than a value a caller might use without checking the clock. That is not
+pedantry: the identical mistake shipped in the camera the same morning, where
+presence held him "present" for twelve seconds after he left and "can you see me"
+borrowed it to say "I can see someone, sir" about an empty frame. A four-hour-old
+location fix is the same lie with a different subject.
+
+**Neither OpenSCAD nor PrusaSlicer is installed** (checked, both absent), so
+phase 5's test will SKIP loudly rather than pass. A green tick for a tool that
+never ran is worse than an honest skip.
+
+**The wiring gate asserts risk TIERS, not just registration.** The tier is the
+security boundary — a tool that quietly becomes SAFE stops asking permission — and
+it counts remaining stubs so a phase landing behaviour without its test is
+visible instead of silent.
+
+**Build time is now the bottleneck: ~50 minutes**, most of it 51 gates (several
+with real multi-second sleeps) plus a PyInstaller pass that bundles mediapipe and
+four models. Worth knowing before planning a phase around "just rebuild it".
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

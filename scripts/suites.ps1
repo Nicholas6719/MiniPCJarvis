@@ -4,8 +4,36 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\suites.ps1
 $ErrorActionPreference = "Continue"
 $root = Split-Path $PSScriptRoot
-$pt = (Get-Content "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\session.txt") -split ' '
-$port, $tok = $pt[0], $pt[1]
+# ASK THE OS, do not trust a file. .agent\session.txt is written only by
+# quick.ps1 and release.ps1; any other way of getting a build onto the machine
+# (the hotswap script, a manual launch) leaves it stale, and every suite then
+# fails wholesale against a dead port for reasons no commit can fix. On
+# 2026-09-01 it was pointing at port 60460 from the previous evening while the
+# sidecar was on 65210. The running process is the only source of truth for an
+# ephemeral port; the file is the fallback, not the authority.
+$port = $null
+$sc = Get-Process jarvis-sidecar -ErrorAction SilentlyContinue
+if ($sc) {
+    $port = (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+             Where-Object { $_.OwningProcess -eq $sc.Id -and $_.LocalAddress -like '127.*' } |
+             Select-Object -First 1).LocalPort
+}
+$tokFile = Join-Path $env:APPDATA "JARVIS\session.token"
+$tok = if (Test-Path $tokFile) { (Get-Content $tokFile -Raw).Trim() } else { $null }
+
+if (-not $port -or -not $tok) {
+    $sf = "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\session.txt"
+    if (Test-Path $sf) {
+        $pt = (Get-Content $sf) -split ' '
+        if (-not $port) { $port = $pt[0] }
+        if (-not $tok)  { $tok  = $pt[1] }
+        Write-Host "suites: fell back to session.txt (port $port)" -ForegroundColor Yellow
+    }
+}
+if (-not $port -or -not $tok) { Write-Error "suites: JARVIS is not running - nothing to test against"; exit 1 }
+Write-Host "suites: testing against 127.0.0.1:$port"
+# Keep the file honest for anything else that still reads it.
+[IO.File]::WriteAllText("C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\session.txt", "$port $tok")
 Set-Location "$root\sidecar"
 $env:PYTHONIOENCODING = 'utf-8'
 

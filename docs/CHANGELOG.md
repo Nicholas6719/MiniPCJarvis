@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — the Evolution (2026-09-01)
+
+### Phase 0 — scaffolding
+- Six new tool modules registered as stubs with real risk tiers before any of them
+  had behaviour, so an integration mistake surfaces on its own. Tools 80 -> 91.
+- **`requirements.txt` was missing `opencv-python` and `mediapipe`.** Both were
+  installed and load-bearing for the camera work; a fresh clone could not have
+  rebuilt this project. Fixed before anything new was added to it.
+- New gate `test_evolution_wiring.py` asserts each tool's **risk tier**, not just
+  that it registered — the tier is the security boundary.
+
+### Phase 1 — weather and projects
+- `volatile.py`: readings with a shelf life (location, health). Nothing is read
+  back without its age, and `fresh()` returns nothing at all once stale.
+- `get_weather` now prefers a fresh phone fix over the configured home, ignores a
+  stale one, and reports `as_of_minutes` from the observation's own timestamp.
+- `list_projects` / `log_progress` / `estimate_completion` over new `projects` and
+  `project_steps` tables — kept clear of `tasks`, which is reminders. The estimate
+  measures the rate between recorded marks and refuses to invent a date from one
+  data point.
+
+### Adjusted from the handoff after reading the repo
+- `tools/weather.py` already existed (Open-Meteo, keyless) — extended, not created.
+- `analyze_image()` already existed on the Gemma 3 + mmproj pipeline — phase 3 is a
+  prompt and an input path, not a pipeline.
+- Nominatim not needed: `weather._geocode()` already resolves place names through
+  Open-Meteo's free geocoder. Kept as a fallback only.
+- insightface not used: `vision_identity.py` already does SFace embeddings, bundled
+  and gated. insightface would add a Cython build and a ~300 MB **runtime** model
+  download, breaking the offline guarantee and the bundle-the-models pattern.
+
 ## 0.4.0 — 2026-08-24
 
 ### Voice

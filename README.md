@@ -92,7 +92,7 @@ app has focus, via the clipboard (with your previous clipboard restored). It is
 deliberately *not* a conversation: nothing reaches the brain, the LLM, the fact
 store or the transcript.
 
-Close to seventy tools are registered in all. Every one carries a risk tier —
+Over ninety tools are registered in all. Every one carries a risk tier —
 SAFE / LOW / MEDIUM / HIGH — and anything MEDIUM or above cannot run without a
 confirmation round-trip. Spoken approval is deliberately asymmetric: liberal about
 what counts as "no", strict and English-only about what counts as "yes", so a

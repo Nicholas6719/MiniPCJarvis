@@ -9,6 +9,8 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\seed_collisions.py || (echo SEED CLASH FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_canon_erasure.py || (echo CANON ERASURE FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_evolution_wiring.py || (echo EVOLUTION WIRING FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_volatile.py || (echo VOLATILE FACTS FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_projects.py || (echo PROJECTS FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)
