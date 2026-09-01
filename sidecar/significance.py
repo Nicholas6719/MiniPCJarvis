@@ -101,13 +101,25 @@ ELSEWHERE_RE = re.compile(
 # ONGOING danger to a lot of people: it is still happening and it does not care
 # who you are. This is the gas leak he asked about by name — distance does not
 # excuse it, because the thing is still unfolding.
+# Every entry here must name an EVENT, not a subject. Three of them did not, and
+# on 2026-09-01 the bare word "nuclear" turned "Trump lashes out at reporter who
+# grilled him on nuclear strikes on alleged drug boats" into "something dangerous
+# close to home" - URGENT, off a local desk, chasing him until he acknowledged
+# it. A press conference is not a hazard. `toxic` would have done the same for a
+# toxic workplace, and `collapse` for a market collapse or the collapse of talks.
 HAZARD = re.compile(
     r"\b(?:earthquake|tsunami|tornado|hurricane|wildfire|flash flood|"
-    r"explosion|blast|gas leak|chemical (?:leak|spill)|hazmat|toxic|"
+    r"explosion|blast|gas leak|chemical (?:leak|spill)|hazmat|"
+    r"toxic (?:gas|fumes?|smoke|spill|leak|cloud|chemical|water|air|waste)|"
     r"evacuat\w+|shelter in place|lockdown|"
-    r"terror\w*|bomb(?:ing)?|"
-    r"plane crash|derail\w+|collapse|"
-    r"nuclear|radiation|outbreak|pandemic|amber alert)\b", re.I)
+    r"terror(?:ist)? attack|terror plot|bombing|bomb threat|"
+    r"plane crash|derail\w+|"
+    r"(?:building|bridge|roof|structure|balcony|crane|deck|wall) collapse|"
+    r"collapsed? (?:building|bridge|roof|structure)|"
+    r"nuclear (?:plant|reactor|meltdown|accident|leak|spill|emergency|"
+    r"contamination|material|waste)|"
+    r"radiation (?:leak|exposure|release|alert)|"
+    r"outbreak|pandemic|amber alert)\b", re.I)
 
 # VIOLENCE against people. Near home this is the "active shooter" case he named
 # and it wakes him. A single stabbing in another country is a tragedy and not

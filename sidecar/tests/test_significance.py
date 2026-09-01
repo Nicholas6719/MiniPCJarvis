@@ -396,6 +396,31 @@ def main() -> int:
         got, _ = classify_news({"headline": live, "_local_feed": True})
         check(f"still reaches him ({why_it_matters})", got in (URGENT, ALERT), got)
 
+    # --- a hazard word must name an EVENT, not a subject (2026-09-01) ---------
+    # At 09:06 he was sent, as URGENT and chased until he acknowledged it:
+    # "Trump lashes out at reporter who grilled him on nuclear strikes on alleged
+    # drug boats". HAZARD matched the bare word "nuclear", and it had arrived on
+    # a local desk, so a press conference became "something dangerous close to
+    # home". `toxic` and `collapse` had the same hole.
+    for topic in ("Trump lashes out at reporter who grilled him on nuclear strikes "
+                  "on alleged drug boats",
+                  "Report finds toxic workplace culture at Boston firm",
+                  "Market collapse wipes billions off Massachusetts pensions",
+                  "Collapse of contract talks leaves Boston teachers without a deal"):
+        got, why = classify_news({"headline": topic, "_local_feed": True})
+        check(f"a subject is not a hazard: {topic[:34]!r}", got == NONE,
+              f"{got} ({why})")
+
+    # ...and the real thing is untouched
+    for real_hazard in ("Nuclear plant leak prompts evacuation in Plymouth",
+                        "Toxic gas leak at Framingham plant",
+                        "Building collapse traps workers in Worcester",
+                        "Bomb threat forces evacuation of Marlborough school",
+                        "Boston hazmat team responds to chemical exposure at Mass General"):
+        got, _ = classify_news({"headline": real_hazard, "_local_feed": True})
+        check(f"a real hazard still reaches him: {real_hazard[:32]!r}",
+              got in (URGENT, ALERT), got)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 
