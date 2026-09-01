@@ -1396,6 +1396,60 @@ visible instead of silent.
 with real multi-second sleeps) plus a PyInstaller pass that bundles mediapipe and
 four models. Worth knowing before planning a phase around "just rebuild it".
 
+## 2026-09-01 (night) — the Evolution, phases 2 to 5
+
+**Phase 2 nearly shipped broken in two independent ways, both found by reading
+the poller before writing to it.** A live location arrives as `edited_message`,
+not `message` — Telegram EDITS the original as he moves — and the handler only
+read `message`. Worse, `getUpdates` was called with
+`allowed_updates=["message","callback_query"]`, and Telegram does not merely
+ignore a kind missing from that list, it never SENDS it. Either alone looks
+exactly like "the feature doesn't work" with nothing in any log. A third was
+designed out rather than discovered: a live share edits its message every few
+seconds, so only the FIRST fix is acknowledged — replying to each would be the
+2,600-message failure arriving by a new route.
+
+Health JSON is untrusted external input and is written like it: size-capped
+before parsing, allow-listed metric names, range-checked (a heart rate of 4,000
+is a unit mix-up, not an emergency — dropped, and the last believable value
+stands), unknown keys ignored, and nothing can raise into the poller. The sniffer
+is strict the other way too: "what's my heart rate" is something he SAID.
+
+**Phase 4's security property is the POSITION of the check, not the comment above
+it.** `face_confirm` runs in `registry.execute()` after the spoken yes and can
+only refuse. The test that matters is not "does it recognise him" — it is that a
+MATCHING face with no spoken answer does not run the tool, and it asserts the
+source ordering, so moving the check above the gate fails the build instead of
+silently turning an additive signal into a replaceable one.
+
+The judgement call, made deliberately: "both must pass" is unsatisfiable when the
+second signal does not exist. Failing closed would lock him out of every
+HIGH-risk tool the first time a webcam driver misbehaved. So UNAVAILABLE leaves
+the spoken gate alone; AVAILABLE-and-wrong refuses. It can only ever ADD a
+refusal.
+
+`check_once()` was added to vision_identity rather than reusing `consider()`,
+which caches its verdict for RECHECK_S — the same staleness that had "can you see
+me" claiming to see a man who had left.
+
+**Phase 5 did not fully run, and the suite says so.** Neither OpenSCAD nor
+PrusaSlicer is installed, so generate-and-slice SKIP loudly and the notice
+appears in the build log. Everything that does not need a binary is tested for
+real, including a slice that reports no numbers — a warning, never a silent
+success, because an invented 0 g estimate is worse than none.
+
+**An audit finding on my own new code:** `face_confirm` was registered SAFE while
+being able to turn the webcam on. SAFE means read-only with no side effects, so
+it is LOW now — and deliberately not MEDIUM, which would demand a confirmation
+for something that runs inside one. Worth repeating as a habit: audit the tiers
+against what the handler DOES, not what it is for.
+
+**And a bug in the test tooling, found because a gate needed it:** `suites.ps1`
+read the port from `.agent\session.txt`, which only quick.ps1 and release.ps1
+write. Every hotswap deploy left it stale — it pointed at a port from the
+previous evening — so a full suite run would have failed wholesale for reasons no
+commit could fix. It asks the running process now.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

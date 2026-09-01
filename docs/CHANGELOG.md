@@ -35,6 +35,36 @@
 - A live share edits its message every few seconds; only the first is
   acknowledged. Replying to each would be the message-storm failure again.
 
+### Phase 3 — describing an object
+- `analyze_object`: the existing Gemma 3 + mmproj pipeline with a prompt aimed at
+  a THING rather than a scene — material, construction, what is notable or
+  damaged — and an explicit instruction not to invent text it cannot read.
+- A photo sent to the paired chat is now looked at instead of refused. The
+  largest of Telegram's sizes is used (the first is a thumbnail), the caption
+  becomes the question, and the temp copy is deleted afterwards.
+
+### Phase 4 — face as a second signal (HIGH risk only)
+- `face_confirm` runs AFTER the spoken yes and can only ever REFUSE. No path
+  grants permission from a face; no flag disables the spoken gate. A photograph
+  would pass a bare webcam match, so it may add confidence and never confer it.
+- An UNAVAILABLE signal (nobody enrolled, camera busy, model missing) leaves the
+  spoken gate standing alone — failing closed would lock him out of his own
+  machine over a misbehaving webcam driver.
+- Built on the SFace embedder already bundled; `check_once()` added because
+  `consider()` caches its verdict for two seconds and a confirmation asks about now.
+- Registered LOW, not SAFE: it can turn the webcam on, and the tier must describe
+  what the handler does.
+
+### Phase 5 — fabrication scaffold
+- `generate_part` (OpenSCAD -> STL), `slice_part` (PrusaSlicer -> G-code with real
+  time and filament estimates), `printer_status`, and a `PrinterBackend` seam with
+  only `NoPrinterBackend` behind it.
+- Ships a generic 0.4 mm FDM profile, bundled in the spec and looked up under
+  `sys._MEIPASS` first, or the frozen build would silently slice with the
+  slicer's own defaults.
+- **Neither binary is installed on this machine, so those cases SKIP loudly.**
+  Phase 5's gate has not been fully exercised and the build log says so.
+
 ### Adjusted from the handoff after reading the repo
 - `tools/weather.py` already existed (Open-Meteo, keyless) — extended, not created.
 - `analyze_image()` already existed on the Gemma 3 + mmproj pipeline — phase 3 is a

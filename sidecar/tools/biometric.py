@@ -159,4 +159,11 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "timeout_s": {"type": "number", "minimum": 1, "maximum": 30}},
             "required": []},
-        risk=Risk.SAFE, handler=face_confirm, timeout=40))
+        # LOW, not SAFE. SAFE means read-only with no side effects, and this can
+        # TURN HIS WEBCAM ON — briefly, and it puts it back, but a camera coming
+        # on is a visible effect and the tier is supposed to say so. Found by
+        # auditing the tiers against what the handlers actually do rather than
+        # against what they are for. It stays below MEDIUM deliberately: MEDIUM
+        # would demand a confirmation, and this runs INSIDE the confirmation
+        # flow.
+        risk=Risk.LOW, handler=face_confirm, timeout=40))

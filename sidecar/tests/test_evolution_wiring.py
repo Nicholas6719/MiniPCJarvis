@@ -42,7 +42,10 @@ EXPECTED = [
     ("distance_to",         "safe", 2),
     ("get_health",          "safe", 2),
     ("analyze_object",      "safe", 3),
-    ("face_confirm",        "safe", 4),
+    # LOW, not SAFE: it can turn the webcam on, and the tier must describe what
+    # the handler DOES rather than what it is for. Below MEDIUM on purpose —
+    # MEDIUM would demand a confirmation, and this runs inside one.
+    ("face_confirm",        "low",  4),
     ("generate_part",       "low",  5),
     ("slice_part",          "low",  5),
     ("printer_status",      "safe", 5),

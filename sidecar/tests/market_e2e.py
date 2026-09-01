@@ -295,8 +295,16 @@ async def main() -> int:
     # then got nothing back, and a provider outage was reported as a routing
     # failure. If the data is not reliably there, this cannot judge the turn.
     async with httpx.AsyncClient(timeout=60) as c2:
-        alive = all((await tool(c2, "get_stock_quote", symbol=sym))["_ok"]
-                    for sym in ("MSFT", "AAPL"))
+        # A LIST, not a generator expression. `all(<await ...> for ...)` builds an
+        # ASYNC generator, and all() cannot consume one — it raises
+        # "TypeError: 'async_generator' object is not iterable". So this guard,
+        # written precisely so a provider outage would not be reported as a
+        # routing failure, crashed in the one case it exists for: on 2026-09-01
+        # Finnhub was timing out, this line raised, and the suite reported a
+        # failure that had nothing to do with the code.
+        probes = [(await tool(c2, "get_stock_quote", symbol=sym))["_ok"]
+                  for sym in ("MSFT", "AAPL")]
+    alive = all(probes)
     if not alive:
         print("  SKIPPED  the spoken-turn checks - the provider is not answering")
         return verdict()
