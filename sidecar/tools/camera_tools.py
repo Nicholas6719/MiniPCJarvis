@@ -12,10 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from tools.registry import Risk, Tool, registry
 
 log = logging.getLogger("jarvis.camera")
+
+# A frame darker than this is the camera still opening its shutter, not a dark
+# room: measured, frame 0 is ~8 and a settled picture is ~57.
+SETTLE_BRIGHTNESS = 25.0
 
 
 async def set_camera(on: bool | None = None) -> dict:
@@ -39,41 +44,63 @@ async def camera_status() -> dict:
 
 
 async def look() -> dict:
-    """One look at whatever is in front of the camera.
+    """Several looks at whatever is in front of the camera, judged together.
 
-    If the camera is off this opens it, takes ONE frame, and shuts it again —
-    asking "what do you see" is itself the permission to look, and leaving the
-    device running afterwards would be taking more than he offered. If it was
-    already on it stays on, because he opened it deliberately.
+    If the camera is off this opens it, looks, and shuts it again — asking is
+    itself the permission to look, and leaving the device running afterwards
+    would be taking more than he offered. If it was already on it stays on.
+
+    It does NOT look at the first frame it can get. Measured on his own camera,
+    frame 0 has a mean brightness of 8 against ~57 once exposure settles — so
+    the first version was routinely reading a nearly black picture, which is a
+    large part of why it missed a water bottle he was holding.
     """
     from camera import camera
-    from vision_objects import describe, objects
+    from vision_objects import LOOK_FRAMES, describe, objects
 
     was_on = camera.is_on
     if not was_on:
         res = await asyncio.to_thread(camera.start)
         if not res.get("ok"):
             return {"error": res.get("error") or "the camera would not open"}
-        # The first frame off this camera is ~900 ms behind the open; looking
-        # before then would report an empty room every time.
-        for _ in range(30):
-            if camera.frame() is not None:
-                break
-            await asyncio.sleep(0.1)
 
     try:
-        jpg = camera.frame()
-        if jpg is None:
-            return {"error": "no frame from the camera"}
         import cv2
         import numpy as np
-        frame = await asyncio.to_thread(
-            cv2.imdecode, np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if frame is None:
-            return {"error": "the frame could not be read"}
-        # Detection is ~71ms of solid CPU: off the event loop, like every other
-        # heavy thing here.
-        res = await asyncio.to_thread(objects.detect, frame)
+
+        def decode(jpg):
+            return cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+        # Wait for a frame at all, then for the picture to stop being dark.
+        deadline = time.time() + 6.0
+        settled = None
+        while time.time() < deadline:
+            jpg = camera.frame()
+            if jpg is not None:
+                img = await asyncio.to_thread(decode, jpg)
+                if img is not None and float(np.mean(img)) > SETTLE_BRIGHTNESS:
+                    settled = img
+                    break
+            await asyncio.sleep(0.1)
+        if settled is None:
+            return {"error": "the camera never produced a usable picture"}
+
+        # Now gather DISTINCT frames. The camera runs at ~15 fps, so a short
+        # wait between grabs is what makes them different pictures rather than
+        # the same one eight times.
+        frames = [settled]
+        last = None
+        while len(frames) < LOOK_FRAMES and time.time() < deadline:
+            await asyncio.sleep(0.08)
+            jpg = camera.frame()
+            if jpg is None or jpg is last:
+                continue
+            last = jpg
+            img = await asyncio.to_thread(decode, jpg)
+            if img is not None:
+                frames.append(img)
+
+        res = await asyncio.to_thread(objects.detect_many, frames)
         if res.get("error"):
             return res
         res["said"] = describe(res)

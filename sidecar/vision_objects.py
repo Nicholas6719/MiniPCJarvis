@@ -33,9 +33,25 @@ log = logging.getLogger("jarvis.objects")
 
 MODEL = "object_detection_yolox_2022nov.onnx"
 INPUT = 640
-CONF = 0.50          # below this it says nothing rather than guessing
+# Per-FRAME floor: deliberately low, because a single frame is a coin flip.
+# Measured on his own camera, the same unmoving person scored 0.31, 0.68, 0.40,
+# 0.52 on consecutive frames. What survives is decided by persistence below,
+# not by this.
+CONF = 0.15
 NMS = 0.50
 MAX_REPORTED = 8
+
+# How many frames one "look" actually looks at, and how they are judged.
+#
+# The room he pointed it at produced cat 0.20, dog 0.14, teddy bear 0.18 and a
+# toilet 0.06 — none of which are in it. So simply lowering the floor to catch
+# his water bottle would have JARVIS confidently reporting a cat he does not
+# own. Noise FLICKERS; a real object is in nearly every frame. Persistence
+# separates them where a single-frame threshold cannot.
+LOOK_FRAMES = 8
+KEEP_SEEN_FRACTION = 0.50   # in at least half the frames...
+KEEP_MIN_CONF = 0.30        # ...and it got at least this sure once
+KEEP_ALONE_CONF = 0.60      # or it was this convincing even once
 
 # The 80 COCO classes, in the exact order the model emits them. Written out
 # rather than assembled, because a single misplaced name here silently renames
@@ -167,8 +183,87 @@ class Objects:
             log.exception("object detection failed")
             return {"error": "the look failed"}
 
+    def detect_many(self, frames: list) -> dict:
+        """Several frames of the same scene, judged together.
+
+        One frame is not enough to answer with. This keeps a label when it
+        appears in at least half the frames AND reached KEEP_MIN_CONF once, or
+        when it was convincing on its own even once. Everything else is noise
+        and is not mentioned.
+        """
+        if not frames:
+            return {"error": "no frames to look at"}
+        seen: dict[str, int] = {}
+        best: dict[str, float] = {}
+        counts: dict[str, list] = {}
+        total_ms = 0.0
+        looked = 0
+        for f in frames:
+            res = self.detect(f)
+            if res.get("error"):
+                continue
+            looked += 1
+            total_ms += res.get("detect_ms", 0.0)
+            for it in res.get("objects", []):
+                label = it["label"]
+                seen[label] = seen.get(label, 0) + 1
+                best[label] = max(best.get(label, 0.0), it["confidence"])
+                counts.setdefault(label, []).append(it.get("count", 1))
+        if not looked:
+            return {"error": "every frame failed"}
+
+        kept = []
+        for label, n in seen.items():
+            frac = n / looked
+            conf = best[label]
+            if (frac >= KEEP_SEEN_FRACTION and conf >= KEEP_MIN_CONF) or conf >= KEEP_ALONE_CONF:
+                # The MODE, and a tie goes to the LOWER number. The median said
+                # "2 beds" when one bed was split across two boxes in a handful
+                # of frames — and over-claiming is precisely the failure he
+                # complained about. Saying "a bed" when there are two is a
+                # smaller error than inventing furniture.
+                from collections import Counter
+                tally = Counter(counts[label])
+                top = max(tally.values())
+                c = min(k for k, v in tally.items() if v == top)
+                kept.append({"label": label, "count": c,
+                             "confidence": round(conf, 2),
+                             "seen_in": f"{n}/{looked}"})
+        kept.sort(key=lambda k: -k["confidence"])
+        return {"objects": kept[:MAX_REPORTED], "frames": looked,
+                "detect_ms": round(total_ms, 1)}
+
+
 
 objects = Objects()
+
+
+# English, because "2 persons" is not something JARVIS would ever say. Only the
+# COCO labels that pluralise irregularly need to be here.
+PLURALS = {
+    "person": "people", "mouse": "mice", "knife": "knives",
+    "sandwich": "sandwiches", "bus": "buses", "sports ball": "sports balls",
+    "wine glass": "wine glasses", "couch": "couches", "bench": "benches",
+    "sheep": "sheep", "skis": "skis", "scissors": "scissors",
+    "broccoli": "broccoli", "toothbrush": "toothbrushes",
+}
+
+
+# Counting is only reported where it is both RELIABLE and USEFUL.
+#
+# Live, it said "2 beds and a person" about a room with one bed: YOLOX split the
+# bed across two boxes in most frames, so no amount of averaging across frames
+# fixes it — the model really does see two. Taking the count off furniture costs
+# him nothing ("a bed" is the whole message) and removes a whole class of
+# confident-sounding error. People are different: how many are in the room is
+# exactly the kind of thing worth knowing, and people separate cleanly.
+COUNTED = {"person"}
+
+
+def plural(label: str, n: int) -> str:
+    if n == 1:
+        return label
+    return PLURALS.get(label, label + "s")
 
 
 def describe(res: dict) -> str:
@@ -184,8 +279,9 @@ def describe(res: dict) -> str:
         return "nothing I recognise"
     parts = []
     for it in items[:5]:
-        label, n = it["label"], it.get("count", 1)
-        parts.append(f"{n} {label}s" if n > 1 else
+        label = it["label"]
+        n = it.get("count", 1) if label in COUNTED else 1
+        parts.append(f"{n} {plural(label, n)}" if n > 1 else
                      ("an " if label[0] in "aeiou" else "a ") + label)
     if len(parts) == 1:
         return parts[0]
