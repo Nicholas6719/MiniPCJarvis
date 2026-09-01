@@ -21,6 +21,20 @@
   measures the rate between recorded marks and refuses to invent a date from one
   data point.
 
+### Phase 2 — his phone (location + health, one poller edit)
+- `where_am_i` / `distance_to`: Telegram live location stored as a volatile fact,
+  straight-line haversine distance, place names resolved by the geocoder weather
+  already uses. No routing, no Nominatim.
+- `get_health`: Apple Watch metrics pushed from iOS Shortcuts into the paired
+  chat. Allow-listed metric names, range-checked values, unknown keys ignored,
+  size-capped before parsing — untrusted external JSON treated as such.
+- **`getUpdates` now asks for `edited_message`.** A live location share is
+  delivered by EDITING the original message, and Telegram does not send an update
+  kind that is missing from `allowed_updates` — so live sharing would have
+  delivered one fix and then gone silent, with nothing in any log to say why.
+- A live share edits its message every few seconds; only the first is
+  acknowledged. Replying to each would be the message-storm failure again.
+
 ### Adjusted from the handoff after reading the repo
 - `tools/weather.py` already existed (Open-Meteo, keyless) — extended, not created.
 - `analyze_image()` already existed on the Gemma 3 + mmproj pipeline — phase 3 is a

@@ -55,6 +55,18 @@ def load_token() -> str | None:
         return None
 
 
+
+def _health_payload(text: str) -> bool:
+    """Is this telemetry rather than something he said? Never raises: a bad
+    detector here must not be able to swallow a real message or crash the
+    poller, so any failure answers 'no' and the text is treated as speech."""
+    try:
+        from tools.health import looks_like_payload
+        return looks_like_payload(text)
+    except Exception:
+        log.debug("health payload sniff failed", exc_info=True)
+        return False
+
 class TelegramBridge:
     def __init__(self) -> None:
         self.token: str | None = None
@@ -173,9 +185,16 @@ class TelegramBridge:
                 # `timeout` must be a BODY parameter for Telegram to hold the
                 # connection open (long polling). As an httpx kwarg only, every
                 # call returned instantly and we hammered the API every ~3 s.
+                # "edited_message" is REQUIRED for live location. Telegram does
+                # not merely ignore an update kind that is missing from this
+                # list — it does not send it at all — and a live location share
+                # is delivered by EDITING the original message each time he
+                # moves. Without this the feature would have looked broken with
+                # nothing in any log to explain why.
                 updates = await self._api("getUpdates", http_timeout=70, timeout=50,
                                           offset=self._offset,
-                                          allowed_updates=["message", "callback_query"])
+                                          allowed_updates=["message", "edited_message",
+                                                           "callback_query"])
                 if updates is None:
                     await asyncio.sleep(5)
                     continue
@@ -231,7 +250,11 @@ class TelegramBridge:
                 log.warning("telegram: ignoring a button press from %s (paired to %s)",
                             who, allowed)
             return
-        msg = u.get("message") or {}
+        # An EDITED message is how a live location moves: Telegram edits the
+        # original rather than sending a new one. Everything below applies to it
+        # unchanged, including the allowed-chat check.
+        edited = "edited_message" in u
+        msg = u.get("message") or u.get("edited_message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
         sender = (msg.get("from") or {}).get("id")
         text = (msg.get("text") or "").strip()
@@ -247,6 +270,33 @@ class TelegramBridge:
             return
         if chat_id != allowed or sender != allowed:
             return   # silence for strangers — nothing to probe
+
+        # -- phone-derived data, from the paired chat only --------------------
+        # Deliberately AFTER the allowed-chat check and before anything is
+        # treated as speech. These are readings, not requests: they are stored
+        # and acknowledged quietly, never run as a turn.
+        loc = msg.get("location")
+        if loc:
+            from tools import location as _loc
+            ok = _loc.ingest(loc, label=(msg.get("venue") or {}).get("title", ""))
+            # A live share edits the same message every few seconds. Answering
+            # each one would be a message storm of exactly the kind that already
+            # cost him a night's sleep — acknowledge the first, then stay quiet.
+            if ok and not edited:
+                await self._send("Got your location, sir.")
+            return
+        if text and _health_payload(text):
+            from tools import health as _health
+            res = _health.ingest_payload(text)
+            if res.get("error"):
+                await self._send(f"I couldn't read that health data, sir — {res['error']}.")
+            elif res.get("stored"):
+                await self._send(f"Logged {res['stored']} reading"
+                                 f"{'s' if res['stored'] != 1 else ''}, sir.")
+            else:
+                await self._send("Nothing in that payload was a metric I track, sir.")
+            return
+
         if not text:
             voice = msg.get("voice") or msg.get("audio") or msg.get("video_note")
             if voice:
