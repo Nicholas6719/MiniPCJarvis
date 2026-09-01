@@ -648,8 +648,13 @@ function CameraStage() {
   }, []);
 
   const dims = status?.width ? `${status.width}x${status.height}` : "";
+  // A FRAGMENT, like every other stage. The stage container is the <div
+  // className="stage"> in App.tsx; wrapping this in another .stage nested a
+  // second absolutely-positioned element inside the first, so `left: calc(760px
+  // * var(--s))` was applied twice and the whole panel sat off the right edge -
+  // present in the DOM, rendering, and impossible to see.
   return (
-    <div className="stage stage--camera">
+    <>
       <StageHeader eyebrow="CAMERA" word="Live"
                    meta={[dims, status?.backend, status?.frames ? `${status.frames} frames` : ""]
                           .filter(Boolean).join("  ")}
@@ -664,7 +669,7 @@ function CameraStage() {
                       onError={() => setFailed(true)} />
         )}
       </div>
-    </div>
+    </>
   );
 }
 
