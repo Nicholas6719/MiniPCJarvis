@@ -87,6 +87,27 @@ def main() -> int:
     check("...and ignores a stale one, falling back to home",
           W._phone_location() is None)
 
+    # --- the place-name forms he actually says -------------------------------
+    # Open-Meteo's geocoder returns NOTHING for "Framingham MA" and resolves
+    # "Framingham, MA" — and speech recognition never inserts a comma, so asking
+    # aloud for the weather in his own town failed outright. distance_to
+    # inherited it the moment it reused this. Offline: only the variant
+    # generation is checked, so the gate needs no network.
+    for said, want in [
+        ("Framingham MA", "Framingham, MA"),
+        ("Sudbury MA", "Sudbury, MA"),
+        ("New York NY", "New York, NY"),
+    ]:
+        v = W._variants(said)
+        check(f"{said!r} is retried with a comma", want in v, v)
+        check(f"...and {said!r} is retried as the bare town",
+              said.rsplit(" ", 1)[0] in v, v)
+    check("a place that already has a comma is not mangled",
+          W._variants("Framingham, MA") == ["Framingham, MA"])
+    check("a one-word place is left alone", W._variants("Paris") == ["Paris"])
+    check("empty input yields no variants worth trying",
+          W._variants("") == [""])
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

@@ -26,14 +26,44 @@ _home: tuple[float, float, str] | None = None
 _home_ts = 0.0
 
 
-async def _geocode(place: str) -> tuple[float, float, str] | None:
-    key = place.strip().lower()
-    if key in _geo_cache:
-        return _geo_cache[key]
+async def _one_geocode(name: str) -> list:
     async with httpx.AsyncClient(timeout=8) as c:
         r = await c.get("https://geocoding-api.open-meteo.com/v1/search",
-                        params={"name": place, "count": 1, "language": "en", "format": "json"})
-        res = (r.json() or {}).get("results") or []
+                        params={"name": name, "count": 1, "language": "en",
+                                "format": "json"})
+        return (r.json() or {}).get("results") or []
+
+
+def _variants(place: str) -> list[str]:
+    """Ways to ask for the same place, commonest first.
+
+    Open-Meteo's geocoder wants "Framingham, MA" and returns NOTHING for
+    "Framingham MA" — and speech recognition never inserts a comma. So asking
+    aloud for the weather in his own town failed outright, and phase 2's
+    distance_to inherited it the moment it reused this. Retry with the comma,
+    then with the trailing region dropped, before giving up.
+    """
+    p = " ".join((place or "").split())
+    out = [p]
+    if "," not in p:
+        parts = p.split()
+        if len(parts) >= 2:
+            # "Framingham MA" -> "Framingham, MA"; "New York NY" -> "New York, NY"
+            out.append(" ".join(parts[:-1]) + ", " + parts[-1])
+            # ...and finally the bare town, which resolves on its own
+            out.append(" ".join(parts[:-1]))
+    return out
+
+
+async def _geocode(place: str) -> tuple[float, float, str] | None:
+    key = (place or "").strip().lower()
+    if key in _geo_cache:
+        return _geo_cache[key]
+    res: list = []
+    for attempt in _variants(place):
+        res = await _one_geocode(attempt)
+        if res:
+            break
     if not res:
         return None
     g = res[0]
