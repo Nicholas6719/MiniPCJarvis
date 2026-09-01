@@ -44,8 +44,13 @@ CASES = [
     # (2026-08-27) instead of merely being guarded away from the sleep skill
     ("go to sleep in an hour", None),       # was: slept immediately
     ("wake me up at 7", None),              # was: "At your service." to an alarm request
-    ("put on some music", None),            # was: launching an app called "some music";
-                                            # slots_app now rejects music-words -> LLM plays
+    # Was None, and that expectation encoded a BUG rather than a decision: "put on"
+    # canonicalized to "open APP" (the determiner list covered "the/my/that/this"
+    # but not "some"), open_app took it, slots_app refused the music-word, and it
+    # fell through to the model. With the erasure fixed it lands where the
+    # near-identical "play some music" has always landed. NOTE for later: both are
+    # a play/pause keypress, which does nothing when nothing is playing.
+    ("put on some music", "media_pause"),
     ("switch to a british voice", None),    # was: hunting a window titled "a british voice"
     ("show me pictures from my trip", None),# was: web-searching his personal photos
     ("we're done here", "sleep"),           # dismissals still work
@@ -151,6 +156,19 @@ CASES = [
     ("show me iron man in my browser", "browser_search"),
     ("show me pictures of a nebula in my browser", "browser_search"),
     ("look up elden ring in brave", "browser_search"),
+    # --- the six refusing guards that had no routing test at all ------------
+    # An audit of every slots_() that can return None found 23 skills able to
+    # refuse a phrasing and only 17 with a case proving where the utterance
+    # LANDS. The other six were the same exposure that produced the "remember my
+    # face" silence: the guard fires, nothing catches it, and he is answered with
+    # nothing. These are the phrasings each guard is supposed to ACCEPT.
+    ("tell me if the cpu goes above 90 percent", "watch"),
+    ("let me know when memory is over 90", "watch"),
+    ("stop watching the cpu", "unwatch"),
+    ("switch to discord", "switch"),
+    ("when i say lights out, mute and open spotify", "teach"),
+    ("no i meant open spotify", "correction"),
+    ("undelete report.docx", "restore_file"),
 ]
 
 async def main() -> int:

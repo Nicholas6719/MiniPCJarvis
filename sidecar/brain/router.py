@@ -58,7 +58,10 @@ _CANON = [
     (r".*\b(?:tab|tabs|panel|panels|menu|navigation)\b.*", "show the VIEW tab"),
     # "hide the panels" is a UI request; "hide YOURSELF" is a dismissal — without the
     # exclusion this rewrote it to "hide everything" and it hit the UI skill at 1.00.
-    (r"^(?:hide|dismiss|clear)\b(?!\s+(?:yourself|himself|jarvis))\b.*", "hide everything"),
+    # ...and "hide the camera" names a subsystem, not "everything". Folded in, it
+    # became the UI's hide-all canon and camera_off could not compete for its own
+    # phrasing. Found by test_canon_erasure, not by him, which is the point of it.
+    (r"^(?:hide|dismiss|clear)\b(?!\s+(?:yourself|himself|jarvis))(?!.*\b(?:camera|webcam)\b)\b.*", "hide everything"),
     (r"^(?:pin|unpin)\b.*", "pin that"),
     # "what does cpu stand for" / "what is a cpu" are questions ABOUT a thing, not requests
     # to measure it — without this they land within 0.05 of the "what's the cpu at" seed
@@ -103,7 +106,7 @@ _CANON = [
     # SUBSYSTEM, not an executable. Rewritten to "open APP", "open the camera" —
     # his own words for this — matched open_app at cosine 1.000 and tried to launch
     # the Windows Camera app instead of the HUD view.
-    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+|that\s+|this\s+)?(?:sound|audio|volume|music|camera|webcam|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself|article|articles|story|link|links|source|page)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
+    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+|that\s+|this\s+|some\s+|a\s+|an\s+)?(?:sound|audio|volume|music|tunes|camera|webcam|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself|article|articles|story|link|links|source|page)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
     (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|camera|webcam|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
     (r"\d+", "N"),
 ]
