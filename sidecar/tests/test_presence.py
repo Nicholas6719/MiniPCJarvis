@@ -181,6 +181,17 @@ def main() -> int:
     empty = st(present=False, faces=0)
     check("...an empty frame says nobody, not 'I cannot tell'",
           "don't see anyone" in say_camera_sees({}, empty), say_camera_sees({}, empty))
+    # The hysteresis holds `present` true for twelve seconds after he walks off.
+    # That is correct for ROUTING and wrong for a question in the present tense:
+    # the live build answered "I can see someone, sir" at a frame with faces=0,
+    # because `faces or 1` invented the someone. Asked directly, it answers from
+    # the current frame.
+    stale = st(present=True, faces=0, who="unknown")
+    check("presence hysteresis does NOT invent a person to see",
+          "don't see anyone" in say_camera_sees({}, stale), say_camera_sees({}, stale))
+    check("...not even with him enrolled and lingering presence",
+          "don't see anyone" in say_camera_sees({}, st(present=True, faces=0, who="him")),
+          say_camera_sees({}, st(present=True, faces=0, who="him")))
     off = {"on": False, "error": None}
     check("...a closed camera says so plainly",
           "camera is off" in say_camera_sees({}, off), say_camera_sees({}, off))

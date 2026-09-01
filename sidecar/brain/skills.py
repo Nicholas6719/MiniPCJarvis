@@ -964,9 +964,18 @@ def say_camera_sees(slots: dict, res: dict) -> str:
     pres = res.get("presence") or {}
     if pres.get("error"):
         return "The camera is on, sir, but I can't make out faces."
-    if not pres.get("present"):
+    # "Can you see me" is a question about RIGHT NOW, so it is answered from the
+    # current frame — NOT from `present`, which deliberately holds him in place
+    # for twelve seconds after he leaves. That hysteresis is right where it
+    # belongs (a blink must never reroute his answer to his phone), but borrowing
+    # it here made JARVIS say "I can see someone, sir" about a frame containing
+    # nobody at all, and then `faces or 1` invented the someone to see. A claim
+    # about the present tense gets present-tense evidence.
+    n = pres.get("faces")
+    if n is None:                       # a status payload without the count
+        n = 1 if pres.get("present") else 0
+    if not n:
         return "The camera is on, sir, but I don't see anyone."
-    n = pres.get("faces") or 1
     who = pres.get("who")
     if who == "him":
         if n == 1:
