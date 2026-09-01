@@ -62,12 +62,16 @@ FEEDS: dict[str, list[tuple[str, str]]] = {
               ("Boston.com", "https://www.boston.com/feed/"),
               ("MassLive", "https://www.masslive.com/arc/outboundfeeds/rss/?outputType=xml"),
               ("WHDH", "https://whdh.com/feed/"),
-              ("NBC10 Boston", "https://www.nbcboston.com/news/local/?rss=y")],
+              # NBC10 read-timed out on every probe (8s per sweep, swallowed to
+              # debug) and WBUR answers in full with real publisher URLs.
+              ("WBUR", "https://www.wbur.org/feed")],
     # The five towns he named, each from its own desk.
     "towns": [("Framingham Patch", "https://patch.com/feeds/massachusetts/framingham"),
               ("Natick Patch", "https://patch.com/feeds/massachusetts/natick"),
               ("Sudbury Patch", "https://patch.com/feeds/massachusetts/sudbury"),
               ("Marlborough Patch", "https://patch.com/feeds/massachusetts/marlborough"),
+              # Maynard Patch returns HTTP 200 with zero items - one of his five
+              # towns had no coverage at all and nothing said so.
               ("Maynard Patch", "https://patch.com/feeds/massachusetts/maynard")],
 }
 
@@ -90,7 +94,14 @@ def _parse_date(raw: str | None) -> dt.datetime | None:
         return d.replace(tzinfo=None) - (d.utcoffset() or dt.timedelta()) if d.tzinfo else d
     except Exception:
         try:                                    # Atom: 2026-08-27T11:04:00Z
-            return dt.datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+            # CONVERT to UTC, do not just drop the offset. "-04:00" was being
+            # discarded, so an item published 10 minutes ago read as 4 hours
+            # old - past alert_max_age_minutes, i.e. a genuinely fresh local
+            # emergency silently thrown away.
+            d = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if d.tzinfo is not None:
+                d = d.astimezone(dt.timezone.utc)
+            return d.replace(tzinfo=None)
         except Exception:
             return None
 

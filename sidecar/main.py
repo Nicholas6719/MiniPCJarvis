@@ -1031,7 +1031,14 @@ def main() -> None:
             pass
 
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+    # timeout_keep_alive: a second request QUEUED on a connection whose first
+    # request is still running was being killed by the 5-second default, which
+    # is every concurrent pair of tool calls from one client - verified
+    # 2026-08-31: two quotes on one connection, second one ReadError, while two
+    # separate connections both succeeded. Tools legitimately take longer than
+    # five seconds.
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning",
+                timeout_keep_alive=120)
 
 
 if __name__ == "__main__":

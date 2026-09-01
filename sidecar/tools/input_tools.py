@@ -198,7 +198,8 @@ async def click_screen(cell: str = "", x: int | None = None, y: int | None = Non
             win32api.mouse_event(up, x, y, 0, 0)
             time.sleep(0.06)
     await asyncio.to_thread(_do)
-    time.sleep(0.35)   # let the click land before anyone screenshots the result
+    await asyncio.sleep(0.35)   # let the click land; asyncio.sleep, because a
+    # plain sleep here froze the event loop and the wake word with it
     await bus.emit("remote_input", action="click", x=x, y=y, cell=cell or None)
     return {"clicked": cell or f"{x},{y}", "button": button, "double": double,
             "window": win32gui.GetWindowText(win32gui.GetForegroundWindow())}

@@ -1147,6 +1147,119 @@ orchestrator he is talking to; on 2026-08-30 six suites "failed" purely because
 he was using JARVIS at the time. And never start a second deploy while a suite is
 running - the hot-swap pulls the app out from under it.
 
+## 2026-09-01 — the 2,600-message night, and a misdiagnosis to learn from
+
+**What he woke up to.** Roughly 2,600 Telegram messages asking about his
+retainers. He had shut JARVIS down the previous evening after ~50 of them; it
+came back and ran until morning. *"I'm done."*
+
+**Why it came back: my fault.** I created scheduled task `JARVIS_HOTSWAP` with
+`/SC ONCE /ST 23:59` and left it armed. It fired at 23:59, and
+`jarvis_hotswap.cmd` ends with `start "" jarvis.exe`. It relaunched the app he
+had deliberately killed. **Helper tasks are created, run, and deleted in the
+same breath — never left with a time-of-day trigger.** Task deleted.
+
+**Why it flooded: three faults in a row.**
+1. **`brain/router.py load()` never committed its deletions.** It drops stale
+   seed examples on every start, but its only `commit()` sat inside
+   `if missing:`. On any start where rows were dropped and nothing needed
+   re-seeding, that connection held an open write transaction — and SQLite's
+   single write lock — for the entire life of the process. Everything else then
+   got "database is locked" forever. *This is the disease; the two outages were
+   its symptoms.* Found 2026-09-01 from the live log: `brain loaded: 518
+   examples` against 521 rows in the table — three deleted, never committed.
+   Gate: `tests/test_write_lock.py`, verified to fail without the fix.
+   (`registry._audit` also caught write errors without rolling back, which would
+   hold the lock the same way; fixed too.)
+2. `tasks/scheduler.py _fire` announced BEFORE it rescheduled. With the update
+   failing, the row stayed `pending` with a past due time and the 10-second loop
+   re-announced it six times a minute.
+3. `delivery._too_soon` opened with `if not key or tier == URGENT: return False`,
+   and `scheduler.announce` passes no key — so "unnamed" meant "unlimited".
+
+**Fixes.** Claim-then-speak in `_fire`, with `_suppressed()` and a one-hour
+back-off when the schedule will not write. `_key_for()` derives a dedup key from
+the message text when none is given. URGENT now repeats on
+`urgent_repeat_minutes` (10) instead of being exempt, while a genuine
+*escalation* (higher tier, same key) still passes immediately. And
+`proactive.max_messages_per_hour` (12) is a hard ceiling over every outbound
+route — the backstop for the next bug, whatever it turns out to be.
+Gates: `tests/test_reminder_flood.py`, `tests/test_delivery_budget.py`.
+
+### The misdiagnosis — read this before touching anything in AppData
+
+Last night I concluded the database was corrupt and spent hours salvaging it.
+**It was not.** The file I read from the agent shell was the container's stale
+copy; the real `%APPDATA%\JARVIS\jarvis.db` was `integrity: ok` all along:
+
+| | agent shell saw | real file |
+|---|---|---|
+| memories | 4 | **12** |
+| brain_examples | 91 | **521** |
+| tasks | 4 | **226** |
+| transcript | 6,001 | **15,135** |
+
+`Get-FileHash` matched on both paths because BOTH resolved to the mirror.
+No user data was lost — the real file was never written by any of it.
+`.agent/scripts/jarvis_dbcheck.cmd` now prints the resolved path, size, mtime,
+row counts and the full `tasks` table from the real session. **Run it before
+diagnosing anything under AppData.** `tools/db_repair.py` and its gate remain
+useful and correct; they were simply aimed at the wrong file.
+
+## 2026-08-31 evening — turns stopped completing (cause corrected above)
+
+Symptom: health green, wake word fine, routing correct, **no reply to anything**.
+Every turn died at `memory/store.py log_turn` with `database is locked`.
+
+Cause: `PRAGMA integrity_check` reported SQLITE_CORRUPT over ~60 pages of the
+`transcript` b-tree (`audit_log` and `turn_stats` too — all three disposable
+logs). **A corrupt page cannot be checkpointed out of the WAL**, so `jarvis.db-wal`
+froze at 4.1 MB from 16:02 while the main file kept being written, the writer
+never drained, and every write waited out `busy_timeout` and raised. Nothing
+noticed, because SQLite only reports a bad page when a query touches one.
+
+Salvaged with the new `sidecar/tools/db_repair.py`; the file is CLEAN and
+writable again (write lock now 1 ms, was refused outright).
+
+| table | kept | note |
+|---|---|---|
+| memories, facts, tasks, night_meta | all | untouched |
+| brain_examples | 91 of 521 | **506 of the 521 keys were canonical seeds — `brain.load()` re-seeds them. Only 15 were learned; their text is in `%APPDATA%\JARVIS\salvaged-keys-brain_examples.txt`** |
+| transcript | 6,019 of 10,278 | conversation log |
+| audit_log | 3,185 | |
+| turn_stats | 0 | instrumentation only |
+
+Fixes that outlive the incident:
+- `log_turn` / `recent_transcript` can no longer raise. Bookkeeping must never
+  cost him the assistant — that single un-guarded INSERT was the whole outage.
+- `config.open_db()` runs `check_and_repair()` **once per process before the
+  first connection**, so damage is found at boot, not hours later.
+- `db_repair` **refuses to swap** when a PRECIOUS table (memories, facts,
+  brain_examples, brain_commands, tasks) loses rows, unless forced. Gate:
+  `tests/test_db_repair.py` — which caught four bugs in the repair tool itself
+  (unbounded rowid probe, write-errors miscounted as corruption, an infinite
+  loop on the WITHOUT ROWID path, and a crash when Windows refused the swap).
+- An intact index outlives its table: `sqlite_sequence` supplies max rowid when
+  `MAX(rowid)` raises, and a UNIQUE index still enumerates keys — so a lost row
+  can be NAMED rather than silently vanish.
+
+**News, third narrowing — verified live, not just unit-tested.**
+`tests/news_emergencies_live.py` runs the real sweep and prints both columns.
+Before: 6 of 60 got through, 3 of them junk — a Somerville bar "taking shots"
+(a shot of Malort), a Times Square stabbing riding Boston.com's wire feed, and a
+jury verdict about the 1996 Tupac killing read as "somebody died close to home".
+After: **2 of 60**, both real (an active Lawrence school shooting, a Sudbury
+bridge closure). Three new guards in `significance.py`: `NOT_VIOLENCE`
+(innocent senses of "shot"), `FAR_PLACE` (a dateline beats the desk a story
+arrived on), `ADJUDICATED`/`STILL_ACTIVE` (a courtroom is not an emergency).
+
+**Do not widen the national door.** I tried, to let a magnitude 7.1 California
+quake through; `test_significance.py` failed instantly on "Hurricane makes
+landfall in Florida, state of emergency declared" — which is on the list HE
+named as "WAY too many news reports", beside "Tornado kills 14 in Oklahoma".
+The bar is his: attack, nuclear accident, pandemic, grid down, toll in the
+hundreds. `briefing.news_scope = "national"` restores the old behaviour.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

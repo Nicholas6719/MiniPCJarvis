@@ -130,8 +130,12 @@ def main() -> int:
           "A66" not in rolled, rolled)
     check("...and neither does a college football staff hire",
           "Defensive Staff" not in rolled, rolled)
-    check("...but something from his own state does",
-          "Mass." in rolled, rolled)
+    # Under his emergencies-only rule there is no roll-up at all: nothing that
+    # merely "waits for the brief" exists any more, so the held list stays empty
+    # even for his own state. ("Only have him tell me about emergencies from now
+    # on", 2026-08-31.)
+    check("...and nor does ordinary state news, now he wants emergencies only",
+          rolled == "", rolled)
 
     # --- the one door that must stay open ------------------------------------
     # He is on local-only. An earlier version stopped FETCHING the national wire
@@ -242,8 +246,11 @@ def main() -> int:
     check("...including SpaceX", "SpaceX" in shown, shown)
 
     # and the CMS artifact is cleaned off the end of a headline
+    # Tested directly: the brief no longer carries this kind of story at all,
+    # but the CMS artifact still has to be cleaned wherever a headline is shown.
+    tidied = br.Briefing._tidy("Markey Holds Lead Over Moulton in Primary -")
     check("a trailing dash is trimmed off a headline",
-          "Primary -" not in shown and "Primary" in shown, shown)
+          tidied == "Markey Holds Lead Over Moulton in Primary", tidied)
 
     # building once is what keeps them honest: the held roll-up is consumed on
     # the first build, so a second build would quietly drop it
@@ -324,7 +331,17 @@ def main() -> int:
     got, kept = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 31), made=kept))
     check("...and does not fire twice", got == [], got)
 
-    # the case that actually failed: nobody looked during 12:30
+    # A brief he HAS had must not arrive twice after a restart - the slots are
+    # persisted now, so a fresh process knows what the last one delivered.
+    got, _ = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 47)))
+    check("a restart does not re-send a brief he already got", got == [], got)
+
+    # ...but one nobody ever delivered still arrives, late, within the grace.
+    # This is the case that actually failed on 2026-08-31: the loop drifted past
+    # 12:30 and nothing was ever sent.
+    import briefing as _br
+    if _br.Briefing._state_path().exists():
+        _br.Briefing._state_path().unlink()          # a machine that never sent it
     got, _ = asyncio.run(_slot(dt.datetime(2026, 8, 31, 12, 47)))
     check("a slot missed by a drifting clock is still delivered",
           len(got) == 1 and "12:30" in got[0][2], got)

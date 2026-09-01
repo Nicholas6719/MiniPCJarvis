@@ -26,7 +26,9 @@ room he left.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 import time
 
 from config import config
@@ -47,6 +49,15 @@ def user_idle_seconds() -> float:
         return _idle()
     except Exception:
         return 1e9          # unknown means away, which routes to the phone
+
+
+def _in_quiet_hours() -> bool:
+    """His night, as proactive already defines it (default 22:00-08:00)."""
+    try:
+        from proactive import proactive
+        return bool(proactive.in_quiet_hours())
+    except Exception:
+        return False        # unknown is treated as daytime: never silently mute him
 
 
 def workstation_locked() -> bool:
@@ -94,19 +105,77 @@ class Delivery:
 
     def __init__(self) -> None:
         self.orchestrator = None      # set at startup
-        self._last: dict[str, float] = {}
+        # key -> (when it was last sent, at what tier). The tier is kept so an
+        # escalation on the same subject is never mistaken for a repeat.
+        self._last: dict[str, tuple[float, str]] = {}
+        # timestamps of everything actually sent, for the hourly ceiling
+        self._sent: list[float] = []
+        self._capped_at = 0.0
+
+    def _key_for(self, key: str, text: str) -> str:
+        """A cooldown key for every message, whether the caller supplied one or not.
+
+        `if not key ... return False` used to mean "no key, no limit", which is
+        exactly backwards: a caller that cannot name its message is the LEAST
+        able to promise it will not repeat. `scheduler.announce` passes no key,
+        so a stuck reminder had no rate limit whatsoever.
+        """
+        if key:
+            return key
+        norm = re.sub(r"\s+", " ", (text or "").lower()).strip()[:160]
+        return "text:" + hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
 
     def _too_soon(self, key: str, tier: str) -> bool:
-        """Don't say the same thing twice in a row. Urgent is exempt — if it is
-        worth waking him for, it is worth repeating."""
-        if not key or tier == URGENT:
-            return False
+        """Don't say the same thing twice in a row.
+
+        URGENT still repeats — "it keeps asking until he acknowledges" is the
+        point of the tier — but it is no longer EXEMPT. On 2026-08-31 a reminder
+        whose schedule could not be written re-fired every ten seconds, and with
+        no key and no cap that became about 2,600 Telegram messages overnight.
+        Repeating every few minutes still gets his attention; repeating six
+        times a minute is how he ends up shutting JARVIS off.
+        """
         gap = float(config.get("proactive", "repeat_cooldown_minutes", default=45)) * 60
-        last = self._last.get(key, 0.0)
-        if time.time() - last < gap:
+        if tier == URGENT:
+            gap = float(config.get("proactive", "urgent_repeat_minutes", default=10)) * 60
+        when, last_tier = self._last.get(key, (0.0, BRIEF))
+        # An ESCALATION is not a repeat. A story he was told about as an alert
+        # that has since become urgent must reach him now, not in ten minutes —
+        # this is the difference between "the same message again" and "this got
+        # worse". Only a message at the same tier or lower waits.
+        escalating = _TIERS.index(tier) > _TIERS.index(last_tier)
+        if not escalating and time.time() - when < gap:
             return True
-        self._last[key] = time.time()
+        self._last[key] = (time.time(), tier)
         return False
+
+    def _over_budget(self, tier: str) -> bool:
+        """The backstop: a hard ceiling on unprompted messages per hour.
+
+        Every specific fix here addresses a specific bug. This one exists
+        because there will be another bug. Whatever goes wrong upstream — a
+        stuck scheduler, a retry loop, a feed that suddenly reports everything
+        as an emergency — it cannot cost him more than this many messages before
+        JARVIS stops and says so once.
+        """
+        now = time.time()
+        self._sent = [t for t in self._sent if now - t < 3600.0]
+        cap = int(config.get("proactive", "max_messages_per_hour", default=12))
+        # At night the ceiling is much lower. The 2,600-message flood ran from
+        # 23:59 to gone 07:00 — entirely inside quiet hours — and every one of
+        # those messages arrived on a phone next to a sleeping man. An URGENT
+        # still gets through; the tiers are unchanged. There is simply far less
+        # room for a mistake to spend while he is asleep.
+        if _in_quiet_hours():
+            cap = min(cap, int(config.get("proactive", "quiet_max_messages_per_hour",
+                                          default=3)))
+        if len(self._sent) < cap:
+            return False
+        if now - self._capped_at > 3600.0:
+            self._capped_at = now
+            log.error("proactive budget spent: %d messages in the last hour "
+                      "(cap %d) — holding everything else back", len(self._sent), cap)
+        return True
 
     async def deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
                       subject: str = "", written: str = "") -> dict:
@@ -124,8 +193,15 @@ class Delivery:
             return {"delivered": "nothing", "why": "empty"}
         if tier not in _TIERS:
             tier = NOTABLE
-        if self._too_soon(key, tier):
+        if self._too_soon(self._key_for(key, text), tier):
             return {"delivered": "nothing", "why": "said recently", "tier": tier}
+        # NOTABLE is only ever held for the brief, so it costs him nothing and
+        # is not charged against the budget; anything that actually reaches him
+        # is. Checked before we decide speech vs phone, so neither route leaks.
+        if tier != NOTABLE and self._over_budget(tier):
+            await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
+            return {"delivered": "nothing", "why": "hourly message budget spent",
+                    "tier": tier}
 
         present = is_present()
         # NOTABLE never interrupts and is not worth a message on its own: it
@@ -137,6 +213,7 @@ class Delivery:
         if present:
             spoke = await self._speak(text, interrupt=tier in (ALERT, URGENT))
             if spoke:
+                self._sent.append(time.time())
                 _remember_proactive(text)
                 await bus.emit("proactive", text=text, tier=tier, channel="voice",
                                subject=subject)
@@ -146,6 +223,7 @@ class Delivery:
         if telegram_available():
             from remote_telegram import telegram
             await telegram.send_proactive(written or text, tier=tier, subject=subject)
+            self._sent.append(time.time())
             _remember_proactive(text)
             await bus.emit("proactive", text=text, tier=tier, channel="telegram",
                            subject=subject)

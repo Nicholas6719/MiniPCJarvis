@@ -29,6 +29,18 @@ from significance import (ALERT, NONE, NOTABLE, URGENT, classify_market,  # noqa
 fails = []
 
 
+def news_mode(mode: str) -> None:
+    """His rule as of 2026-08-31: emergencies only.
+
+    *"Only have him tell me about emergencies from now on... I only want to hear
+    about the emergencies and the local ones. Only tell me about national ones
+    if it's extremely important."* So NOTABLE stops existing for news - no local
+    colour, no town notices, no roll-up. The "all" expectations below are kept
+    because the tiers are unchanged and one config line restores them.
+    """
+    significance.emergencies_only = lambda: mode != "all"
+
+
 def scope(mode: str) -> None:
     """Switch between his setting and the wider one, without a config file.
 
@@ -54,6 +66,7 @@ def main() -> int:
     # HIS SETTING: local only. Everything in this block is what his phone does.
     # ==========================================================================
     scope("local")
+    news_mode("emergencies")
 
     # The ones that actually reached him on 2026-08-30 and made him say "WAY too
     # many news reports". Every one is real, serious, and none of it is his.
@@ -118,8 +131,8 @@ def main() -> int:
         check(f"not his: {uk[:38]!r}", tier(uk) == NONE, tier(uk))
 
     # ...while a story off one of HIS desks is local whatever it says
-    from_desk = {"headline": "Two hurt in a crash on Route 9", "_local_feed": True}
-    check("a story from his own desk is local", classify_news(from_desk)[0] != NONE,
+    from_desk = {"headline": "Fatal crash closes Route 9", "_local_feed": True}
+    check("an emergency from his own desk is local", classify_news(from_desk)[0] != NONE,
           classify_news(from_desk))
     check("an explicit Massachusetts is local too",
           tier("Man held without bail after woman found dead in Mass. home")
@@ -174,8 +187,8 @@ def main() -> int:
                     "Natick Mall to add three new stores this fall",
                     "Marlborough approves budget for new sidewalk project",
                     "Maynard restaurant wins regional award"):
-        check(f"waits for the brief: {townish[:38]!r}",
-              tier(townish) == NOTABLE, tier(townish))
+        check(f"not an emergency, so silent: {townish[:34]!r}",
+              tier(townish) == NONE, tier(townish))
 
     # ...but anything that changes what he can actually do today does ping.
     for real in ("Sudbury schools closed after water main break",
@@ -215,16 +228,16 @@ def main() -> int:
     check("war news of consequence is an alert",
           tier("President declares state of emergency as invasion begins") == ALERT)
     check("routine politics waits for the brief",
-          tier("Congress debates infrastructure funding bill") == NOTABLE)
+          tier("Congress debates infrastructure funding bill") not in (URGENT, ALERT))
 
     # --- his towns get a lower bar, but not NO bar -----------------------------
     check("something real in Sudbury reaches him",
           tier("Sudbury schools closed after water main break") == ALERT)
     check("a ribbon cutting in Maynard does not",
-          tier("Ribbon cutting for new Maynard library wing") == NOTABLE,
+          tier("Ribbon cutting for new Maynard library wing") not in (URGENT, ALERT),
           tier("Ribbon cutting for new Maynard library wing"))
     check("a Natick road closure is a line in the brief, not an interruption",
-          tier("Road closure on Speen Street in Natick for construction") == NOTABLE)
+          tier("Road closure on Speen Street in Natick for construction") not in (URGENT, ALERT))
 
     # --- and the rest of the world's small change is not mentioned at all ------
     for junk in ("High school football roundup: Iowa playoffs",
@@ -244,14 +257,14 @@ def main() -> int:
     check("many deaths anywhere wake him",
           tier("Dozens killed in bus crash in Peru") == URGENT)
     check("a single distant death waits for the brief",
-          tier("Fatal crash on I-80 in Nebraska") == NOTABLE,
+          tier("Fatal crash on I-80 in Nebraska") not in (URGENT, ALERT),
           tier("Fatal crash on I-80 in Nebraska"))
 
     # --- a real headline that used to wake him for nothing ---------------------
     # One death, abroad, no scale. It read as URGENT because the scale words
     # include the fatality words; that is now separated.
     check("a single death abroad does not wake him",
-          tier("British woman killed in stabbing at German railway station") == NOTABLE,
+          tier("British woman killed in stabbing at German railway station") not in (URGENT, ALERT),
           tier("British woman killed in stabbing at German railway station"))
     check("...but a mass casualty abroad does",
           tier("Mass casualty incident at German railway station, dozens dead") == URGENT)
@@ -280,7 +293,8 @@ def main() -> int:
                   "penalty? What sentence could she face if found guilty?",
                   "Massachusetts man on death row seeks new trial",
                   "Suspect received death threats, Boston police say"):
-        check(f"not a death: {legal[:34]!r}", tier(legal) == NOTABLE, tier(legal))
+        check(f"not a death: {legal[:34]!r}", tier(legal) not in (URGENT, ALERT),
+              tier(legal))
 
     # ...while a real one near him is untouched
     check("a real local death still reaches him",

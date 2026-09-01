@@ -343,8 +343,13 @@ def open_url(url: str) -> dict:
         try:
             subprocess.Popen([exe, "--new-window", "--window-position=120,80",
                               "--window-size=1360,880", url], close_fds=True)
-            _focus_newest_browser_window()
-            return {"opened": url, "where": "your browser"}
+            # Report what actually happened. _focus_newest_browser_window
+            # swallows a SetForegroundWindow failure and returns, and this said
+            # "opened" regardless - a tool lying about its own result is worse
+            # than the failure it is hiding.
+            focused = _focus_newest_browser_window()
+            return {"opened": url, "where": "your browser",
+                    "focused": bool(focused)}
         except Exception as e:
             log.warning("could not open %s in a new Brave window: %s", url, e)
     try:
@@ -354,8 +359,13 @@ def open_url(url: str) -> dict:
         return {"error": f"could not open {url}: {e}"}
 
 
-def _focus_newest_browser_window() -> None:
-    """Bring the window we just opened for him to the front, and only that one."""
+def _focus_newest_browser_window() -> bool:
+    """Bring the window we just opened for him to the front, and only that one.
+
+    Returns whether it actually managed it. It used to return None on every
+    path - including the one where SetForegroundWindow raised and the failure
+    was swallowed - so open_url reported success it had not achieved.
+    """
     import time as _t
     from search_brave_web import hidden_hwnds
     for _ in range(12):
@@ -375,7 +385,7 @@ def _focus_newest_browser_window() -> None:
         try:
             win32gui.EnumWindows(cb, None)
         except Exception:
-            return
+            return False
         if not found:
             continue
         hwnd = found[-1]
@@ -391,8 +401,10 @@ def _focus_newest_browser_window() -> None:
             finally:
                 ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
         except Exception:
-            pass
-        return
+            log.debug("could not focus the new browser window", exc_info=True)
+            return False
+        return True
+    return False
 
 
 def enter_sleep_mode() -> dict:

@@ -35,8 +35,14 @@ set PYTHONIOENCODING=utf-8
 
 .venv\Scripts\python.exe tests\test_market_resilience.py || (echo MARKET RESILIENCE TEST FAILED & exit /b 1)
 
-.venv\Scripts\python.exe tests\test_wake_display.py || (echo WAKE DISPLAY TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_wake_display.py || (echo WAKE DISPLAY TEST FAILED & exit /b 1)
+
 .venv\Scripts\python.exe tests\test_deaf_watch.py || (echo DEAF WATCH TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_launchable.py || (echo LAUNCHABLE TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_db_repair.py || (echo DB REPAIR TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_write_lock.py || (echo WRITE LOCK TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_reminder_flood.py || (echo REMINDER FLOOD TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_delivery_budget.py || (echo DELIVERY BUDGET TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\sleep_coverage.py || (echo SLEEP TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\speech_symbols.py || (echo SPEECH TEST FAILED & exit /b 1)
 .venv\Scripts\pyinstaller jarvis-sidecar.spec --noconfirm --distpath dist --workpath build > "%TEMP%\pyi.log" 2>&1 || (echo PYINSTALLER FAILED & exit /b 1)

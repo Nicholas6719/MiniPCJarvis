@@ -8,6 +8,31 @@ $pt = (Get-Content "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\sessi
 $port, $tok = $pt[0], $pt[1]
 Set-Location "$root\sidecar"
 $env:PYTHONIOENCODING = 'utf-8'
+
+# WAIT FOR THE APP TO BE READY. /health answers "starting" the moment the socket
+# binds, and a suite run against a starting app fails wholesale for reasons no
+# commit can fix - clarify_e2e reported 9 failures on 2026-08-31 purely because
+# the sidecar had restarted seconds earlier. release.ps1 learned this on
+# 2026-08-30; this script never did, which is why the same false failures kept
+# coming back.
+$deadline = (Get-Date).AddSeconds(300)
+while ((Get-Date) -lt $deadline) {
+    try {
+        $h = Invoke-RestMethod "http://127.0.0.1:$port/health" -Headers @{'X-Jarvis-Token'=$tok} -TimeoutSec 10
+        if ($h.state -ne 'starting' -and $h.state -ne 'offline') {
+            $dg = Invoke-RestMethod "http://127.0.0.1:$port/diagnostics" -Headers @{'X-Jarvis-Token'=$tok} -TimeoutSec 25
+            if (($dg.checks | Where-Object name -eq 'Wake Word').status -eq 'ok') { break }
+        }
+    } catch {}
+    Start-Sleep 5
+}
+# and make it answer once, so the model and caches are warm before anything is judged
+try {
+    Invoke-RestMethod "http://127.0.0.1:$port/text" -Method Post -Headers @{'X-Jarvis-Token'=$tok} `
+        -ContentType 'application/json' -Body (@{ text = "what time is it" } | ConvertTo-Json) -TimeoutSec 120 | Out-Null
+    Start-Sleep 8
+} catch { }
+
 $failed = @()
 # sleep_e2e runs LAST on purpose: it sleeps and wakes him, and the state churn
 # was making whatever ran next (research) drop a turn and report a bare shrug.

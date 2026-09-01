@@ -205,17 +205,37 @@ class Brain:
                 for u in sk.seeds:
                     canon.setdefault(_norm(u), sk.name)
             # drop seeds that are stale or mislabeled under the current canonical map
+            dropped = 0
             for text, skill in self.db.execute("SELECT text, skill FROM brain_examples WHERE source='seed'").fetchall():
                 if canon.get(text) != skill:
                     self.db.execute("DELETE FROM brain_examples WHERE text=?", (text,))
+                    dropped += 1
             # seeds are ground truth: a learned row that contradicts a seed is a mislabel
             for text, skill in self.db.execute("SELECT text, skill FROM brain_examples WHERE source!='seed'").fetchall():
                 if text in canon and canon[text] != skill:
                     self.db.execute("DELETE FROM brain_examples WHERE text=?", (text,))
+                    dropped += 1
                     log.info("brain: dropped mislabeled learned example %r (%s)", text, skill)
                 elif not self._executable(text, skill):
                     self.db.execute("DELETE FROM brain_examples WHERE text=?", (text,))
+                    dropped += 1
                     log.info("brain: dropped unusable learned example %r (%s)", text, skill)
+            # COMMIT THE DELETIONS HERE. This single missing line was the root of
+            # the 2026-08-31 outage. The commit below sits inside `if missing:`,
+            # so on any start where rows were dropped and nothing needed seeding,
+            # this connection kept an open write transaction — and with it
+            # SQLite's one write lock — for the entire life of the process.
+            # Every other writer then got "database is locked" forever: turns
+            # stopped being recorded, and the scheduler could not move a due
+            # reminder on, so it re-announced Nicholas's 9 p.m. retainer reminder
+            # every ten seconds and sent him ~2,600 messages overnight.
+            #
+            # It also has to happen BEFORE the `await` below: holding a write
+            # transaction across a thread hop hands the lock to a coroutine that
+            # may never come back.
+            if dropped:
+                self.db.commit()
+                log.info("brain: dropped %d stale example(s)", dropped)
             have = {r[0] for r in self.db.execute("SELECT text FROM brain_examples")}
             missing = [(sk, t) for t, sk in canon.items() if t not in have]
             if missing:

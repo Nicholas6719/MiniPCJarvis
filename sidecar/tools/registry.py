@@ -77,6 +77,16 @@ class ToolRegistry:
             self._audit_db.commit()
         except Exception:
             log.exception("audit write failed")
+            # Roll back, or this connection keeps the implicit transaction that
+            # the failed INSERT opened - and with it the database's single write
+            # lock. That is how a corrupt `audit_log` becomes "database is
+            # locked" for the transcript, the facts and the brain: the audit
+            # trail swallows its own error, looks fine, and silently holds the
+            # door shut against every other writer in the process.
+            try:
+                self._audit_db.rollback()
+            except Exception:
+                pass
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool

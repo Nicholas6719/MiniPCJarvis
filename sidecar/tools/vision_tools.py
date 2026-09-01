@@ -78,8 +78,8 @@ async def analyze_screen(question: str = "Describe what is on the screen.",
     """
     from tools.windows_tools import list_windows
     _hide = {"JARVIS", "Program Manager", "Windows Input Experience", "Settings"}
-    titles = [t for t in list_windows().get("windows", []) if t not in _hide]
-    shot = take_screenshot(monitor, hide_self=True)
+    titles = [t for t in (await asyncio.to_thread(list_windows)).get("windows", []) if t not in _hide]
+    shot = await asyncio.to_thread(take_screenshot, monitor, hide_self=True)
     if "error" in shot:
         return shot
     fg, rect = _foreground_rect()

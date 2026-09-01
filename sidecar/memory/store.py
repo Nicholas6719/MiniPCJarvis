@@ -80,6 +80,21 @@ class MemoryStore:
         """Shared embedder for other stores (the fact store) — one ONNX model in RAM."""
         return await asyncio.to_thread(self._embed, texts)
 
+    def _unlock(self) -> None:
+        """Release the write lock after a failed write. Never raises.
+
+        Every method here shares ONE connection, and a statement that raises
+        leaves the implicit transaction it opened still open — holding SQLite's
+        single write lock. So one broken table does not stay one broken table:
+        it becomes "database is locked" for the transcript, the memories and
+        the facts alike, which is exactly the shape of the 2026-08-31 outage.
+        Rolling back is what keeps a local failure local.
+        """
+        try:
+            self.db.rollback()
+        except Exception:
+            pass
+
     # ---- turn-path instrumentation (brain roadmap stage 1) --------------------
     def log_turn_stat(self, path: str, skill: str | None, latency_ms: int) -> None:
         try:
@@ -88,6 +103,7 @@ class MemoryStore:
             self.db.commit()
         except Exception:
             log.exception("turn stat insert failed")
+            self._unlock()
 
     def turn_stats_summary(self, days: int = 7) -> dict:
         """What fraction of turns woke the LLM, and what they cost — the data that
@@ -119,9 +135,17 @@ class MemoryStore:
 
     async def search(self, query: str, top_k: int = 5,
                      min_score: float = 0.35) -> list[dict]:
-        rows = self.db.execute(
-            "SELECT id, ts, category, content, source, confidence, embedding "
-            "FROM memories WHERE embedding IS NOT NULL").fetchall()
+        # Recall is an ENRICHMENT of a turn, not a precondition for one. Same
+        # lesson as log_turn: on 2026-08-31 an un-guarded read in the turn path
+        # was all it took to make JARVIS silent. Without memory he answers with
+        # less; raising here means he does not answer at all.
+        try:
+            rows = self.db.execute(
+                "SELECT id, ts, category, content, source, confidence, embedding "
+                "FROM memories WHERE embedding IS NOT NULL").fetchall()
+        except Exception:
+            log.exception("memory search failed; answering without recall")
+            return []
         if not rows:
             return []
         qv = (await asyncio.to_thread(self._embed, [query]))[0]
@@ -146,9 +170,14 @@ class MemoryStore:
                  "source": r[4], "confidence": r[5], "pinned": bool(r[6])} for r in rows]
 
     def list_pinned(self, limit: int = 10) -> list[str]:
-        rows = self.db.execute(
-            "SELECT content FROM memories WHERE pinned=1 ORDER BY ts DESC LIMIT ?",
-            (limit,)).fetchall()
+        # Also on the turn path, also enrichment, also must not raise.
+        try:
+            rows = self.db.execute(
+                "SELECT content FROM memories WHERE pinned=1 ORDER BY ts DESC LIMIT ?",
+                (limit,)).fetchall()
+        except Exception:
+            log.exception("could not read pinned memories")
+            return []
         return [r[0] for r in rows]
 
     def set_pinned(self, memory_id: int, pinned: bool) -> bool:
@@ -171,9 +200,21 @@ class MemoryStore:
         return cur.rowcount > 0
 
     def log_turn(self, role: str, content: str) -> None:
-        self.db.execute("INSERT INTO transcript (ts, role, content) VALUES (?,?,?)",
-                        (time.time(), role, content))
-        self.db.commit()
+        """Record a line of conversation. Never raises.
+
+        On 2026-08-31 the `transcript` b-tree corrupted, and because this line
+        sat un-guarded in the middle of `_converse`, EVERY turn died on it:
+        health was green, routing was correct, and he got no reply to anything
+        for hours. Writing the history is bookkeeping. Losing it costs him a
+        transcript; letting it raise costs him the assistant.
+        """
+        try:
+            self.db.execute("INSERT INTO transcript (ts, role, content) VALUES (?,?,?)",
+                            (time.time(), role, content))
+            self.db.commit()
+        except Exception:
+            log.exception("could not log a %s turn to the transcript", role)
+            self._unlock()
 
     def prune(self, keep_turns: int = 20000, keep_audit: int = 20000,
               stats_days: int = 120) -> dict:
@@ -201,6 +242,7 @@ class MemoryStore:
             self.db.commit()
         except Exception:
             log.exception("prune failed")
+            self._unlock()
         if any(out.values()):
             log.info("pruned old rows: %s", out)
         return out
@@ -209,9 +251,16 @@ class MemoryStore:
         # id and ts ride along: anything that needs to know WHICH turn a row
         # belongs to cannot use content alone (the same question recurs), and
         # counting rows breaks silently once the window is full.
-        rows = self.db.execute(
-            "SELECT id, ts, role, content FROM transcript ORDER BY id DESC LIMIT ?", (n,)
-        ).fetchall()
+        # Same reasoning as log_turn: a damaged transcript must cost him his
+        # history, not his ability to hold a conversation. He would rather be
+        # answered without context than not answered at all.
+        try:
+            rows = self.db.execute(
+                "SELECT id, ts, role, content FROM transcript ORDER BY id DESC LIMIT ?", (n,)
+            ).fetchall()
+        except Exception:
+            log.exception("could not read recent transcript; continuing without history")
+            return []
         return [{"id": r[0], "ts": r[1], "role": r[2], "content": r[3]}
                 for r in reversed(rows)]
 

@@ -69,6 +69,20 @@ ANCHOR_RE = re.compile(r"\bmassachusetts\b|\bmass\.|\bmetrowest\b|\bmiddlesex\b"
 # as news from one of his five towns. A name like this needs corroboration.
 AMBIGUOUS_TOWN_RE = re.compile(r"\bmarlboro\b(?!ugh)", re.I)
 
+# A local desk is not only local. WCVB, MassLive and Boston.com all carry the
+# national wire, so provenance ALONE made "Woman randomly stabs 2 people in New
+# York City's Times Square, killing 1" read as violence in his state on
+# 2026-08-31. When a story names a place that plainly is not Massachusetts, and
+# names nothing of his anywhere in it, the dateline beats the feed it rode in on.
+FAR_PLACE = re.compile(
+    r"\b(?:new york|manhattan|brooklyn|the bronx|times square|"
+    r"los angeles|san francisco|san diego|seattle|portland|denver|phoenix|"
+    r"chicago|houston|dallas|austin|atlanta|miami|orlando|tampa|new orleans|"
+    r"las vegas|nevada|detroit|cleveland|philadelphia|baltimore|st\. louis|"
+    r"new jersey|connecticut|rhode island|new hampshire|vermont|maine|"
+    r"california|florida|texas|arizona|georgia|ohio|michigan|illinois|"
+    r"oregon|colorado|utah|alaska|hawaii|oklahoma|kentucky|tennessee)\b", re.I)
+
 # Rejecting every bare "Boston" was too blunt - it cost him a hazmat call at Mass
 # General, a fatal MBTA incident and a Boston police story, all genuinely his.
 # The UK stories give themselves away by their SUBJECT, not their city: football
@@ -101,6 +115,47 @@ HAZARD = re.compile(
 VIOLENCE = re.compile(
     r"\b(?:active shooter|mass shooting|shooting|shot|gunman|hostage|manhunt|"
     r"stabbing|stabbed|assault)\b", re.I)
+
+# ...but not every "shot" is a gunshot. On 2026-08-31 Boston.com ran "This
+# Somerville bar aimed to help set a world record. It involved taking shots." -
+# thirty-five people drinking a shot of Malort - and it reached him as violence
+# in his state. Same shape as NOT_A_DEATH below: strip the innocent senses of
+# the word before asking, rather than dropping "shot" and losing real shootings.
+NOT_VIOLENCE = re.compile(
+    r"\bshots?\s+of\s+\w+"
+    r"|\b(?:a|the|another|free|flu|booster|vaccine|covid|tequila|whiskey)\s+shots?\b"
+    r"|\b(?:tak\w+|took|drink\w*|drank|down\w+|pour\w+|order\w*)\s+(?:a\s+)?shots?\b"
+    r"|\bshot\s+(?:clock|glass|list|put)\b|\bscreenshots?\b"
+    r"|\b(?:jump|three|3|slap|penalty|corner|free)\s*-?\s*shots?\b"
+    r"|\bshots?\s+on\s+goal\b|\b(?:big|long|hot|cheap|parting)\s+shot\b"
+    r"|\bshot\s+(?:a|the)\s+(?:film|movie|video|scene|documentary)\b", re.I)
+
+
+def _violence_text(text: str) -> str:
+    """The text with non-violent uses of 'shot' removed, for VIOLENCE only."""
+    return NOT_VIOLENCE.sub(" ", text)
+
+
+# The courts are not an emergency. A verdict, an indictment or a sentencing is
+# the system working on something that already happened, often years ago. On
+# 2026-08-31 "Jury convicts a man of first-degree murder for the 1996 killing of
+# rap icon Tupac Shakur" arrived on the MassLive feed and reached him as
+# "somebody died close to home" - a killing thirty years ago and two thousand
+# miles away, delivered as an alert.
+ADJUDICATED = re.compile(
+    r"\b(?:jury|jurors?|verdict|convict\w+|acquit\w+|sentenc\w+|"
+    r"pleads? guilty|pleaded guilty|plea deal|found guilty|on trial|retrial|"
+    r"indict\w+|arraign\w+|grand jury|lawsuit|settlement|appeals? court|"
+    r"parole|extradit\w+|testifie[sd]|takes the stand|courtroom)\b", re.I)
+
+# ...unless the thing is still out there. An active manhunt is an emergency even
+# when the same sentence is full of courtroom words, so this outranks the guard
+# above rather than sitting inside it.
+STILL_ACTIVE = re.compile(
+    r"\b(?:manhunt|at large|on the loose|active shooter|lockdown|"
+    r"shelter in place|evacuat\w+|ongoing|unfolding|still burning|"
+    r"no suspect in custody|police are searching|search continues|"
+    r"remains? at large)\b", re.I)
 
 # Someone died. Not every death is his business — a fatal crash in Oregon is
 # not — but a death near home is never a footnote, and "fatal" on its own was
@@ -198,6 +253,19 @@ CATASTROPHIC_TOLL = re.compile(
     r"|\bdeath toll\s+(?:rises|climbs|passes|tops|reaches)\s+"
     r"(?:past\s+|above\s+|over\s+)?(?:hundreds|thousands|[1-9]\d{2,})", re.I)
 
+# A note for the next person who thinks this door is too narrow. On 2026-08-31 I
+# widened it to let a magnitude 7.1 California earthquake with thousands
+# evacuated through, on the reasoning that a disaster should not have to finish
+# killing people before it counts. test_significance.py failed immediately, on
+# "Hurricane makes landfall in Florida, state of emergency declared" - which is
+# in the list of alerts HE named when he said "WAY too many news reports", right
+# beside "Tornado kills 14 in Oklahoma". The test was right and the reasoning
+# was wrong: he set this bar himself, at things every American hears about the
+# same hour - an attack, a nuclear accident, a pandemic, the grid down, a toll
+# in the hundreds. A disaster in another state is not on his list. Do not widen
+# this without him asking; `briefing.news_scope = "national"` already exists for
+# the day he wants the whole wire back.
+
 
 # Somewhere else's country. "Everyone in THE COUNTRY needs to know" means his
 # country: a Nepal landslide rescue is a tragedy and front-page news, and it is
@@ -268,7 +336,10 @@ ROUTINE = re.compile(
 NOT_A_DEATH = re.compile(
     r"\bdeath (?:penalty|row|sentence|benefits?|certificate|notice|threats?)\b"
     r"|\bsentenced to death\b|\blife or death\b|\bdeath with dignity\b"
-    r"|\bdeath tax\b|\bdeath star\b", re.I)
+    r"|\bdeath tax\b|\bdeath star\b"
+    # Nobody died. "Man seriously injured in box cutter attack" carried
+    # "attempted murder" in its summary and reached him as a death near home.
+    r"|\battempted (?:murder|homicide|killing)\b", re.I)
 
 
 def _event_text(text: str) -> str:
@@ -299,6 +370,13 @@ def is_local(story: dict) -> tuple[bool, bool]:
     t = _text_of(story)
     from_his_desk = bool(story.get("_local_feed"))
     anchored = bool(ANCHOR_RE.search(t))
+
+    # Provenance is good evidence, not proof. If the story names nothing of his
+    # and does name somewhere clearly else, the desk it came from stops counting
+    # - otherwise every wire story a local outlet reprints is "close to home".
+    if from_his_desk and FAR_PLACE.search(t) and not (
+            anchored or TOWN_RE.search(t) or REGION_RE.search(t)):
+        from_his_desk = False
 
     town = bool(TOWN_RE.search(t))
     if town and AMBIGUOUS_TOWN_RE.search(t) and not (anchored or from_his_desk):
@@ -334,7 +412,25 @@ def local_only() -> bool:
     return str(config.get("briefing", "news_scope", default="local")).lower() != "national"
 
 
-def classify_news(story: dict) -> tuple[str, str]:
+def emergencies_only() -> bool:
+    """He wants emergencies, not a news service.
+
+    2026-08-31, his third narrowing of this in two days: *"Only have him tell me
+    about emergencies from now on. I was getting too many news feeds. I only want
+    to hear about the emergencies and the local ones. Only tell me about national
+    ones if it's extremely important."*
+
+    So NOTABLE stops existing for news. Anything that merely 'waits for the
+    brief' is now nothing at all - no local colour, no roll-up, no town notices.
+    What survives is what would interrupt him: a local emergency, something that
+    changes his day, or the very narrow national door.
+    """
+    from config import config
+    return str(config.get("briefing", "news_mode",
+                          default="emergencies")).lower().startswith("emerg")
+
+
+def _classify_news_full(story: dict) -> tuple[str, str]:
     """(tier, why). `story` is any dict with a headline and ideally a summary."""
     text = _text_of(story).strip()
     if not text:
@@ -354,8 +450,15 @@ def classify_news(story: dict) -> tuple[str, str]:
             return URGENT, "the whole country needs to know this"
         return NONE, "not local, and not something the country needs to know"
     hazard = bool(HAZARD.search(text))
-    violence = bool(VIOLENCE.search(text))
+    violence = bool(VIOLENCE.search(_violence_text(text)))
     danger = hazard or violence
+
+    # A courtroom story is the system processing something that is already over,
+    # so it cannot be an emergency however violent its vocabulary - unless the
+    # thing itself is still happening out there, which outranks this.
+    if (ADJUDICATED.search(text) and not STILL_ACTIVE.search(text)
+            and not hazard):
+        return NOTABLE, "a court case, not an emergency"
     scale = bool(MAJOR_SCALE.search(text))
     weighty = bool(NATIONAL_WEIGHT.search(text))
     routine = bool(ROUTINE.search(text))
@@ -426,6 +529,14 @@ def classify_news(story: dict) -> tuple[str, str]:
     return NONE, "not his, and not serious"
 
 
+def _news_tier(story: dict) -> tuple[str, str]:
+    """The tier, with his emergencies-only rule applied last."""
+    tier, why = _classify_news_full(story)
+    if tier == NOTABLE and emergencies_only():
+        return NONE, "not an emergency, and he asked for emergencies only"
+    return tier, why
+
+
 def classify_market(*, symbol: str, percent: float, held: bool = False,
                     is_index: bool = False) -> tuple[str, str]:
     """A price move, judged by size and by whether it is his money."""
@@ -455,3 +566,7 @@ def classify_market(*, symbol: str, percent: float, held: bool = False,
 
 def worth_saying(tier: str) -> bool:
     return tier in (URGENT, ALERT, NOTABLE)
+
+
+# The public entry point applies his emergencies-only rule.
+classify_news = _news_tier

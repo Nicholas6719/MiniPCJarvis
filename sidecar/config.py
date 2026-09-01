@@ -142,6 +142,10 @@ DEFAULTS: dict[str, Any] = {
         # reached his phone and neither was his business. The alerting itself is
         # unchanged - this only decides what is close enough to count.
         "news_scope": "local",
+        # "emergencies" | "all". He asked three times for less news and
+        # settled here: emergencies and things that change his day, and
+        # nothing that merely "waits for the brief".
+        "news_mode": "emergencies",
         # Massachusetts, weighted to the five towns he named. The whole
         # state is wanted; these come first.
         # Publisher desks with REAL article URLs, so stories can be read and
@@ -274,6 +278,9 @@ config = Config()
 secrets: dict[str, str] = {}
 
 
+_db_checked = False
+
+
 def open_db(path: str | Path | None = None, timeout: float = 15.0):
     """Open the JARVIS database the one correct way.
 
@@ -287,7 +294,25 @@ def open_db(path: str | Path | None = None, timeout: float = 15.0):
     wait instead of raising.
     """
     import sqlite3
-    conn = sqlite3.connect(str(path or DB_PATH), check_same_thread=False, timeout=timeout)
+    target = str(path or DB_PATH)
+
+    # Check the file is sound BEFORE handing out the first connection to it.
+    # On 2026-08-31 the transcript, audit and turn-stat b-trees corrupted, and
+    # nothing noticed: SQLite reports a damaged page only when a query happens to
+    # touch it, so the first symptom arrived hours later as a writer that could
+    # not drain, a stale 4MB WAL, and "database is locked" on every single turn.
+    # He had a JARVIS that passed its health check and answered nothing.
+    global _db_checked
+    if not _db_checked and target == str(DB_PATH):
+        _db_checked = True                       # once per process, before anyone connects
+        try:
+            from tools.db_repair import check_and_repair
+            check_and_repair(target)
+        except Exception:
+            logging.getLogger("jarvis.config").exception(
+                "database integrity check could not run")
+
+    conn = sqlite3.connect(target, check_same_thread=False, timeout=timeout)
     try:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")   # WAL-safe, far fewer fsyncs

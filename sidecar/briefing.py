@@ -69,7 +69,11 @@ class Briefing:
         # Slots already delivered, as "2026-08-31 12:30". A set rather than one
         # value: two slots can come due close together after a restart, and the
         # single value let the second overwrite the first.
-        self._done_slots: set[str] = set()
+        self._done_slots: set[str] = self._load_state("done_slots")
+        # Priming exists so a restart does not dump the whole feed at him as
+        # breaking news. Kept on DISK, because a process restarting more often
+        # than the 5-minute lane gap primed for ever and silently sent nothing.
+        self._seen.update(self._load_state("seen_keys", as_dict=True))
         self._last_watch: float = 0.0
         # Two clocks: emergencies are checked more often than prices are.
         self._last_news: float = 0.0
@@ -82,6 +86,44 @@ class Briefing:
         # is already out there — otherwise every restart dumps the day's news at
         # him as though it had all just happened.
         self._primed = False
+
+    # ---------- what survives a restart ----------
+    #
+    # `_done_slots` and `_seen` were memory only, so a restart at 07:40 saw the
+    # 07:30 slot ten minutes late, inside the grace window, and sent the brief a
+    # second time - and every story already sent became new again.
+
+    @staticmethod
+    def _state_path():
+        # Beside the DATABASE, not in AppData: JARVIS_DB is what the gates
+        # redirect, and a state file outside it meant the tests read and wrote
+        # his real briefing state - one run's saved slots made the next run's
+        # "a missed brief is still delivered" check fail against nothing.
+        from config import DB_PATH
+        return DB_PATH.parent / "briefing_state.json"
+
+    def _load_state(self, key: str, as_dict: bool = False):
+        try:
+            import json
+            raw = json.loads(self._state_path().read_text(encoding="utf-8"))
+            today = _now().strftime("%Y-%m-%d")
+            if raw.get("day") != today:
+                return {} if as_dict else set()     # yesterday is not today
+            val = raw.get(key) or ({} if as_dict else [])
+            return dict(val) if as_dict else set(val)
+        except Exception:
+            return {} if as_dict else set()
+
+    def _save_state(self) -> None:
+        try:
+            import json
+            self._state_path().write_text(json.dumps({
+                "day": _now().strftime("%Y-%m-%d"),
+                "done_slots": sorted(self._done_slots),
+                "seen_keys": {k: v for k, v in list(self._seen.items())[-400:]},
+            }), encoding="utf-8")
+        except Exception:
+            log.debug("could not save briefing state", exc_info=True)
 
     # ---------- lifecycle ----------
 
@@ -159,6 +201,7 @@ class Briefing:
             return
         stamp, slot, late = due
         self._done_slots.add(stamp)
+        self._save_state()
         if len(self._done_slots) > 40:
             self._done_slots = set(list(self._done_slots)[-20:])
         if late > 1.5:
@@ -274,6 +317,7 @@ class Briefing:
         if market:
             out.extend(await self._market_moves())
         self._forget_old()
+        self._save_state()
         return out
 
     @staticmethod
@@ -377,7 +421,24 @@ class Briefing:
                         self._feed_fails)
         return self._dedupe(stories)
 
+    @staticmethod
+    def _market_open() -> bool:
+        """Is the US market actually trading?
+
+        Finnhub keeps the last session's percent after the close, so a Friday
+        -6% on NVDA looked like a fresh -6% every hour until Monday - about 48
+        Telegram alerts across a weekend, and ALERT is not suppressed by quiet
+        hours. The key also carried the hour, so each one looked new.
+        """
+        now = _now()
+        if now.weekday() >= 5:                 # Saturday, Sunday
+            return False
+        minutes = now.hour * 60 + now.minute   # his machine runs on ET
+        return 9 * 60 + 30 <= minutes <= 16 * 60
+
     async def _market_moves(self) -> list[tuple[str, str, str]]:
+        if not self._market_open():
+            return []          # a closed market has no news, only stale numbers
         from tools.market_tools import get_market_movers, get_watchlist
         out: list[tuple[str, str, str]] = []
         held = set(config.get("markets", "watchlist", default=[]) or [])
@@ -387,12 +448,15 @@ class Briefing:
                 tier, why = classify_market(symbol=row["symbol"],
                                             percent=row.get("percent") or 0,
                                             held=row["symbol"] in held)
-                key = f"move:{row['symbol']}:{_now():%Y-%m-%d-%H}"
+                key = f"move:{row['symbol']}:{_now():%Y-%m-%d}"
                 if tier == NONE or key in self._seen:
                     continue
                 self._seen[key] = time.time()
-                line = (f"{row['name']} is {'up' if (row.get('percent') or 0) > 0 else 'down'} "
-                        f"{abs(row.get('percent') or 0)}% at {row.get('price')} dollars.")
+                from analyst import display_name
+                name = display_name(row.get("symbol"), row.get("name"))
+                pct = abs(row.get("percent") or 0)
+                way = "up" if (row.get("percent") or 0) > 0 else "down"
+                line = f"{name} is {way} {pct:.2f}% at {row.get('price')} dollars."
                 if tier in (ALERT, URGENT):
                     out.append((line, tier, key))
                 # a smaller move is NOT held: every brief already lists his
@@ -404,10 +468,13 @@ class Briefing:
             for m in (movers.get("markets") or []):
                 tier, _ = classify_market(symbol=m["symbol"],
                                           percent=m.get("percent") or 0, is_index=True)
-                key = f"index:{m['symbol']}:{_now():%Y-%m-%d-%H}"
+                key = f"index:{m['symbol']}:{_now():%Y-%m-%d}"
                 if tier in (ALERT, URGENT) and key not in self._seen:
                     self._seen[key] = time.time()
-                    out.append((f"{m['name']} is {m.get('percent')}% today.", tier, key))
+                    pct = m.get("percent") or 0
+                    way = "up" if pct >= 0 else "down"
+                    out.append((f"{m['name']} is {way} {abs(pct):.2f}% today.",
+                                tier, key))
         except Exception:
             log.debug("index scan failed", exc_info=True)
         return out
@@ -435,6 +502,21 @@ class Briefing:
             if self._same_story(headline, key[5:]):
                 return True
         return False
+
+    @staticmethod
+    def _remember_all(items: list) -> None:
+        """Remember every story in the brief, in the order he heard them."""
+        rows = [{"headline": i.get("headline"), "url": i.get("url"),
+                 "source": i.get("source"), "when": i.get("when"),
+                 "age_minutes": i.get("age_minutes")}
+                for i in items if i.get("url")]
+        if not rows:
+            return
+        try:
+            from lastseen import last_seen
+            last_seen.note_result({"items": rows})
+        except Exception:
+            log.debug("could not remember the brief's links", exc_info=True)
 
     @staticmethod
     def _remember(said: dict) -> None:
@@ -565,8 +647,12 @@ class Briefing:
         news: list[tuple[str, str]] = []
         if picked:
             from newsroom import summarize_all
-            for said in await summarize_all(picked, limit=3):
-                self._remember(said)
+            said_all = await summarize_all(picked, limit=3)
+            # ONE call with all three. note_result REPLACES the link list, so
+            # calling it per story in a loop left only the last one - and "give
+            # me the article" opened story three whatever he asked for.
+            self._remember_all(said_all)
+            for said in said_all:
                 body = said.get("summary") or said.get("headline") or ""
                 src = said.get("source") or "the news"
                 line = f"{body.rstrip(' .')} ({src})"

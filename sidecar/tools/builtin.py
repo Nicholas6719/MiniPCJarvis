@@ -133,6 +133,20 @@ def launchable_names(ttl: float = 300.0) -> set[str]:
     except Exception:
         log.debug("could not index the Start Menu", exc_info=True)
     names |= {k.lower() for k in _KNOWN_SITES}
+    # Store-installed apps live behind a 15-second PowerShell call, so they are
+    # NOT indexed here - but Office is exactly what he works in, and refusing
+    # "open Excel" because it has no Start Menu shortcut would be a worse bug
+    # than the one this check exists to fix. If the Store list happens to be
+    # cached already, use it; either way these names are always allowed.
+    names |= {
+        "word", "excel", "powerpoint", "outlook", "onenote", "teams", "onedrive",
+        "access", "publisher", "visio", "project", "skype", "xbox", "photos",
+        "camera", "clock", "alarms", "maps", "weather", "mail", "calendar",
+        "paint", "snip", "snipping tool", "notepad", "wordpad", "cmd",
+        "powershell", "task manager", "control panel", "file explorer",
+    }
+    if _store_apps_cache:
+        names |= {k.lower() for k in _store_apps_cache}
     _LAUNCHABLE_CACHE = (now, names)
     return names
 
@@ -148,6 +162,13 @@ def looks_launchable(name: str) -> bool:
     """
     key = (name or "").strip().lower()
     if not key or len(key) > 40:
+        return False
+    # No application is called "a something". Without this, Microsoft PROJECT
+    # matched inside "a new project" and "open a new project for me" was an app
+    # launch again - the substring rule that lets "chrome" find "google chrome"
+    # also lets any index name hide inside an English phrase.
+    if key.split()[0] in ("a", "an", "the", "some", "my", "your", "our", "this",
+                          "that", "another"):
         return False
     have = launchable_names()
     if key in have:

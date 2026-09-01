@@ -49,13 +49,18 @@ def _thumb(hwnd: int) -> str | None:
         log.debug("thumb failed for %s: %s", hwnd, e)
         return None
     finally:
-        try:
-            win32gui.DeleteObject(bmp.GetHandle())
-            save_dc.DeleteDC()
-            mfc_dc.DeleteDC()
-            win32gui.ReleaseDC(hwnd, hwnd_dc)
-        except Exception:
-            pass
+        # One try per handle. Grouped under a single except, a failing
+        # bmp.GetHandle() on a protected or DRM window skipped the other three
+        # and leaked both device contexts AND the window DC - once per window,
+        # every time the window list was built.
+        for _release in (lambda: win32gui.DeleteObject(bmp.GetHandle()),
+                         save_dc.DeleteDC,
+                         mfc_dc.DeleteDC,
+                         lambda: win32gui.ReleaseDC(hwnd, hwnd_dc)):
+            try:
+                _release()
+            except Exception:
+                pass
 
 
 def _process_name(hwnd: int) -> str:
