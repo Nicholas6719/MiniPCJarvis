@@ -42,6 +42,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_db_repair.py || (echo DB REPAIR TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_write_lock.py || (echo WRITE LOCK TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_reminder_flood.py || (echo REMINDER FLOOD TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_reminder_voice.py || (echo REMINDER VOICE TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_delivery_budget.py || (echo DELIVERY BUDGET TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\sleep_coverage.py || (echo SLEEP TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\speech_symbols.py || (echo SPEECH TEST FAILED & exit /b 1)

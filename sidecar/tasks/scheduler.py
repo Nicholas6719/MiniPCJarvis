@@ -153,7 +153,11 @@ class Scheduler:
         await bus.emit("task_due", task_id=tid, text=text)
         if self.announce is not None:
             try:
-                await self.announce(f"A reminder: {text}")
+                # The RAW text, and a key tied to this task. The announcer puts
+                # it into JARVIS's own words, so the sentence differs night to
+                # night - which means the sentence cannot be what delivery
+                # de-duplicates on. The task can.
+                await self.announce(text, key=f"task:{tid}")
             except Exception:
                 log.exception("announce failed")
 

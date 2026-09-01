@@ -51,7 +51,7 @@ def main() -> int:
     # ---- the healthy case: a daily reminder fires ONCE and moves on ---------
     said = []
 
-    async def announce(t):
+    async def announce(t, **kw):
         said.append(t)
 
     s = fresh(announce)
@@ -127,7 +127,7 @@ def main() -> int:
     # forever - the schedule has already moved on.
     tried = []
 
-    async def refuses(t):
+    async def refuses(t, **kw):
         tried.append(t)
         raise RuntimeError("telegram is down")
 

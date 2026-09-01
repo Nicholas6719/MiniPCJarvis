@@ -73,10 +73,26 @@ async def lifespan(app: FastAPI):
     from delivery import ALERT, delivery
     delivery.orchestrator = orchestrator
 
-    async def _announce_alert(text: str) -> None:
-        await delivery.deliver(text, tier=ALERT)
+    async def _announce_alert(text: str, *, key: str = "") -> None:
+        await delivery.deliver(text, tier=ALERT, key=key)
 
-    scheduler.announce = _announce_alert
+    async def _announce_reminder(text: str, *, key: str = "") -> None:
+        """A due reminder, in JARVIS's own words rather than the user's.
+
+        He set "wear my retainers" and heard `A reminder: wear my retainers`
+        back every night. Now it goes through the LLM and comes out as
+        something he would actually say, differently most nights.
+
+        `key` is the TASK, deliberately - not the sentence. The whole point of
+        this feature is that the wording changes, and delivery's flood guard
+        de-duplicates on the key. Keying on text would mean every fresh phrasing
+        looked like a brand new message, which is exactly how a stuck reminder
+        became ~2,600 overnight messages on 2026-08-31.
+        """
+        from reminder_voice import phrase
+        await delivery.deliver(await phrase(text), tier=ALERT, key=key)
+
+    scheduler.announce = _announce_reminder
     scheduler.start()
     from mcp_client import mcp_manager
     asyncio.create_task(mcp_manager.start())

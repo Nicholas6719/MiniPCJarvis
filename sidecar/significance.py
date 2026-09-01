@@ -342,6 +342,51 @@ NOT_A_DEATH = re.compile(
     r"|\battempted (?:murder|homicide|killing)\b", re.I)
 
 
+# A death is not automatically an emergency. On 2026-09-01 he was sent
+# "Dolly Parton died on August 25 after a brief battle with cancer. Levi Herman,
+# an outlaw country musician, died on Monday — MassLive." off a LOCAL desk, and
+# it reached him as "somebody died close to home". His reply: *"this doesn't seem
+# like a news emergency... so why am I hearing about it?"*
+#
+# The distinction that was missing: an emergency is an INCIDENT — something
+# happened, and it may still be happening. An illness, an age, a hospital bed is
+# news, and news waits for the brief. Local desks carry national obituaries, so
+# provenance will keep handing these to us.
+NATURAL_DEATH = re.compile(
+    r"\b(?:battle|struggle)\s+with\s+\w+"
+    r"|\b(?:died|dies|death)\s+(?:of|from|after)\s+(?:a\s+|an\s+|his\s+|her\s+)?"
+    r"(?:brief\s+|long\s+|short\s+)?(?:illness|cancer|complications|disease)"
+    r"|\b(?:cancer|leukemia|natural causes|old age|pneumonia|alzheimer\w*|"
+    r"parkinson\w*|dementia|heart failure|long illness|hospice)\b"
+    r"|\bpassed away\b|\b(?:dies?|died)\s+at\s+(?:the\s+age\s+of\s+)?\d{2}\b"
+    r"|\bobituar\w+|\bin memoriam\b", re.I)
+
+# Someone whose death is an obituary rather than an emergency, wherever it
+# happened. "Levi Herman, an outlaw country musician, died on Monday" names no
+# cause at all, so the illness words above cannot catch it.
+PUBLIC_FIGURE = re.compile(
+    r"\b(?:musician|singer|songwriter|guitarist|drummer|rapper|band|actor|"
+    r"actress|comedian|author|novelist|poet|artist|painter|director|producer|"
+    r"broadcaster|journalist|athlete|quarterback|pitcher|boxer|wrestler|coach|"
+    r"senator|congressman|congresswoman|governor|mayor|ambassador|"
+    r"laureate|icon|legend|star|hall of fame)\b", re.I)
+
+# ...unless something HAPPENED to them. These are the deaths that stay
+# emergencies no matter who died: a crash is a crash.
+INCIDENT = re.compile(
+    r"\b(?:crash|collision|struck by|hit by|drown\w+|overdose|electrocut\w+|"
+    r"suffocat\w+|carbon monoxide|blaze|wreck|derail\w+|capsiz\w+|"
+    r"fell from|fall from|shot|stabb\w+|assault\w*|attack\w*|accident)\b", re.I)
+
+
+def _is_obituary(text: str) -> bool:
+    """A death that is sad news rather than an unfolding emergency."""
+    if INCIDENT.search(text) or HAZARD.search(text) or VIOLENCE.search(
+            _violence_text(text)):
+        return False
+    return bool(NATURAL_DEATH.search(text) or PUBLIC_FIGURE.search(text))
+
+
 def _event_text(text: str) -> str:
     """The text with non-event uses of death words removed, for FATALITY only."""
     return NOT_A_DEATH.sub(" ", text)
@@ -494,6 +539,11 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
     # A death, with no hazard word to announce it. "Fatal MBTA rail incident"
     # names no danger at all and was reading as ordinary local news.
     if FATALITY.search(_event_text(text)):
+        # An obituary is not an emergency, however local the desk that carried
+        # it. This is the Dolly Parton case: a celebrity death from illness,
+        # reprinted by MassLive, reaching him as "somebody died close to home".
+        if _is_obituary(text):
+            return NOTABLE, "a death, but not an emergency"
         if own_town:
             return URGENT, "somebody died in one of his towns"
         if near:

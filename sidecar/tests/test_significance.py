@@ -335,6 +335,29 @@ def main() -> int:
     check("owning it always raises the tier, never lowers it",
           (louder, quieter) == (ALERT, NONE), (louder, quieter))
 
+    # --- an obituary is not an emergency (2026-09-01) -------------------------
+    # He was sent "Dolly Parton died on August 25 after a brief battle with
+    # cancer. Levi Herman, an outlaw country musician, died on Monday
+    # — MassLive." and asked, fairly: *"this doesn't seem like a news
+    # emergency... so why am I hearing about it?"* Local desks reprint national
+    # obituaries, so provenance made it local and the word "died" made it fatal.
+    # An emergency is an INCIDENT — something happened, and it may still be
+    # happening. An illness is news, and news waits for the brief.
+    for obit in ("Dolly Parton died on August 25 after a brief battle with cancer",
+                 "Levi Herman, an outlaw country musician, died on Monday",
+                 "Beloved actor dies at 88 after long illness",
+                 "Grammy-winning singer passed away at her home"):
+        got, why = classify_news({"headline": obit, "_local_feed": True})
+        check(f"obituary is silent: {obit[:36]!r}", got == NONE, f"{got} ({why})")
+
+    # ...and a death that IS an incident still reaches him
+    for real in ("Crews battle house fire on Concord Street in Framingham",
+                 "One dead after crash on Route 9 in Natick",
+                 "Fatal MBTA rail incident halts the Framingham line"):
+        got, why = classify_news({"headline": real, "_local_feed": True})
+        check(f"an incident death still reaches him: {real[:32]!r}",
+              got in (URGENT, ALERT), f"{got} ({why})")
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

@@ -103,7 +103,7 @@ def main() -> int:
     from tasks.scheduler import Scheduler
     said = []
 
-    async def announce(t):
+    async def announce(t, **kw):
         said.append(t)
 
     s = Scheduler()
