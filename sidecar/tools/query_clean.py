@@ -86,3 +86,52 @@ def clean_search_query(text: str) -> str:
     q = _VERB_ME.sub("", q)
     q = q.strip(" .?!,")
     return q if len(q) >= 3 else text.strip()
+
+
+# --- video ------------------------------------------------------------------
+# The same job the image cleaner does, for things to watch. He asked for "a You
+# Tube video of someone playing Iron Man PS3" and YouTube was searched for
+# "someone playing iron man ps3" — his sentence, not his subject. The words that
+# describe the KIND of video are not part of what he is looking for.
+_VIDEO_NOUN = r"(?:video|clip|trailer|gameplay|playthrough|walkthrough|footage|montage)s?"
+_SERVICE = r"(?:youtube|you\s?tube|netflix|spotify)"
+_VIDEO_LEAD = re.compile(
+    rf"^(?:show|find|get|pull\s+up|bring\s+up|play|put\s+on|watch|search)\s+"
+    rf"(?:me\s+)?(?:a|an|some|the)?\s*(?:{_SERVICE}\s+)?(?:{_VIDEO_NOUN}\s+)?"
+    r"(?:of|for|about|by|with|from)?\s*", re.I)
+# "someone playing X" is HOW he described it; the subject is X, and keeping the
+# filler put "someone" in the search box. Only PLAYING becomes "gameplay" — the
+# other verbs carry meaning and have to survive, or "a guy building a pc" turns
+# into "pc gameplay", which is a different video entirely.
+_SOMEONE_DOING = re.compile(
+    r"^(?:some(?:one|body)|a\s+(?:guy|girl|man|woman|person|kid)|people)\s+"
+    r"(playing|doing|building|making|reviewing|explaining|repairing|cooking)\s+(.+)$",
+    re.I)
+_BARE_SERVICE = re.compile(rf"^{_SERVICE}\s+", re.I)
+_TRAIL_SERVICE = re.compile(rf"\s+(?:on|in|from)\s+{_SERVICE}\s*$", re.I)
+_LEAD_ARTICLE = re.compile(r"^(?:a|an|the)\s+", re.I)
+
+
+def clean_video_query(text: str) -> str:
+    """"find me a you tube video of someone playing iron man ps3"
+    -> "iron man ps3 gameplay".
+
+    Conservative in the same way as the image cleaner: it only strips a lead verb
+    that reads as a command, and if it would leave nothing it gives the original
+    back rather than searching for an empty string.
+    """
+    q = _TRAIL.sub("", (text or "").strip().strip(" .?!"))
+    q = _HEY.sub("", q)
+    q = _POLITE.sub("", q)
+    q = _TRAIL_SERVICE.sub("", q)
+    q = _VIDEO_LEAD.sub("", q, count=1)
+    q = _BARE_SERVICE.sub("", q, count=1)      # "youtube lofi beats"
+    m = _SOMEONE_DOING.match(q.strip())
+    if m:
+        verb, subject = m.group(1).lower(), m.group(2).strip()
+        # "someone playing X" is X gameplay; everything else keeps its verb,
+        # because the verb IS the subject there ("building a pc").
+        q = (f"{_LEAD_ARTICLE.sub('', subject)} gameplay" if verb == "playing"
+             else f"{verb} {subject}")
+    q = _LEAD_ARTICLE.sub("", q).strip(" .?!,")
+    return q if len(q) >= 2 else (text or "").strip()

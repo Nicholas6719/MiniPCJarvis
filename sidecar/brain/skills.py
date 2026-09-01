@@ -768,6 +768,32 @@ def slots_search(t: str) -> dict | None:
     return {"query": q} if len(q) >= 3 and q != t.strip() else None
 
 
+# "in my browser" / "in brave" — the ONLY thing that sends a picture or a search
+# out of the HUD. His rule: the app is meant to be an OS, so what he asks to see
+# is shown INSIDE it unless he says otherwise.
+_IN_BROWSER = re.compile(
+    r"\bin\s+(?:my\s+|the\s+)?(?:browser|brave|chrome|firefox|edge)\b"
+    r"|\bon\s+(?:my\s+)?(?:browser|brave)\b", re.I)
+_MEDIA_WORD = re.compile(r"\b(?:picture|photo|image|pic|shot|wallpaper)s?\b", re.I)
+
+
+def slots_browser_search(t: str) -> dict | None:
+    """Only fires when he NAMED the browser. Everything else stays in the HUD."""
+    if not _IN_BROWSER.search(t):
+        return None
+    stripped = _IN_BROWSER.sub(" ", t).strip(" .?!,")
+    if len(stripped) < 3:
+        return None
+    return {"query": stripped,
+            "kind": "images" if _MEDIA_WORD.search(t) else "web"}
+
+
+def say_browser_search(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"I couldn't open that, sir — {res['error']}."
+    return f"Opening {res.get('searched', 'it')} in your browser, sir."
+
+
 def slots_images(t: str) -> dict | None:
     """Shares the tools' cleaner so "show me iron man" and "show me 5 images of
     spiderman" both become keywords (+count). Only fires when something was
@@ -775,6 +801,11 @@ def slots_images(t: str) -> dict | None:
     from tools.query_clean import clean_image_query
     # "pictures FROM my trip" are the user's own photos, not a web search
     if re.search(r"\bfrom\s+(?:my|our|the)\b", t):
+        return None
+    # "...in my browser" is the one case that leaves the HUD. Step aside so it
+    # reaches browser_search; without the guard this skill takes it at 1.00 and
+    # renders into the media panel he explicitly asked to bypass.
+    if _IN_BROWSER.search(t):
         return None
     q, count = clean_image_query(t.strip())
     if not q or q == t.strip().strip(" .?!"):
@@ -919,10 +950,12 @@ def slots_video(t: str) -> dict | None:
             subject = (m2.group(1) or "").strip(" .?!,")
     if not subject:
         return None
-    # a bare service/noun left over is not a subject
-    subject = re.sub(r"^(?:of|for|about|on)\s+", "", subject, flags=re.I)
-    subject = re.sub(r"\s+(?:on|from|in)\s+(?:youtube|spotify|netflix)\s*$", "",
-                     subject, flags=re.I).strip(" .?!,")
+    if re.fullmatch(_MEDIA_NOUN, subject.strip(), re.I):
+        return None                       # "play the video" — a control, not a search
+    # The SUBJECT, not his sentence. YouTube was searched for "someone playing
+    # iron man ps3" because the words describing the kind of video were left in.
+    from tools.query_clean import clean_video_query
+    subject = clean_video_query(t)
     if len(subject) < 3 or re.fullmatch(_MEDIA_NOUN, subject, re.I):
         return None
     return {"query": subject, "service": service}
@@ -1562,6 +1595,16 @@ SKILLS: list[Skill] = [
         "find me gameplay of elden ring", "youtube lofi beats",
         "find me a video about how engines work"],
         slots=slots_video, speak=say_video, speak_first=True),
+    # The escape hatch, and only that. Pictures and search results live in the
+    # HUD because the thing being built is an operating system, not a launcher —
+    # they leave it only when he names the browser.
+    Skill("browser_search", "search_in_browser", [
+        "show me iron man in my browser", "look that up in my browser",
+        "show me pictures of a nebula in my browser",
+        "open a search for the best mini pc in my browser",
+        "look up elden ring in brave", "show me images of mars in brave",
+        "find the best mini pc in my browser"],
+        slots=slots_browser_search, speak=say_browser_search, speak_first=True),
     Skill("images", "show_images", [
         "show me a picture of spider-man", "show me pictures of a nebula",
         "find me a photo of a golden retriever", "pull up images of the eiffel tower",

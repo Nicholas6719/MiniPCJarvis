@@ -372,7 +372,11 @@ def play_media(query: str, service: str = "youtube") -> dict:
     would mean trusting a scraped first result, and being confidently wrong about
     which video he wanted is worse than showing him the shelf.
     """
-    q = (query or "").strip()
+    # Clean here too, not only in the brain: the LLM path passes whatever the
+    # model wrote, which is usually the raw utterance. Same reason the image
+    # tools call their cleaner.
+    from tools.query_clean import clean_video_query
+    q = clean_video_query(query or "")
     if not q:
         return {"error": "nothing to search for"}
     import urllib.parse
@@ -387,6 +391,35 @@ def play_media(query: str, service: str = "youtube") -> dict:
     if res.get("error"):
         return res
     return {"searched": q, "service": where, "where": "your browser",
+            "focused": res.get("focused", False)}
+
+
+def search_in_browser(query: str, kind: str = "web") -> dict:
+    """A search in HIS browser, because he asked for it there specifically.
+
+    The default for "show me iron man" is the HUD's own media panel, and that is
+    deliberate — his words: *"it should show it in the OS, in the application we
+    built, because it's meant to be an OS."* This is the escape hatch for when he
+    says "...in my browser", and ONLY then. A picture he did not ask to be
+    elsewhere belongs inside the thing he is building.
+    """
+    from tools.query_clean import clean_image_query, clean_search_query
+    raw = (query or "").strip()
+    if not raw:
+        return {"error": "nothing to search for"}
+    import urllib.parse
+    if (kind or "web").lower() in ("image", "images", "picture", "pictures"):
+        q, _count = clean_image_query(raw)
+        url = "https://search.brave.com/images?q=" + urllib.parse.quote(q)
+        kind = "images"
+    else:
+        q = clean_search_query(raw)
+        url = "https://search.brave.com/search?q=" + urllib.parse.quote(q)
+        kind = "web"
+    res = open_url(url)
+    if res.get("error"):
+        return res
+    return {"searched": q, "kind": kind, "where": "your browser",
             "focused": res.get("focused", False)}
 
 
@@ -745,6 +778,18 @@ def register_all() -> None:
                         "description": "youtube (default) | spotify | netflix"}},
             "required": ["query"]},
         risk=Risk.LOW, handler=play_media))
+    registry.register(T(
+        name="search_in_browser",
+        description="Run a web or image search in the USER's own browser. ONLY when he asks "
+                    "for it there — 'show me X in my browser', 'look that up in brave'. The "
+                    "default home for pictures and search results is the HUD itself "
+                    "(show_images / web_search); this is the explicit exception, never the "
+                    "default.",
+        parameters={"type": "object", "properties": {
+            "query": {"type": "string"},
+            "kind": {"type": "string", "description": "web (default) | images"}},
+            "required": ["query"]},
+        risk=Risk.LOW, handler=search_in_browser))
     registry.register(T(
         name="enter_sleep_mode",
         description="Dismiss JARVIS himself: minimise his window and stand by for the wake "

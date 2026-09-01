@@ -143,7 +143,14 @@ CASES = [
     ("search youtube for guitar lessons", "video"),
     ("play the video", "media_pause"), ("pause the music", "media_pause"),
     ("search the web for the best mini pc", "search"),
+    # The HUD is the default home for what he asks to see — "it's meant to be an
+    # OS". Naming the browser is the ONLY thing that sends it out, so both sides
+    # are gated: the same sentence with and without the phrase.
     ("show me pictures of a nebula", "images"),
+    ("show me iron man", "images"),
+    ("show me iron man in my browser", "browser_search"),
+    ("show me pictures of a nebula in my browser", "browser_search"),
+    ("look up elden ring in brave", "browser_search"),
 ]
 
 async def main() -> int:

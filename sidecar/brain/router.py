@@ -80,14 +80,21 @@ _CANON = [
     (r"\b(?:find|look for|locate|where is|where's)\b.*\b(?:file|folder|document|resume|screenshot|invoice|report|notes?|photo|picture)s?\b(?!\s+(?:of|from)\b).*", "find the file called NAME"),
     (r".*\b(?:file|folder|document)s?\s+(?:called|named|with|containing)\b.*", "find the file called NAME"),
     (r"\bsearch (?:my )?(?:desktop|documents|downloads|pictures) for\b.*", "find the file called NAME"),
-    (r"\b(?:show|find|pull up|get|display|bring up)\s+(?:me\s+)?(?:a\s+|some\s+|an\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+.+", "show me pictures of THING"),
+    # "...in my browser" decides WHERE the pictures appear, so it must survive
+    # the rewrite. Folded in, "show me pictures of X in my browser" became the
+    # plain image canon and rendered into the HUD panel he had just asked to
+    # bypass — the third rewrite today to delete the word carrying the intent.
+    (r"(?!.*\bin\s+(?:my\s+|the\s+)?(?:browser|brave|chrome|firefox|edge)\b)\b(?:show|find|pull up|get|display|bring up)\s+(?:me\s+)?(?:a\s+|some\s+|an\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+.+", "show me pictures of THING"),
     # Something to WATCH is not a web search. Without this exclusion "find me a
     # youtube video of X" folded onto the search canon at cosine 1.000, so the
     # only way to answer it was to search the web, let the model read the
     # results, and recite a URL into the side panel — which is exactly what he
     # got, and exactly what he does not want. The media words survive now, and
     # the request reaches the skill that OPENS it in his browser.
-    (r"(?!.*\b(?:youtube|you\s?tube|video|videos|clip|trailer|gameplay|netflix|spotify)\b)\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
+    # ...and "in my browser" is excluded for the same reason: it is the one
+    # phrase that decides WHERE the answer appears, and folding it into the
+    # search canon deleted it before anything could act on it.
+    (r"(?!.*\b(?:youtube|you\s?tube|video|videos|clip|trailer|gameplay|netflix|spotify)\b)(?!.*\bin\s+(?:my\s+|the\s+)?(?:browser|brave|chrome|firefox|edge)\b)\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
     (r"\b(?:volume|turn it|turn the volume|set the volume|set volume|make the volume|change the volume|lower the volume|raise the volume|put the volume)\b.*\d+.*", "set the volume to N percent"),
     (r"\b(?:open|go to|pull up|take me to|load|bring up|open up)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "open the website SITE"),
     # The launch verbs are ordinary English words, so the exclusions matter: "run along"
