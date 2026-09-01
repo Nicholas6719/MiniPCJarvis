@@ -884,6 +884,19 @@ def say_volume(slots: dict, res: dict) -> str:
     return f"Volume set to {slots['percent']} percent."
 
 
+def say_camera(slots: dict, res: dict) -> str:
+    """What he hears after asking for the camera.
+
+    It reports what the device ACTUALLY did rather than what was asked for. A
+    camera that says "camera on" while the handle never opened is the worst
+    possible answer — he would believe it was watching when it was not, and the
+    reverse when it was.
+    """
+    if "error" in res:
+        return f"I couldn't open the camera, sir — {res['error']}."
+    return "Camera on, sir." if res.get("camera") == "on" else "Camera off, sir."
+
+
 def say_mute(slots: dict, res: dict) -> str:
     return "Muted." if slots.get("muted") else "Unmuted."
 
@@ -1236,6 +1249,33 @@ SKILLS: list[Skill] = [
         "what's today", "date please", "which day is it", "what day of the week is it",
         "what is the date today", "tell me the date", "what's the day today"],
         slots=slots_clock, speak=say_date),
+    # The camera. Three skills, not one, because "toggle" and "turn it off" mean
+    # different things and he should not have to guess which word works. The
+    # toggle seeds are his own phrasing: "toggle camera view mode".
+    Skill("camera_toggle", "set_camera", [
+        "toggle camera view mode", "toggle camera view", "toggle the camera",
+        "camera view mode", "toggle camera mode", "switch camera view mode",
+        "flip the camera view", "camera view"],
+        speak=say_camera),
+    # NOTE: "open the camera", "bring up the camera", "close the camera",
+    # "close the webcam" and "hide the camera" are deliberately ABSENT. _CANON
+    # rewrites them to "open APP" / "close APP" / "hide everything" — the exact
+    # canonical strings that open_app, close_app and the UI skill own. Seeding
+    # them here made every "open spotify" and "close notepad" match the camera
+    # at cosine 1.000 and stole app launching outright. Any new seed goes
+    # through _norm() first; if it comes back changed, it belongs to something
+    # else.
+    Skill("camera_on", "set_camera", [
+        "turn the camera on", "show me the camera", "camera on",
+        "turn on the webcam", "pull up the camera", "put the camera up",
+        "let me see the camera", "show me the webcam",
+        "i want to see the camera", "let me see myself"],
+        fixed_args={"on": True}, speak=say_camera),
+    Skill("camera_off", "set_camera", [
+        "turn the camera off", "camera off", "turn off the webcam",
+        "shut the camera off", "stop the camera", "put the camera away",
+        "i'm done with the camera", "switch the camera off"],
+        fixed_args={"on": False}, speak=say_camera),
     Skill("volume_set", "set_volume", [
         "set the volume to 50 percent", "volume 30", "turn the volume to 40",
         "set volume at 70 percent", "make the volume 20", "change the volume to 80",

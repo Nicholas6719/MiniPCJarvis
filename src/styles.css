@@ -749,3 +749,24 @@ body.compact .wedge { padding: calc(12px * var(--s)) calc(18px * var(--s)) calc(
   font: 400 calc(13px * var(--s))/1.5 Rajdhani, sans-serif;
   color: var(--text-dim); margin-top: calc(4px * var(--s)); max-width: calc(460px * var(--s));
 }
+
+/* --- camera view ---------------------------------------------------------
+   "Toggle camera view mode." The feed is served by the sidecar as multipart
+   JPEG, so this is a plain <img>: no canvas, no decode loop, and the browser
+   drops frames on its own if it falls behind. Letterboxed rather than cropped —
+   he asked to SEE the room, and object-fit: cover would quietly cut it off. */
+.stage--camera .camera__frame {
+  flex: 1; min-height: 0; margin-top: calc(18px * var(--s));
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--rim) 22%, transparent);
+  border-radius: calc(6px * var(--s));
+  background: color-mix(in srgb, var(--rim) 5%, transparent);
+  overflow: hidden;
+}
+.stage--camera .camera__img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain; display: block;
+}
+.stage--camera .camera__off {
+  opacity: .55; letter-spacing: .08em; text-transform: uppercase;
+}

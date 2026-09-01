@@ -3,7 +3,7 @@
 // navigate to — the utterance selects the renderer.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, STAGE_HOLD_MS, SettingsSection } from "../state/store";
-import { api } from "../lib/sidecar";
+import { api, sidecarInfo } from "../lib/sidecar";
 import { SettingsView } from "./SettingsView";
 import { MemoryView } from "./MemoryView";
 import { TasksView } from "./TasksView";
@@ -622,6 +622,52 @@ function SettingsStage() {
 
 // ---------------------------------------------------------------- dispatcher
 
+
+// The live camera. He bought the C920 for this: "toggle camera view mode and it
+// pulls up the camera". The sidecar owns the device and serves multipart JPEG;
+// an <img> renders that natively, so there is no decoding to do here and no
+// second consumer fighting for the webcam.
+function CameraStage() {
+  const [src, setSrc] = useState("");
+  const [status, setStatus] = useState<any>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      const { port, token } = await sidecarInfo();
+      if (dead) return;
+      // cache-buster: without it a re-open reuses the finished stream and shows
+      // a frozen last frame, which reads as "the camera is broken"
+      setSrc(`http://127.0.0.1:${port}/camera/stream?token=${encodeURIComponent(token)}&t=${Date.now()}`);
+    })();
+    const poll = setInterval(async () => {
+      try { setStatus(await api("/camera/status")); } catch { /* the panel still shows the feed */ }
+    }, 2000);
+    return () => { dead = true; clearInterval(poll); setSrc(""); };
+  }, []);
+
+  const dims = status?.width ? `${status.width}x${status.height}` : "";
+  return (
+    <div className="stage stage--camera">
+      <StageHeader eyebrow="CAMERA" word="Live"
+                   meta={[dims, status?.backend, status?.frames ? `${status.frames} frames` : ""]
+                          .filter(Boolean).join("  ")}
+                   live={!!status?.on} />
+      <div className="camera__frame">
+        {failed || (status && !status.on) ? (
+          <div className="camera__off mono-sub">
+            {status?.error ? `camera unavailable — ${status.error}` : "camera is off"}
+          </div>
+        ) : (
+          src && <img className="camera__img" src={src} alt=""
+                      onError={() => setFailed(true)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Stage() {
   const stage = useStore((s) => s.stage);
   const dismiss = useStore((s) => s.dismissStage);
@@ -658,6 +704,7 @@ export function Stage() {
     case "images": return <ImagesStage />;
     case "file": return <FileStage />;
     case "folder": return <FolderStage />;
+    case "camera": return <CameraStage />;
     case "settings": return <SettingsStage />;
     default: return null;
   }

@@ -50,9 +50,10 @@ async def lifespan(app: FastAPI):
     vision_tools.register_all()
     browser_tools.register_all()
     handoff.register_all()
-    from tools import file_tools, market_tools, news_tools, weather
+    from tools import camera_tools, file_tools, market_tools, news_tools, weather
     file_tools.register_all()
     weather.register_all()
+    camera_tools.register_all()   # the webcam view; the device stays shut until asked
     market_tools.register_all()   # quotes/analysts: realm 2, never cached
     news_tools.register_all()     # keyless RSS
     if config.get("remote", "allow_input", default=True):
@@ -967,6 +968,65 @@ async def transcript(limit: int = 30, x_jarvis_token: str | None = Header(None))
     _auth(x_jarvis_token)
     # the History pane asks for 200; cap so a bad param can't drag the whole DB out
     return {"transcript": memory.recent_transcript(max(1, min(500, limit)))}
+
+
+@app.get("/camera/status")
+async def camera_status(x_jarvis_token: str | None = Header(None)):
+    _auth(x_jarvis_token)
+    from camera import camera
+    return camera.status()
+
+
+@app.post("/camera")
+async def camera_set(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Turn the camera on, off, or the other way from however it is now."""
+    _auth(x_jarvis_token)
+    from camera import camera
+    want = body.get("on")
+    # Opening a USB device blocks for the best part of a second, so it goes to a
+    # thread. The event loop is where he waits for answers.
+    if want is None:
+        return await asyncio.to_thread(camera.toggle)
+    return await asyncio.to_thread(camera.start if want else camera.stop)
+
+
+@app.get("/camera/stream")
+async def camera_stream(token: str = "", x_jarvis_token: str | None = Header(None)):
+    """The live view, as multipart JPEG.
+
+    An <img> tag cannot send a header, so this one route also accepts the token
+    as a query parameter — the same session token, on loopback only, and the
+    header is still honoured when the caller can set one.
+    """
+    _auth(x_jarvis_token or token)
+    import asyncio as _a
+
+    from fastapi.responses import StreamingResponse
+
+    from camera import TARGET_FPS, camera
+
+    async def frames():
+        # The stream NEVER turns the camera on by itself. He said "toggle camera
+        # view mode"; a page that opened the device merely by being rendered
+        # would be a camera he did not ask for.
+        blank = 0
+        while camera.is_on:
+            data = camera.frame()
+            if data is None:
+                blank += 1
+                if blank > int(TARGET_FPS * 10):     # ~10 s with nothing at all
+                    break
+                await _a.sleep(1.0 / TARGET_FPS)
+                continue
+            blank = 0
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n"
+                   b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
+                   + data + b"\r\n")
+            await _a.sleep(1.0 / TARGET_FPS)
+
+    return StreamingResponse(
+        frames(), media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/metrics")

@@ -16,6 +16,7 @@ export type StageKind =
   | "images"     // grid, four across
   | "file"       // the file, open, matches lit
   | "folder"     // a folder listing (no designed surface; kept minimal)
+  | "camera"     // the live webcam view: "toggle camera view mode"
   | "settings";  // settings rail incl. History
 
 export type SettingsSection =
@@ -383,6 +384,14 @@ export const useStore = create<Store>((set, get) => ({
         break;
       }
       case "tool_call":
+        // The camera opens and closes the stage itself. He said "toggle camera
+        // view mode and it pulls up the camera" - the panel appearing IS the
+        // feature, so it does not wait to be asked for separately.
+        if (evt.tool === "set_camera" && evt.status === "success") {
+          const on = JSON.stringify(evt.result ?? "").includes("\"on\"");
+          if (on) get().openStage("camera", { holdUntil: 0, pinned: true });
+          else set((st) => (st.stage?.kind === "camera" ? { stage: null } : {}));
+        }
         // A confirmation that resolves ANYWHERE has to take the card with it.
         // clearConfirmation was only ever called by tapping a button here, so a
         // question answered by voice, by the phone, or by the 30-second timeout
