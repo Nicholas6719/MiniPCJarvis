@@ -1260,6 +1260,45 @@ named as "WAY too many news reports", beside "Tornado kills 14 in Oklahoma".
 The bar is his: attack, nuclear accident, pandemic, grid down, toll in the
 hundreds. `briefing.news_scope = "national"` restores the old behaviour.
 
+## 2026-09-01 — the camera can see, count, and recognise; two phrasings could not
+
+Camera phase 3 shipped: `vision_identity.py` (SFace, embeddings only, cosine
+0.363 = OpenCV's documented 99.80% point), `vision_hands.py` (MediaPipe
+HandLandmarker, 21 landmarks a hand, 8 ms a frame), and the HUD holds the camera
+view anchored while it is on instead of tearing it down to go back to listening.
+
+**The lesson worth keeping: a guard is not an outcome.** Two of his own phrasings
+were broken in the shipped build and every offline test was green.
+
+  * `"open the camera"` launched the Windows Camera app. An earlier fix had
+    stopped camera seeds from stealing `open spotify` by deleting them all — the
+    theft was fixed and this was created in the same stroke.
+  * `"remember my face"` did **nothing at all**. The memory skill's guard refused
+    it exactly as designed. But `_CANON` had already rewritten the words "my
+    face" out of the sentence, so the fallthrough re-classified text that no
+    longer mentioned a face, found nothing above threshold, and returned `None`.
+    Silence. `test_identity.py` asserted that memory REFUSES the phrasing and
+    never that anything CATCHES it.
+
+Both were `_CANON` eating the object noun before the embedding saw it.
+`camera|webcam` now sit in the same exclusion list as `music`/`volume`, and face
+phrasings are excluded from the remember-canon. When a guard makes a skill step
+aside, **gate where the utterance lands**, not just that it stepped aside.
+
+**Verifying against the running app needs the OS, not a fixed port.** The Rust
+core hands the sidecar an EPHEMERAL port every launch (52322, then 62683), so
+scanning 8790-8799 finds nothing and any port file would be stale. Ask psutil
+which port `jarvis-sidecar.exe` is listening on. See
+`.agent/scripts/camverify.py` — routing, latency and the spoken sentence, run in
+the real session against the installed build.
+
+Measured live on the shipped bundle: `count_fingers` 0.53 s, `look` 0.71 s,
+`camera_status` 0.02 s, camera opens in 0.47 s. His "it was buffering" is gone.
+
+**Still needs him in the chair** (nothing offline can prove these): say "learn my
+face" while seated to enroll, then "can you see me" should answer *"I can see
+you, sir"*; and hold up fingers to check the count against reality.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
