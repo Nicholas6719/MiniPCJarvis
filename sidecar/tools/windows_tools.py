@@ -359,6 +359,37 @@ def open_url(url: str) -> dict:
         return {"error": f"could not open {url}: {e}"}
 
 
+def play_media(query: str, service: str = "youtube") -> dict:
+    """Find something to WATCH or LISTEN to, in his own browser.
+
+    His instruction, verbatim: *"Any media searches should be done in my actual
+    brave app."* Asked for a YouTube video, JARVIS ran a web search, let the model
+    read the results and recited a URL into the side panel — a link he then had to
+    go and open himself. A video is something you watch, not something you are
+    told about.
+
+    It opens the SEARCH page rather than guessing at one video. Picking for him
+    would mean trusting a scraped first result, and being confidently wrong about
+    which video he wanted is worse than showing him the shelf.
+    """
+    q = (query or "").strip()
+    if not q:
+        return {"error": "nothing to search for"}
+    import urllib.parse
+    where = (service or "youtube").strip().lower()
+    sites = {
+        "youtube": "https://www.youtube.com/results?search_query=",
+        "spotify": "https://open.spotify.com/search/",
+        "netflix": "https://www.netflix.com/search?q=",
+    }
+    base = sites.get(where, sites["youtube"])
+    res = open_url(base + urllib.parse.quote(q))
+    if res.get("error"):
+        return res
+    return {"searched": q, "service": where, "where": "your browser",
+            "focused": res.get("focused", False)}
+
+
 def _focus_newest_browser_window() -> bool:
     """Bring the window we just opened for him to the front, and only that one.
 
@@ -701,6 +732,19 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "url": {"type": "string"}}, "required": ["url"]},
         risk=Risk.LOW, handler=open_url))
+    registry.register(T(
+        name="play_media",
+        description="Find a VIDEO, song or film for the user to watch or listen to, opened "
+                    "in their OWN browser. Use this for anything playable - 'find me a "
+                    "youtube video of...', 'play some jazz', 'find the trailer for...'. "
+                    "NEVER answer a request for something to watch with web_search and a "
+                    "recited link: he wants it open, not read out.",
+        parameters={"type": "object", "properties": {
+            "query": {"type": "string", "description": "what to find, e.g. 'iron man ps3 gameplay'"},
+            "service": {"type": "string",
+                        "description": "youtube (default) | spotify | netflix"}},
+            "required": ["query"]},
+        risk=Risk.LOW, handler=play_media))
     registry.register(T(
         name="enter_sleep_mode",
         description="Dismiss JARVIS himself: minimise his window and stand by for the wake "

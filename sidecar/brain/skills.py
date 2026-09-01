@@ -884,6 +884,56 @@ def say_time(_: dict, __: dict) -> str:
     return "It's " + dt.datetime.now().strftime("%I:%M %p").lstrip("0") + "."
 
 
+_MEDIA_NOUN = r"(?:video|clip|trailer|gameplay|playthrough|song|track|movie|film|episode)s?"
+# "a you tube video of ..." — the service word may sit before the noun, and the
+# transcript may hyphenate or split it; _light() already folds "you tube".
+_VIDEO_OF = re.compile(
+    r"\b(?:find|get|pull up|bring up|search|look for|play|put on|show|watch)\b"
+    r"(?:\s+me)?(?:\s+(?:a|an|some|the))?\s*"
+    r"(?:youtube|netflix|spotify)?\s*" + _MEDIA_NOUN +
+    r"\b(?:\s+(?:of|for|about|by|from|with))?\s*(.*)$", re.I)
+_SERVICE_FOR = re.compile(
+    r"\b(?:youtube|netflix|spotify)\b(?:\s+(?:for|search))?\s+(.+)$", re.I)
+
+
+def slots_video(t: str) -> dict | None:
+    """What he wants to watch, and where.
+
+    Steps aside (None) when there is no SUBJECT after the media noun: "play the
+    video" and "pause the video" are media CONTROL, and stealing them would
+    replace a pause button with a browser window.
+    """
+    service = "youtube"
+    if re.search(r"\bspotify\b", t, re.I):
+        service = "spotify"
+    elif re.search(r"\bnetflix\b", t, re.I):
+        service = "netflix"
+
+    subject = ""
+    m = _VIDEO_OF.search(t)
+    if m:
+        subject = (m.group(1) or "").strip(" .?!,")
+    if not subject:                       # "search youtube for guitar lessons"
+        m2 = _SERVICE_FOR.search(t)
+        if m2:
+            subject = (m2.group(1) or "").strip(" .?!,")
+    if not subject:
+        return None
+    # a bare service/noun left over is not a subject
+    subject = re.sub(r"^(?:of|for|about|on)\s+", "", subject, flags=re.I)
+    subject = re.sub(r"\s+(?:on|from|in)\s+(?:youtube|spotify|netflix)\s*$", "",
+                     subject, flags=re.I).strip(" .?!,")
+    if len(subject) < 3 or re.fullmatch(_MEDIA_NOUN, subject, re.I):
+        return None
+    return {"query": subject, "service": service}
+
+
+def say_video(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"I couldn't open that, sir — {res['error']}."
+    return f"Opening {res.get('searched', 'it')} in your browser, sir."
+
+
 def say_who_am_i(_: dict, __: dict) -> str:
     """He asked JARVIS who he was and was told "user".
 
@@ -1496,6 +1546,22 @@ SKILLS: list[Skill] = [
         "look up who won the game last night", "web search for ryzen 8845hs benchmarks",
         "search the web for spider man release date", "research local llm benchmarks"],
         slots=slots_search, llm_after=True),
+    # Something to WATCH goes to his own browser, not into the side panel. He
+    # asked for a YouTube video and got a recited URL he then had to open
+    # himself: "Any media searches should be done in my actual brave app."
+    # Deliberately ahead of `search`, and slots_video refuses a bare "play the
+    # video" so media CONTROL still reaches media_pause.
+    # NOT "put on some jazz" or "play some music on spotify": the first
+    # canonicalizes to "open APP" and clashes with open_app, the second is
+    # media_pause's territory. Play/pause stays a control; this is a search.
+    Skill("video", "play_media", [
+        "find me a youtube video of someone playing iron man",
+        "find me a video of a rocket launch", "pull up a video about black holes",
+        "play a video of northern lights", "search youtube for guitar lessons",
+        "find the trailer for dune", "watch a clip of the moon landing",
+        "find me gameplay of elden ring", "youtube lofi beats",
+        "find me a video about how engines work"],
+        slots=slots_video, speak=say_video, speak_first=True),
     Skill("images", "show_images", [
         "show me a picture of spider-man", "show me pictures of a nebula",
         "find me a photo of a golden retriever", "pull up images of the eiffel tower",
@@ -1543,7 +1609,12 @@ SKILLS: list[Skill] = [
         # NOT "put on some music": "put on" canonicalizes to the open-APP form and
         # clashes with open_app; slots_app rejects music-words so it falls to the LLM.
         "pause spotify", "resume playback", "unpause", "pause that", "play pause",
-        "play some music"],
+        "play some music",
+        # "play/pause the video" is a CONTROL, and was scoring 0.78 — under the
+        # threshold, so it fell to the model and cost a round trip for a button
+        # press. Seeded here it is also the guard that stops the video-search
+        # skill taking it: slots_video refuses a bare noun, this owns it outright.
+        "play the video", "pause the video", "stop the video"],
         fixed_args={"action": "play_pause"}, speak=say_media),
     Skill("media_next", "media_control", [
         "next song", "skip this song", "next track", "skip", "play the next one", "skip this track"],

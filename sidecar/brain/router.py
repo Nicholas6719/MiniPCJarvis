@@ -81,7 +81,13 @@ _CANON = [
     (r".*\b(?:file|folder|document)s?\s+(?:called|named|with|containing)\b.*", "find the file called NAME"),
     (r"\bsearch (?:my )?(?:desktop|documents|downloads|pictures) for\b.*", "find the file called NAME"),
     (r"\b(?:show|find|pull up|get|display|bring up)\s+(?:me\s+)?(?:a\s+|some\s+|an\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+.+", "show me pictures of THING"),
-    (r"\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
+    # Something to WATCH is not a web search. Without this exclusion "find me a
+    # youtube video of X" folded onto the search canon at cosine 1.000, so the
+    # only way to answer it was to search the web, let the model read the
+    # results, and recite a URL into the side panel — which is exactly what he
+    # got, and exactly what he does not want. The media words survive now, and
+    # the request reaches the skill that OPENS it in his browser.
+    (r"(?!.*\b(?:youtube|you\s?tube|video|videos|clip|trailer|gameplay|netflix|spotify)\b)\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
     (r"\b(?:volume|turn it|turn the volume|set the volume|set volume|make the volume|change the volume|lower the volume|raise the volume|put the volume)\b.*\d+.*", "set the volume to N percent"),
     (r"\b(?:open|go to|pull up|take me to|load|bring up|open up)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "open the website SITE"),
     # The launch verbs are ordinary English words, so the exclusions matter: "run along"
@@ -102,6 +108,11 @@ def _light(t: str) -> str:
     t = t.lower().strip()
     t = re.sub(r"^(?:hey|hi|ok|okay)?[,\s]*jarvis[,.!?\s]*", "", t)
     t = re.sub(r"\b(?:please|for me|can you|could you|would you|will you)\b", " ", t)
+    # Speech recognition writes it as two words. His actual sentence was "find me
+    # a You Tube video of someone playing Iron Man PS3", and every pattern
+    # matching "youtube" missed it — the request was right, the transcript was
+    # right, and the routing failed on a space.
+    t = re.sub(r"\byou\s+tube\b", "youtube", t)
     t = re.sub(r"[^\w\s%':.-]", " ", t)
     return re.sub(r"\s+", " ", t).strip()
 

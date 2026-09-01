@@ -199,15 +199,26 @@ class Orchestrator:
 
     # ---------- sound cues ----------
 
-    async def _wake_from_sleep(self) -> None:
-        """Come back to the front. Win32 rather than a window message, because the webview
-        is throttled while minimised and must not be on the critical path for waking."""
+    async def _surface(self) -> None:
+        """Come to the front. Never raises — being buried is not worth a crash.
+
+        Split out of _wake_from_sleep because surfacing and un-sleeping are two
+        different things, and only one of them was happening when he called.
+        Win32 rather than a window message, because the webview is throttled
+        while minimised and must not be on the critical path for waking.
+        """
         try:
             from tools.windows_tools import exit_sleep_mode
             await asyncio.to_thread(exit_sleep_mode)
+        except Exception:
+            log.exception("could not come to the front")
+
+    async def _wake_from_sleep(self) -> None:
+        await self._surface()
+        try:
             await bus.emit("awake", summary="back from sleep")
         except Exception:
-            log.exception("could not come back from sleep")
+            log.exception("could not announce waking")
 
     # How long JARVIS may sit in a state that cannot hear his name before we
     # decide something has gone wrong and put him back. Comfortably longer than
@@ -666,6 +677,14 @@ class Orchestrator:
                         # the capture/turn path only runs from IDLE, so restoring the
                         # window alone left him awake-looking but deaf.
                         await self.wake_if_sleeping()
+                    else:
+                        # Awake but BURIED. Surfacing used to happen only on the
+                        # sleeping path, so calling his name while he sat behind
+                        # another window got an answer from something invisible —
+                        # and the case is common precisely because opening a page
+                        # for him focuses Brave over the top of him. Saying his
+                        # name is a deliberate approach; it brings him forward.
+                        await self._surface()
                     await bus.emit("wake", score=round(score, 2))
                     wake.reset()
                     self._preroll = np.concatenate(list(preroll))

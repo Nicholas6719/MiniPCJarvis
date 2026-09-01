@@ -100,8 +100,16 @@ def main() -> int:
 
     res = cam.start()
     check("it opens when asked", res.get("ok") and cam.is_on, res)
-    time.sleep(0.4)
-    check("...and frames arrive", cam.frame() is not None)
+    # WAIT for the first frame, with a deadline — do not sleep a guessed 0.4 s
+    # and hope. The capture thread preloads four vision models before its loop
+    # begins, and on a machine also running a PyInstaller build that overran the
+    # guess: this gate failed one build in three at random, which is worse than
+    # no gate, because a red build nobody trusts gets re-run instead of read.
+    deadline = time.time() + 8.0
+    while cam.frame() is None and time.time() < deadline:
+        time.sleep(0.02)
+    check("...and frames arrive", cam.frame() is not None,
+          f"none within {8.0:.0f}s")
     check("...reporting the size the DEVICE gave", cam.status()["width"] == 1920,
           cam.status())
 

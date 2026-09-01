@@ -132,6 +132,18 @@ CASES = [
     ("do you know who i am", "whoami"),
     ("what do you know about me", "recall"),
     ("what did i tell you about my car", "recall"),
+    # Something to WATCH opens in HIS browser; it is not a web search recited
+    # into the side panel. His own sentence is the first case, "You Tube" and
+    # all — speech recognition writes it as two words and every pattern matching
+    # "youtube" missed it, so the request was right and the routing lost on a
+    # space. The control phrasings are gated beside it: stealing "play the
+    # video" would replace his pause button with a browser window.
+    ("find me a you tube video of someone playing iron man ps3", "video"),
+    ("find me a video of a rocket launch", "video"),
+    ("search youtube for guitar lessons", "video"),
+    ("play the video", "media_pause"), ("pause the music", "media_pause"),
+    ("search the web for the best mini pc", "search"),
+    ("show me pictures of a nebula", "images"),
 ]
 
 async def main() -> int:
