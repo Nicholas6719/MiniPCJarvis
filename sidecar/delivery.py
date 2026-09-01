@@ -68,16 +68,44 @@ def workstation_locked() -> bool:
         return False
 
 
+def _camera_sees_him() -> bool:
+    """Does the webcam currently have a face in front of it? Never raises.
+
+    Only ever consulted while the camera is already on — this does not open it,
+    and with the camera off it is simply False and nothing changes.
+    """
+    try:
+        from camera import camera
+        if not camera.is_on:
+            return False
+        from vision_presence import presence
+        return bool(presence.present)
+    except Exception:
+        return False
+
+
 def is_present() -> bool:
     """Is he actually at the machine right now?
 
-    Keyboard and mouse only — the camera idea is much later and this is enough.
-    A locked workstation is away no matter how recent the last keystroke was.
+    Keyboard and mouse, plus the camera when it happens to be open.
+
+    The camera is used in ONE DIRECTION only: it can say "he is here" when the
+    idle clock had given up on him, and it can never say "he is not". Reading a
+    long answer on screen without touching the mouse used to look identical to
+    having left the room, and sent his own reply to his phone. A face in front
+    of the lens settles that.
+
+    It cannot vote the other way because it is not evidence of absence: he may
+    be leaning out of frame, the room may be dark, the camera is usually off.
+    And it is not authentication — a photograph would satisfy it, which is
+    exactly why nothing dangerous hangs on it.
     """
     if workstation_locked():
-        return False
+        return False        # locked is away, whatever the camera sees
     away_after = float(config.get("presence", "away_after_seconds", default=180))
-    return user_idle_seconds() < away_after
+    if user_idle_seconds() < away_after:
+        return True
+    return _camera_sees_him()
 
 
 def telegram_available() -> bool:

@@ -32,6 +32,15 @@ import time
 
 log = logging.getLogger("jarvis.camera")
 
+
+def _presence_status() -> dict:
+    """Presence, folded into camera status. Never raises."""
+    try:
+        from vision_presence import presence
+        return presence.status()
+    except Exception:
+        return {"present": False, "error": "presence unavailable"}
+
 # Native 1080p, which is what the C920 gives whether you ask for it or not.
 #
 # The first version of this forced 720p to save CPU. Measured on his machine,
@@ -79,7 +88,8 @@ class Camera:
                 # what the DEVICE gave, not what was requested - this camera
                 # ignores the request and the HUD should not be lied to
                 "width": self._actual[0], "height": self._actual[1],
-                "error": self._error}
+                "error": self._error,
+                "presence": _presence_status()}
 
     # ---------- lifecycle ----------
 
@@ -115,6 +125,11 @@ class Camera:
                 log.warning("camera thread did not stop; the device may still be held")
         with self._lock:
             self._frame = None          # never leave the last picture of him lying around
+        try:
+            from vision_presence import presence
+            presence.reset()            # camera shut: presence is UNKNOWN, not false
+        except Exception:
+            log.debug("could not reset presence", exc_info=True)
         return {"ok": True, "on": self.is_on}
 
     def toggle(self) -> dict:
@@ -150,6 +165,8 @@ class Camera:
 
     def _run(self, ready: threading.Event) -> None:
         import cv2
+
+        from vision_presence import presence
         cap = None
         try:
             cap = self._open()
@@ -177,6 +194,13 @@ class Camera:
                     time.sleep(0.05)
                     continue
                 misses = 0
+                # Presence looks at roughly one frame a second and returns
+                # immediately the rest of the time. It never raises, so a
+                # detector problem cannot stop the camera.
+                try:
+                    presence.consider(frame)
+                except Exception:
+                    log.debug("presence pass failed", exc_info=True)
                 ok, buf = cv2.imencode(".jpg", frame, params)
                 if ok:
                     with self._lock:

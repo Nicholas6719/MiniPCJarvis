@@ -884,6 +884,21 @@ def say_volume(slots: dict, res: dict) -> str:
     return f"Volume set to {slots['percent']} percent."
 
 
+def say_camera_sees(slots: dict, res: dict) -> str:
+    """Answer "can you see me" honestly, including when the camera is shut."""
+    if "error" in res:
+        return "I can't tell, sir."
+    if not res.get("on"):
+        return "The camera is off, sir, so I can't see anything."
+    pres = res.get("presence") or {}
+    if pres.get("error"):
+        return "The camera is on, sir, but I can't make out faces."
+    if pres.get("present"):
+        n = pres.get("faces") or 1
+        return "I can see you, sir." if n == 1 else f"I can see {n} people, sir."
+    return "The camera is on, sir, but I don't see anyone."
+
+
 def say_camera(slots: dict, res: dict) -> str:
     """What he hears after asking for the camera.
 
@@ -1276,6 +1291,11 @@ SKILLS: list[Skill] = [
         "shut the camera off", "stop the camera", "put the camera away",
         "i'm done with the camera", "switch the camera off"],
         fixed_args={"on": False}, speak=say_camera),
+    Skill("camera_sees", "camera_status", [
+        "can you see me", "do you see me", "am i on camera",
+        "can you see anything", "what do you see on the camera",
+        "is anyone there", "do you see anyone", "can you see my face"],
+        speak=say_camera_sees),
     Skill("volume_set", "set_volume", [
         "set the volume to 50 percent", "volume 30", "turn the volume to 40",
         "set volume at 70 percent", "make the volume 20", "change the volume to 80",

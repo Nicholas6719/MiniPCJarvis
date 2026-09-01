@@ -24,6 +24,12 @@ for pkg in ["winrt.runtime", "winrt.windows.foundation", "winrt.windows.foundati
     except Exception as e:
         print("collect skipped", pkg, e)
 
+# The face model for presence detection. 227 KB, and vision_presence looks for
+# it under sys._MEIPASS/models at runtime — without this line the frozen build
+# silently loses face detection while every offline test still passes, because
+# the tests stub the detector.
+datas += [("models/face_detection_yunet_2023mar.onnx", "models")]
+
 hiddenimports += [
     "uvicorn.logging", "uvicorn.loops", "uvicorn.loops.auto",
     "uvicorn.protocols", "uvicorn.protocols.http", "uvicorn.protocols.http.auto",
