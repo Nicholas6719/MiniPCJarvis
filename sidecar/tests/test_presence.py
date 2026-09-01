@@ -151,6 +151,30 @@ def main() -> int:
     finally:
         D.workstation_locked, D.user_idle_seconds = real_locked, real_idle
 
+    # --- what he is actually TOLD, which is where this first went wrong ------
+    # camera.status() always carries an "error" key set to None when healthy, so
+    # `if "error" in res` was true every time and "can you see me" answered
+    # "I can't tell, sir." with the camera open and his face in the frame.
+    # Truthiness, not key presence.
+    from brain.skills import say_camera_sees
+    healthy = {"on": True, "error": None,
+               "presence": {"present": True, "faces": 1, "error": None}}
+    check("with a face in frame he is told he is seen",
+          say_camera_sees({}, healthy) == "I can see you, sir.",
+          say_camera_sees({}, healthy))
+    two = {**healthy, "presence": {"present": True, "faces": 2, "error": None}}
+    check("...and two faces are counted", "2 people" in say_camera_sees({}, two),
+          say_camera_sees({}, two))
+    empty = {**healthy, "presence": {"present": False, "faces": 0, "error": None}}
+    check("...an empty frame says nobody, not 'I cannot tell'",
+          "don't see anyone" in say_camera_sees({}, empty), say_camera_sees({}, empty))
+    off = {"on": False, "error": None}
+    check("...a closed camera says so plainly",
+          "camera is off" in say_camera_sees({}, off), say_camera_sees({}, off))
+    check("...and a REAL error still admits it",
+          say_camera_sees({}, {"error": "boom"}) == "I can't tell, sir.",
+          say_camera_sees({}, {"error": "boom"}))
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

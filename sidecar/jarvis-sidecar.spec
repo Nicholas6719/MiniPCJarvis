@@ -28,7 +28,8 @@ for pkg in ["winrt.runtime", "winrt.windows.foundation", "winrt.windows.foundati
 # it under sys._MEIPASS/models at runtime — without this line the frozen build
 # silently loses face detection while every offline test still passes, because
 # the tests stub the detector.
-datas += [("models/face_detection_yunet_2023mar.onnx", "models")]
+datas += [("models/face_detection_yunet_2023mar.onnx", "models"),
+          ("models/object_detection_yolox_2022nov.onnx", "models")]
 
 hiddenimports += [
     "uvicorn.logging", "uvicorn.loops", "uvicorn.loops.auto",

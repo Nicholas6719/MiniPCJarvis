@@ -884,9 +884,28 @@ def say_volume(slots: dict, res: dict) -> str:
     return f"Volume set to {slots['percent']} percent."
 
 
+def say_look(slots: dict, res: dict) -> str:
+    """What he hears after asking JARVIS to look.
+
+    It reports what the model actually returned, including nothing. Eighty
+    nouns is a narrow window on a room, and pretending otherwise is how he
+    stops trusting the answer.
+    """
+    if res.get("error"):
+        return f"I couldn't look, sir — {res['error']}."
+    said = res.get("said") or "nothing I recognise"
+    if said == "nothing I recognise":
+        return "Nothing I recognise, sir."
+    return f"I can see {said}, sir."
+
+
 def say_camera_sees(slots: dict, res: dict) -> str:
     """Answer "can you see me" honestly, including when the camera is shut."""
-    if "error" in res:
+    # .get(), NOT `in`. camera.status() ALWAYS carries an "error" key, set to
+    # None when everything is fine, so `if "error" in res` was true every single
+    # time and "can you see me" answered "I can't tell, sir." even with the
+    # camera open and his face in the frame.
+    if res.get("error"):
         return "I can't tell, sir."
     if not res.get("on"):
         return "The camera is off, sir, so I can't see anything."
@@ -907,7 +926,7 @@ def say_camera(slots: dict, res: dict) -> str:
     possible answer — he would believe it was watching when it was not, and the
     reverse when it was.
     """
-    if "error" in res:
+    if res.get("error"):
         return f"I couldn't open the camera, sir — {res['error']}."
     return "Camera on, sir." if res.get("camera") == "on" else "Camera off, sir."
 
@@ -1291,6 +1310,16 @@ SKILLS: list[Skill] = [
         "shut the camera off", "stop the camera", "put the camera away",
         "i'm done with the camera", "switch the camera off"],
         fixed_args={"on": False}, speak=say_camera),
+    Skill("look_at", "look", [
+        # "look at this" is deliberately ABSENT: the `screen` skill owns it, and
+        # at a desk "look at this" means the monitor far more often than the
+        # webcam. The seed-collision gate caught it; camera phrasings here all
+        # name the camera or ask what is in FRONT of him.
+        "what do you see", "what can you see", "look through the camera",
+        "what's in front of you", "what am i holding", "what's on the camera",
+        "tell me what you see through the camera", "describe what you see",
+        "what do you see right now", "look and tell me what's there"],
+        speak=say_look),
     Skill("camera_sees", "camera_status", [
         "can you see me", "do you see me", "am i on camera",
         "can you see anything", "what do you see on the camera",

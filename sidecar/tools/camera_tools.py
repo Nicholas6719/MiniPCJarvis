@@ -38,6 +38,52 @@ async def camera_status() -> dict:
     return camera.status()
 
 
+async def look() -> dict:
+    """One look at whatever is in front of the camera.
+
+    If the camera is off this opens it, takes ONE frame, and shuts it again —
+    asking "what do you see" is itself the permission to look, and leaving the
+    device running afterwards would be taking more than he offered. If it was
+    already on it stays on, because he opened it deliberately.
+    """
+    from camera import camera
+    from vision_objects import describe, objects
+
+    was_on = camera.is_on
+    if not was_on:
+        res = await asyncio.to_thread(camera.start)
+        if not res.get("ok"):
+            return {"error": res.get("error") or "the camera would not open"}
+        # The first frame off this camera is ~900 ms behind the open; looking
+        # before then would report an empty room every time.
+        for _ in range(30):
+            if camera.frame() is not None:
+                break
+            await asyncio.sleep(0.1)
+
+    try:
+        jpg = camera.frame()
+        if jpg is None:
+            return {"error": "no frame from the camera"}
+        import cv2
+        import numpy as np
+        frame = await asyncio.to_thread(
+            cv2.imdecode, np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return {"error": "the frame could not be read"}
+        # Detection is ~71ms of solid CPU: off the event loop, like every other
+        # heavy thing here.
+        res = await asyncio.to_thread(objects.detect, frame)
+        if res.get("error"):
+            return res
+        res["said"] = describe(res)
+        res["camera_left_on"] = was_on
+        return res
+    finally:
+        if not was_on:
+            await asyncio.to_thread(camera.stop)
+
+
 def register_all() -> None:
     registry.register(Tool(
         name="set_camera",
@@ -50,6 +96,14 @@ def register_all() -> None:
                    "description": "true to turn on, false to turn off, omit to toggle"}},
             "required": []},
         risk=Risk.LOW, handler=set_camera, timeout=15))
+    registry.register(Tool(
+        name="look",
+        description="Look through the webcam and report what is actually there. "
+                    "Use for 'what do you see', 'what am I holding', 'look at "
+                    "this', 'what's in front of you'. Opens the camera briefly "
+                    "if it is off, and closes it again.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.LOW, handler=look, timeout=40))
     registry.register(Tool(
         name="camera_status",
         description="Whether the webcam is currently on, and how it is running.",
