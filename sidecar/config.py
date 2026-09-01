@@ -102,6 +102,30 @@ DEFAULTS: dict[str, Any] = {
     "dictation": {"enabled": True, "strip_fillers": True,
                   "spoken_punctuation": True, "restore_clipboard": True},
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
+    # --- the Evolution (2026-09-01) -------------------------------------
+    # External binaries, same shape as llm.server_binary above: a path that may
+    # not exist. Neither is installed on this machine today, so fabrication's
+    # gate SKIPS rather than passes — a green tick for a tool that never ran
+    # would be worse than an honest skip.
+    "fabrication": {
+        "openscad_binary": r"C:\Program Files\OpenSCAD\openscad.exe",
+        "prusaslicer_binary": r"C:\Program Files\Prusa3D\PrusaSlicer\prusa-slicer-console.exe",
+        "work_dir": "",            # "" = %APPDATA%\JARVIS\fabrication
+        "slicer_profile": "",      # "" = the bundled generic 0.4 mm FDM profile
+    },
+    # Face confirmation for HIGH-risk tools. It is ADDITIVE ONLY: the spoken
+    # yes/no gate stays mandatory and there is deliberately no flag here that
+    # can turn it off, because a bare webcam match has no liveness guarantee —
+    # a photograph would pass it.
+    "biometric": {
+        "enabled": True,
+        "profile_path": "",        # "" = %APPDATA%\JARVIS\face_profile.json (shared with vision_identity)
+        "confirm_timeout_s": 8.0,
+    },
+    # Phone-derived facts arriving over the existing Telegram poller. No new
+    # endpoint, no second entry point.
+    "location": {"stale_after_minutes": 120},
+    "health": {"stale_after_minutes": 180, "max_payload_bytes": 65536},
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,
               "sound_cues": True, "boot_sound": True,

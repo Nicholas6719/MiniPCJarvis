@@ -25,6 +25,19 @@ pefile>=2023.2
 onnx-asr>=0.6
 winocr>=0.0.15
 lxml>=5.0
+# The camera stack (2026-09-01). Both were installed by hand while building it and
+# neither was declared, so a fresh clone could not have rebuilt this project —
+# found by the Evolution plan's Phase 0 audit, before anything new was added to an
+# environment that was not reproducible.
+opencv-python>=4.10
+# mediapipe MUST be installed with --no-deps. Its wheel declares
+# opencv-contrib-python, which fights the opencv-python above that the whole
+# vision stack runs on; plain cv2 satisfies every import it actually makes
+# (proven in a scratch venv before the real one was touched). It also imports
+# matplotlib at module level for debug overlays nobody calls — vision_hands
+# stubs that out rather than carrying 40 MB into the bundle.
+#     pip install --no-deps mediapipe==1.0.1
+mediapipe>=1.0.1
 
 # build-time only (gates, not bundled)
 pyinstaller
