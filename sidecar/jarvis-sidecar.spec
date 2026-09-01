@@ -29,7 +29,21 @@ for pkg in ["winrt.runtime", "winrt.windows.foundation", "winrt.windows.foundati
 # silently loses face detection while every offline test still passes, because
 # the tests stub the detector.
 datas += [("models/face_detection_yunet_2023mar.onnx", "models"),
-          ("models/object_detection_yolox_2022nov.onnx", "models")]
+          ("models/object_detection_yolox_2022nov.onnx", "models"),
+          ("models/face_recognition_sface_2021dec.onnx", "models"),
+          ("models/hand_landmarker.task", "models")]
+
+# mediapipe was installed with --no-deps (its declared opencv-contrib dependency
+# would fight the opencv-python everything else uses; plain cv2 satisfies every
+# import it makes). collect_all grabs its 55 MB C library and the tasks python
+# tree. Its hidden imports mention matplotlib, which is stubbed at runtime in
+# vision_hands - PyInstaller only warns about hidden imports it cannot find.
+try:
+    d, b, h = collect_all("mediapipe")
+    datas += d; binaries += b
+    hiddenimports += [x for x in h if not x.startswith("matplotlib")]
+except Exception as e:
+    print("collect skipped mediapipe", e)
 
 hiddenimports += [
     "uvicorn.logging", "uvicorn.loops", "uvicorn.loops.auto",

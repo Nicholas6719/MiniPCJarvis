@@ -637,7 +637,12 @@ _ORDINALS = {"first": 0, "second": 1, "third": 2, "fourth": 3, "fifth": 4, "sixt
              "one": 0, "two": 1, "three": 2, "four": 3}
 
 _KEEP_FOR = re.compile(r"\b(?:keep|pin|hold)\b.*?\bfor\s+(?:the next\s+)?(an?\s+|\d+\s*|one\s+|two\s+|five\s+|ten\s+|fifteen\s+|twenty\s+|thirty\s+)?(hour|hours|minutes?|min)\b")
-_NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30}
+# Named for its one job. This used to be a second `_NUM_WORDS`, silently
+# shadowing the fuller dict at the top of the file for every runtime caller —
+# and a third definition (for finger counts) then landed on top of BOTH and
+# turned this dict into a tuple, crashing "keep it for ten minutes". One name,
+# one meaning.
+_PIN_AMOUNTS = {"a": 1, "an": 1, "one": 1, "two": 2, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30}
 
 
 def slots_ui(t: str) -> dict | None:
@@ -650,7 +655,7 @@ def slots_ui(t: str) -> dict | None:
     mk = _KEEP_FOR.search(t)
     if mk:
         amount, unit = (mk.group(1) or "").strip(), mk.group(2)
-        n = int(amount) if amount.isdigit() else _NUM_WORDS.get(amount, 10)
+        n = int(amount) if amount.isdigit() else _PIN_AMOUNTS.get(amount, 10)
         return {"action": "pin", "minutes": n * 60 if unit.startswith("hour") else n}
     if re.search(r"\b(?:pin|keep)\b.*\b(?:that|this|it|the panel|the tab|open|up)\b", t):
         return {"action": "pin"}
@@ -862,6 +867,13 @@ def slots_reminder(t: str) -> dict | None:
 
 
 def slots_remember(t: str) -> dict | None:
+    # "Remember my face" is enrollment, not a fact. _CANON folds every
+    # "remember ..." onto this skill's canonical form, so the refusal has to
+    # live here: return None and the router hands the turn to the next-best
+    # skill (face_learn). Without this, "remember my face" stored the two words
+    # "my face" as a memory and he was never enrolled.
+    if re.search(r"\b(?:my face|what i look like|my appearance)\b", t, re.I):
+        return None
     m = re.search(r"\bremember\s+(?:that\s+)?(.+?)[.!?]*$", t)
     return {"content": m.group(1).strip()} if m and len(m.group(1)) > 3 else None
 
@@ -899,12 +911,52 @@ def say_look(slots: dict, res: dict) -> str:
     return f"I can see {said}, sir."
 
 
+_COUNT_WORDS = ("no", "one", "two", "three", "four", "five", "six", "seven",
+                "eight", "nine", "ten")
+
+
+def say_fingers(slots: dict, res: dict) -> str:
+    """The count, plainly — and NEVER a left/right claim. The webcam is a
+    mirror, so the model's "left hand" is HIS right; naming sides would be
+    confidently wrong half the time, which is the exact failure he keeps
+    catching. Counts only."""
+    if res.get("error"):
+        return f"I couldn't read your hands, sir — {res['error']}."
+    if res.get("no_hands") or not res.get("hands"):
+        return "I don't see your hands, sir."
+    n = res.get("fingers", 0)
+    word = _COUNT_WORDS[n].capitalize() if 0 <= n <= 10 else str(n)
+    per = res.get("hands") or []
+    if len(per) == 2 and n > 0:
+        a, b = per[0]["fingers"], per[1]["fingers"]
+        if a == b:
+            return f"{word}, sir — {_COUNT_WORDS[a]} on each hand."
+        return f"{word}, sir — {_COUNT_WORDS[max(a, b)]} on one hand and {_COUNT_WORDS[min(a, b)]} on the other."
+    if n == 0:
+        return "None, sir — your hands are closed."
+    return f"{word}, sir."
+
+
+def say_learn_face(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"I couldn't learn your face, sir — {res['error']}. Face the camera and try again."
+    return "Done, sir. I'll know you from now on."
+
+
+def say_forget_face(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return "I couldn't forget it, sir."
+    return "Forgotten, sir."
+
+
 def say_camera_sees(slots: dict, res: dict) -> str:
-    """Answer "can you see me" honestly, including when the camera is shut."""
-    # .get(), NOT `in`. camera.status() ALWAYS carries an "error" key, set to
-    # None when everything is fine, so `if "error" in res` was true every single
-    # time and "can you see me" answered "I can't tell, sir." even with the
-    # camera open and his face in the frame.
+    """Answer "can you see me" honestly — and by NAME when it knows him.
+
+    His ask, verbatim: recognise "me as me and people who it doesn't recognize
+    as persons". So: him -> "you, sir"; a stranger, once he is enrolled -> said
+    plainly; nobody enrolled yet -> an invitation to teach it, because the
+    feature is invisible until he knows it exists.
+    """
     if res.get("error"):
         return "I can't tell, sir."
     if not res.get("on"):
@@ -912,10 +964,22 @@ def say_camera_sees(slots: dict, res: dict) -> str:
     pres = res.get("presence") or {}
     if pres.get("error"):
         return "The camera is on, sir, but I can't make out faces."
-    if pres.get("present"):
-        n = pres.get("faces") or 1
-        return "I can see you, sir." if n == 1 else f"I can see {n} people, sir."
-    return "The camera is on, sir, but I don't see anyone."
+    if not pres.get("present"):
+        return "The camera is on, sir, but I don't see anyone."
+    n = pres.get("faces") or 1
+    who = pres.get("who")
+    if who == "him":
+        if n == 1:
+            return "I can see you, sir."
+        others = n - 1
+        return ("I can see you and one other person, sir." if others == 1
+                else f"I can see you and {others} other people, sir.")
+    if not pres.get("enrolled"):
+        return ("I can see someone, sir — say 'remember my face' and I'll know "
+                "whether it's you.")
+    if n == 1:
+        return "I can see someone, sir, but I don't recognise them."
+    return f"I can see {n} people, sir, but I don't recognise them."
 
 
 def say_camera(slots: dict, res: dict) -> str:
@@ -1291,24 +1355,25 @@ SKILLS: list[Skill] = [
         "camera view mode", "toggle camera mode", "switch camera view mode",
         "flip the camera view", "camera view"],
         speak=say_camera),
-    # NOTE: "open the camera", "bring up the camera", "close the camera",
-    # "close the webcam" and "hide the camera" are deliberately ABSENT. _CANON
-    # rewrites them to "open APP" / "close APP" / "hide everything" — the exact
-    # canonical strings that open_app, close_app and the UI skill own. Seeding
-    # them here made every "open spotify" and "close notepad" match the camera
-    # at cosine 1.000 and stole app launching outright. Any new seed goes
-    # through _norm() first; if it comes back changed, it belongs to something
-    # else.
+    # "open the camera" is HIS phrasing and it now lives here, but only because
+    # _CANON was fixed first. Seeded while the rewrite was still active, these
+    # became the literal string "open APP" and stole every "open spotify" at
+    # cosine 1.000. The exclusion in _CANON (camera|webcam, alongside music) is
+    # what makes them safe: they keep their own words instead of collapsing onto
+    # the app-launching canon. Any new seed still goes through _norm() first —
+    # if it comes back changed, it belongs to something else.
     Skill("camera_on", "set_camera", [
         "turn the camera on", "show me the camera", "camera on",
         "turn on the webcam", "pull up the camera", "put the camera up",
         "let me see the camera", "show me the webcam",
-        "i want to see the camera", "let me see myself"],
+        "i want to see the camera", "let me see myself",
+        "open the camera", "open the webcam", "bring up the camera"],
         fixed_args={"on": True}, speak=say_camera),
     Skill("camera_off", "set_camera", [
         "turn the camera off", "camera off", "turn off the webcam",
         "shut the camera off", "stop the camera", "put the camera away",
-        "i'm done with the camera", "switch the camera off"],
+        "i'm done with the camera", "switch the camera off",
+        "close the camera", "close the webcam"],
         fixed_args={"on": False}, speak=say_camera),
     Skill("look_at", "look", [
         # "look at this" is deliberately ABSENT: the `screen` skill owns it, and
@@ -1320,6 +1385,33 @@ SKILLS: list[Skill] = [
         "tell me what you see through the camera", "describe what you see",
         "what do you see right now", "look and tell me what's there"],
         speak=say_look),
+    # "remember my face" IS a seed on face_learn below, and the guard on
+    # slots_remember stays as the second line of defence. The guard alone was not
+    # enough and the live build proved it: the memory skill refused the phrasing
+    # exactly as designed, but _CANON had already rewritten the words "my face"
+    # out of existence, so the fallthrough re-classified a sentence that no longer
+    # mentioned a face, found nothing above threshold, and returned None. He would
+    # have said "remember my face" and been answered with silence. The rewrite is
+    # excluded now; the words survive, and the seed can do its job.
+    Skill("fingers", "count_fingers", [
+        "how many fingers am i holding up", "how many fingers do you see",
+        "count my fingers", "how many fingers is this",
+        "how many fingers am i holding", "how many fingers am i showing you",
+        "tell me how many fingers i have up"],
+        speak=say_fingers),
+    Skill("face_learn", "learn_face", [
+        "learn my face", "learn what i look like", "memorize my face",
+        "study my face", "learn my face so you know me",
+        "remember my face", "remember what i look like",
+        # NOT "teach yourself my face": _CANON folds "teach you..." onto the
+        # teach-a-command skill and the collision gate rejected it.
+        "learn to recognize me", "learn to recognize my face",
+        "get to know my face"],
+        speak=say_learn_face),
+    Skill("face_forget", "forget_face", [
+        "forget my face", "delete my face", "forget what i look like",
+        "delete my face profile", "erase my face"],
+        speak=say_forget_face),
     Skill("camera_sees", "camera_status", [
         "can you see me", "do you see me", "am i on camera",
         "can you see anything", "what do you see on the camera",
@@ -1657,7 +1749,11 @@ SKILLS: list[Skill] = [
         "what do you remember about my desk lamp", "what did i tell you about my desk",
         "do you remember what i said about the garage", "what do you remember about that",
         "what have i told you about my routine"],
-        slots=lambda t: {"query": t}, speak=say_recall),
+        # The face guard again: "remember my face" falls through the remember
+        # skill and lands here next. Refusing sends it on to face_learn.
+        slots=lambda t: (None if re.search(
+            r"\b(?:my face|what i look like|my appearance)\b", t, re.I)
+            else {"query": t}), speak=say_recall),
 ]
 
 SKILLS.append(Skill("general", None, [

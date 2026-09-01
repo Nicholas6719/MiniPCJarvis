@@ -67,7 +67,12 @@ _CANON = [
     # "a/an" only, never "the": "what's THE time" / "what's THE date" are live readings.
     (r"^(?:so\s+)?what(?:'s|s| is| are)\s+an?\s+[a-z0-9 -]{2,30}\??$", "explain what SOMETHING means"),
     (r"\b(?:remind me(?!\s+(?:what|who|where|when|which|how)\b)|set a reminder|reminder)\b.*", "remind me at TIME to TASK"),
-    (r"^(?:remember|note|keep in mind)\b.*", "remember that FACT"),
+    # "remember my face" is ENROLLMENT, not a fact to store. Folding it onto the
+    # memory canon left it stranded: the memory skill's guard refused it, and the
+    # rewrite had already destroyed the word "face", so the fallthrough had
+    # nothing above threshold to land on and the whole utterance did NOTHING.
+    # Excluded here, it keeps its own words and reaches face_learn on meaning.
+    (r"^(?:remember|note|keep in mind)\b(?!.*\b(?:my face|what i look like|my appearance)\b).*", "remember that FACT"),
     (r".*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*\b(?:and tell|tell me|read|summar\w*|what does|what's on|what is on|look at|check)\b.*", "read the website SITE and tell me"),
     (r".*\b(?:read|summar\w*|what does|what's on|look at|check)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "read the website SITE and tell me"),
     (r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
@@ -81,8 +86,12 @@ _CANON = [
     (r"\b(?:open|go to|pull up|take me to|load|bring up|open up)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "open the website SITE"),
     # The launch verbs are ordinary English words, so the exclusions matter: "run along"
     # and "off you go" are dismissals, not a request to open an app called "along".
-    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+|that\s+|this\s+)?(?:sound|audio|volume|music|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself|article|articles|story|link|links|source|page)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
-    (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
+    # "camera"/"webcam" are excluded for the same reason "music" is: he is naming a
+    # SUBSYSTEM, not an executable. Rewritten to "open APP", "open the camera" —
+    # his own words for this — matched open_app at cosine 1.000 and tried to launch
+    # the Windows Camera app instead of the HUD view.
+    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+|that\s+|this\s+)?(?:sound|audio|volume|music|camera|webcam|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself|article|articles|story|link|links|source|page)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
+    (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|camera|webcam|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
     (r"\d+", "N"),
 ]
 

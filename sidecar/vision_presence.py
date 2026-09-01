@@ -95,6 +95,25 @@ class Presence:
             self._seen = False
             self._faces = 0
             self._misses = 0
+        try:
+            from vision_identity import identity
+            identity.reset()
+        except Exception:
+            log.debug("identity reset failed", exc_info=True)
+
+    def find_faces(self, frame):
+        """YuNet on one frame, for enrollment. (small_frame, faces) or (None, None)."""
+        det = self._detector()
+        if det is None:
+            return None, None
+        try:
+            import cv2
+            small = cv2.resize(frame, (DETECT_W, DETECT_H))
+            _, faces = det.detect(small)
+            return small, faces
+        except Exception:
+            log.debug("find_faces failed", exc_info=True)
+            return None, None
 
     # ---------- detection ----------
 
@@ -141,6 +160,14 @@ class Presence:
         except Exception:
             log.debug("presence check failed", exc_info=True)
             return
+
+        # Identity rides on the same detection: same small frame, same face
+        # rows, ~5 ms more, and only every couple of seconds inside consider().
+        try:
+            from vision_identity import identity
+            identity.consider(small, faces)
+        except Exception:
+            log.debug("identity pass failed", exc_info=True)
 
         with self._lock:
             self._checks += 1

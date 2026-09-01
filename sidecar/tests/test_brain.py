@@ -113,6 +113,17 @@ CASES = [
     ("check my stocks", "watchlist"),
     ("what's in the news", "news"), ("tell me the tech news", "news"),
     ("any breaking news", "breaking"),
+    # The camera is a subsystem, not an executable. Both halves are gated
+    # together on purpose: the first version of this fix taught the camera to
+    # answer "open the camera" and stole every "open spotify" with it, and the
+    # second version protected app-launching so well that "open the camera" —
+    # his own words for it — launched the Windows Camera app instead.
+    ("open the camera", "camera_on"), ("bring up the camera", "camera_on"),
+    ("close the camera", "camera_off"),
+    ("open the calculator", "open_app"), ("close chrome", "close_app"),
+    # enrollment, not a stored fact — and it must reach a skill, not silence
+    ("remember my face", "face_learn"), ("learn my face", "face_learn"),
+    ("remember that i park in the north garage", "remember"),
 ]
 
 async def main() -> int:

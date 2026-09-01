@@ -37,6 +37,8 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_camera.py || (echo CAMERA TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_presence.py || (echo PRESENCE TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_objects.py || (echo OBJECTS TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_identity.py || (echo IDENTITY TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_hands.py || (echo HANDS TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_linkguard.py || (echo LINKGUARD TEST FAILED & exit /b 1)
 

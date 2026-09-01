@@ -118,8 +118,17 @@ export default function App() {
   const gateOpen = confirmation != null;
   const faultOpen = state === "error";
   // The state picks the geometry; a held stage keeps the anchor while idle.
+  //
+  // The camera stage outranks the state. His ask, verbatim: "when the camera
+  // is active, I don't want it to leave... when he goes back to listening, I
+  // want him to be listening in the side panel HUD-ready state." Listening,
+  // thinking and speaking used to flip the frame radial, which faded the live
+  // feed out mid-conversation. A confirmation gate or a fault still takes the
+  // whole room - those are the moments nothing may compete with.
+  const cameraHeld = stage?.kind === "camera";
   const geometry: "radial" | "anchor" =
     gateOpen || faultOpen ? "radial"
+    : cameraHeld ? "anchor"
     : RADIAL.has(state) ? "radial"
     : stage ? "anchor"
     : state === "idle" ? "radial"

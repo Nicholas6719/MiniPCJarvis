@@ -157,15 +157,28 @@ def main() -> int:
     # "I can't tell, sir." with the camera open and his face in the frame.
     # Truthiness, not key presence.
     from brain.skills import say_camera_sees
-    healthy = {"on": True, "error": None,
-               "presence": {"present": True, "faces": 1, "error": None}}
-    check("with a face in frame he is told he is seen",
-          say_camera_sees({}, healthy) == "I can see you, sir.",
-          say_camera_sees({}, healthy))
-    two = {**healthy, "presence": {"present": True, "faces": 2, "error": None}}
-    check("...and two faces are counted", "2 people" in say_camera_sees({}, two),
-          say_camera_sees({}, two))
-    empty = {**healthy, "presence": {"present": False, "faces": 0, "error": None}}
+
+    def st(**pres):
+        base = {"present": True, "faces": 1, "error": None,
+                "who": None, "enrolled": True}
+        base.update(pres)
+        return {"on": True, "error": None, "presence": base}
+
+    check("HIM in frame is told by name",
+          say_camera_sees({}, st(who="him")) == "I can see you, sir.",
+          say_camera_sees({}, st(who="him")))
+    check("...him plus one other",
+          say_camera_sees({}, st(who="him", faces=2))
+          == "I can see you and one other person, sir.",
+          say_camera_sees({}, st(who="him", faces=2)))
+    check("a stranger, once enrolled, is said plainly",
+          say_camera_sees({}, st(who="unknown"))
+          == "I can see someone, sir, but I don't recognise them.",
+          say_camera_sees({}, st(who="unknown")))
+    check("before enrollment he is invited to teach it",
+          "remember my face" in say_camera_sees({}, st(who="unknown", enrolled=False)),
+          say_camera_sees({}, st(who="unknown", enrolled=False)))
+    empty = st(present=False, faces=0)
     check("...an empty frame says nobody, not 'I cannot tell'",
           "don't see anyone" in say_camera_sees({}, empty), say_camera_sees({}, empty))
     off = {"on": False, "error": None}

@@ -193,14 +193,18 @@ class Objects:
         """
         if not frames:
             return {"error": "no frames to look at"}
+        return self.aggregate([self.detect(f) for f in frames])
+
+    def aggregate(self, results: list) -> dict:
+        """Judge per-frame results together. Split from detect_many so the
+        look tool can detect WHILE frames arrive instead of afterwards."""
         seen: dict[str, int] = {}
         best: dict[str, float] = {}
         counts: dict[str, list] = {}
         total_ms = 0.0
         looked = 0
-        for f in frames:
-            res = self.detect(f)
-            if res.get("error"):
+        for res in results:
+            if not res or res.get("error"):
                 continue
             looked += 1
             total_ms += res.get("detect_ms", 0.0)
@@ -266,7 +270,7 @@ def plural(label: str, n: int) -> str:
     return PLURALS.get(label, label + "s")
 
 
-def describe(res: dict) -> str:
+def describe(res: dict, who: str | None = None) -> str:
     """The detections, as a sentence he would want to hear.
 
     Deliberately plain. The model knows eighty nouns; dressing that up as
@@ -281,8 +285,17 @@ def describe(res: dict) -> str:
     for it in items[:5]:
         label = it["label"]
         n = it.get("count", 1) if label in COUNTED else 1
+        # When identity says the person in frame is HIM, the first person is
+        # "you", not "a person" — the difference he asked for by name.
+        if label == "person" and who == "him":
+            parts.append("you" if n == 1 else
+                         ("you and one other person" if n == 2 else
+                          f"you and {n - 1} other people"))
+            continue
         parts.append(f"{n} {plural(label, n)}" if n > 1 else
                      ("an " if label[0] in "aeiou" else "a ") + label)
+    # He should hear about himself first, whatever the confidences said.
+    parts.sort(key=lambda p2: 0 if p2.startswith("you") else 1)
     if len(parts) == 1:
         return parts[0]
     return ", ".join(parts[:-1]) + " and " + parts[-1]

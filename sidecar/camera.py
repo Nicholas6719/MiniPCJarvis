@@ -37,7 +37,11 @@ def _presence_status() -> dict:
     """Presence, folded into camera status. Never raises."""
     try:
         from vision_presence import presence
-        return presence.status()
+        st = presence.status()
+        from vision_identity import identity
+        st["who"] = identity.who()
+        st["enrolled"] = identity.enrolled
+        return st
     except Exception:
         return {"present": False, "error": "presence unavailable"}
 
@@ -178,6 +182,21 @@ class Camera:
             ready.set()          # unblock start() whether it worked or not
 
         self._cap = cap
+        # Load every vision model NOW, on this thread, while the first frames
+        # are still settling. He asked how many fingers he was holding up and
+        # "it was buffering" — a chunk of that wait was YOLOX's 36 MB being read
+        # from disk inside his question. The models load once per camera
+        # session, in dead time he cannot feel.
+        try:
+            presence._detector()
+            from vision_identity import identity
+            identity._recognizer()
+            from vision_objects import objects
+            objects._load()
+            from vision_hands import hands
+            hands._landmarker()
+        except Exception:
+            log.debug("vision model preload failed", exc_info=True)
         params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
         period = 1.0 / TARGET_FPS
         misses = 0
