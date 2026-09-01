@@ -137,7 +137,7 @@ class Scheduler:
             try:
                 self.db.rollback()   # never leave the write lock held on the shared conn
             except Exception:
-                pass
+                log.warning('rollback failed after a task write', exc_info=True)
             return False
 
     async def _fire(self, tid: int, due_ts: float, text: str, recurrence: str) -> None:

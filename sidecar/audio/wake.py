@@ -41,7 +41,11 @@ class WakeWord:
             try:
                 self._model.reset()
             except Exception:
-                pass
+                # If the model will not clear, JARVIS's own name can linger in
+                # its window and the next "hey JARVIS" is swallowed. Being
+                # unable to hear him is the failure he minds most, and it has
+                # already happened twice — it must never be silent as well.
+                log.debug("wake model reset failed", exc_info=True)
 
     def feed(self, audio_f32: np.ndarray) -> float:
         """Feed float32 [-1,1] 16 kHz audio; returns max hey_jarvis score seen."""

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import logging
 import time
 from typing import Awaitable, Callable
+
+log = logging.getLogger("jarvis.state")
 
 
 class State(str, enum.Enum):
@@ -68,5 +71,11 @@ class StateMachine:
             try:
                 await cb(old, new)
             except Exception:
-                pass
+                # One listener must not stop the others, so this stays caught —
+                # but it no longer stays silent. These callbacks are how the HUD
+                # and the watchdogs learn what he is doing; one failing quietly
+                # means a screen that has stopped tracking reality, and nothing
+                # anywhere saying so.
+                log.debug("state listener %r failed on %s -> %s",
+                          getattr(cb, "__name__", cb), old, new, exc_info=True)
         return True

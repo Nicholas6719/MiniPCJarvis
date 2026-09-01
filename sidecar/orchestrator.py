@@ -1040,7 +1040,10 @@ class Orchestrator:
             try:
                 await self.speak_line(line)
             except Exception:
-                pass
+                # He asked a question and heard nothing back. That is
+                # indistinguishable from JARVIS being broken, so it does not get
+                # to happen without a line in the log saying why.
+                log.warning('could not speak the reply aloud', exc_info=True)
             await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000), breakdown={})
             if self.sm.state not in (State.ERROR, State.STARTING):
                 await self.sm.to(State.IDLE, force=True)
@@ -1502,7 +1505,7 @@ class Orchestrator:
             try:
                 await self.speak_line("Okay." if answer == "yes" else "Cancelled.")
             except Exception:
-                pass
+                log.warning('could not speak the answer to a question', exc_info=True)
             return
 
     async def _listen_yes_no(self, timeout: float = 8.0) -> str | None:
@@ -1581,7 +1584,9 @@ class Orchestrator:
         try:
             await self.speak_line("Okay." if approved else "Cancelled.")
         except Exception:
-            pass
+            # Silence after a confirmation is the worst case of all: he does not
+            # know whether the thing he approved actually happened.
+            log.warning('could not confirm the decision aloud', exc_info=True)
         return True
 
     async def _reflex_turn(self, text: str, reflex, t_start: float) -> None:
@@ -1911,7 +1916,9 @@ class Orchestrator:
             try:
                 wake.reset()
             except Exception:
-                pass
+                # His own name can stay in the model's window after he speaks,
+                # and the next "hey JARVIS" is swallowed by the echo.
+                log.warning("wake reset after speaking failed", exc_info=True)
 
     async def _barge_in_watch(self) -> None:
         """While speaking, watch for the user cutting in.

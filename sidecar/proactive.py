@@ -185,7 +185,9 @@ class Proactive:
                     f"{int(free_gb)} gigabytes of free space.",
                     cooldown_h=12)
         except Exception:
-            pass
+            # A check that silently stops running looks exactly like a machine
+            # with nothing wrong with it.
+            log.debug("disk check failed", exc_info=True)
 
         # sustained RAM pressure
         try:
@@ -197,7 +199,7 @@ class Proactive:
                     "something before things slow down.",
                     cooldown_h=2)
         except Exception:
-            pass
+            log.debug("memory check failed", exc_info=True)
 
         # continuous work session → break suggestion
         try:
@@ -218,7 +220,7 @@ class Proactive:
                         cooldown_h=3):
                     self._active_since = now  # reset the clock after suggesting
         except Exception:
-            pass
+            log.debug("work-session check failed", exc_info=True)
 
 
 proactive = Proactive()

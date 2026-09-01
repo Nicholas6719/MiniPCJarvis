@@ -130,7 +130,8 @@ class ToolRegistry:
             try:
                 self._audit_db.rollback()
             except Exception:
-                pass
+                log.warning('audit rollback failed - the write lock may be held',
+                            exc_info=True)
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool

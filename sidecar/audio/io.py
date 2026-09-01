@@ -57,7 +57,10 @@ def resolve_input_device() -> tuple[int | None, str, bool]:
             else:
                 return int(explicit), chosen["name"], any(pat in chosen["name"].lower() for pat in _pats)
         except Exception:
-            pass
+            # He configured a specific microphone and is about to silently get a
+            # different one. Worth knowing before he wonders why it mishears him.
+            log.warning('configured input device %r could not be used', explicit,
+                        exc_info=True)
     patterns = [str(x).lower() for x in
                 config.get("audio", "preferred_input_names",
                            default=["C920", "Webcam", "Logitech"])]
@@ -349,7 +352,7 @@ class Speaker:
                 try:
                     stream.close()
                 except Exception:
-                    pass
+                    log.debug('closing the audio stream failed', exc_info=True)
             else:
                 # ABANDONED, and that has to mean it. The first version of this
                 # said "abandoning" in the log and then called stream.close()
@@ -382,7 +385,7 @@ class Speaker:
         try:
             stream.abort()  # asks PortAudio to unblock any in-flight write
         except Exception:
-            pass
+            log.debug('aborting the audio stream failed', exc_info=True)
         self._release(stream, "abort")
 
     def close(self) -> None:
@@ -392,7 +395,7 @@ class Speaker:
         try:
             stream.stop()
         except Exception:
-            pass
+            log.debug('stopping the audio stream failed', exc_info=True)
         self._release(stream, "close")
 
 

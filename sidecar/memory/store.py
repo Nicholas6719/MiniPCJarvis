@@ -93,7 +93,10 @@ class MemoryStore:
         try:
             self.db.rollback()
         except Exception:
-            pass
+            # A rollback that itself fails means the connection is in trouble,
+            # and an unreleased write lock is exactly what stopped every turn
+            # on 2026-08-31. Never learn about that one from the symptoms.
+            log.warning('rollback failed on the shared connection', exc_info=True)
 
     # ---- turn-path instrumentation (brain roadmap stage 1) --------------------
     def log_turn_stat(self, path: str, skill: str | None, latency_ms: int) -> None:
