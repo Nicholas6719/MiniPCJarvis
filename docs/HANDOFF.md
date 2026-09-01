@@ -1289,7 +1289,7 @@ aside, **gate where the utterance lands**, not just that it stepped aside.
 core hands the sidecar an EPHEMERAL port every launch (52322, then 62683), so
 scanning 8790-8799 finds nothing and any port file would be stale. Ask psutil
 which port `jarvis-sidecar.exe` is listening on. See
-`.agent/scripts/camverify.py` — routing, latency and the spoken sentence, run in
+`sidecar/tests/camera_live.py` (run it with `scripts/camera_live.cmd`) — routing, latency and the spoken sentence, run in
 the real session against the installed build.
 
 Measured live on the shipped bundle: `count_fingers` 0.53 s, `look` 0.71 s,
