@@ -159,6 +159,18 @@ class ToolRegistry:
             return True
         return False
 
+    async def _second_signal(self, tool_name: str) -> tuple[bool, str]:
+        """The face check for HIGH-risk tools. Imported late and never allowed to
+        raise: a webcam problem must not become a wall between him and his own
+        machine. Any failure here falls back to the spoken gate, which is the
+        security level that already existed."""
+        try:
+            from tools.biometric import second_signal
+            return await second_signal(tool_name)
+        except Exception:
+            log.exception("second signal unavailable for %s", tool_name)
+            return True, "second signal errored"
+
     async def execute(self, name: str, arguments: str | dict) -> dict:
         """Run a tool with risk gating. Returns {ok, result|error, ...}."""
         tool = self._tools.get(name)
@@ -200,6 +212,25 @@ class ToolRegistry:
                 await bus.emit("tool_call", call_id=call_id, tool=name, status="denied")
                 self._audit(name, args, tool.risk.value, "denied", confirmed=False)
                 return {"ok": False, "error": "user declined the action", "declined": True}
+
+            # A SECOND signal for HIGH risk only, and only ever a refusal.
+            #
+            # Its position here is the security property: it runs AFTER the
+            # spoken yes has already been given, so there is no path by which a
+            # face grants anything. A bare webcam match has no liveness
+            # guarantee — a photograph held to the lens would pass it — so it
+            # may raise confidence and must never confer permission. Moving this
+            # above the `approved` check, or letting it set `approved`, would
+            # turn an additive signal into a replaceable one.
+            if tool.risk is Risk.HIGH:
+                allow, why = await self._second_signal(name)
+                if not allow:
+                    await bus.emit("tool_call", call_id=call_id, tool=name,
+                                   status="denied", detail=why)
+                    self._audit(name, args, tool.risk.value, "denied", confirmed=False)
+                    return {"ok": False, "error": f"face check failed: {why}",
+                            "declined": True, "face_failed": True}
+
             self._audit(name, args, tool.risk.value, "confirmed", confirmed=True)
 
         t0 = time.time()

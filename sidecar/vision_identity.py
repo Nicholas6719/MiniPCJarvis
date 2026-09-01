@@ -172,6 +172,42 @@ class Identity:
         except Exception:
             log.debug("identity check failed", exc_info=True)
 
+    def check_once(self, small_frame, faces) -> tuple[str | None, float]:
+        """One deliberate look, unthrottled. Returns (verdict, best_score).
+
+        `consider()` is the wrong call for a confirmation: it answers at most
+        every RECHECK_S and will happily hand back a cached verdict from two
+        seconds ago, which is precisely the staleness that made "can you see me"
+        claim to see a man who had left. A confirmation asks about NOW, so this
+        shares the matching but keeps none of the caching, and touches none of
+        the presence state.
+
+        Verdicts: "him", "unknown", "no_face", or None when it could not tell
+        (no model, no profile, embedding failed). None is not a match and must
+        never be treated as one.
+        """
+        try:
+            if faces is None or len(faces) == 0:
+                return "no_face", 0.0
+            profile = self._load_profile()
+            if not profile:
+                return None, 0.0                # nobody enrolled: cannot tell
+            emb = self._embed(small_frame, faces[0])
+            if emb is None:
+                return None, 0.0
+            import cv2
+            import numpy as np
+            rec = self._recognizer()
+            if rec is None:
+                return None, 0.0
+            best = max(rec.match(emb, np.array(s, dtype=np.float32),
+                                 cv2.FaceRecognizerSF_FR_COSINE)
+                       for s in profile)
+            return ("him" if best >= COSINE_SAME else "unknown"), float(best)
+        except Exception:
+            log.debug("identity one-shot check failed", exc_info=True)
+            return None, 0.0
+
     def who(self) -> str | None:
         """"him", "unknown", or None when nobody is in frame / never checked."""
         return self._who
