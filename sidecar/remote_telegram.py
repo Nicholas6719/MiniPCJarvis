@@ -371,19 +371,33 @@ class TelegramBridge:
         widening interval, and stop the moment he answers. His phone is never
         silenced, which is the one weakness of doing it this way.
         """
+        from delivery import URGENT, _in_quiet_hours, delivery
         chat = config.get("remote", "telegram_chat_id", default=None)
-        for wait in (300, 300, 600):               # 5 min, 5 min, 10 min
+        # ONE follow-up at night, three by day. The chase is deliberate and he
+        # asked for it, but it reaches a phone beside a sleeping man: three
+        # repeats per alert, times however many alerts fire, is how a safety
+        # feature turns into the thing he switches off.
+        waits = (600,) if _in_quiet_hours() else (300, 300, 600)
+        for wait in waits:
             await asyncio.sleep(wait)
             item = self._urgent.get(token)
             if not item:
                 log.info("telegram chase %s stopping - he acknowledged it", token)
                 return                              # acknowledged, or replied to
+            # A chase is a message on his phone like any other, so it answers to
+            # the same hourly ceiling. Without this the cap counted only the
+            # FIRST send of each alert and quietly permitted four times as many.
+            if not delivery.has_budget(URGENT):
+                log.warning("telegram chase %s stopping - the hourly message "
+                            "budget is spent", token)
+                break
             item["sent"] += 1
             await self._api(
                 "sendMessage", chat_id=chat,
                 text=f"Still unanswered, sir — {item['text']}",
                 reply_markup={"inline_keyboard": [[
                     {"text": "Got it", "callback_data": f"ack:{token}"}]]})
+            delivery.note_sent()
         if self._urgent.pop(token, None):
             log.info("telegram chase %s giving up - never acknowledged", token)
 

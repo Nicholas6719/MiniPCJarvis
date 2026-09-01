@@ -102,6 +102,18 @@ class Briefing:
         from config import DB_PATH
         return DB_PATH.parent / "briefing_state.json"
 
+    # The same 400 that is written to disk, applied in memory too. Without it
+    # this dict grew for as long as JARVIS stayed up: every headline judged, all
+    # day, kept forever, while only the newest 400 were ever persisted. Small,
+    # but it is a leak, and the cap already existed one line away.
+    _SEEN_MAX = 400
+
+    def _remember_seen(self, key: str) -> None:
+        self._seen[key] = time.time()
+        if len(self._seen) > self._SEEN_MAX * 2:
+            keep = sorted(self._seen.items(), key=lambda kv: kv[1])[-self._SEEN_MAX:]
+            self._seen = dict(keep)
+
     def _load_state(self, key: str, as_dict: bool = False):
         try:
             import json
@@ -291,7 +303,7 @@ class Briefing:
             # asked WITHIN a single sweep, never across them.
             if key in self._seen or self._seen_before(head):
                 continue
-            self._seen[key] = time.time()
+            self._remember_seen(key)
             if tier in (ALERT, URGENT):
                 # Read the piece and say what happened. He asked for exactly
                 # this: "is Jarvis reading through these like news articles and
@@ -451,7 +463,7 @@ class Briefing:
                 key = f"move:{row['symbol']}:{_now():%Y-%m-%d}"
                 if tier == NONE or key in self._seen:
                     continue
-                self._seen[key] = time.time()
+                self._remember_seen(key)
                 from analyst import display_name
                 name = display_name(row.get("symbol"), row.get("name"))
                 pct = abs(row.get("percent") or 0)
@@ -470,7 +482,7 @@ class Briefing:
                                           percent=m.get("percent") or 0, is_index=True)
                 key = f"index:{m['symbol']}:{_now():%Y-%m-%d}"
                 if tier in (ALERT, URGENT) and key not in self._seen:
-                    self._seen[key] = time.time()
+                    self._remember_seen(key)
                     pct = m.get("percent") or 0
                     way = "up" if pct >= 0 else "down"
                     out.append((f"{m['name']} is {way} {abs(pct):.2f}% today.",

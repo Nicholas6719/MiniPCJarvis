@@ -72,9 +72,31 @@ _background: set = set()
 
 
 def spawn(coro, name: str | None = None):
-    """create_task that cannot be collected before it finishes."""
+    """create_task that cannot be collected before it finishes, and that SAYS
+    so when it fails.
+
+    The reference-keeping above solved work vanishing silently. The exception
+    did not: `add_done_callback(_background.discard)` drops the task without
+    ever reading `task.exception()`, so a background job that raised was
+    reported only by asyncio's own late "exception was never retrieved" notice
+    at garbage-collection time, if at all — under a frozen build, usually not.
+    Every one of the failures that has cost him a working assistant was
+    invisible before it was expensive. A crashed background task should be one
+    line in the log, immediately, with its name on it.
+    """
     import asyncio
     task = asyncio.create_task(coro, name=name)
     _background.add(task)
-    task.add_done_callback(_background.discard)
+
+    def _done(t: "asyncio.Task") -> None:
+        _background.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            import logging
+            logging.getLogger("jarvis.events").error(
+                "background task %r failed", t.get_name(), exc_info=exc)
+
+    task.add_done_callback(_done)
     return task

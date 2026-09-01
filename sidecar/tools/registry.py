@@ -15,6 +15,50 @@ from events import bus
 
 log = logging.getLogger("jarvis.tools")
 
+# Sync tool handlers get their OWN threads, separate from everything else.
+#
+# `asyncio.to_thread` uses the interpreter's default executor, which on this
+# machine is 20 threads — and 61 call sites share it, including speech-to-text,
+# text-to-speech, the embedding calls on the turn path, and the brain. Tool
+# handlers are the dangerous tenants: Windows UI Automation blocks on an
+# unresponsive app, a subprocess can hang, a browser call can sit forever. And
+# `wait_for` cancels the FUTURE, never the thread — a timed-out tool keeps its
+# thread for the life of the process.
+#
+# Sharing one pool meant enough wedged tools would starve the turn path itself,
+# leaving JARVIS unable to hear, think or speak. He has already lived through
+# "answers nothing" twice; it must not be reachable from a stuck tool.
+# Bounded and separate, so a wedged tool costs him tools and nothing else.
+_TOOL_THREADS = 8
+_tool_pool = None
+
+
+def _tool_executor():
+    global _tool_pool
+    if _tool_pool is None:
+        import concurrent.futures as cf
+        _tool_pool = cf.ThreadPoolExecutor(
+            max_workers=_TOOL_THREADS, thread_name_prefix="jarvis-tool")
+    return _tool_pool
+
+
+def _run_in_tool_pool(handler, args: dict):
+    """Run a sync handler off the loop, on the tool pool, preserving context.
+
+    `to_thread` copies the current context; `run_in_executor` does not, so it is
+    copied explicitly here rather than silently changing what handlers see.
+    """
+    import contextvars
+    import functools
+    ctx = contextvars.copy_context()
+    call = functools.partial(ctx.run, functools.partial(handler, **args))
+    busy = len(getattr(_tool_executor(), "_threads", ()) or ())
+    if busy >= _TOOL_THREADS:
+        log.warning("tool pool is saturated (%d/%d threads) — a handler is "
+                    "probably wedged; speech and thinking are unaffected",
+                    busy, _TOOL_THREADS)
+    return asyncio.get_running_loop().run_in_executor(_tool_executor(), call)
+
 
 class Risk(str, enum.Enum):
     SAFE = "safe"        # read-only, no side effects
@@ -163,7 +207,7 @@ class ToolRegistry:
                 result = await asyncio.wait_for(tool.handler(**args), timeout=tool.timeout)
             else:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(tool.handler, **args), timeout=tool.timeout)
+                    _run_in_tool_pool(tool.handler, args), timeout=tool.timeout)
             ms = int((time.time() - t0) * 1000)
             await bus.emit("tool_call", call_id=call_id, tool=name,
                            status="success", latency_ms=ms, result=_truncate(result))

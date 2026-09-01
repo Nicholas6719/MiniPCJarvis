@@ -32,6 +32,8 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_audio_io.py || (echo AUDIO IO TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audio_deaf_output.py || (echo AUDIO DEAF OUTPUT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_speech_pipeline.py || (echo SPEECH PIPELINE TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_isolation.py || (echo ISOLATION TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_chase_budget.py || (echo CHASE BUDGET TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_linkguard.py || (echo LINKGUARD TEST FAILED & exit /b 1)
 

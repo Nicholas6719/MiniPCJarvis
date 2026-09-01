@@ -138,16 +138,44 @@ class Delivery:
         gap = float(config.get("proactive", "repeat_cooldown_minutes", default=45)) * 60
         if tier == URGENT:
             gap = float(config.get("proactive", "urgent_repeat_minutes", default=10)) * 60
+        # Prune first. Before today the keys here were a handful of named ones
+        # ("story-1", "market-NVDA"); now an unnamed caller gets a key derived
+        # from its message text, so every distinct thing JARVIS ever says on his
+        # own initiative would add an entry that never left. Anything older than
+        # the longest window this function can enforce cannot affect a decision,
+        # so it is simply gone.
+        now = time.time()
+        if len(self._last) > 512:
+            cutoff = now - max(gap, 3600.0)
+            self._last = {k: v for k, v in self._last.items() if v[0] >= cutoff}
+
         when, last_tier = self._last.get(key, (0.0, BRIEF))
         # An ESCALATION is not a repeat. A story he was told about as an alert
         # that has since become urgent must reach him now, not in ten minutes —
         # this is the difference between "the same message again" and "this got
         # worse". Only a message at the same tier or lower waits.
         escalating = _TIERS.index(tier) > _TIERS.index(last_tier)
-        if not escalating and time.time() - when < gap:
+        if not escalating and now - when < gap:
             return True
-        self._last[key] = (time.time(), tier)
+        self._last[key] = (now, tier)
         return False
+
+    def note_sent(self) -> None:
+        """Record a message that reached him by a route outside `deliver()`.
+
+        The urgent chase in remote_telegram sends straight through the Telegram
+        API, so until now its follow-ups were invisible to the ceiling below: a
+        cap of 12 an hour really meant up to 48, because every alert could carry
+        three chases behind it. They reach his phone, so they count.
+        """
+        self._sent.append(time.time())
+
+    def has_budget(self, tier: str = ALERT) -> bool:
+        """Whether another message may reach him right now. Never raises."""
+        try:
+            return not self._over_budget(tier)
+        except Exception:
+            return True         # unknown is treated as allowed: never mute him by accident
 
     def _over_budget(self, tier: str) -> bool:
         """The backstop: a hard ceiling on unprompted messages per hour.
