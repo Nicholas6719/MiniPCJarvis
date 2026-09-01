@@ -1299,6 +1299,49 @@ Measured live on the shipped bundle: `count_fingers` 0.53 s, `look` 0.71 s,
 face" while seated to enroll, then "can you see me" should answer *"I can see
 you, sir"*; and hold up fingers to check the count against reality.
 
+## 2026-09-01 (later) — he asked JARVIS who he was and was told "user"
+
+**JARVIS_PERSONA.md was loaded by NOTHING.** 274 careful lines that no code path
+had ever read, while the persona actually shipping lived in a hardcoded string in
+`llm/prompts.py`. They had drifted into contradiction: the document said "sir"
+should be rare and optional, the running system says it at the measured film rate
+of 37%, which is what he wants. Nobody noticed because nothing could notice. The
+document is the spec now, its behaviour-bearing parts compile into the prompt,
+and `tests/test_persona_sync.py` fails the build if they disagree.
+
+**Naming him in the prompt was not the fix.** It corrected "who do you work for"
+and did nothing for "who am i" — that question never reached the model, matching
+the memory RECALL skill at cosine 1.000 and coming back as a list of stored
+notes. Second time this shape has bitten in one day (see "remember my face"): a
+prompt cannot answer what the router already answered. "who am i" is a reflex
+now; recall keeps "what do you know about me"; both gated together.
+
+**Most of what it "knew" about him was false**, and it was being injected into
+every turn as context. He struck it himself: no Regina, no black coffee, no desk
+lamp, two conflicting favourite-colour rows, plus octopus trivia and a stale
+session note filed as personal facts. Twelve memories down to two, backed up
+first. A cached research answer claiming the Ryzen 7 8845HS supports ECC was also
+wrong — AMD validates ECC on the **PRO** variant only — and deleted, which
+self-heals because the facts table re-researches what it does not hold.
+His towns are Framingham and **Sudbury** (not Natick), the colour is blue, quiet
+hours end **05:30**, and he follows the market broadly, not five tickers.
+
+**The camera lag he reported had three causes**, found by probing rather than
+reasoning (`.agent/scripts/camlag.py`, `fpsprobe.py`):
+1. The loop read one frame then slept to pace 15 fps while the device delivers
+   30, so declined frames QUEUED — three deep, ~100 ms — and every read returned
+   the oldest. It consumes every frame with `grab()` now (device wait, not CPU).
+2. The stream slept on its own clock and could re-send a frame the HUD already
+   had. It blocks on a condition variable until a genuinely new frame exists.
+3. My own fix then drifted to 10 fps: a deadline of "now + 66.7 ms" set from the
+   frame just encoded lands a hair after the next device frame on a 33.3 ms grid.
+   A stride by COUNT cannot drift.
+
+**The camera ignores every mode request** — asking 1280x720@60 returns 1080p30 —
+so 60 fps is not available at any resolution. 30 is the ceiling and is now the
+target: 7.9 ms per frame all in (decode 4.9 + encode 3.0), 238 ms of each second,
+~24% of ONE core of sixteen, 3.6 MB/s over loopback.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

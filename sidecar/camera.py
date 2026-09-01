@@ -58,7 +58,19 @@ def _presence_status() -> dict:
 # So: take what the camera gives. Phase 2 will downscale to about 320x240 for
 # face detection, because THAT is where resolution genuinely costs something.
 WIDTH, HEIGHT = 1920, 1080
-TARGET_FPS = 15.0          # a face and a room; this is not a video call
+# 30 fps, which is everything this camera has. He asked why the preview was not
+# 30, or 60. The 15 was a guess — "a face and a room; this is not a video call" —
+# made before any of this was measured, and half of every frame the device
+# produced was being thrown away for no benefit he could see.
+#
+# Probed (.agent/scripts/fpsprobe.py): the camera IGNORES every mode request and
+# returns 1920x1080 at 30 fps regardless — asking for 1280x720@60 still gives
+# back 1080p30 — so 60 is not on offer at any resolution. At 30 fps the whole
+# per-frame cost is decode 4.9 ms + encode 3.0 ms = 7.9 ms, i.e. 238 ms of one
+# second, about 24% of ONE core of sixteen, and 3.6 MB/s over loopback. That is
+# affordable, and it halves the interval between frames from 67 ms to 33 ms,
+# which is latency as well as smoothness.
+TARGET_FPS = 30.0
 JPEG_QUALITY = 75          # ~116 KB/frame, 1.7 MB/s over loopback
 OPEN_TIMEOUT_S = 6.0       # a camera that will not open must not hang the turn
 
