@@ -80,6 +80,19 @@ async def lifespan(app: FastAPI):
                            description="test-only confirmation-gated no-op",
                            parameters={"type": "object", "properties": {}, "required": []},
                            risk=Risk.MEDIUM, handler=_debug_confirm))
+
+        async def _debug_confirm_high() -> dict:
+            return {"ok": True, "did": "nothing (high-risk test)"}
+        # A HIGH-risk no-op, so phase 4's face gate can be proved END TO END on
+        # the real install without driving a genuinely destructive tool. The only
+        # HIGH-risk tools that exist empty the recycle bin or cut the power, and
+        # neither is an acceptable way to test a security property: if the check
+        # ever wrongly PASSES, the test itself does the damage it was meant to
+        # prevent. Debug-only, so it never ships as a capability.
+        _reg.register(Tool(name="_debug_confirm_high",
+                           description="test-only HIGH-risk no-op (face-gate verification)",
+                           parameters={"type": "object", "properties": {}, "required": []},
+                           risk=Risk.HIGH, handler=_debug_confirm_high))
     # Everything JARVIS says on his own initiative goes through delivery, which
     # decides where he is and therefore whether to speak it or send it.
     from delivery import ALERT, delivery

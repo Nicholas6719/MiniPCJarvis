@@ -131,8 +131,16 @@ def parse_slicer_output(text: str, gcode: Path | None = None) -> dict:
     blob = text or ""
     if gcode and gcode.exists():
         try:
+            # 8 KB was not enough and produced a WRONG answer rather than a
+            # missing one: PrusaSlicer writes the estimates and then dumps its
+            # entire configuration after them — 353 lines for a cube — so the
+            # last 8 KB lands inside the alphabetical settings block and the
+            # numbers sit just above it. Measured on a real slice: the estimates
+            # were at line 6061 of 6414. Read the last 512 KB, which covers any
+            # plausible config dump, and the whole file when it is smaller.
+            size = gcode.stat().st_size
             with open(gcode, "r", encoding="utf-8", errors="replace") as fh:
-                fh.seek(max(0, gcode.stat().st_size - 8192))
+                fh.seek(max(0, size - 512 * 1024))
                 blob += "\n" + fh.read()
         except OSError:
             log.debug("could not read the gcode footer", exc_info=True)

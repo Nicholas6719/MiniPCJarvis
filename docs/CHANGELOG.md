@@ -54,6 +54,12 @@
   `consider()` caches its verdict for two seconds and a confirmation asks about now.
 - Registered LOW, not SAFE: it can turn the webcam on, and the tier must describe
   what the handler does.
+- **Verified end to end on the real install**: a HIGH-risk tool was given a
+  spoken YES and refused anyway — denial detail "nobody is at the camera" — while
+  MEDIUM ran untouched. Driven against `_debug_confirm_high`, a HIGH-risk no-op
+  that exists only under JARVIS_DEBUG, because the real HIGH-risk tools empty the
+  recycle bin or cut the power and a security test must not be able to do the
+  damage it exists to prevent.
 
 ### Phase 5 — fabrication scaffold
 - `generate_part` (OpenSCAD -> STL), `slice_part` (PrusaSlicer -> G-code with real
@@ -62,8 +68,15 @@
 - Ships a generic 0.4 mm FDM profile, bundled in the spec and looked up under
   `sys._MEIPASS` first, or the frozen build would silently slice with the
   slicer's own defaults.
-- **Neither binary is installed on this machine, so those cases SKIP loudly.**
-  Phase 5's gate has not been fully exercised and the build log says so.
+- OpenSCAD 2021.01 and PrusaSlicer 2.9.6 installed as the official PORTABLE
+  builds under `C:\AI` (the winget packages demand admin and a scheduled task
+  cannot answer a UAC prompt). The gate now renders a real STL and slices it:
+  **17m 8s, 3.73 g, 1249.41 mm** for a 20 mm cube. Zero skips.
+- Closing the skip immediately found a bug it had hidden: the estimate parser
+  read the last 8 KB of the G-code, but PrusaSlicer writes its estimates and
+  THEN dumps its whole configuration after them — 353 lines for a cube — so the
+  numbers sat just out of reach. Every offline test passed because captured
+  output put them at the end. Reads the last 512 KB now.
 
 ### Adjusted from the handoff after reading the repo
 - `tools/weather.py` already existed (Open-Meteo, keyless) — extended, not created.

@@ -113,20 +113,41 @@ async def main() -> int:
         check("...and it is a 0.4 mm FDM profile", "nozzle_diameter = 0.4" in body)
         check("...with a layer height", "layer_height" in body)
 
-    # ------------------------------------------------- the part that cannot run
+    # --------------------------------------- the binaries, for real if present
+    # The SCAD source is written HERE rather than asked of the model: this gate
+    # runs offline and llama-server belongs to the running app. What is being
+    # tested is the two binaries and the estimate parsing, not the model's
+    # OpenSCAD — that path is exercised live through /debug/tool instead.
     scad, slicer = F.openscad_path(), F.slicer_path()
     if not scad:
-        skip("generate a real part", "OpenSCAD is not installed on this machine")
+        skip("render a real STL", "OpenSCAD is not installed on this machine")
         res = await F.generate_part("a 20 mm cube")
         check("...and the tool says so instead of failing obscurely",
               res.get("unavailable") is True, res)
     else:
-        res = await F.generate_part("a 20 mm cube", name="test-cube")
-        check("a cube is generated", res.get("stl") and os.path.exists(res["stl"]), res)
+        wd = F.work_dir()
+        src = wd / "gate-cube.scad"
+        src.write_text("cube([20,20,20]);", encoding="utf-8")
+        stl = wd / "gate-cube.stl"
+        rc, out, err = await F._run([scad, "-o", str(stl), str(src)], 120)
+        check("OpenSCAD renders a real STL", rc == 0 and stl.exists(),
+              f"rc={rc} {err[:120]}")
+
+        if not slicer:
+            skip("slice it and read a real estimate",
+                 "PrusaSlicer is not installed on this machine")
+        elif stl.exists():
+            res = await F.slice_part(str(stl))
+            check("PrusaSlicer produces G-code", res.get("gcode"), res)
+            # THE point of phase 5: a real number, from the real slicer.
+            check("...and a real print-time estimate comes back",
+                  bool(res.get("print_time")), res)
+            check("...and a real filament estimate",
+                  isinstance(res.get("filament_g"), float) and res["filament_g"] > 0, res)
+            check("...with no 'no estimate' warning",
+                  not res.get("warning"), res)
 
     if not slicer:
-        skip("slice a real part and read a real estimate",
-             "PrusaSlicer is not installed on this machine")
         res = await F.slice_part(os.path.join(d, "notmesh.txt"))
         check("...and slicing reports the missing binary honestly",
               res.get("error") is not None, res)

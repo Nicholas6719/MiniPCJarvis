@@ -107,9 +107,13 @@ DEFAULTS: dict[str, Any] = {
     # not exist. Neither is installed on this machine today, so fabrication's
     # gate SKIPS rather than passes — a green tick for a tool that never ran
     # would be worse than an honest skip.
+    # Portable builds under C:\AI, the same convention llm.server_binary uses.
+    # The winget installers both demand administrator elevation and a scheduled
+    # task cannot answer a UAC prompt, so the official portable releases were
+    # unpacked here instead — same publishers, same versions, no installer.
     "fabrication": {
-        "openscad_binary": r"C:\Program Files\OpenSCAD\openscad.exe",
-        "prusaslicer_binary": r"C:\Program Files\Prusa3D\PrusaSlicer\prusa-slicer-console.exe",
+        "openscad_binary": r"C:\AI\OpenSCAD\openscad.exe",
+        "prusaslicer_binary": r"C:\AI\PrusaSlicer\prusa-slicer-console.exe",
         "work_dir": "",            # "" = %APPDATA%\JARVIS\fabrication
         "slicer_profile": "",      # "" = the bundled generic 0.4 mm FDM profile
     },
