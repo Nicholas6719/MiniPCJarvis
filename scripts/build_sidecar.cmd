@@ -10,6 +10,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_persona_sync.py || (echo PERSONA SYNC FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_facts.py || (echo FACTS TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_remote.py || (echo REMOTE TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_input.py || (echo INPUT TEST FAILED & exit /b 1)

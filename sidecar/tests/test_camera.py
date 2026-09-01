@@ -57,6 +57,18 @@ class FakeCap:
         time.sleep(0.005)
         return True, np.zeros((16, 16, 3), dtype=np.uint8)
 
+    # The capture loop drives the device as grab() + retrieve() so that every
+    # frame the camera produces is consumed and none can queue up behind us —
+    # the queue was ~100 ms of the lag he saw on his own face. The fake has to
+    # model that split, or the test proves nothing about the real loop.
+    def grab(self):
+        time.sleep(0.005)
+        return not self._refuse
+
+    def retrieve(self):
+        import numpy as np
+        return True, np.zeros((16, 16, 3), dtype=np.uint8)
+
     def release(self):
         FakeCap.released += 1
 
@@ -127,6 +139,49 @@ def main() -> int:
     check("a camera that will not open reports it", res.get("ok") is False, res)
     check("...quickly, rather than hanging the turn", took < 8.0, f"{took:.1f}s")
     check("...and leaves nothing running", bad.is_on is False)
+
+    # --- the preview must not run behind the world --------------------------
+    # He watched his own face in the HUD and it trailed him. Two causes, both
+    # gated here: the capture loop declined frames the device had already made
+    # (which then queued, ~100 ms measured), and the HTTP stream slept on its
+    # own clock and could re-send a frame the HUD already had.
+    import threading as _t
+
+    fresh = cammod.Camera()
+    check("a new camera hands out nothing and waits",
+          fresh.frame_after(-1, timeout=0.05)[0] is None)
+
+    seq_seen = []
+
+    def consumer():
+        s = -1
+        for _ in range(3):
+            data, s = fresh.frame_after(s, timeout=2.0)
+            seq_seen.append((data, s))
+
+    th = _t.Thread(target=consumer, daemon=True)
+    th.start()
+    time.sleep(0.05)
+    for i in range(3):
+        with fresh._new:
+            fresh._frame = f"jpeg{i}".encode()
+            fresh._seq += 1
+            fresh._new.notify_all()
+        time.sleep(0.05)
+    th.join(timeout=3.0)
+
+    check("the stream is woken by each new frame", len(seq_seen) == 3,
+          f"got {len(seq_seen)}")
+    got = [s for _d, s in seq_seen]
+    check("...and never handed the same frame twice",
+          len(set(got)) == len(got), got)
+    check("...in order, newest last", got == sorted(got), got)
+
+    t0 = time.time()
+    fresh.frame_after(fresh._seq, timeout=0.2)
+    waited = time.time() - t0
+    check("waiting for a frame that never comes times out, never hangs",
+          0.15 < waited < 1.0, f"{waited:.2f}s")
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

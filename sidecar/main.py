@@ -1003,26 +1003,30 @@ async def camera_stream(token: str = "", x_jarvis_token: str | None = Header(Non
 
     from fastapi.responses import StreamingResponse
 
-    from camera import TARGET_FPS, camera
+    from camera import camera
 
     async def frames():
         # The stream NEVER turns the camera on by itself. He said "toggle camera
         # view mode"; a page that opened the device merely by being rendered
         # would be a camera he did not ask for.
-        blank = 0
+        #
+        # It WAITS for each new frame rather than sleeping on its own clock.
+        # Sleeping added up to another 1/15 s of lag on top of the capture path
+        # and could re-send a frame the HUD already had — half of why his face
+        # trailed him on screen. frame_after blocks in a thread so the event
+        # loop, where he waits for answers, is never held.
+        blank, seq = 0, -1
         while camera.is_on:
-            data = camera.frame()
+            data, seq = await _a.to_thread(camera.frame_after, seq, 1.0)
             if data is None:
                 blank += 1
-                if blank > int(TARGET_FPS * 10):     # ~10 s with nothing at all
+                if blank > 10:                       # ~10 s with nothing at all
                     break
-                await _a.sleep(1.0 / TARGET_FPS)
                 continue
             blank = 0
             yield (b"--frame\r\nContent-Type: image/jpeg\r\n"
                    b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
                    + data + b"\r\n")
-            await _a.sleep(1.0 / TARGET_FPS)
 
     return StreamingResponse(
         frames(), media_type="multipart/x-mixed-replace; boundary=frame",

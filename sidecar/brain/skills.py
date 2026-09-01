@@ -884,6 +884,21 @@ def say_time(_: dict, __: dict) -> str:
     return "It's " + dt.datetime.now().strftime("%I:%M %p").lstrip("0") + "."
 
 
+def say_who_am_i(_: dict, __: dict) -> str:
+    """He asked JARVIS who he was and was told "user".
+
+    Naming him in the system prompt fixed "who do you work for" but not this,
+    because "who am i" never reaches the model at all: it matched the memory
+    RECALL skill at cosine 1.000 and came back as a list of stored notes. The
+    prompt cannot answer a question the router already answered.
+
+    So this is a reflex, like the time. It is also instant, which is right —
+    a man's own name should not cost a language-model round trip. The honorific
+    is added centrally at his measured rate; it is not written in here.
+    """
+    return "You're Nicholas."
+
+
 def say_date(_: dict, __: dict) -> str:
     d = dt.datetime.now()
     suf = "th" if 11 <= d.day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(d.day % 10, "th")
@@ -1346,6 +1361,14 @@ SKILLS: list[Skill] = [
         "says who", "where did that come from", "what is your source for that",
         "how do you know this", "who told you that", "can you cite that"],
         speak=say_provenance),
+    # Who he is, answered instantly and identically every time. Kept clear of
+    # the recall skill's territory: "what do you know about me" is a request to
+    # read the memory back and stays with recall; these ask for his NAME.
+    Skill("whoami", None, [
+        "who am i", "what is my name", "what's my name", "do you know who i am",
+        "do you know my name", "say my name", "who do you think i am",
+        "tell me my name", "who are you talking to"],
+        speak=say_who_am_i),
     Skill("time", None, [
         "what time is it", "what's the time", "tell me the time", "do you have the time",
         "current time", "time check", "what time is it right now", "got the time",

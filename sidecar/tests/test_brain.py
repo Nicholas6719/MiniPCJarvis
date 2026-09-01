@@ -124,6 +124,14 @@ CASES = [
     # enrollment, not a stored fact — and it must reach a skill, not silence
     ("remember my face", "face_learn"), ("learn my face", "face_learn"),
     ("remember that i park in the north garage", "remember"),
+    # He asked JARVIS who he was and was told "user". Naming him in the system
+    # prompt was not enough: "who am i" matched the memory RECALL skill at 1.000
+    # and never reached the model at all. Both sides are gated, because the fix
+    # must not swallow a genuine request to read his memory back.
+    ("who am i", "whoami"), ("what is my name", "whoami"),
+    ("do you know who i am", "whoami"),
+    ("what do you know about me", "recall"),
+    ("what did i tell you about my car", "recall"),
 ]
 
 async def main() -> int:

@@ -133,10 +133,12 @@ DEFAULTS: dict[str, Any] = {
         "watch_minutes": 10,         # the market sweep
         "alert_max_age_minutes": 180,
         # A digest at 22:00 is an intrusion; one at 07:30 is his morning. This
-        # is deliberately NOT the proactive window (which ends at 08:00) — the
-        # first brief of the day is at 07:30 and must not be suppressed by it.
+        # is deliberately NOT the proactive window — the first brief of the day
+        # is at 07:30 and must not be suppressed by it.
+        # 05:30 end is his call (2026-09-01): he is up before the first brief and
+        # wants an emergency to be able to reach him then.
         "quiet_start": "22:00",
-        "quiet_end": "07:00",
+        "quiet_end": "05:30",
         # "local" | "national". He asked for local-only on 2026-08-30 after a day
         # of the alternative: a California wildfire and a Grand Canyon flood both
         # reached his phone and neither was his business. The alerting itself is
@@ -153,7 +155,9 @@ DEFAULTS: dict[str, Any] = {
         "local_topics": ["local", "towns"],
         # Extra named searches. Kept small on purpose: these come back with
         # news.google.com redirect links, which cannot be fetched or opened.
-        "local_places": ["Framingham MA", "Natick MA"],
+        # The two towns he names as his own ground (corrected 2026-09-01: Natick
+        # was never his, Sudbury is).
+        "local_places": ["Framingham MA", "Sudbury MA"],
     },
     "markets": {
         # The names he actually holds or follows. They do NOT narrow what he
@@ -187,8 +191,14 @@ DEFAULTS: dict[str, Any] = {
     "mcp": {"servers": {}},
     "proactive": {
         "enabled": True,
+        # 05:30 end is his call (2026-09-01), same as the briefing window.
+        # SIDE EFFECT worth knowing: night_school trains only while he is asleep
+        # AND inside this window, so its nightly run now ends at 05:30 instead of
+        # 08:00 — two and a half hours less training. If that matters more than
+        # the earlier start, give night_school its own window rather than
+        # widening this one back.
         "quiet_start": "22:00",
-        "quiet_end": "08:00",
+        "quiet_end": "05:30",
         "max_per_hour": 2,
         "disk_free_gb_warn": 50,
         "ram_percent_warn": 94,

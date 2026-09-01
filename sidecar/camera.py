@@ -70,6 +70,10 @@ class Camera:
         self._stop = threading.Event()
         self._frame: bytes | None = None          # newest JPEG, and only the newest
         self._lock = threading.Lock()
+        # Bumped every time a new JPEG lands, so the HTTP stream can WAIT for a
+        # frame instead of sleeping on its own clock and re-sending stale ones.
+        self._seq = 0
+        self._new = threading.Condition(self._lock)
         self._started_at = 0.0
         self._frames = 0
         self._error: str | None = None
@@ -198,19 +202,49 @@ class Camera:
         except Exception:
             log.debug("vision model preload failed", exc_info=True)
         params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
-        period = 1.0 / TARGET_FPS
         misses = 0
+        # LATENCY, measured rather than assumed. He watched his own face in the
+        # HUD and it trailed him. The old loop did read() then slept to pace 15
+        # fps — but the device delivers 30, so the frames we declined to take
+        # QUEUED: a probe found three of them waiting (~100 ms) after any pause,
+        # and every read() then handed back the oldest of them. The preview ran a
+        # fixed distance behind the world and stayed there.
+        #
+        # Now the loop consumes EVERY frame the device produces, so nothing can
+        # accumulate, and only decodes/encodes on the 15 fps beat. grab() does
+        # not decode — it is the device wait, not work — so this costs no extra
+        # CPU, which matters because the LLM needs those cores.
+        # Keep every Nth frame by COUNT, not by clock. A deadline of "now +
+        # 66.7 ms" set from the frame just encoded lands a hair after the next
+        # device frame on a 33.3 ms grid, so that one is missed and the one
+        # after it is taken: a measured 10 fps against a 15 fps target, drifting
+        # by construction. A stride cannot drift.
+        src_fps = 0.0
+        try:
+            src_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        except Exception:
+            pass
+        if not (1.0 <= src_fps <= 240.0):
+            src_fps = 30.0                          # what this camera reports
+        stride = max(1, int(round(src_fps / TARGET_FPS)))
+        log.info("camera: %.0f fps device, keeping 1 in %d -> %.1f fps preview",
+                 src_fps, stride, src_fps / stride)
+        n = -1
         try:
             while not self._stop.is_set():
-                t0 = time.time()
-                ok, frame = cap.read()
-                if not ok or frame is None:
+                if not cap.grab():                 # blocks ~33 ms on a 30 fps cam
                     misses += 1
                     if misses >= 30:
                         self._error = "the camera stopped delivering frames"
                         log.warning("camera: %s", self._error)
                         break
                     time.sleep(0.05)
+                    continue
+                n += 1
+                if n % stride:
+                    continue                       # frame consumed, deliberately not kept
+                ok, frame = cap.retrieve()
+                if not ok or frame is None:
                     continue
                 misses = 0
                 # Presence looks at roughly one frame a second and returns
@@ -222,14 +256,12 @@ class Camera:
                     log.debug("presence pass failed", exc_info=True)
                 ok, buf = cv2.imencode(".jpg", frame, params)
                 if ok:
-                    with self._lock:
-                        self._frame = buf.tobytes()   # only ever the newest
+                    data = buf.tobytes()
+                    with self._new:                # the lock, plus a wake-up
+                        self._frame = data         # only ever the newest
+                        self._seq += 1
+                        self._new.notify_all()
                     self._frames += 1
-                # Pace to TARGET_FPS rather than spinning as fast as the device
-                # will go; the LLM needs those cores more than the HUD does.
-                rest = period - (time.time() - t0)
-                if rest > 0:
-                    self._stop.wait(rest)
         except Exception:
             self._error = "the capture thread failed"
             log.exception("camera capture thread failed")
@@ -246,6 +278,19 @@ class Camera:
     def frame(self) -> bytes | None:
         with self._lock:
             return self._frame
+
+    def frame_after(self, seq: int, timeout: float = 1.0):
+        """Block until a frame NEWER than `seq` exists. Returns (data, seq).
+
+        The stream used to sleep 1/15 s and take whatever was there, which added
+        up to another frame of lag on top of the capture path and could re-send
+        one it had already sent. Waiting on the condition means the HUD gets each
+        frame the instant it is encoded, and never the same one twice.
+        """
+        with self._new:
+            if self._seq <= seq:
+                self._new.wait(timeout)
+            return self._frame, self._seq
 
 
 camera = Camera()
