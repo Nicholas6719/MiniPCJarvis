@@ -1820,40 +1820,90 @@ class Orchestrator:
         except Exception:
             log.exception("brain learn failed")
 
+    # How far synthesis may run ahead of the speakers. Bounded so a long reply
+    # cannot be synthesized in full into memory, but deep enough that the next
+    # sentence is always ready before the current one stops playing.
+    _SYNTH_LOOKAHEAD = 8
+
     async def _speaker_worker(self, queue: asyncio.Queue) -> None:
-        """Consumes sentences, synthesizes and plays them; watches for barge-in."""
+        """Consumes sentences, synthesizes and plays them; watches for barge-in.
+
+        Synthesis runs AHEAD of playback. It used to be strictly serial —
+        synthesize a sentence, play it, and only then start synthesizing the
+        next — so every sentence boundary in a multi-sentence reply was dead
+        air, about 0.6-0.9 s of it, while Kokoro worked in a silence he was
+        sitting through. A three-sentence answer paid that twice.
+
+        Now a producer fills a bounded audio queue while the consumer plays
+        from it, so the next sentence is already waiting when the current one
+        ends. First-audio latency is unchanged — nothing can be prefetched
+        before the first sentence exists — but the gaps between sentences close.
+        """
         barge_task = asyncio.create_task(self._barge_in_watch())
         spoke = False
         tts.idle.clear()      # hold off the background phrase warm until he has finished
+        # (sentence, chunk, is_first) — is_first marks a sentence boundary for the
+        # consumer, which is where the HUD event and the state change belong.
+        audio_q: asyncio.Queue = asyncio.Queue(maxsize=self._SYNTH_LOOKAHEAD)
+
+        async def produce() -> None:
+            try:
+                while True:
+                    sentence = await queue.get()
+                    if sentence is None:
+                        break
+                    if self._speak_cancel.is_set():
+                        continue
+                    if self.remote_turn:
+                        continue   # remote turn: text goes to the phone, not the speakers
+                    first = True
+                    try:
+                        async for chunk in tts.synthesize_stream(sentence,
+                                                                 self._speak_cancel):
+                            if self._speak_cancel.is_set():
+                                break
+                            await audio_q.put((sentence, chunk, first))
+                            first = False
+                    except Exception:
+                        log.exception("synthesis failed for %r", sentence[:60])
+                    if self._speak_cancel.is_set():
+                        break
+            finally:
+                await audio_q.put(None)          # always release the consumer
+
+        producer = asyncio.create_task(produce())
         try:
             while True:
-                sentence = await queue.get()
-                if sentence is None:
+                item = await audio_q.get()
+                if item is None:
                     break
+                sentence, chunk, first = item
                 if self._speak_cancel.is_set():
-                    continue
-                if self.remote_turn:
-                    continue   # remote turn: text goes to the phone, not the speakers
-                if not spoke or self.sm.state != State.SPEAKING:
-                    await self.sm.to(State.SPEAKING, force=True)
-                    spoke = True
-                await bus.emit("speaking", text=sentence)
-                self._saying_own_name = "jarvis" in sentence.lower()
+                    break
+                if first:
+                    if not spoke or self.sm.state != State.SPEAKING:
+                        await self.sm.to(State.SPEAKING, force=True)
+                        spoke = True
+                    await bus.emit("speaking", text=sentence)
+                    self._saying_own_name = "jarvis" in sentence.lower()
                 try:
-                    async for chunk in tts.synthesize_stream(sentence, self._speak_cancel):
-                        if self._speak_cancel.is_set():
-                            break
-                        self.metrics.mark("first_audio_ms")
-                        await speaker.play_chunk(chunk, tts.sample_rate)
+                    self.metrics.mark("first_audio_ms")
+                    await speaker.play_chunk(chunk, tts.sample_rate)
                 except SpeakerStalled as e:
                     # the device died mid-sentence: say so on screen, drop the rest of
                     # the speech, and let the turn FINISH — silence beats a frozen JARVIS
                     log.error("speech aborted: %s", e)
                     await bus.emit("error", summary=f"audio output stalled: {e}")
                     break
-                if self._speak_cancel.is_set():
-                    break  # interrupted — drop any remaining queued sentences
         finally:
+            producer.cancel()
+            # Drain whatever was synthesized ahead: on a barge-in that audio is
+            # already stale, and leaving it queued would speak it over the next turn.
+            while not audio_q.empty():
+                try:
+                    audio_q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
             tts.idle.set()
             barge_task.cancel()
             self._saying_own_name = False
