@@ -304,8 +304,15 @@ class TelegramBridge:
                 if spoken:
                     await self._remote_turn(spoken)
                 return
-            if msg.get("photo") or msg.get("document"):
-                await self._send("I can't read attachments yet, sir — say it or type it.")
+            photo = msg.get("photo")
+            if photo:
+                # Telegram sends the same photo at several sizes, smallest first;
+                # the last is the largest and the only one worth looking at.
+                await self._look_at_photo(photo[-1], (msg.get("caption") or "").strip())
+                return
+            if msg.get("document"):
+                await self._send("I can't read documents yet, sir — send it as a photo "
+                                 "if you want me to look at it.")
             return
         if text == "/start":
             await self._send("At your service. Ask me anything you would at the PC.")
@@ -348,6 +355,52 @@ class TelegramBridge:
             # only repeat it
             c["asked"] = True
             spawn(self._send_choice(evt), name="tg-clarify-ask")
+
+    MAX_PHOTO_BYTES = 15_000_000
+
+    async def _look_at_photo(self, photo: dict, caption: str = "") -> None:
+        """A photo he sent, described back to him. Never raises into the poller.
+
+        Downloaded to a temp file and DELETED afterwards. A picture he sent from
+        his phone is not something this program should quietly accumulate on
+        disk — the vision model needs a path, and that is the only reason a copy
+        exists at all.
+        """
+        import os
+        import tempfile
+        size = int(photo.get("file_size") or 0)
+        if size > self.MAX_PHOTO_BYTES:
+            await self._send(f"That photo is {size // 1_000_000} MB, sir — a little "
+                             "large for me to look at.")
+            return
+        meta = await self._api("getFile", file_id=photo.get("file_id"))
+        path = (meta or {}).get("file_path")
+        if not path:
+            await self._send("I couldn't fetch that photo, sir.")
+            return
+        tmp = None
+        try:
+            if self._client is None:
+                self._client = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10))
+            r = await self._client.get(f"{API}/file/bot{self.token}/{path}", timeout=90)
+            r.raise_for_status()
+            suffix = os.path.splitext(path)[1] or ".jpg"
+            fd, tmp = tempfile.mkstemp(prefix="jarvis-tg-", suffix=suffix)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(r.content)
+            from tools.vision_analyze import analyze_object
+            res = await analyze_object(tmp, caption)
+            await self._send(res.get("analysis") or
+                             f"I couldn't make that out, sir — {res.get('error', 'no idea why')}.")
+        except Exception:
+            log.exception("telegram photo analysis failed")
+            await self._send("I couldn't look at that photo, sir.")
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    log.debug("could not remove %s", tmp, exc_info=True)
 
     async def _hear(self, voice: dict) -> str:
         """A voice note, in his own words. Downloads it, decodes it and runs the

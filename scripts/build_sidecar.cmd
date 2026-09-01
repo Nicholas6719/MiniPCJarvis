@@ -12,6 +12,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_volatile.py || (echo VOLATILE FACTS FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_projects.py || (echo PROJECTS FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_location_health.py || (echo LOCATION/HEALTH FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_vision_analyze.py || (echo VISION ANALYZE FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)
