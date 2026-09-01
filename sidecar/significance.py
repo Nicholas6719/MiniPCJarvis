@@ -204,7 +204,7 @@ NATIONAL_WEIGHT = re.compile(
 # lower bar for what interrupts him.
 DISRUPTION = re.compile(
     r"\b(?:power outage|outage|blackout|water main|boil water|no water|"
-    r"road closed|closure|closed|shut down|shutdown|detour|"
+    r"road clos\w+|closure|clos(?:e|es|ed|ing)|shut down|shutdown|detour|"
     r"schools? closed|cancell?ed|suspended|delays?|"
     r"evacuat\w+|shelter|curfew|state of emergency|"
     r"service (?:disruption|change)|no service)\b", re.I)
@@ -379,6 +379,40 @@ INCIDENT = re.compile(
     r"fell from|fall from|shot|stabb\w+|assault\w*|attack\w*|accident)\b", re.I)
 
 
+# More than one person died. A single fatality an hour away is the thing he
+# asked to stop hearing about; a toll is not.
+MULTI_DEATH = re.compile(
+    r"\bdeath toll\b"
+    r"|\b(?:[2-9]|\d{2,})\s+(?:people\s+)?(?:are\s+)?(?:dead|killed|died|feared dead)\b"
+    r"|\b(?:two|three|four|five|six|seven|eight|nine|ten)\s+(?:people\s+)?"
+    r"(?:are\s+)?(?:dead|killed|died)\b", re.I)
+
+# Weather that HAZARD does not name but that is still moving while he reads it.
+WEATHER_EVENT = re.compile(
+    r"\b(?:flood\w*|blizzard|ice storm|nor'?easter|snowstorm|storm surge|"
+    r"heat wave|landslide|mudslide|avalanche)\b", re.I)
+
+
+def _ongoing(text: str) -> bool:
+    """Is this still happening, or is it over?
+
+    The distinction that decides whether a serious thing an hour away is his
+    emergency or his news. A gas leak is unfolding and can travel; a suspect at
+    large is unfolding and can move. A drowning that ended at the hospital and a
+    cyclist killed in a collision are finished - terrible, and nothing he can do
+    at nine in the morning.
+    """
+    if HAZARD.search(text) or STILL_ACTIVE.search(text):
+        return True                      # a hazard is unfolding by definition
+    if WEATHER_EVENT.search(text):
+        return True                      # flooding and storms are still moving
+    # More than one person. "Death toll rises to 12 in Massachusetts flooding"
+    # is an emergency however finished it sounds; "one dead after a crash" is
+    # the case this whole rule exists to quieten.
+    return bool(MULTI_DEATH.search(text) or MANY.search(text)
+                or CATASTROPHE.search(text))
+
+
 def _is_obituary(text: str) -> bool:
     """A death that is sad news rather than an unfolding emergency."""
     if INCIDENT.search(text) or HAZARD.search(text) or VIOLENCE.search(
@@ -520,8 +554,15 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
     # That is how an alarm teaches you to ignore it.
     if hazard and near:
         return URGENT, "something dangerous close to home"
-    if danger and near:
-        return ALERT, "violence in the state, but not his town"
+    # Violence in the state, but not his town, and ALREADY OVER. On 2026-09-01
+    # he was sent a drowning in Falmouth and a cyclist killed in Lynn - both
+    # real, both genuinely Massachusetts, both an hour away and finished. His
+    # reply: *"why am I still getting this kind of news?"* The same lesson as
+    # the Brockton shooting: he can do nothing with it, and an alarm he can do
+    # nothing about is an alarm he learns to ignore. Still ongoing is different
+    # - a suspect at large forty minutes away is his business.
+    if danger and near and _ongoing(text):
+        return ALERT, "still happening, and in his state"
     # Distant, but big enough that distance stops mattering. MANY or CATASTROPHE
     # rather than `scale`, which contains the fatality words and so promoted
     # every distant death to something worth waking him for.
@@ -546,8 +587,16 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
             return NOTABLE, "a death, but not an emergency"
         if own_town:
             return URGENT, "somebody died in one of his towns"
-        if near:
-            return ALERT, "somebody died close to home"
+        # A death elsewhere in the state that is already over is news, not an
+        # emergency - see the Falmouth and Lynn cases above. If it is still
+        # unfolding, it still reaches him.
+        if near and _ongoing(text):
+            return ALERT, "a death nearby, and it is still unfolding"
+        # ...or it is over, but it has shut a road or a rail line he uses. That
+        # is not an emergency either - it is something that changes his day,
+        # which is the other reason he wants to be told.
+        if near and DISRUPTION.search(text):
+            return ALERT, "a death nearby, and it has closed something"
         # MANY only, deliberately not `scale` — the scale words INCLUDE the
         # fatality words, so testing them here made every distant death read as
         # a mass casualty event and woke him for a crash in Nebraska.

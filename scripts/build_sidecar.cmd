@@ -30,6 +30,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_newsroom.py || (echo NEWSROOM TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_audio_io.py || (echo AUDIO IO TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_audio_deaf_output.py || (echo AUDIO DEAF OUTPUT TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_linkguard.py || (echo LINKGUARD TEST FAILED & exit /b 1)
 

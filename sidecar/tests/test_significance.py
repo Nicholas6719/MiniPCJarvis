@@ -172,9 +172,16 @@ def main() -> int:
     check("a death in a Mass. home still reaches him",
           tier("Man held without bail after woman found dead in Mass. home")
           in (URGENT, ALERT))
-    check("the MBTA death he was sent is still his news",
+    # SUPERSEDED 2026-09-01. This once asserted the opposite. He was sent a
+    # drowning in Falmouth and a cyclist killed in Lynn on the same morning and
+    # said: *"why am I still getting this kind of news?"* A single death
+    # elsewhere in the state, already over, with nothing shut, is news - it goes
+    # in the brief, it does not interrupt him. Same shape, same answer.
+    check("a concluded death elsewhere in the state waits for the brief",
           tier("Teen dies after fall at Massachusetts Bay Transportation Authority "
-               "train station") in (URGENT, ALERT))
+               "train station") == NONE,
+          tier("Teen dies after fall at Massachusetts Bay Transportation Authority "
+               "train station"))
     check("a Natick fatal crash still wakes him",
           tier("Fatal crash closes Route 9 in Natick") in (URGENT, ALERT))
 
@@ -249,9 +256,14 @@ def main() -> int:
     # --- a death, with no hazard word to announce it ---------------------------
     # "Fatal MBTA rail incident" names no danger at all, and read as ordinary
     # local news until FATALITY existed. Somebody died near his home.
-    check("a fatal incident near home is not a footnote",
-          tier("Fatal MBTA rail incident in Boston") == ALERT,
+    # SUPERSEDED 2026-09-01, same reason as above - but note the pair: the
+    # moment it shuts a line he might be standing on, it is his again.
+    check("a concluded fatal incident in Boston waits for the brief",
+          tier("Fatal MBTA rail incident in Boston") == NONE,
           tier("Fatal MBTA rail incident in Boston"))
+    check("...but the same incident reaches him once it halts service",
+          tier("Fatal MBTA rail incident closes the Framingham line") in (URGENT, ALERT),
+          tier("Fatal MBTA rail incident closes the Framingham line"))
     check("a death in one of his towns wakes him",
           tier("Man dies in Framingham house fire") == URGENT)
     check("many deaths anywhere wake him",
@@ -357,6 +369,32 @@ def main() -> int:
         got, why = classify_news({"headline": real, "_local_feed": True})
         check(f"an incident death still reaches him: {real[:32]!r}",
               got in (URGENT, ALERT), f"{got} ({why})")
+
+    # --- concluded vs ongoing (2026-09-01) -----------------------------------
+    # The two he was actually sent, minutes apart: both real, both his state,
+    # both an hour away, and both finished. *"Why am I still getting this kind
+    # of news?"* An emergency is something he can still act on.
+    for over in ("An 18-year-old man died after being pulled from Jenkins Pond in "
+                 "Falmouth, Massachusetts. He was taken to Falmouth Hospital, "
+                 "where he was pronounced dead",
+                 "Bicyclist dies after colliding with pickup truck in Lynn, Massachusetts",
+                 "Two people shot in Brockton overnight"):
+        got, why = classify_news({"headline": over, "_local_feed": True})
+        check(f"already over, not his town: {over[:32]!r}", got == NONE,
+              f"{got} ({why})")
+
+    # ...and the ones that must still get through, each for its own reason
+    for live, why_it_matters in (
+            ("3 injured in shooting near Lawrence school, no suspect in custody",
+             "the suspect is still out there"),
+            ("Gas leak forces evacuation of Woburn apartment building",
+             "a hazard travels"),
+            ("Death toll rises to 12 in Massachusetts flooding",
+             "more than one person, and the water is still moving"),
+            ("Fatal crash closes Route 9",
+             "it has shut a road he drives")):
+        got, _ = classify_news({"headline": live, "_local_feed": True})
+        check(f"still reaches him ({why_it_matters})", got in (URGENT, ALERT), got)
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1

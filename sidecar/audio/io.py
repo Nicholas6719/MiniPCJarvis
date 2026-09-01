@@ -266,6 +266,13 @@ class Speaker:
 
     silent_until: float = 0.0   # self-test mode: synthesize but don't play (no 3 AM chatter)
 
+    # How long the output is presumed unusable after a write hangs. Long enough
+    # that a whole reply is routed to the phone rather than dribbling out one
+    # stalled chunk at a time; short enough that plugging headphones back in is
+    # noticed within a minute.
+    _DEAF_OUTPUT_S = 60.0
+    _deaf_output_until: float = 0.0
+
     async def play_chunk(self, chunk: np.ndarray, rate: int) -> None:
         """Play one chunk. NEVER blocks the turn forever: PortAudio's write is a
         blocking call, and when the output device disappears mid-sentence (a
@@ -277,6 +284,13 @@ class Speaker:
         if time.time() < self.silent_until:
             await asyncio.sleep(len(chunk) / float(rate) * 0.25)   # keep timing roughly real
             return
+        # A device that just refused to accept audio will refuse the next chunk
+        # too. Without this, every sentence pays the full write budget again to
+        # rediscover the same sleeping monitor - twelve seconds a chunk, with
+        # the turn stalled behind it. Fail immediately instead, so the caller
+        # can fall back to the phone while the speakers are unavailable.
+        if time.time() < self._deaf_output_until:
+            raise SpeakerStalled("the audio output device is not accepting data")
         stream = self._ensure(rate)
 
         def _write() -> None:
@@ -298,8 +312,10 @@ class Speaker:
                 loop.run_in_executor(_writer_executor(), _write), timeout=budget)
         except asyncio.TimeoutError:
             _writer_lost()      # that thread is not coming back
+            self._deaf_output_until = time.time() + self._DEAF_OUTPUT_S
             log.error("audio write hung (%.1fs of audio, %.0fs budget) — output device "
-                      "is not accepting data; aborting and reopening", secs, budget)
+                      "is not accepting data; aborting, and not trying again for %.0fs",
+                      secs, budget, self._DEAF_OUTPUT_S)
             self.abort()          # unblocks the stuck writer thread, closes the stream
             self._stream = None   # next chunk reopens against the CURRENT default device
             self._rate = None

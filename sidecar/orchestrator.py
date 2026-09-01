@@ -44,6 +44,15 @@ from tools.shortlist import shortlist
 
 log = logging.getLogger("jarvis.orchestrator")
 
+
+def _display_off() -> bool:
+    """Is the screen dark? Never raises - unknown is treated as lit."""
+    try:
+        from tools.windows_tools import display_is_off
+        return bool(display_is_off())
+    except Exception:
+        return False
+
 # What the tools actually returned this turn. Nothing else may be linked.
 link_ledger = LinkLedger()
 
@@ -366,7 +375,13 @@ class Orchestrator:
         self._deaf_task = asyncio.create_task(self._deaf_watch())
         asyncio.create_task(self._warm_prompts())
         asyncio.create_task(tts.warm_phrases())
-        if config.get("audio", "boot_sound", default=True):
+        # The boot chime plays through whatever the default output is, and on
+        # this machine that is the monitor's own speakers over DisplayPort. A
+        # sleeping monitor does not accept audio: on 2026-08-31 every restart
+        # stalled here for the full 12-second write budget and burned a writer
+        # thread, 27 times in one day. He could not have heard it anyway - a
+        # dark screen means either he is not there or the panel is asleep.
+        if config.get("audio", "boot_sound", default=True) and not _display_off():
             asyncio.create_task(self.play_sound("boot"))
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
