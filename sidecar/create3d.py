@@ -63,6 +63,10 @@ TIERS = (0, 1, 2, 3, 4)
 # never caught by it.
 MIN_SENSIBLE_MM = 0.5
 
+# The most a reference picture may weigh. Its URL comes from a web search rather
+# than from him, so it needs an upper bound as well as a lower one.
+MAX_REFERENCE_BYTES = 24 * 1024 * 1024
+
 TIER_NOTE_RELIEF = ("the picture as a relief — dark is thick, so hold it up to a "
                     "light and the photograph appears")
 
@@ -456,11 +460,20 @@ async def reference_image(description: str) -> str:
         if not src.startswith(("http://", "https://")):
             continue
         try:
-            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True,
+                                         max_redirects=3) as c:
                 resp = await c.get(src)
-            if resp.status_code != 200 or len(resp.content) < 2048:
+            # A CEILING AS WELL AS A FLOOR. This URL came from a web search, not
+            # from him, and the only bound on it was "at least 2 KB" — a
+            # hundred-megabyte image would have been pulled into memory whole.
+            # 24 MB is far more than any photograph worth reconstructing.
+            if (resp.status_code != 200
+                    or not (2048 <= len(resp.content) <= MAX_REFERENCE_BYTES)):
                 continue
-            ext = ".png" if resp.content[:4] == b"\x89PNG" else ".jpg"
+            head = resp.content[:4]
+            if head != b"\x89PNG" and head[:2] != b"\xff\xd8":
+                continue                      # not a PNG or a JPEG; not a picture
+            ext = ".png" if head == b"\x89PNG" else ".jpg"
             p = d / f"{safe_name(description)}-ref{ext}"
             p.write_bytes(resp.content)
             return str(p)

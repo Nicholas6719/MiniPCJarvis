@@ -79,7 +79,11 @@ async def main() -> int:
         check("the current model is remembered", cur.get("path", "").endswith(".stl"), cur)
         import meshio
         p = meshio.to_payload(cur["path"])
-        check("the payload is a real mesh", len(p["positions"]) == 12 * 9)
+        # base64 float32 rather than a JSON list of numbers — 7.5 MB against
+        # 2.0 MB on a tier-3 mesh, and exact either way.
+        import base64
+        _pos = base64.b64decode(p["positions_b64"])
+        check("the payload is a real mesh", len(_pos) == 12 * 9 * 4, len(_pos))
         check("...with the 12 real edges, not 36", p["edges"] == 12, p["edges"])
 
         seen.clear()

@@ -194,6 +194,10 @@ async def main() -> int:
 
     check("nothing is running to start with", q.busy is False)
     check("...and status says so", q.status()["busy"] is False)
+    check("...and the two agree about the word 'busy'",
+          q.busy == q.status()["busy"],
+          "status() counted a queued job as busy and the property did not, so "
+          "anything waiting on `not busy` stopped waiting before work began")
 
     # A job that is QUEUED but not yet picked up still counts as busy. Reporting
     # "nothing is rendering" one second after he asked for something is a lie he
@@ -203,6 +207,7 @@ async def main() -> int:
         id="x", tier=1, label="the waiting one", run=lambda: {}, estimate_s=5.0))
     s0 = q0.status()
     check("a queued-but-not-started job still reads as busy", s0["busy"] is True, s0)
+    check("...by both names for it", q0.busy is True, q0.busy)
     check("...and says it is about to start", s0.get("starting") is True, s0)
     check("...and names it", s0.get("label") == "the waiting one", s0)
     q0._jobs.clear()
@@ -261,6 +266,29 @@ async def main() -> int:
     check("a job submitted as the queue empties is not stranded", ran2 == [1],
           "the pump did not restart")
 
+    # THE CALIBRATION MUST LEARN THE TIER THAT RAN, not the one predicted. They
+    # usually agree — but a parametric template that fails to build falls through
+    # to the model, and a 27-second run filed under tier 0 would drag its median
+    # from a fifth of a second up to a wait he would then be asked about.
+    qc = RenderQueue()
+    est.record(0, 0.4)
+    before0, before1 = est.measured(0), est.measured(1)
+    # It must take a MEASURABLE moment: `record` correctly refuses a duration of
+    # zero, and an instant lambda finishes inside one clock tick on Windows.
+    def mislabelled():
+        time.sleep(0.05)
+        return {"ok": True, "tier": 1}
+
+    qc.submit(0, "mislabelled", mislabelled)
+    for _ in range(300):
+        if not qc.busy:
+            break
+        await asyncio.sleep(0.02)
+    await asyncio.sleep(0.2)
+    check("a job that reports a different tier calibrates THAT tier",
+          est.measured(1) == before1 + 1 and est.measured(0) == before0,
+          (before0, est.measured(0), before1, est.measured(1)))
+
     # ---------------------------------------------------------- cancelling
     q2 = RenderQueue()
     q2.submit(1, "a long one", slow("long", 5.0))
@@ -286,6 +314,51 @@ async def main() -> int:
     await asyncio.sleep(0.2)
     check("a cancelled render does not poison the estimate",
           est.measured(1) == before, (before, est.measured(1)))
+
+    # ------------------------------- "stop that" must actually stop the child
+    # Cancelling the awaiting task does NOT touch a subprocess: proven on
+    # 2026-09-02 by watching the process survive. A cancelled tier-3 render would
+    # have kept 1.7 GB of TripoSR weights and a core busy for another half minute
+    # after he was told it had stopped — he would have heard the fans.
+    import psutil
+    from tools.fabrication import _run
+
+    MARK = "jarvis_cancel_gate"
+
+    def probe_pids():
+        found = []
+        for p in psutil.process_iter(["cmdline"]):
+            try:
+                if MARK in " ".join(p.info["cmdline"] or []):
+                    found.append(p.pid)
+            except Exception:
+                pass
+        return found
+
+    task = asyncio.ensure_future(
+        _run([sys.executable, "-c", f"# {MARK}\nimport time; time.sleep(20)"], 60))
+    for _ in range(100):
+        if probe_pids():
+            break
+        await asyncio.sleep(0.05)
+    check("the child process really started", bool(probe_pids()))
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    for _ in range(100):
+        if not probe_pids():
+            break
+        await asyncio.sleep(0.05)
+    left = probe_pids()
+    check("cancelling a render kills the process, not just the wait",
+          not left, f"{len(left)} orphan(s) left running")
+    for pid in left:
+        try:
+            psutil.Process(pid).kill()
+        except Exception:
+            pass
 
     # ------------------------------------------------ the question, and no-ing it
     import clarify

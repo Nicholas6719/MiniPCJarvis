@@ -11,7 +11,7 @@ when NOT to run.
   * It disarms itself when the stage closes, when the camera stops, and after a
     stretch with no hand in frame. The resting state of this feature is off.
   * It reads at a modest rate rather than as fast as the camera can produce, and
-    it skips detection entirely when the previous one is still running.
+    one detection is awaited before the next begins, so it can never pile up.
 
 Everything it emits is a `holo_control` payload — the same ones the spoken
 commands produce — so hands and voice drive one control surface. That is what
@@ -80,13 +80,23 @@ class HandControl:
         self._task = spawn(self._loop(), name="hands:track")
         return {"armed": True}
 
-    def disarm(self, why: str = "") -> dict:
+    def _stand_down(self) -> bool:
+        """Clear the state without touching the task. Safe to call FROM the loop."""
         was = self.armed
         self.armed = False
+        self._tracker.reset()
+        return was
+
+    def disarm(self, why: str = "") -> dict:
+        """Stop watching. Called from outside the loop — it cancels the task."""
+        was = self._stand_down()
+        # NOT from inside `_loop`: cancelling the task you are running is a
+        # CancelledError delivered at some later await, to whatever happens to be
+        # there. The loop uses `_stand_down` and then breaks, which is the same
+        # outcome and no surprise.
         if self._task and not self._task.done():
             self._task.cancel()
         self._task = None
-        self._tracker.reset()
         return {"armed": False, "was": was, "why": why}
 
     # ---- the loop -------------------------------------------------------
@@ -100,13 +110,13 @@ class HandControl:
                 await asyncio.sleep(period)
                 # Every reason to stop, checked before any work is done.
                 if not current().get("path"):
-                    self.disarm("the stage closed")
+                    self._stand_down()
                     break
                 if not camera.is_on:
-                    self.disarm("the camera stopped")
+                    self._stand_down()
                     break
                 if time.time() - self._last_hand_at > IDLE_OFF_S:
-                    self.disarm("no hands for a while")
+                    self._stand_down()
                     await bus.emit("hands", action="disarmed",
                                    why="nothing in frame")
                     break
@@ -130,7 +140,9 @@ class HandControl:
             pass
         except Exception:
             log.exception("hand tracking stopped")
-            self.disarm("it failed")
+            self._stand_down()
+        finally:
+            self._task = None
 
     @staticmethod
     def _detect(jpg: bytes) -> dict:
@@ -143,8 +155,11 @@ class HandControl:
         landmarks it returns are NORMALISED 0..1, so every coordinate downstream
         is identical either way.
 
-        Measured on this machine: tracking cost about half a core at full size
-        and roughly a third of that at half size.
+        Worth being precise about the gain, because the first note here
+        overstated it: half-size decoding took the whole tracker from ~49% of a
+        core to ~43%, which is what proved the decode was NOT the cost. The
+        landmarker is, at ~30 ms a frame, and the frame rate is what took it the
+        rest of the way down.
         """
         try:
             import cv2

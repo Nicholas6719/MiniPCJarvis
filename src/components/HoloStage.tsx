@@ -43,9 +43,21 @@ const CYAN = 0x27c7ff;
 const AMBER = 0xffb454;       // overhangs: the one thing allowed to alarm
 const GREEN = 0x59e0a5;       // the real toolpath
 
+// Base64 float32, not a JSON array of numbers. A 38k-triangle mesh from tier 3
+// is 344,556 coordinates: 7.5 MB of JSON the browser parses number by number,
+// against 2.0 MB that arrives as one typed array. Exact, too — three.js wants
+// float32 either way.
+function f32(b64: string): Float32Array {
+  if (!b64) return new Float32Array(0);
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Float32Array(bytes.buffer);
+}
+
 type Geometry = {
-  positions: number[];
-  edge_positions: number[];
+  positions_b64: string;
+  edge_positions_b64: string;
   size_mm: number[];
   triangles: number;
   edges: number;
@@ -63,7 +75,7 @@ type Check = {
   overhang_positions?: number[];
   report?: {
     bed?: { fits: boolean; footprint_mm: number[]; too_tall?: boolean };
-    overhangs?: { faces: number; worst_deg: number };
+    overhangs?: { faces: number; worst_deg: number; fraction?: number };
     wall?: { estimate_mm: number | null; below_minimum?: boolean };
     integrity?: { sliceable: boolean | null };
   };
@@ -165,14 +177,15 @@ export function HoloStage() {
       } catch {
         return;                       // the panel stays, empty, rather than throwing
       }
-      if (disposed || geo.error || !geo.positions?.length) return;
+      const positions = f32(geo.positions_b64);
+      if (disposed || geo.error || !positions.length) return;
 
       clear();
       const faces = new BufferGeometry();
-      faces.setAttribute("position", new Float32BufferAttribute(geo.positions, 3));
+      faces.setAttribute("position", new Float32BufferAttribute(positions, 3));
       faces.computeVertexNormals();
       faceGeom = faces;
-      basePos = Float32Array.from(geo.positions);
+      basePos = positions.slice();
       // Per-VERTEX body labels: the sidecar sends one per triangle, because
       // three of every four bytes would otherwise be a repeat.
       vertBody = geo.bodies
@@ -189,9 +202,10 @@ export function HoloStage() {
       clipped.length = 0;
       clipped.push(faceMat);
 
-      if (geo.edge_positions?.length) {
+      const edgePositions = f32(geo.edge_positions_b64);
+      if (edgePositions.length) {
         const lines = new BufferGeometry();
-        lines.setAttribute("position", new Float32BufferAttribute(geo.edge_positions, 3));
+        lines.setAttribute("position", new Float32BufferAttribute(edgePositions, 3));
         // The wide dim pass is the bloom. One extra draw call, no render target,
         // no post-processing — and it costs the 780M nothing worth measuring,
         // which matters because llama-server owns that GPU.
@@ -286,7 +300,14 @@ export function HoloStage() {
         if (r.bed?.too_tall) faults.push("TOO TALL");
         if (r.integrity?.sliceable === false) faults.push("NOT WATERTIGHT");
         if (r.overhangs?.faces) {
-          faults.push(`${r.overhangs.faces} OVERHANGS · ${Math.round(r.overhangs.worst_deg)}°`);
+          // A COUNT means something on a bracket and nothing on a mesh from a
+          // photograph, where "15,424 overhangs" is both true and useless. Past
+          // a few hundred faces the AREA is the number he can act on.
+          const deg = Math.round(r.overhangs.worst_deg);
+          const frac = r.overhangs.fraction;
+          faults.push(r.overhangs.faces > 200 && frac != null
+            ? `${Math.round(frac * 100)}% OVERHANGING · ${deg}°`
+            : `${r.overhangs.faces} OVERHANGS · ${deg}°`);
         }
         if (r.wall?.below_minimum) faults.push("WALL UNDER MINIMUM");
 

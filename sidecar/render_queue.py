@@ -74,7 +74,16 @@ class RenderQueue:
     # ---- what he can ask about ------------------------------------------
     @property
     def busy(self) -> bool:
-        return self._current is not None
+        """Running OR waiting to run.
+
+        These were two different answers to the same word: `status()` learned to
+        count a queued job as busy — because telling him "nothing's rendering"
+        one second after he asked for something is a lie — while this property
+        still meant "a job is executing". Anything waiting on `not busy` for the
+        work to be over therefore stopped waiting before it had started, which is
+        exactly how a calibration check concluded a job had never run.
+        """
+        return self._current is not None or bool(self._jobs)
 
     def status(self) -> dict:
         cur = self._current
@@ -179,6 +188,13 @@ class RenderQueue:
                 job.result = await self._task
                 job.state = "failed" if (job.result or {}).get("error") else "done"
                 if job.state == "done":
+                    # Calibrate the tier that ACTUALLY RAN, not the one that was
+                    # predicted. They usually agree, but a parametric template
+                    # that fails to build falls through to the model — and a
+                    # 27-second run filed under tier 0 would drag its median from
+                    # a fifth of a second to a wait he would then be asked about.
+                    ran = int((job.result or {}).get("tier", job.tier))
+                    timer.tier = ran
                     timer.done()          # only a real success calibrates
             except asyncio.CancelledError:
                 job.state = "cancelled"

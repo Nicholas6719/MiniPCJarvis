@@ -138,14 +138,34 @@ async def _run(args: list[str], timeout: int) -> tuple[int, str, str]:
         return 127, "", "binary not found"
     except Exception as e:
         return 1, "", str(e)
+    def stop() -> None:
+        try:
+            if proc.returncode is None:
+                proc.kill()
+        except Exception:
+            log.debug("could not kill the child", exc_info=True)
+        # Close the pipes too, or the transport is reaped by the garbage
+        # collector and complains about an I/O operation on a closed pipe.
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                if stream is not None:
+                    stream.feed_eof()
+            except Exception:
+                pass
+
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-        except Exception:
-            log.debug("could not kill a timed-out slicer", exc_info=True)
+        stop()
         return 1, "", f"timed out after {timeout}s"
+    except asyncio.CancelledError:
+        # "STOP THAT" MUST ACTUALLY STOP IT. Cancelling the awaiting task does
+        # not touch the child — proven on 2026-09-02, the process was still
+        # running afterwards — so a cancelled tier-3 render would have kept
+        # 1.7 GB of TripoSR weights and a core busy for another half minute
+        # after he had been told it had stopped. He would have heard the fans.
+        stop()
+        raise
     return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
 

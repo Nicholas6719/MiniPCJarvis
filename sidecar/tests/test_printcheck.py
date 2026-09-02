@@ -129,6 +129,28 @@ def main() -> int:
     check("a 1.2 mm wall prints but is flagged as not load-bearing",
           mid["below_minimum"] is False and mid["below_functional"] is True, mid)
     check("the estimate says it is an estimate", "sampled" in w["why"], w)
+    check("...and says it is a percentile, not the minimum",
+          "percentile" in w["why"], w["why"])
+    check("...while still reporting the raw thinnest span it saw",
+          "thinnest_seen_mm" in w, w)
+
+    # THE ORGANIC-MESH CASE, which is why this is a percentile at all. A
+    # reconstructed mesh contains hair-thin slivers from marching cubes meeting
+    # the isosurface tangentially — far below the voxel size and far below the
+    # nozzle. Taking the minimum called a real watertight duck unprintable.
+    slivered = np.concatenate([
+        box(40, 30, 10),
+        # a 0.01 mm sliver stuck to the side: one artefact among a solid part
+        np.array([[(40, 0, 0), (40.01, 0, 0), (40, 30, 0)],
+                  [(40, 30, 0), (40.01, 0, 0), (40.01, 30, 0)],
+                  [(40, 0, 10), (40, 30, 10), (40.01, 0, 10)],
+                  [(40, 30, 10), (40.01, 30, 10), (40.01, 0, 10)]],
+                 dtype=np.float64)])
+    w2 = pc.thinnest_wall(slivered)
+    check("one hair-thin artefact does not condemn a solid part",
+          not w2["below_minimum"], w2)
+    check("...but it is still reported, so nothing is hidden",
+          w2.get("thinnest_seen_mm") is not None, w2)
     check("empty geometry does not raise",
           pc.thinnest_wall(np.zeros((0, 3, 3)))["estimate_mm"] is None)
 

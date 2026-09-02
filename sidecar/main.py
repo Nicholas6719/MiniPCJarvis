@@ -1012,7 +1012,12 @@ async def holo_geometry(x_jarvis_token: str | None = Header(None)):
         return {"error": "nothing is on the stage"}
     import meshio
     try:
-        return meshio.to_payload(cur["path"])
+        # OFF THE EVENT LOOP. This is 0.48 s of numpy on a 38k-triangle mesh from
+        # tier 3 — parse, weld, feature edges, centring — and it was running
+        # inline. Harmless while the only models were 150-triangle brackets;
+        # half a second of dead loop the moment a reconstructed mesh went up, in
+        # the middle of whatever else he was saying.
+        return await asyncio.to_thread(meshio.to_payload, cur["path"])
     except meshio.BadMesh as e:
         return {"error": str(e)}
 

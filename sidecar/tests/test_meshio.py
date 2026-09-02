@@ -97,17 +97,34 @@ def main() -> int:
           m["triangles"] == 12, m["triangles"])
 
     # ------------------------------------------------------------- the payload
-    p = meshio.to_payload(b)
-    check("the payload carries triangle positions", len(p["positions"]) == 12 * 9)
-    check("...and edge positions", len(p["edge_positions"]) == 12 * 6)
+    # BASE64 FLOAT32, not a JSON list of numbers: a 38k-triangle mesh from tier 3
+    # is 344,556 coordinates, which is 7.5 MB of JSON for the browser to parse
+    # one number at a time against 2.0 MB arriving as a typed array. The encoding
+    # must be EXACT — it is the geometry he prints from — so it is decoded here
+    # and compared against the source rather than merely counted.
+    import base64
+
+    import numpy as _np      # local: `np` is bound later inside main() and would
+    p = meshio.to_payload(b)  # otherwise be an unassigned free variable here
+
+    def decoded(key):
+        return _np.frombuffer(base64.b64decode(p[key]), dtype="<f4")
+
+    pos = decoded("positions_b64")
+    check("the payload carries triangle positions", len(pos) == 12 * 9, len(pos))
+    check("...and edge positions", len(decoded("edge_positions_b64")) == 12 * 6)
     check("...centred on the model, not on the exporter's origin",
           p["centre_mm"] == [10.0, 10.0, 10.0], p["centre_mm"])
-    xs = p["positions"][0::3]
+    xs = pos[0::3]
     check("...so the geometry straddles zero",
-          abs(min(xs) + 10.0) < 0.01 and abs(max(xs) - 10.0) < 0.01,
-          f"{min(xs)}..{max(xs)}")
-    check("the payload has no numpy left in it",
-          all(isinstance(v, float) for v in p["positions"][:6]))
+          abs(float(xs.min()) + 10.0) < 0.01 and abs(float(xs.max()) - 10.0) < 0.01,
+          f"{xs.min()}..{xs.max()}")
+    check("...and the encoding loses nothing at all",
+          _np.array_equal(pos, (meshio.load_stl(b).reshape(-1, 3)
+                                - _np.array([10.0, 10.0, 10.0])).astype(_np.float32).ravel()),
+          "base64 float32 must be exact, not merely close")
+    check("the payload is JSON-serialisable, with no numpy left in it",
+          isinstance(__import__("json").dumps(p), str))
 
     # --------------------------------------------------- creases versus flats
     # Two coplanar triangles form a square: the shared diagonal is NOT a feature.

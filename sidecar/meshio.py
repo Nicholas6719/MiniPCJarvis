@@ -245,15 +245,31 @@ def describe(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     }
 
 
+def _f32(arr) -> str:
+    """A float array as base64 float32, little-endian.
+
+    NOT a JSON list of numbers. A 38k-triangle mesh from tier 3 is 344,556
+    coordinates, and as JSON that is a 7.5 MB response the browser then has to
+    parse number by number. The same floats as base64 are 1.8 MB and arrive as
+    one typed array — and it is EXACT, because the renderer wanted float32 all
+    along: `Float32BufferAttribute` converts to it either way.
+
+    Rounding the JSON was tried first and saved almost nothing: numpy's float32
+    widened back to float64 on `tolist()`, so `round(x, 2)` produced
+    12.34000015258789 rather than 12.34.
+    """
+    import base64
+    return base64.b64encode(np.ascontiguousarray(arr, dtype="<f4").tobytes()).decode("ascii")
+
+
 def to_payload(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
-    """The wire format: flat float lists, centred on the model's own middle so the
-    renderer never has to know where in space the exporter happened to put it."""
+    """The wire format: flat float32 arrays, centred on the model's own middle so
+    the renderer never has to know where in space the exporter happened to put it."""
     d = describe(path, angle_deg)
     tris, edges = d.pop("_tris"), d.pop("_edges")
     centre = (np.asarray(d["min_mm"]) + np.asarray(d["max_mm"])) / 2.0
-    d["positions"] = (tris.reshape(-1, 3) - centre).astype(np.float32).round(4).ravel().tolist()
-    d["edge_positions"] = ((edges.reshape(-1, 3) - centre).astype(np.float32)
-                           .round(4).ravel().tolist()) if len(edges) else []
+    d["positions_b64"] = _f32((tris.reshape(-1, 3) - centre).ravel())
+    d["edge_positions_b64"] = _f32((edges.reshape(-1, 3) - centre).ravel()) if len(edges) else ""
     d["centre_mm"] = [round(float(v), 2) for v in centre]
 
     # Separate bodies, for the exploded view — and ONLY when there is more than
@@ -263,7 +279,7 @@ def to_payload(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     n_bodies = int(lab.max()) + 1 if len(lab) else 0
     d["body_count"] = n_bodies
     if n_bodies > 1:
-        d["bodies"] = lab.tolist()
+        d["bodies"] = lab.astype(int).tolist()
         # Where each body sits relative to the model's middle, so the renderer
         # knows which way to push it. Computed here because it is the same
         # arithmetic as the centring above and must not disagree with it.

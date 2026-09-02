@@ -1,9 +1,7 @@
 """Will it print? The questions worth asking before plastic is spent.
-
 Phase B of the hologram. These are the checks a person does by eye and then
 regrets not doing properly, and every threshold here is the industry one rather
 than a number invented for this file:
-
   * 45° FROM VERTICAL is the overhang limit for FDM. Past it surface quality
     degrades, and at steeper angles the print fails outright. Measured per face
     from its normal, which is exact and costs one dot product.
@@ -14,23 +12,25 @@ than a number invented for this file:
     a slicer refuses a file, found in roughly one file in seven, and
     AI-generated meshes are specifically prone to it. Tiers 3 and 4 of the
     creation plan are exactly that.
-
 WHAT THIS IS HONEST ABOUT. Wall thickness is an ESTIMATE and is labelled one
 everywhere it surfaces. Rigorous minimum-thickness needs a medial-axis transform;
-what this does is sample the bounding box and report the thinnest solid span it
-finds. That is genuinely useful for catching a 0.6 mm rib, and it is not a
-guarantee — telling him a part is sound when it is not would be worse than
-saying nothing.
+what this does is fire rays through the part and report a LOW PERCENTILE of the
+solid spans it finds. That is genuinely useful for catching a 0.6 mm rib, and it
+is not a guarantee — telling him a part is sound when it is not would be worse
+than saying nothing.
+
+A percentile rather than the minimum, because the minimum stopped being useful
+the moment tier 3 arrived: a reconstructed mesh genuinely contains hair-thin
+slivers where marching cubes met the isosurface tangentially, far below the
+voxel size, and a real watertight 60 x 46 x 20 mm duck therefore measured a
+0.01 mm wall and would have been called unprintable. A slicer ignores features
+under its nozzle and so does this. The raw minimum is still reported, as
+`thinnest_seen_mm`, so nothing is hidden.
 """
 from __future__ import annotations
-
 import logging
-import math
-
 import numpy as np
-
 log = logging.getLogger("jarvis.printcheck")
-
 OVERHANG_LIMIT_DEG = 45.0        # from vertical; past this an FDM print wants support
 MIN_WALL_MM = 0.8                # thinnest any FDM machine will reliably produce
 FUNCTIONAL_WALL_MM = 1.5         # thinnest worth trusting with load
@@ -42,20 +42,34 @@ MAX_Z_MM = 250.0                 # ...as does this: max_print_height
 # overhang. Nothing about FDM is precise to a tenth of a degree, so spending one
 # on the boundary costs nothing real and removes a whole class of false alarm.
 ANGLE_TOL_DEG = 0.1
-
-
+# How square a ray must meet a surface for the span it measures to count as a
+# wall. cos(75 degrees): anything more tangential than that is the ray clipping a
+# silhouette, not passing through material. Measured need: without it, a
+# watertight 60 x 46 x 20 mm mesh from TripoSR reported a 0.01 mm wall, because
+# on a smooth organic surface the grazing rays are the minimum every time.
+GRAZE_COS = 0.26
+# The estimate is a LOW PERCENTILE of the measured spans, not their minimum.
+#
+# A reconstructed mesh genuinely contains hair-thin slivers — marching cubes
+# produces them wherever the isosurface is tangent to the grid, far below the
+# 0.375 mm voxel of a 60 mm model at resolution 160. The absolute minimum is
+# therefore a true measurement of an artefact: a real TripoSR duck measured
+# 0.01 mm and would have been reported as unprintable. A slicer ignores features
+# under its nozzle; so should this.
+#
+# 5% is chosen so a deliberately thin part is still caught — a 0.6 mm plate has a
+# THIRD of its rays at 0.6 mm — while a handful of artefacts cannot dominate. It
+# is the same trade the docstring already states: this can miss a thin feature
+# that almost no ray crossed.
+WALL_PERCENTILE = 5.0
 def face_normals(tris: np.ndarray) -> np.ndarray:
     n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     ln = np.linalg.norm(n, axis=1, keepdims=True)
     ln[ln == 0] = 1.0
     return n / ln
-
-
 def areas(tris: np.ndarray) -> np.ndarray:
     return 0.5 * np.linalg.norm(
         np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]), axis=1)
-
-
 def overhang_mask(tris: np.ndarray, limit_deg: float = OVERHANG_LIMIT_DEG) -> np.ndarray:
     """Which faces need support. One definition, used by the count and by the
     geometry the HUD paints red — so a face can never be counted and not drawn."""
@@ -68,12 +82,9 @@ def overhang_mask(tris: np.ndarray, limit_deg: float = OVERHANG_LIMIT_DEG) -> np
     on_bed = np.all(np.abs(tris[:, :, 2] - zmin) < 1e-4, axis=1)
     ang = np.degrees(np.arcsin(np.clip(-n[:, 2], 0.0, 1.0)))
     return (n[:, 2] < 0) & (~on_bed) & (ang > limit_deg + ANGLE_TOL_DEG)
-
-
 def overhangs(tris: np.ndarray, limit_deg: float = OVERHANG_LIMIT_DEG,
               want_positions: bool = True) -> dict:
     """Downward faces steeper than the limit, measured from vertical.
-
     The angle is asin(-nz): a vertical wall gives 0°, a 45° chamfer gives 45°,
     and a flat ceiling gives 90° — the worst case, and the one that always needs
     support. Faces lying ON the bed are excluded; they point straight down too,
@@ -94,11 +105,8 @@ def overhangs(tris: np.ndarray, limit_deg: float = OVERHANG_LIMIT_DEG,
         "positions": tris[bad].reshape(-1, 3).astype(np.float32).round(3).ravel().tolist()
         if (want_positions and bad.any()) else [],
     }
-
-
 def bed_fit(size_mm, bed: float = BED_MM, max_z: float = MAX_Z_MM) -> dict:
     """Does it fit AS IT SITS — and if not, would turning it help?
-
     The footprint is X by Y and the height is Z, because that is how the STL is
     oriented and how the slicer will place it. Sorting the three and calling the
     two largest the footprint — which this did first — declared a 50 x 50 x 400
@@ -119,19 +127,20 @@ def bed_fit(size_mm, bed: float = BED_MM, max_z: float = MAX_Z_MM) -> dict:
             "fits_if_rotated": bool(rotated and not fits),
             "too_tall": bool(z > max_z),
             "max_z_mm": max_z}
-
-
 def _axis_hits(tris: np.ndarray, axis: int, uv: np.ndarray) -> list:
     """Where rays parallel to `axis` cross the surface. Pure numpy, no rtree.
-
     trimesh's ray engines all want rtree — a compiled dependency, and a
     PyInstaller problem for one estimate. But these rays are AXIS-ALIGNED, which
     makes the general Möller–Trumbore machinery unnecessary: project each
     triangle onto the other two axes, test containment in 2D with barycentric
     coordinates, and solve the plane for the remaining coordinate. Exact, and it
     needs nothing but numpy.
-
-    Returns one sorted array of crossing depths per ray.
+    Returns, per ray, a sorted array of crossing depths AND the matching
+    |n·axis| for each crossing — how square the surface was to the ray. The
+    caller needs that second number to throw away GRAZES: a ray that clips a
+    silhouette tangentially enters and leaves almost immediately and reports a
+    hundredth of a millimetre of "wall" that does not exist. On a smooth organic
+    mesh those grazes dominate the minimum completely.
     """
     u, v = [i for i in range(3) if i != axis]
     a, b, c = tris[:, 0], tris[:, 1], tris[:, 2]
@@ -141,8 +150,7 @@ def _axis_hits(tris: np.ndarray, axis: int, uv: np.ndarray) -> list:
     denom = v0u * v1v - v1u * v0v
     live = np.abs(denom) > 1e-12          # triangles edge-on contribute nothing
     if not live.any():
-        return [np.empty(0) for _ in range(len(uv))]
-
+        return [(np.empty(0), np.empty(0)) for _ in range(len(uv))]
     n = face_normals(tris)
     out = []
     for pu, pv in uv:
@@ -157,26 +165,26 @@ def _axis_hits(tris: np.ndarray, axis: int, uv: np.ndarray) -> list:
             t = t / denom
             inside = live & (s >= 0) & (t >= 0) & (s + t <= 1)
         if not inside.any():
-            out.append(np.empty(0))
+            out.append((np.empty(0), np.empty(0)))
             continue
         # The point on the triangle's plane, solved for the ray's own axis.
         na = n[inside][:, axis]
         ok = np.abs(na) > 1e-12
         if not ok.any():
-            out.append(np.empty(0))
+            out.append((np.empty(0), np.empty(0)))
             continue
         pa = a[inside][ok]
         nn = n[inside][ok]
         du = pu - pa[:, u]
         dv = pv - pa[:, v]
         depth = pa[:, axis] - (nn[:, u] * du + nn[:, v] * dv) / nn[:, axis]
-        out.append(np.sort(depth))
+        order = np.argsort(depth)
+        # The depths AND how square each surface was to the ray, in the same
+        # order, so the caller can pair them and reject grazes.
+        out.append((depth[order], np.abs(nn[order][:, axis])))
     return out
-
-
 def thinnest_wall(tris: np.ndarray, samples: int = 4000) -> dict:
     """An ESTIMATE of the thinnest solid span, by ray casting through the part.
-
     Deliberately not sold as a measurement. A rigorous minimum thickness needs a
     medial-axis transform; this fires rays along each axis, measures the solid
     runs between entry and exit hits, and reports the smallest. It reliably
@@ -189,7 +197,8 @@ def thinnest_wall(tris: np.ndarray, samples: int = 4000) -> dict:
         flat = tris.reshape(-1, 3)
         lo, hi = flat.min(axis=0), flat.max(axis=0)
         rng = np.random.RandomState(0)
-        best, crossed = math.inf, 0
+        kept: list = []
+        crossed = 0
         per_axis = max(8, samples // 3)
         for axis in range(3):
             u, v = [i for i in range(3) if i != axis]
@@ -199,32 +208,45 @@ def thinnest_wall(tris: np.ndarray, samples: int = 4000) -> dict:
             pad_v = (hi[v] - lo[v]) * 0.02
             uv = np.stack([rng.uniform(lo[u] + pad_u, hi[u] - pad_u, per_axis),
                            rng.uniform(lo[v] + pad_v, hi[v] - pad_v, per_axis)], axis=1)
-            for hits in _axis_hits(tris, axis, uv):
+            for hits, square in _axis_hits(tris, axis, uv):
                 if len(hits) < 2:
                     continue
                 # Solid runs are entry->exit pairs. An odd count means the ray
                 # grazed an edge; drop the stray rather than pairing it wrongly.
                 n_pairs = len(hits) // 2
-                spans = hits[1:2 * n_pairs:2] - hits[0:2 * n_pairs:2]
-                spans = spans[spans > 1e-4]
+                enter, exit_ = hits[0:2 * n_pairs:2], hits[1:2 * n_pairs:2]
+                spans = exit_ - enter
+                # REJECT GRAZES. A span only measures a wall if the ray met both
+                # surfaces reasonably square to them; a ray clipping a silhouette
+                # tangentially enters and leaves almost at once and reports a
+                # hundredth of a millimetre that is not there. On a smooth mesh
+                # from TripoSR those grazes ARE the minimum — a real 60x46x20 mm
+                # model came back as a 0.01 mm wall, which would have told him a
+                # perfectly good part could not be printed.
+                sq = np.minimum(square[0:2 * n_pairs:2], square[1:2 * n_pairs:2])
+                keep = (spans > 1e-4) & (sq >= GRAZE_COS)
+                spans = spans[keep]
                 if len(spans):
                     crossed += 1
-                    best = min(best, float(spans.min()))
-        if not math.isfinite(best):
+                    kept.append(spans)
+        if not kept:
             return {"estimate_mm": None, "why": "no rays crossed solid material"}
+        allspans = np.concatenate(kept)
+        best = float(np.percentile(allspans, WALL_PERCENTILE))
         return {"estimate_mm": round(best, 2),
+                "thinnest_seen_mm": round(float(allspans.min()), 3),
                 "below_minimum": bool(best < MIN_WALL_MM),
                 "below_functional": bool(best < FUNCTIONAL_WALL_MM),
                 "rays_crossing": crossed,
-                "why": "sampled, not measured — a thin feature no ray crossed can be missed"}
+                "why": f"sampled, not measured — this is the {WALL_PERCENTILE:.0f}th "
+                       f"percentile of the spans found, so a hair-thin artefact "
+                       f"cannot dominate and a thin feature almost no ray crossed "
+                       f"can still be missed"}
     except Exception as e:
         log.debug("wall estimate failed", exc_info=True)
         return {"estimate_mm": None, "why": f"could not estimate ({e})"}
-
-
 def integrity(tris: np.ndarray) -> dict:
     """Is this mesh something a slicer will accept, and can it be repaired?
-
     Reports rather than repairs. What gets fixed and what he is told about it is
     the caller's decision — silently changing a model he is about to print is
     not this function's business.
@@ -262,11 +284,8 @@ def integrity(tris: np.ndarray) -> dict:
         log.debug("integrity check failed", exc_info=True)
         return {"sliceable": None, "degenerate_faces": degenerate,
                 "why": f"could not check ({e})"}
-
-
 def report(tris: np.ndarray, size_mm) -> dict:
     """Everything at once, for the tool and the hologram overlay.
-
     Counts and angles only — no geometry. The overhang TRIANGLES are built by
     the caller, which is the only place that knows where to centre them; having
     this build an uncentred copy first meant every check assembled thousands of
@@ -284,14 +303,10 @@ def report(tris: np.ndarray, size_mm) -> dict:
                    "functional_wall_mm": FUNCTIONAL_WALL_MM},
     }
     return r
-
-
 def _mm(v) -> str:
     """A number as it would be said. Nobody says "four hundred point oh"."""
     f = float(v)
     return str(int(round(f))) if abs(f - round(f)) < 0.05 else f"{f:.1f}"
-
-
 def spoken(r: dict) -> str:
     """One or two sentences, in his voice. Facts first, worst news first."""
     bits: list[str] = []

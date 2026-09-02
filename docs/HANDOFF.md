@@ -1902,6 +1902,65 @@ which they no longer do. The refusal path is now forced by pointing
 `model3d_dir` at nowhere, so it is exercised deliberately rather than depending
 on what happens to be installed.
 
+## 2026-09-02 — the audit: six bugs, and a 7.5 MB payload
+
+Audited for bugs and performance. The theme is that **tier 3 changed the inputs**
+— meshes went from 150 triangles to 38,000 — and several things that were fine
+at the old scale stopped being fine, silently.
+
+**1. The wall estimate called every reconstructed mesh unprintable.** A
+watertight 60 × 46 × 20 mm duck measured a **0.01 mm wall**. Those spans are
+real: marching cubes leaves hair-thin slivers wherever the isosurface met the
+grid tangentially, far below the 0.375 mm voxel and far below the nozzle. The
+minimum was therefore a true measurement of an artefact. `thinnest_wall` reports
+the **5th percentile** now, and the raw minimum alongside it as
+`thinnest_seen_mm`, so nothing is hidden. Known answers all hold: 20 mm cube →
+20, 0.6 mm plate → 0.6 and flagged, 1.2 mm plate → 1.2. Duck → 4.51 mm.
+
+**2. `/holo/geometry` blocked the event loop for half a second.** `to_payload` is
+0.48 s of parse, weld, feature edges and centring on a tier-3 mesh, and it ran
+inline. Harmless with 150-triangle brackets; half a second of dead loop the
+moment a reconstructed mesh went up, in the middle of whatever else he was
+saying. It is in a thread now.
+
+**3. "Stop that" did not stop it.** Cancelling the awaiting task does not touch a
+subprocess — proven by watching the process survive — so a cancelled tier-3
+render kept 1.7 GB of TripoSR weights and a core busy for another half minute
+after he had been told it had stopped. He would have heard the fans. `_run` now
+kills the child on `CancelledError` and closes the pipes, and there is a gate
+that starts a real process, cancels it, and asserts nothing is left.
+
+**4. The calibration could learn the wrong tier.** The queue timed the tier it
+SUBMITTED, not the one that ran. A parametric template that fails to build falls
+through to the model, and a 27-second run filed under tier 0 would drag its
+median from a fifth of a second up to a wait he would then be asked about.
+
+**5. Two things named `busy` meant different things.** `status()` learned to
+count a queued job as busy; the property did not. Anything waiting on
+`not busy` for work to finish therefore stopped waiting before it started —
+which is exactly how the calibration gate above concluded a job had never run.
+
+**6. Two more false matches in the template library**, found by probing with
+realistic phrasings: "a plate with 4 mounting holes" produced a plate with ONE
+centred hole, and "a cube 20 mm and a plate 30 by 30 by 2 mm" produced just the
+cube. And the first fix broke what it protected — counting `\d+` read "a 25 mm
+sphere" as a count of 25. A digit before a unit is a dimension; the real signals
+are plural nouns, counting words and "and a".
+
+**THE PAYLOAD: 7.48 MB → 2.01 MB, byte-exact.** A tier-3 mesh is 344,556
+coordinates, and as a JSON array of numbers that is 7.5 MB the browser parses one
+number at a time. As base64 float32 it is 2.0 MB arriving as a single typed
+array — and it loses nothing, because three.js converts to float32 anyway.
+Rounding the JSON was tried first and saved almost nothing: numpy's float32
+widens back to float64 on `tolist()`, so `round(x, 2)` produced
+12.34000015258789.
+
+Also fixed: a reference picture downloaded from a web search had a floor of 2 KB
+and **no ceiling at all** — a hundred-megabyte image would have been pulled into
+memory whole. And `hand_control` cancelled its own task from inside its own loop,
+which delivers a `CancelledError` to whatever happens to be awaiting next; it
+stands down and breaks instead.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
