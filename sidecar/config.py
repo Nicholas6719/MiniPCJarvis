@@ -95,6 +95,10 @@ DEFAULTS: dict[str, Any] = {
     # token lives DPAPI-encrypted on disk, never here
     "remote": {"telegram": True, "telegram_chat_id": None,
                "recycle_screenshots": True,   # a screenshot sent to the phone is a message, not a file
+               # From the phone he cannot check, so anything that moves something
+               # on his desktop comes back with a picture of the result rather
+               # than a sentence claiming it happened.
+               "screenshot_after_actions": True,
                "allow_input": True},          # remote typing/clicking (R2), always risk-gated
     # RSS is keyless and instant; Finnhub needs a key (Settings -> Tools)
     "news": {"enabled": True},

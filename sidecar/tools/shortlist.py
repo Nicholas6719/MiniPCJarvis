@@ -24,6 +24,25 @@ ALWAYS = {
     "web_search", "research", "fetch_page",
     "get_system_stats", "take_screenshot", "recall", "remember_fact",
     "list_folder", "find_files", "preview_file",
+    # ACTING ON A FILE, not just finding one. This omission produced the exact
+    # failure the docstring above warns about, in one Telegram exchange:
+    #
+    #   "remove the screenshot from my desktop"      -> "File removed, sir."
+    #   "now remove Wispr Flow from the desktop too" -> "I don't have a tool to
+    #                                                   delete files directly."
+    #
+    # It was not lying. `delete_file` ranked inside the top 30 for the first
+    # sentence and outside it for the second, because "Wispr Flow" pulls the
+    # embedding away from anything about deleting — so the model really was
+    # handed no way to delete, one message after doing it. Being able to FIND a
+    # file always and ACT on it only sometimes is not a coherent capability.
+    "delete_file", "move_file", "rename_file",
+    # Same argument for the desktop itself. "Minimise this", "close that",
+    # "bring my windows back" are among the most ordinary things he asks, and
+    # they lose to any sentence with a proper noun in it.
+    "list_windows", "focus_window", "minimize_window", "maximize_window",
+    "close_window", "show_desktop", "restore_windows",
+    "open_application", "close_application",
 }
 
 MIN_TOOLS = 16          # never send fewer than this many

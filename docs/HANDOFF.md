@@ -2175,6 +2175,67 @@ state; `search_brave_web` uses SW_SHOWNOACTIVATE and does not steal focus. The
 bring JARVIS forward, that is the request. **The rule is about side effects he
 did not ask for.**
 
+## 2026-09-02 — one Telegram exchange, four problems
+
+He sent two screenshots of a conversation with JARVIS from his phone. Two things
+he asked for, and two more visible in the same exchange.
+
+**SHOW HIM, DON'T TELL HIM.** His instruction: *"if I ever ask Jarvis to do
+anything on my computer — minimizing something, opening something, deleting
+something, whatever I ask him to do — he should always send me a screenshot so I
+can see that he had done it and then I can instruct him further afterwards."*
+
+He is right and the reason is worth stating: from the phone he cannot check.
+"File removed, sir." is a claim; a picture of the desktop is evidence, and it is
+also the context for his next instruction. In the exchange he had to type "show
+me" after every single action. A remote turn that touches anything in
+`CHANGED_THE_DESKTOP` now takes a screenshot on its own.
+
+An explicit set rather than a risk tier, because LOW covers plenty of tools that
+change nothing visible — a screenshot after remembering a fact is noise. **Add to
+that set when a new tool moves something on screen.**
+
+**AND STOP NARRATING IT.** *"He doesn't need to say screenshot saved every time
+he does it, I'll know he took a screenshot by him actually showing me."* So
+`say_screenshot` returns an empty string. Where it was SAVED survives, because a
+picture cannot say that. Both reflex emit sites now skip an empty reply rather
+than pushing it at the speaker — silence can be the right answer.
+
+**HE CONTRADICTED HIMSELF ABOUT DELETING FILES**, which was not in the ask but is
+in the screenshots:
+
+    "remove the screenshot from my desktop"      -> "File removed, sir."
+    "now remove Wispr Flow from the desktop too" -> "I don't have a tool to
+                                                    delete files directly."
+
+It was not lying. The tool shortlist ranks tools by embedding similarity and cuts
+at 30, and **`delete_file` ranked inside the top 30 for the first sentence and
+outside it for the second** — a proper noun pulls the sentence away from whatever
+the verb wanted. Measured, both ways, before and after. `shortlist.py`'s own
+docstring warns about exactly this: *"A tool wrongly withheld is a capability
+that silently disappears."* It happened anyway, because ALWAYS listed
+`list_folder`, `find_files` and `preview_file` and none of the tools that ACT.
+Being able to find a file always and act on one only sometimes is not a coherent
+capability. The file-mutation and window tools are in ALWAYS now; the prompt
+still shrinks (43 of 62 on average), so the speed win is intact.
+
+**AND A MISS WAS A DEAD END.** "Remove that screenshot and whisper flow from my
+desktop" got "I'm sorry, sir." — the model's own words, not a canned string.
+`delete_file` takes an exact path, and the file is `Wispr Flow.lnk`, which is not
+how he spells it and never will be: he typed "Wisper flow" and "whisper flow".
+The tool returned `not found` with nothing usable, so the model apologised and
+stopped.
+
+It now hands back near matches. Substring alone was not enough — it found the
+file for "Wispr Flow" and missed both of his actual spellings — so it falls back
+to a `SequenceMatcher` ratio at 0.7, loose enough for a dropped letter and tight
+enough that "Documents" does not match "Downloads" (0.44). Names only; nothing is
+deleted on a guess, and it still reports the miss honestly rather than pretending.
+
+That last one is also the compound-request fix he asked for. The 8-round tool
+loop already supported several calls per turn — what it did not have was a way to
+recover from the first miss.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

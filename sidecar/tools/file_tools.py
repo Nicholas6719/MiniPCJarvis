@@ -244,10 +244,57 @@ FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 0x4, 0x10, 0x40, 
 _QUIET = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI
 
 
+def _near_matches(name: str, limit: int = 5) -> list[str]:
+    """Files in the allowed roots whose name resembles what he called it.
+
+    Shortcuts on the desktop are the case this exists for: he says "Wispr Flow",
+    the file is "Wispr Flow.lnk", and an exact-path tool sees nothing.
+    """
+    want = "".join(ch for ch in (name or "").lower() if ch.isalnum())
+    if len(want) < 3:
+        return []
+    # SUBSTRING IS NOT ENOUGH, because he does not type the way a filename is
+    # spelled. He asked for "Wisper flow" and "whisper flow"; the file is
+    # "Wispr Flow.lnk", and neither of his spellings contains it or is contained
+    # by it. A ratio catches the missing letter; 0.7 is loose enough for a typo
+    # and tight enough that "Documents" does not match "Downloads" (0.44).
+    from difflib import SequenceMatcher
+    scored: list[tuple[float, str]] = []
+    for root in roots().values():
+        try:
+            for f in root.iterdir():
+                flat = "".join(ch for ch in f.stem.lower() if ch.isalnum())
+                if not flat:
+                    continue
+                if want in flat or flat in want:
+                    score = 1.0
+                else:
+                    score = SequenceMatcher(None, want, flat).ratio()
+                if score >= 0.7:
+                    scored.append((score, str(f)))
+        except OSError:
+            continue
+    scored.sort(key=lambda s: -s[0])
+    return [p for _, p in scored[:limit]]
+
+
 async def delete_file(path: str) -> dict:
     """Send to the Recycle Bin (undoable in Explorer)."""
     p = _resolve(path)
     if p is None or not p.exists():
+        # A BARE "not found" IS A DEAD END, and it produced one: asked to remove
+        # "Wispr Flow" from the desktop, the model guessed a path, got nothing
+        # back it could use, and answered "I'm sorry, sir." The file was there —
+        # as a .lnk, which is not what he calls it and never will be.
+        #
+        # Handing back the near misses turns a refusal into the next round: the
+        # tool loop can call this again with a real path. Names only; nothing is
+        # deleted on a guess.
+        near = _near_matches(Path(str(path)).stem if path else "")
+        if near:
+            return {"error": f"not found: {path}",
+                    "did_you_mean": near,
+                    "hint": "call delete_file again with one of these exact paths"}
         return {"error": f"not found: {path}"}
     if p in roots().values():
         return {"error": "refusing to delete a root folder"}

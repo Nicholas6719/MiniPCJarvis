@@ -83,6 +83,33 @@ async def main() -> int:
               await shortlist.pick(registry, "what time is it", keep={"empty_recycle_bin"})}
     check("a tool already used this turn stays offered", "empty_recycle_bin" in picked)
 
+    # ---- ACTING ON THINGS NEVER DISAPPEARS ---------------------------------
+    # A real failure, from one Telegram exchange: "remove the screenshot from my
+    # desktop" worked, and one message later "now remove Wispr Flow from the
+    # desktop too" got "I don't have a tool to delete files directly". It was not
+    # lying — delete_file ranked inside the top 30 for the first sentence and
+    # outside it for the second, because a proper noun pulls the embedding away
+    # from whatever the verb wanted. Being able to FIND a file always and ACT on
+    # one only sometimes is not a coherent capability.
+    ACTIONS = ("delete_file", "move_file", "rename_file", "take_screenshot",
+               "minimize_window", "maximize_window", "close_window",
+               "focus_window", "show_desktop", "restore_windows",
+               "open_application", "close_application")
+    HARD = (
+        "Great now remove Wisper flow from the desktop too",
+        "Remove that screenshot and whisper flow from my desktop",
+        "minimize Claude and show me in a screenshot",
+        "close Spotify and open Brave",
+        "put Discord away",
+        "what's the weather in Framingham",
+        "tell me a joke about penguins",
+    )
+    for said in HARD:
+        offered = {t["function"]["name"] for t in await shortlist.pick(registry, said)}
+        missing = [a for a in ACTIONS if a not in offered]
+        check(f"nothing to act with is withheld from {said[:38]!r}",
+              not missing, f"missing {missing}")
+
     # failure modes must fall back to everything, never to nothing
     check("empty utterance sends all tools",
           len(await shortlist.pick(registry, "   ")) == total)

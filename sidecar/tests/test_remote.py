@@ -102,6 +102,79 @@ async def main() -> int:
         "chat": {"id": 111}, "from": {"id": 111}, "voice": {"file_id": "x"}}})
     check("voice note answered honestly", any(m == "sendMessage" for m, _ in calls))
 
+    # --- SHOW HIM, DON'T TELL HIM -------------------------------------------
+    # His instruction: "if I ever ask Jarvis to do anything on my computer —
+    # minimizing something, opening something, deleting something — he should
+    # always send me a screenshot so I can see that he had done it." From the
+    # phone he cannot check; "File removed, sir." is a claim, a picture is
+    # evidence, and it is also the context for whatever he says next. In the
+    # exchange that prompted this he had to type "show me" after every action.
+    b2 = rt.TelegramBridge()
+    for tool in ("minimize_window", "delete_file", "open_application",
+                 "close_window", "move_file", "type_text"):
+        check(f"{tool} counts as changing his desktop",
+              tool in b2.CHANGED_THE_DESKTOP)
+    for tool in ("remember_fact", "web_search", "get_system_stats",
+                 "watch_metric", "recall"):
+        check(f"{tool} does NOT, so it sends no photo",
+              tool not in b2.CHANGED_THE_DESKTOP,
+              "a screenshot after remembering a fact is noise")
+
+    # The collector has to record what ran, or there is nothing to decide with.
+    b2._collect = {"text": ""}
+    b2._on_event({"kind": "tool_call", "status": "success",
+                  "tool": "minimize_window", "result": {}})
+    check("the turn records what it actually did",
+          "minimize_window" in (b2._collect.get("did") or []), b2._collect)
+
+    # --- and it does not narrate the picture --------------------------------
+    # "He doesn't need to say screenshot saved every time he does it — I'll know
+    # he took a screenshot by him actually showing me."
+    from brain.skills import say_screenshot
+    check("a bare screenshot says nothing at all",
+          say_screenshot({}, {"path": "x.png"}) == "",
+          say_screenshot({}, {"path": "x.png"}))
+    check("...but a failure still speaks up",
+          "couldn't" in say_screenshot({}, {"error": "no"}))
+    check("...and WHERE it was saved survives, since a picture cannot say that",
+          "desktop" in say_screenshot({"destination": "desktop"}, {"path": "x.png"}))
+
+    # --- a miss must not be a dead end --------------------------------------
+    # "Remove that screenshot and whisper flow from my desktop" got "I'm sorry,
+    # sir." The file was there — as "Wispr Flow.lnk", which is not how he spells
+    # it and never will be. delete_file took an exact path, missed, and said so
+    # in a way the model could do nothing with, so it apologised and stopped.
+    import tempfile
+    from pathlib import Path
+
+    import tools.file_tools as ft
+
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "Wispr Flow.lnk").write_text("x")
+    (tmp / "Screenshot 2026-09-02.png").write_text("x")
+    real_roots = ft.roots
+    ft.roots = lambda: {"desktop": tmp}
+    try:
+        for said in ("Wispr Flow", "wisper flow", "whisper flow", "WisprFlow"):
+            got = ft._near_matches(said)
+            check(f"{said!r} finds the shortcut he means",
+                  any("Wispr Flow" in g for g in got), got)
+        check("a name matching nothing stays empty",
+              ft._near_matches("zzzznothingatall") == [])
+        check("...and two letters are not enough to guess from",
+              ft._near_matches("ab") == [])
+        # The tool itself must hand the alternatives back, or the model has
+        # nothing to try on its next round.
+        out = await ft.delete_file("Wisper Flow")
+        check("a missed delete offers the real path instead of giving up",
+              bool(out.get("did_you_mean")), out)
+        check("...and still reports it as not found, rather than pretending",
+              "not found" in (out.get("error") or ""), out)
+        check("...and deleted nothing on a guess",
+              (tmp / "Wispr Flow.lnk").exists())
+    finally:
+        ft.roots = real_roots
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

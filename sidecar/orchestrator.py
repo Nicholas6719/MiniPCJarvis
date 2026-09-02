@@ -1284,8 +1284,12 @@ class Orchestrator:
             # announce the action immediately ("Opening youtube.com."), then do it
             reply = polish(skill.speak(args, {}))
             self.metrics.mark("first_token_ms")
-            await bus.emit("assistant_delta", text=reply)
-            await queue.put(clean_for_speech(reply))
+            # A skill may deliberately say NOTHING — taking a screenshot is the
+            # case: the picture is the answer and "Screenshot saved." is one more
+            # thing to read. Nothing may be pushed at the speaker in that case.
+            if reply.strip():
+                await bus.emit("assistant_delta", text=reply)
+                await queue.put(clean_for_speech(reply))
         if skill.tool and prefetched is not None:
             res = prefetched if isinstance(prefetched, dict) else {"value": prefetched}
             last_seen.note_result(res)
@@ -1331,8 +1335,9 @@ class Orchestrator:
                 log.exception("reflex speak template failed")
                 reply = "Done." if "error" not in res else "I'm afraid that didn't work."
             self.metrics.mark("first_token_ms")
-            await bus.emit("assistant_delta", text=reply)
-            await queue.put(clean_for_speech(reply))
+            if reply.strip():          # see above: silence can be the right answer
+                await bus.emit("assistant_delta", text=reply)
+                await queue.put(clean_for_speech(reply))
         return reply
 
     async def _fact_intake(self, question: str, answer: str, evidence: dict) -> None:

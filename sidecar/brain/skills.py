@@ -1303,7 +1303,15 @@ def say_screenshot(slots: dict, res: dict) -> str:
     if "error" in res:
         return "I couldn't take the screenshot."
     where = slots.get("destination")
-    return f"Screenshot saved to your {where}." if where else "Screenshot saved."
+    if where:
+        # WHERE it went is information the picture does not carry, so this stays.
+        return f"Screenshot saved to your {where}."
+    # ...but "Screenshot saved." is not. His words: "he doesn't need to say
+    # screenshot saved every time he does it — I'll know he took a screenshot by
+    # him actually showing me." The image goes to the HUD panel and to Telegram;
+    # announcing it is one more thing to read or listen to that says nothing the
+    # picture has not already said.
+    return ""
 
 
 def say_images(slots: dict, res: dict) -> str:

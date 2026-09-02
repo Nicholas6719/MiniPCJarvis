@@ -342,6 +342,9 @@ class TelegramBridge:
             c["images_query"] = evt.get("query", "")
         elif kind == "tool_call" and evt.get("status") == "success":
             res = evt.get("result")
+            # WHAT THIS TURN ACTUALLY DID to the machine, so the reply can show
+            # him rather than assert. See CHANGED_THE_DESKTOP below.
+            c.setdefault("did", []).append(evt.get("tool"))
             if evt.get("tool") in ("take_screenshot", "screenshot_grid") \
                     and isinstance(res, dict) and res.get("path"):
                 c["screenshot"] = res["path"]
@@ -355,6 +358,33 @@ class TelegramBridge:
             # only repeat it
             c["asked"] = True
             spawn(self._send_choice(evt), name="tg-clarify-ask")
+
+    # TOOLS THAT CHANGE WHAT HIS SCREEN LOOKS LIKE.
+    #
+    # His instruction, verbatim: "if I ever ask Jarvis to do anything on my
+    # computer — minimizing something, opening something, deleting something,
+    # whatever I ask him to do — he should always send me a screenshot so I can
+    # see that he had done it and then I can instruct him further afterwards."
+    #
+    # That is a better protocol than words, because from the phone he cannot
+    # check. "File removed, sir." is a claim; a picture of the desktop is
+    # evidence, and it is also the context for his next instruction — in the
+    # exchange that prompted this he had to type "show me" after every single
+    # action.
+    #
+    # An explicit set rather than a risk tier: LOW covers plenty of tools that
+    # change nothing visible (remembering a fact, setting a watch), and a
+    # screenshot after those is noise. ADD TO THIS LIST when a new tool moves
+    # something on screen.
+    CHANGED_THE_DESKTOP = {
+        "minimize_window", "maximize_window", "close_window", "focus_window",
+        "show_desktop", "restore_windows",
+        "open_application", "close_application", "open_url", "open_with_windows",
+        "search_in_browser",
+        "delete_file", "move_file", "rename_file", "empty_recycle_bin",
+        "restore_from_recycle_bin",
+        "click_screen", "type_text", "press_keys", "scroll_screen",
+    }
 
     MAX_PHOTO_BYTES = 15_000_000
 
@@ -574,8 +604,32 @@ class TelegramBridge:
                 except asyncio.TimeoutError:
                     pass
                 c = self._collect
+                # SHOW HIM, DON'T TELL HIM. If the turn moved something on his
+                # desktop and did not already take a picture, take one now — he
+                # should never have to type "show me" after asking for something
+                # to be minimised or deleted, and the picture is the context for
+                # whatever he says next.
+                if (not c.get("screenshot")
+                        and set(c.get("did") or []) & self.CHANGED_THE_DESKTOP
+                        and config.get("remote", "screenshot_after_actions",
+                                       default=True)):
+                    try:
+                        shot = await registry.execute("take_screenshot", {})
+                        got = (shot or {}).get("result") or {}
+                        if isinstance(got, dict) and got.get("path"):
+                            c["screenshot"] = got["path"]
+                    except Exception:
+                        log.warning("could not photograph the result", exc_info=True)
+
                 if not c.get("asked"):        # the question went with its buttons
-                    await self._send(c.get("text") or "Done, sir.")
+                    line = c.get("text") or ""
+                    # NO "Done, sir." IN FRONT OF A PICTURE. His words: "he
+                    # doesn't need to say screenshot saved every time — I'll know
+                    # he took a screenshot by him actually showing me." A caption
+                    # that says nothing the image does not is one more thing to
+                    # read on a phone.
+                    if line.strip() or not c.get("screenshot"):
+                        await self._send(line or "Done, sir.")
                 for url in c.get("images", []):
                     if url and not await self._send_photo_url(url):
                         break   # DDG thumbs occasionally refuse Telegram's fetch
