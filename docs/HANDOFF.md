@@ -1544,6 +1544,83 @@ real session's; `where node` finds nothing in either.
 `JARVIS_SELFTEST` (daily 03:30) is legitimate, not another orphan: its suite list
 contains no Telegram suite and it deletes the test reminder it creates.
 
+## 2026-09-02 — the hologram, phase C: he works on it with it
+
+Phase A projected a model, phase B told him whether it would print. Phase C lets
+him change it by talking. New: `sidecar/holo_angles.py` (the way he actually says
+angles), the `holo_control` tool, `edit_part` / `revert_part`, six skills
+(`holo_move`, `holo_show`, `holo_hide`, `holo_check`, `holo_edit`,
+`holo_revert`), and `tests/test_holo_control.py`. Routing accuracy is 177/177.
+
+**The line that matters most: what is the VIEW and what is the PART.** Rotating,
+scaling, sectioning and exploding are view state — the STL is untouched and its
+millimetres do not move. `edit_part` rewrites the OpenSCAD source and re-renders,
+so it changes the real thing, and it is the only one that says "that's the part
+changed". `holo_control` returns `note: view only` on every call and the tool
+description forbids saying the part got bigger. This is a part he is about to
+spend an hour printing; the two must never sound alike.
+
+**Voice editing works only because the source is on disk.** `generate_part`
+keeps `<name>.scad` beside `<name>.stl`, so "make it twelve millimetres thick"
+is a parameter change and a re-render, which either compiles or does not —
+rather than mesh surgery, which is a research problem with unreliable results. A
+part with no source (every tier-3 and tier-4 mesh) is refused in words rather
+than approximated. The previous source is kept as `<name>.prev.scad`, so "put
+the old version back" is a file copy. After an edit JARVIS names the dimension
+that moved — "that was 6 millimetres, it's 12 now" — which is the half of an A/B
+that still works when he is not looking at the screen. A side-by-side visual A/B
+is NOT built; revert plus the spoken before-and-after covers the intent.
+
+**"Slice it" needed a new kind of clarification.** It means either a cross
+section of the hologram or a run through PrusaSlicer, and the existing clarify
+engine speculatively runs every branch — which is right for two lookups and
+wrong here, because both readings ACT. Speculating would cut the model open on
+screen while he was still being asked, and start a real slice for an answer he
+might never give. `Branch.speculative` is new: a deferred branch is asked about
+and then run. It is only ambiguous while something is on the stage; with nothing
+up, "slice it" plainly means the slicer and asking would be pedantry.
+
+**Four more canon erasures, found by the gates rather than by him:**
+`open the hologram` became `open APP` (it went looking for a program called
+hologram to launch), `hide the hologram` became `hide everything`,
+`close the hologram` became `close APP`, and `hide the layers` became
+`hide everything` too. `3d` was being turned into `Nd` by the digit rule — and
+`3d` is the word that distinguishes "create a 3D image of that" from any other
+kind of image. A fifth turned up from the seed-collision gate:
+`go back to the previous version` folded onto `switch to APP` and would have
+hunted for a window called *previous version*. All five now have exclusions and
+their own cases in `test_holo_control.py`.
+
+**His own correction is gated in both directions.** "Show me Spider-Man" means
+PICTURES and still routes to `images`; a hologram is only ever an explicit
+request. Both are cases in `test_brain.py`, because that is where utterances land
+rather than where they parse.
+
+**Three bugs in my first cut of the control surface, all caught by tests written
+to fail:**
+
+1. **The phrase fallback guessed.** Anything it did not recognise fell through
+   to "rotate", so "reset it" and "show me the layers" both spun the model. A
+   wrong action is worse than an admitted miss — he watches it do the wrong
+   thing and then has to undo it. `parse_action` returns None now.
+2. **"Turn it upside down" rotated about the vertical axis**, which leaves the
+   part standing exactly as it was and merely facing backwards. "Upside down"
+   and "flip" name an outcome, not an axis, and the outcome is only reachable
+   about a horizontal one.
+3. **A slot invented parts.** "Does it fit on the bed" extracted a part named
+   `bed` and sent `inspect_part` hunting for bed.stl. No stop-word list fixes
+   that honestly — `bed`, `printer` and `supports` are all fine names for a part
+   — so the work folder decides: a name counts only if an STL by that name is
+   actually there.
+
+**And a gate that had been quietly incomplete for two phases.**
+`test_evolution_wiring.py` registers the tool modules by hand to mirror
+`main.py`, and `holo_tools` was added to the app in phase A and never added
+here. It passed the whole time, because nothing referred to those tools yet; it
+only went red when phase C added skills pointing at them. It now parses
+`main.py` for `X.register_all()` and fails if its own list is missing any of
+them — proven against exactly the drift that occurred.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

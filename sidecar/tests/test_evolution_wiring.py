@@ -54,15 +54,33 @@ EXPECTED = [
 
 def main() -> int:
     from tools import (biometric, browser_tools, builtin, camera_tools, fabrication,
-                       file_tools, handoff, health, input_tools, location,
+                       file_tools, handoff, health, holo_tools, input_tools, location,
                        market_tools, memory_tools, news_tools, projects, task_tools,
                        uia, vision_analyze, vision_tools, weather, web_tools,
                        windows_tools)
-    for m in (builtin, memory_tools, windows_tools, web_tools, task_tools,
-              vision_tools, browser_tools, handoff, file_tools, weather,
-              camera_tools, market_tools, news_tools, input_tools, uia,
-              projects, location, health, vision_analyze, biometric, fabrication):
+    mods = (builtin, memory_tools, windows_tools, web_tools, task_tools,
+            vision_tools, browser_tools, handoff, file_tools, weather,
+            camera_tools, market_tools, news_tools, input_tools, uia,
+            projects, location, health, vision_analyze, biometric, fabrication,
+            holo_tools)
+    for m in mods:
         m.register_all()
+
+    # THIS LIST MUST NOT DRIFT FROM main.py. `holo_tools` was added to the app in
+    # the hologram's phase A and never added here, so for two phases this gate
+    # was checking a smaller registry than the one that actually runs — and it
+    # passed the whole time, because nothing referred to those tools yet. It only
+    # went red when phase C added skills pointing at them, which is a lucky way
+    # to find out. Comparing against main.py's own source is ugly and it is also
+    # the only thing that cannot quietly fall behind.
+    import re
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(here, "main.py"), encoding="utf-8").read()
+    called = set(re.findall(r"^\s*(\w+)\.register_all\(\)", src, re.M))
+    listed = {m.__name__.rsplit(".", 1)[-1] for m in mods}
+    missing = sorted(called - listed)
+    check("this gate registers every tool module main.py does", not missing,
+          f"main.py also registers: {missing}")
 
     from tools.registry import registry
     known = registry._tools

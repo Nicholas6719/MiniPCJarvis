@@ -1355,6 +1355,10 @@ class Orchestrator:
         self._drop_clarification("superseded")
         pending = clarify.Pending(amb)
         for b in amb.branches:
+            # A branch that ACTS is not run until he picks it. Speculating on a
+            # lookup wastes a read; speculating on an action does the thing.
+            if not getattr(b, "speculative", True):
+                continue
             async def fetch(tool=b.tool, args=dict(b.args)):
                 out = await registry.execute(tool, args)
                 return out.get("result") if out.get("ok") else {
@@ -1419,7 +1423,17 @@ class Orchestrator:
         said = []
         for b in chosen:
             try:
-                res = await asyncio.wait_for(pending.tasks[b.label], timeout=30)
+                if b.label not in pending.tasks:
+                    # A deferred branch: nothing was run on speculation, so it
+                    # runs NOW, having been chosen. This is the only path on
+                    # which a clarified answer costs a round trip, and it is the
+                    # one where the alternative was doing something he had not
+                    # asked for yet.
+                    out = await registry.execute(b.tool, dict(b.args))
+                    res = out.get("result") if out.get("ok") else {
+                        "error": out.get("error") or "that didn't come back"}
+                else:
+                    res = await asyncio.wait_for(pending.tasks[b.label], timeout=30)
             except asyncio.CancelledError:
                 res = None
             except Exception:

@@ -50,6 +50,17 @@ class Branch:
     args: dict                    # its arguments, already filled in
     words: tuple[str, ...]        # what he might say to pick it
     render: object                # (args, result) -> the line he hears
+    # Whether this reading may be run BEFORE he answers. True for a lookup —
+    # that is the whole point of the engine, and a wasted read costs nothing.
+    #
+    # False for a reading that DOES something. "Slice it" is either a cross
+    # section of the hologram or a run through PrusaSlicer, and neither is a
+    # lookup: speculating would cut the model open on screen while he is still
+    # being asked which he meant, and start a real slice for an answer he might
+    # not give. A deferred branch is asked about and then run — the question
+    # costs a round trip instead of saving one, which is the correct trade when
+    # the alternative is doing both things.
+    speculative: bool = True
 
 
 @dataclass
@@ -148,10 +159,78 @@ _ALREADY_COMPANY = re.compile(
     r"factory|lawsuit|ceo|hiring|layoffs|announcement|announced)\b", re.I)
 
 
+_SLICE = re.compile(r"^(?:can you |could you |please )?slice (?:it|that|this|the model|the part)"
+                    r"[.!?]?$", re.I)
+
+
+def _slice_ambiguity(t: str) -> Ambiguity | None:
+    """"Slice it" means two completely different things once a model is up.
+
+    A cross section — cut it open so he can see inside — or a run through
+    PrusaSlicer to produce the G-code a printer eats. Both are reasonable
+    readings of the same two words, and guessing wrong is expensive in opposite
+    directions: cut it open when he wanted G-code and he waits for a file that
+    is not coming; run the slicer when he wanted to look inside and he waits
+    thirty seconds for nothing he asked for.
+
+    It is ONLY ambiguous while something is on the stage. With no hologram up
+    there is nothing to cross-section, so "slice it" plainly means the slicer
+    and asking would be pedantry. Neither branch speculates: see Branch.
+    """
+    if not _SLICE.match(t):
+        return None
+    try:
+        from tools.holo_tools import current
+        up = current()
+    except Exception:
+        return None
+    if not up.get("path"):
+        return None
+    name = up.get("name") or ""
+    return Ambiguity(
+        subject=name or "the model",
+        question="A cross section, or slice it for the printer, sir?",
+        branches=(
+            Branch("a cross section", "holo_control",
+                   {"action": "section", "axis": "z", "at": 0.5},
+                   ("section", "cross", "cut", "open", "inside", "look", "view",
+                    "visual", "see"),
+                   render=lambda a, r: (r or {}).get("spoken") or "Cutting it open, sir.",
+                   speculative=False),
+            Branch("for the printer", "slice_part",
+                   {"stl_path": up.get("path", "")},
+                   ("printer", "print", "gcode", "g-code", "prusa", "slicer",
+                    "properly", "real", "file"),
+                   render=lambda a, r: _say_slice(r),
+                   speculative=False),
+        ),
+    )
+
+
+def _say_slice(res: dict) -> str:
+    """What the slicer actually reported — never a number nobody produced."""
+    if not isinstance(res, dict) or res.get("error"):
+        return f"The slicer wouldn't take it, sir — {(res or {}).get('error', 'no idea why')}."
+    bits = []
+    if res.get("print_time"):
+        bits.append(f"about {res['print_time']}")
+    if res.get("filament_g"):
+        bits.append(f"{res['filament_g']} grams of filament")
+    line = "Sliced, sir" + (" — " + " and ".join(bits) if bits else "") + "."
+    if res.get("mesh_warning"):
+        line += f" Though {res['mesh_warning']}."
+    return line
+
+
 def detect(text: str) -> Ambiguity | None:
     """An ambiguity worth one short question, or None to answer as usual."""
     t = (text or "").strip()
-    if not t or _ALREADY_STOCK.search(t) or _ALREADY_COMPANY.search(t):
+    if not t:
+        return None
+    slice_amb = _slice_ambiguity(t)
+    if slice_amb:
+        return slice_amb
+    if _ALREADY_STOCK.search(t) or _ALREADY_COMPANY.search(t):
         return None
     m = next((hit for hit in (p.search(t) for p in _VAGUE) if hit), None)
     if not m:

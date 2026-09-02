@@ -33,9 +33,10 @@ import { useEffect, useRef } from "react";
 import {
   BufferGeometry, DoubleSide, Float32BufferAttribute, Group, GridHelper,
   LineBasicMaterial, LineSegments, Material, Mesh, MeshBasicMaterial,
-  PerspectiveCamera, Scene, WebGLRenderer,
+  PerspectiveCamera, Plane, Scene, Vector3, WebGLRenderer,
 } from "three";
 import { useStore } from "../state/store";
+import type { HoloState } from "../state/store";
 import { api } from "../lib/sidecar";
 
 const CYAN = 0x27c7ff;
@@ -48,6 +49,12 @@ type Geometry = {
   size_mm: number[];
   triangles: number;
   edges: number;
+  // Only present when the part is actually made of more than one body; the
+  // sidecar leaves them out otherwise rather than sending kilobytes to say
+  // "there is nothing to explode".
+  body_count?: number;
+  bodies?: number[];
+  body_centres?: number[][];
   error?: string;
 };
 
@@ -73,9 +80,13 @@ export function HoloStage() {
   // tear the scene down and rebuild it — that would restart the spin and flash
   // the panel — so it reaches the live scene through this.
   const applyCheck = useRef<((wantLayers: boolean) => void) | null>(null);
+  // Same reasoning as applyCheck: a control must reach the live scene without
+  // rebuilding it, or every "turn it" would restart the spin and flash the panel.
+  const applyCmd = useRef<((c: NonNullable<HoloState["cmd"]>) => void) | null>(null);
   const holo = useStore((s) => s.holo);
   const checkTs = holo?.check?.ts ?? 0;
   const showLayers = holo?.showLayers ?? false;
+  const cmd = holo?.cmd;
 
   useEffect(() => {
     const el = host.current;
@@ -106,8 +117,27 @@ export function HoloStage() {
     let spin = true;
     let settled = false;
     let bob = 0;
-    const target = { ry: 0.6, rx: -0.2, scale: 1 };
-    const current = { ry: 0.6, rx: -0.2, scale: 1 };
+    // Rotation is held per axis rather than as the two the idle spin uses, so a
+    // spoken "tip it forward thirty degrees" and the ambient turn do not fight
+    // over the same number.
+    const HOME = { rx: -0.2, ry: 0.6, rz: 0, scale: 1 };
+    const target = { ...HOME };
+    const current = { ...HOME };
+
+    // Section cut. One plane, disabled by default; three.js clips against it
+    // only while it is in the material's `clippingPlanes`.
+    const clip = new Plane(new Vector3(0, 0, -1), 0);
+    let clipping = false;
+    const clipped: (Material & { clippingPlanes?: Plane[] | null })[] = [];
+
+    // Exploded view: the untouched positions, so it can always come home.
+    let basePos: Float32Array | null = null;
+    let vertBody: Int32Array | null = null;
+    let bodyDir: number[][] = [];
+    let explode = 0;
+    let explodeTarget = 0;
+    let faceGeom: BufferGeometry | null = null;
+    let lastSize: number[] | null = null;   // millimetres, for the cut plane
 
     const size = () => {
       const w = el.clientWidth || 800;
@@ -141,10 +171,23 @@ export function HoloStage() {
       const faces = new BufferGeometry();
       faces.setAttribute("position", new Float32BufferAttribute(geo.positions, 3));
       faces.computeVertexNormals();
-      shell.add(new Mesh(faces, new MeshBasicMaterial({
+      faceGeom = faces;
+      basePos = Float32Array.from(geo.positions);
+      // Per-VERTEX body labels: the sidecar sends one per triangle, because
+      // three of every four bytes would otherwise be a repeat.
+      vertBody = geo.bodies
+        ? Int32Array.from(geo.bodies.flatMap((b) => [b, b, b]))
+        : null;
+      bodyDir = geo.body_centres ?? [];
+      explode = 0;
+      explodeTarget = 0;
+      const faceMat = new MeshBasicMaterial({
         color: CYAN, transparent: true, opacity: 0.075,
         side: DoubleSide, depthWrite: false,
-      })));
+      });
+      shell.add(new Mesh(faces, faceMat));
+      clipped.length = 0;
+      clipped.push(faceMat);
 
       if (geo.edge_positions?.length) {
         const lines = new BufferGeometry();
@@ -152,19 +195,23 @@ export function HoloStage() {
         // The wide dim pass is the bloom. One extra draw call, no render target,
         // no post-processing — and it costs the 780M nothing worth measuring,
         // which matters because llama-server owns that GPU.
-        const halo = new LineSegments(lines, new LineBasicMaterial({
+        const haloMat = new LineBasicMaterial({
           color: CYAN, transparent: true, opacity: 0.16,
-        }));
+        });
+        const edgeMat = new LineBasicMaterial({
+          color: CYAN, transparent: true, opacity: 0.95,
+        });
+        const halo = new LineSegments(lines, haloMat);
         halo.scale.setScalar(1.015);
         shell.add(halo);
-        shell.add(new LineSegments(lines, new LineBasicMaterial({
-          color: CYAN, transparent: true, opacity: 0.95,
-        })));
+        shell.add(new LineSegments(lines, edgeMat));
+        clipped.push(haloMat, edgeMat);
       }
 
       // Frame it: the model is already centred by the sidecar, so this only has
       // to choose a distance that fits the largest dimension.
       const [w, h, d] = geo.size_mm;
+      lastSize = [w, h, d];
       const span = Math.max(w, h, d) || 1;
       camera.position.set(0, span * 0.34, span * 2.5);
       camera.lookAt(0, 0, 0);
@@ -269,6 +316,84 @@ export function HoloStage() {
       settled = false;
     }
 
+    // ---- the spoken controls ------------------------------------------------
+    function setClip(axis: string, at: number) {
+      // The model is centred, so the plane sits at (at - 0.5) of the extent from
+      // the middle. Axis names are HIS — z is vertical, the axis it stands on the
+      // bed on — and the -90 degree `orient` rotation is what maps that onto the
+      // renderer's y. Doing the swap here rather than in the language keeps every
+      // number in the app Z-up, the way the slicer and printcheck have it.
+      const size = lastSize ?? [1, 1, 1];
+      const n = axis === "x" ? new Vector3(-1, 0, 0)
+        : axis === "y" ? new Vector3(0, 0, 1)
+        : new Vector3(0, -1, 0);
+      const extent = axis === "x" ? size[0] : axis === "y" ? size[1] : size[2];
+      clip.normal.copy(n);
+      clip.constant = (0.5 - at) * extent * (axis === "y" ? -1 : 1);
+      clipping = true;
+      for (const m of clipped) m.clippingPlanes = [clip];
+      settled = false;
+    }
+
+    function clearClip() {
+      clipping = false;
+      for (const m of clipped) m.clippingPlanes = null;
+      settled = false;
+    }
+
+    function applyExplode(t: number) {
+      if (!basePos || !vertBody || !faceGeom || !bodyDir.length) return;
+      const attr = faceGeom.getAttribute("position") as { array: Float32Array; needsUpdate: boolean };
+      const arr = attr.array;
+      for (let i = 0, v = 0; i < arr.length; i += 3, v++) {
+        const d = bodyDir[vertBody[v]] ?? [0, 0, 0];
+        arr[i] = basePos[i] + d[0] * t;
+        arr[i + 1] = basePos[i + 1] + d[1] * t;
+        arr[i + 2] = basePos[i + 2] + d[2] * t;
+      }
+      attr.needsUpdate = true;
+      settled = false;
+    }
+
+    applyCmd.current = (c) => {
+      switch (c.action) {
+        case "rotate": {
+          // Degrees are in HIS frame (z vertical). `orient` already turns the
+          // model, so a rotation about his z is a rotation about the renderer's
+          // y — the same mapping as the clip plane above, and wrong in the same
+          // way if it is only done in one of them.
+          const r = ((c.degrees ?? 90) * Math.PI) / 180;
+          if (c.axis === "x") target.rx += r;
+          else if (c.axis === "y") target.rz += r;
+          else target.ry += r;
+          spin = false;              // he is steering it now; stop the idle drift
+          break;
+        }
+        case "scale":
+          target.scale = Math.max(0.2, Math.min(6, target.scale * (c.factor ?? 1.5)));
+          break;
+        case "section":
+          setClip(c.axis ?? "z", c.at ?? 0.5);
+          break;
+        case "explode":
+          explodeTarget = explodeTarget > 0 ? 0 : 1;
+          break;
+        case "fit":
+          target.scale = 1;
+          break;
+        case "reset":
+          Object.assign(target, HOME);
+          clearClip();
+          explodeTarget = 0;
+          spin = true;
+          break;
+        case "layers":
+          void applyCheck.current?.(!!c.on);
+          break;
+      }
+      settled = false;
+    };
+
     applyCheck.current = async (wantLayers: boolean) => {
       // Fetch once, and once more only if layers are wanted and were not asked
       // for the first time. Re-parsing a 6,000-line G-code file on every toggle
@@ -294,15 +419,26 @@ export function HoloStage() {
       if (spin) target.ry += 0.006;
       const dry = target.ry - current.ry;
       const drx = target.rx - current.rx;
+      const drz = target.rz - current.rz;
       const ds = target.scale - current.scale;
-      const moving = spin || Math.abs(dry) > 1e-4 || Math.abs(drx) > 1e-4 || Math.abs(ds) > 1e-4;
+      const dx = explodeTarget - explode;
+      const moving = spin
+        || Math.abs(dry) > 1e-4 || Math.abs(drx) > 1e-4 || Math.abs(drz) > 1e-4
+        || Math.abs(ds) > 1e-4 || Math.abs(dx) > 1e-3;
       // Settle, like the orb. An unmoving scene is not re-rendered.
       if (!moving && settled) return;
       current.ry += dry * 0.1;
       current.rx += drx * 0.1;
+      current.rz += drz * 0.1;
       current.scale += ds * 0.1;
+      if (Math.abs(dx) > 1e-3) {
+        explode += dx * 0.1;
+        // Pushed by a fraction of the model's own size, so a 6 mm bracket and a
+        // 200 mm frame separate by an amount that reads the same on screen.
+        applyExplode(explode * (Math.max(...(lastSize ?? [10])) * 0.45));
+      }
       bob += 0.012;
-      group.rotation.set(current.rx, current.ry, 0);
+      group.rotation.set(current.rx, current.ry, current.rz);
       group.scale.setScalar(current.scale);
       group.position.y = Math.sin(bob) * 1.4;
       bed.rotation.y = current.ry;
@@ -319,6 +455,7 @@ export function HoloStage() {
     return () => {
       disposed = true;
       applyCheck.current = null;
+      applyCmd.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
       clear();
@@ -332,6 +469,12 @@ export function HoloStage() {
   useEffect(() => {
     if (checkTs) void applyCheck.current?.(showLayers);
   }, [checkTs, showLayers]);
+
+  // Controls, keyed on the sequence number rather than the payload: "turn it
+  // ninety degrees" twice is two identical payloads and must turn it twice.
+  useEffect(() => {
+    if (cmd) applyCmd.current?.(cmd);
+  }, [cmd?.seq]);
 
   return (
     <>

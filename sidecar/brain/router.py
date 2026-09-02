@@ -61,7 +61,11 @@ _CANON = [
     # ...and "hide the camera" names a subsystem, not "everything". Folded in, it
     # became the UI's hide-all canon and camera_off could not compete for its own
     # phrasing. Found by test_canon_erasure, not by him, which is the point of it.
-    (r"^(?:hide|dismiss|clear)\b(?!\s+(?:yourself|himself|jarvis))(?!.*\b(?:camera|webcam)\b)\b.*", "hide everything"),
+    # ...and "hide the hologram" names a subsystem too, for exactly the reason
+    # the camera does. Rewritten to "hide everything" it dismissed the whole
+    # stage through the UI skill, and hide_hologram — the tool that actually
+    # takes a model down — never saw the sentence that was about it.
+    (r"^(?:hide|dismiss|clear)\b(?!\s+(?:yourself|himself|jarvis))(?!.*\b(?:camera|webcam|hologram|holo|layers|toolpath)\b)\b.*", "hide everything"),
     (r"^(?:pin|unpin)\b.*", "pin that"),
     # "what does cpu stand for" / "what is a cpu" are questions ABOUT a thing, not requests
     # to measure it — without this they land within 0.05 of the "what's the cpu at" seed
@@ -78,7 +82,12 @@ _CANON = [
     (r"^(?:remember|note|keep in mind)\b(?!.*\b(?:my face|what i look like|my appearance)\b).*", "remember that FACT"),
     (r".*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*\b(?:and tell|tell me|read|summar\w*|what does|what's on|what is on|look at|check)\b.*", "read the website SITE and tell me"),
     (r".*\b(?:read|summar\w*|what does|what's on|look at|check)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "read the website SITE and tell me"),
-    (r"\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
+    # "go back to the previous version" is not a window. Folded onto "switch to
+    # APP" it went looking for something called `previous version` to focus,
+    # and the words that said which VERSION he meant were already gone. Same
+    # shape as camera and hologram: the noun after the verb is sometimes a
+    # subsystem rather than an argument.
+    (r"(?!.*\b(?:version|edit|revision)\b)\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
     (r"\b(?:open|show|browse|go to|list|look at|pull up|what's (?:in|on))\b.*\b(?:desktop|documents|docs|downloads|pictures|photos)\b(?!\s+(?:of|from)\b).*", "open my FOLDER folder"),
     (r"\b(?:find|look for|locate|where is|where's)\b.*\b(?:file|folder|document|resume|screenshot|invoice|report|notes?|photo|picture)s?\b(?!\s+(?:of|from)\b).*", "find the file called NAME"),
     (r".*\b(?:file|folder|document)s?\s+(?:called|named|with|containing)\b.*", "find the file called NAME"),
@@ -87,7 +96,12 @@ _CANON = [
     # the rewrite. Folded in, "show me pictures of X in my browser" became the
     # plain image canon and rendered into the HUD panel he had just asked to
     # bypass — the third rewrite today to delete the word carrying the intent.
-    (r"(?!.*\bin\s+(?:my\s+|the\s+)?(?:browser|brave|chrome|firefox|edge)\b)\b(?:show|find|pull up|get|display|bring up)\s+(?:me\s+)?(?:a\s+|some\s+|an\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+.+", "show me pictures of THING"),
+    # ...and "as a hologram" / "in 3d" decides WHAT KIND of thing appears, so it
+    # has to survive too. "show me pictures of a bracket as a hologram" folded
+    # onto the plain image canon and rendered flat pictures into the panel — the
+    # same erasure as "in my browser", one noun along. His rule, verbatim: images
+    # unless he says hologram.
+    (r"(?!.*\bin\s+(?:my\s+|the\s+)?(?:browser|brave|chrome|firefox|edge)\b)(?!.*\b(?:hologram|holo|3d|holographic)\b)\b(?:show|find|pull up|get|display|bring up)\s+(?:me\s+)?(?:a\s+|some\s+|an\s+)?(?:picture|pictures|photo|photos|image|images|pic|pics)\s+of\s+.+", "show me pictures of THING"),
     # Something to WATCH is not a web search. Without this exclusion "find me a
     # youtube video of X" folded onto the search canon at cosine 1.000, so the
     # only way to answer it was to search the web, let the model read the
@@ -106,9 +120,17 @@ _CANON = [
     # SUBSYSTEM, not an executable. Rewritten to "open APP", "open the camera" —
     # his own words for this — matched open_app at cosine 1.000 and tried to launch
     # the Windows Camera app instead of the HUD view.
-    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+|that\s+|this\s+|some\s+|a\s+|an\s+)?(?:sound|audio|volume|music|tunes|camera|webcam|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself|article|articles|story|link|links|source|page)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
-    (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|camera|webcam|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
-    (r"\d+", "N"),
+    # `hologram`/`holo` join `camera` in both launch lists for the same reason:
+    # they name a SUBSYSTEM, not an executable. "open the hologram" became
+    # "open APP" and went looking for a program called hologram to run.
+    (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+|that\s+|this\s+|some\s+|a\s+|an\s+)?(?:sound|audio|volume|music|tunes|camera|webcam|hologram|holo|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself|article|articles|story|link|links|source|page)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
+    (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|camera|webcam|hologram|holo|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
+    # "3d" must survive the digit rule below. It is the word that distinguishes
+    # "create a 3D image of that" — which builds a mesh in the background — from
+    # any other kind of image, and "Nd" is not a word anything can route on.
+    # Normalised first so "3-D" and "3 d" reach the same token.
+    (r"\b3\s*-?\s*d\b", "3d"),
+    (r"\d+(?!\s*-?\s*d\b)", "N"),
 ]
 
 

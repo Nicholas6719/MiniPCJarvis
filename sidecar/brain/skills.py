@@ -994,6 +994,120 @@ def say_volume(slots: dict, res: dict) -> str:
     return f"Volume set to {slots['percent']} percent."
 
 
+# ---- the hologram -------------------------------------------------------
+def slots_holo_move(t: str) -> dict | None:
+    """Hand the whole sentence down, plus whatever could be read out of it.
+
+    The parsing lives in holo_angles, not here, so the tool and the skill can
+    never disagree about what "a quarter turn" means — and so it can be tested
+    without a stage, a model or a renderer.
+    """
+    import holo_angles
+    act = holo_angles.parse_action(t)
+    if not act:
+        return None            # not a control after all; let something else have it
+    out: dict = {"action": act, "phrase": t}
+    if act in ("rotate", "flip"):
+        out["axis"] = holo_angles.parse_axis(t)
+        out["degrees"] = holo_angles.parse_degrees(t)
+    elif act == "scale":
+        out["factor"] = holo_angles.parse_scale(t) or 1.5
+    elif act == "section":
+        sec = holo_angles.parse_section(t) or {"axis": "z", "at": 0.5}
+        out.update(sec)
+    return out
+
+
+def say_holo_move(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    # The tool composes the sentence, because it is the one that knows what it
+    # actually did — including when it clamped or ignored something.
+    return res.get("spoken") or "Done, sir."
+
+
+def _holo_name(t: str) -> str:
+    """A part named in the sentence — only if a part by that name actually exists.
+
+    The obvious version, "the noun after 'the'", read "does it fit on the bed"
+    as a request about a part called `bed` and sent inspect_part hunting for
+    bed.stl. No list of stop words fixes that honestly: `bed`, `printer`,
+    `screen` and `supports` are all perfectly good names for a part he might one
+    day make.
+
+    So the work folder decides. If a matching STL is there, he named a part; if
+    not, he did not, and the tool's own fallback — the most recent thing he made
+    — is the right answer. Two `os.path` calls on the routing path, which is
+    cheaper than the embedding that got us here.
+    """
+    import re
+    m = re.search(r"\b(?:of|the|my)\s+([a-z0-9][a-z0-9 _-]{1,40}?)\s*"
+                  r"(?:as a hologram|in 3d|hologram)?$", (t or "").lower().strip())
+    if not m:
+        return ""
+    cand = m.group(1).strip()
+    if cand in {"it", "that", "this", "one", "model", "part", "thing", "hologram"}:
+        return ""
+    try:
+        from tools.fabrication import safe_name, work_dir
+        return cand if (work_dir() / f"{safe_name(cand)}.stl").exists() else ""
+    except Exception:
+        return ""
+
+
+def slots_holo_show(t: str) -> dict:
+    n = _holo_name(t)
+    return {"name": n} if n else {}
+
+
+def say_holo_show(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    size = res.get("spoken_size")
+    return f"There it is, sir — {size}." if size else "There it is, sir."
+
+
+def slots_holo_check(t: str) -> dict:
+    n = _holo_name(t)
+    return {"name": n} if n else {}
+
+
+def say_holo_check(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    return res.get("spoken") or "I couldn't tell, sir."
+
+
+def slots_holo_edit(t: str) -> dict:
+    """The change, in his own words — the model doing the edit reads English."""
+    return {"change": (t or "").strip()}
+
+
+def say_holo_edit(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    size, was = res.get("spoken_size"), res.get("was_size_mm")
+    # Says the part CHANGED, explicitly, because everything else on the stage
+    # only moves the view and he needs to be able to tell the two apart.
+    #
+    # And names the DIMENSION that moved, not all three: "it was six millimetres,
+    # it's twelve now" is the useful half of an A/B, and it is the half that
+    # still works when he is not looking at the screen.
+    if size and was and res.get("size_mm"):
+        moved = [(round(a, 1), round(b, 1))
+                 for a, b in zip(was, res["size_mm"]) if abs(a - b) > 0.05]
+        if len(moved) == 1:
+            return f"Done, sir — that was {moved[0][0]} millimetres, it's {moved[0][1]} now."
+    return (f"Done, sir — it's {size} now." if size
+            else "Done, sir — that's the part changed.")
+
+
+def say_holo_revert(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    return "Back to the previous version, sir."
+
+
 def say_look(slots: dict, res: dict) -> str:
     """What he hears after asking JARVIS to look.
 
@@ -1477,6 +1591,73 @@ SKILLS: list[Skill] = [
     # what makes them safe: they keep their own words instead of collapsing onto
     # the app-launching canon. Any new seed still goes through _norm() first —
     # if it comes back changed, it belongs to something else.
+    # ---- the hologram (phase C) ------------------------------------------
+    # ONE skill for every control rather than one per verb. The router picks a
+    # skill by meaning, and "rotate it", "cut it in half" and "put it back" are
+    # all the same meaning — do something to the thing on the stage. Splitting
+    # them would have produced seed clusters so close together that
+    # seed_collisions.py would rightly reject them; instead the sentence is
+    # parsed by holo_angles, which is tested on its own.
+    #
+    # These seeds are safe only because _CANON was fixed first: "hide the
+    # hologram" used to become "hide everything" and "open the hologram" became
+    # "open APP". Seeding them before that would have handed every "open
+    # spotify" to the hologram at cosine 1.000 — the camera's exact bug.
+    Skill("holo_move", "holo_control", [
+        "rotate it", "rotate the model", "turn it ninety degrees",
+        "spin it round", "turn it upside down", "flip it over",
+        "tip it forward", "tilt it back", "roll it over",
+        "cut it in half", "give me a cross section", "show me the inside of it",
+        # NOT a bare "make it bigger": the `ui` skill already owns that phrasing
+        # and the collision gate rejected it. Taking it would have changed what
+        # an existing sentence does depending on whether a model happened to be
+        # up, which is worse than making him name the model.
+        "zoom in on it", "zoom out a bit", "make the model bigger",
+        "pull it apart", "explode the model", "show me it exploded",
+        "put it back the way it was", "reset the model", "straighten it up",
+        "show me the layers", "show me the toolpath", "show me how it prints",
+        "back to the model", "hide the layers",
+        "fit it on the screen", "centre the model"],
+        slots=slots_holo_move, speak=say_holo_move),
+    Skill("holo_show", "show_hologram", [
+        "show me that as a hologram", "project that as a hologram",
+        "put it up as a hologram", "show me the hologram",
+        "bring up the hologram", "open the hologram",
+        "let me see it in 3d", "show me a 3d view of it",
+        "project the bracket", "put the part up in 3d"],
+        slots=slots_holo_show, speak=say_holo_show),
+    Skill("holo_hide", "hide_hologram", [
+        "hide the hologram", "take the hologram down", "close the hologram",
+        "put the hologram away", "get rid of the hologram",
+        "turn the hologram off", "stop projecting that"],
+        speak=lambda s, r: "Taking it down, sir."),
+    Skill("holo_check", "inspect_part", [
+        "will it print", "will that print", "can you print that",
+        "is it printable", "check if it will print",
+        "does it fit on the bed", "will it fit the printer",
+        "check that part", "check the model for problems",
+        "are there any overhangs", "will it need supports",
+        "how thick are the walls"],
+        slots=slots_holo_check, speak=say_holo_check),
+    # Editing the REAL part, as against moving the view. The seeds are all
+    # phrased as changes to a dimension, because that is the only thing this can
+    # actually do — it rewrites a parameter in the OpenSCAD source and
+    # re-renders. "Make it bigger" is deliberately absent: it belongs to the
+    # view (and to the `ui` skill), and silently resizing a part he is about to
+    # print because he leaned at the screen would be the worst bug in the app.
+    Skill("holo_edit", "edit_part", [
+        "make the hole bigger", "make the holes smaller",
+        "make it taller", "make it thicker", "make it thinner",
+        "make the wall thicker", "round off the corners",
+        "add a fillet to the edges", "move the hole over",
+        "change the hole to 5 millimetres", "make the base wider",
+        "give it a chamfer"],
+        slots=slots_holo_edit, speak=say_holo_edit),
+    Skill("holo_revert", "revert_part", [
+        "put the old version back", "undo that change", "revert the part",
+        "go back to the previous version", "undo the edit",
+        "i liked the old one better"],
+        speak=say_holo_revert),
     Skill("camera_on", "set_camera", [
         "turn the camera on", "show me the camera", "camera on",
         "turn on the webcam", "pull up the camera", "put the camera up",

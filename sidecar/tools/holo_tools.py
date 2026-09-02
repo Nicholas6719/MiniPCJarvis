@@ -57,12 +57,16 @@ def _pick(path: str = "", name: str = "") -> Path | None:
     Shared by projecting and inspecting, so "show me the bracket" and "will the
     bracket print" can never disagree about which file they are talking about.
     """
-    from tools.fabrication import work_dir
+    from tools.fabrication import safe_name, work_dir
 
     if path:
         return _resolve(path)
     if name:
-        return _resolve(str(work_dir() / f"{Path(name).stem}.stl"))
+        # safe_name, not Path().stem — that is what generate_part writes files
+        # with, so "bracket v2" is on disk as bracket-v2.stl. Using the raw stem
+        # here made the routing slot (which does use safe_name to check the file
+        # exists) and this lookup disagree about the same part.
+        return _resolve(str(work_dir() / f"{safe_name(Path(name).stem)}.stl"))
     # Nothing named: the newest thing he made, which is almost always what
     # "show me the bracket" means right after making one.
     try:
@@ -78,9 +82,16 @@ async def show_hologram(path: str = "", name: str = "") -> dict:
     if target is None or target.suffix.lower() != ".stl":
         return {"error": "I don't have a model to project, sir"}
 
+    import asyncio
+
     import meshio
     try:
-        info = meshio.describe(str(target))
+        # OFF THE EVENT LOOP. Parsing an STL, welding its vertices and finding its
+        # separate bodies is hundreds of milliseconds on a real part and seconds
+        # on a photo-derived one — and the event loop is where he waits for
+        # answers. This was running inline; it is the forty-minute-freeze lesson
+        # in miniature, and cheaper to fix than to diagnose later.
+        info = await asyncio.to_thread(meshio.describe, str(target))
     except meshio.BadMesh as e:
         return {"error": str(e)}
     except Exception as e:
@@ -181,6 +192,109 @@ async def inspect_part(path: str = "", name: str = "") -> dict:
     return out
 
 
+_ACTIONS = ("rotate", "flip", "scale", "section", "explode", "reset", "fit",
+            "layers", "solid")
+
+
+def _sliced(name: str) -> bool:
+    """Is there real G-code for this part? The file on disk is the only truth."""
+    if not name:
+        return False
+    try:
+        from tools.fabrication import safe_name, work_dir
+        return (work_dir() / f"{safe_name(name)}.gcode").exists()
+    except Exception:
+        return False
+
+# What each control turns into, said aloud. Short on purpose: he is watching the
+# thing move, so the sentence is an acknowledgement, not a description.
+_AXIS_SAID = {"x": "forwards", "y": "sideways", "z": "round"}
+
+
+async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
+                       factor: float = 0.0, at: float = 0.5,
+                       phrase: str = "") -> dict:
+    """Move the model that is already on the stage.
+
+    NOTHING HERE CHANGES THE MODEL. Rotation, scale and the section cut are all
+    view state: the STL on disk is untouched, and the millimetres `inspect_part`
+    reports do not move because he turned it. Changing the real part is
+    `edit_part`, which rewrites the source and re-renders and says so. Keeping
+    that line sharp matters more here than anywhere else in the app — this is a
+    part he is about to spend an hour printing.
+    """
+    if not _current:
+        return {"error": "there's nothing on the stage to move, sir"}
+
+    act = (action or "").strip().lower()
+    said = phrase or ""
+    if act not in _ACTIONS:
+        # The model may hand us the sentence instead of an action; the skills
+        # parse it too, and both paths land on the same parser rather than on
+        # two that can drift apart. An unrecognised sentence is an admitted miss,
+        # never a guess — falling through to "rotate" made "reset it" spin the
+        # model, which he then has to undo.
+        import holo_angles
+        act = holo_angles.parse_action(said) or ""
+        if act not in _ACTIONS:
+            # `!r` in an f-string applies to the whole conditional, not the last
+            # branch, so this said: I'm not sure what to do with 'that', sir.
+            what = action.strip() if action else "that"
+            return {"error": f"I'm not sure what to do with {what}, sir"}
+
+    payload: dict = {"action": act}
+    spoken = "Done, sir."
+
+    if act in ("rotate", "flip"):
+        import holo_angles
+        ax = (axis or "").lower() or (holo_angles.parse_axis(said) if said else "z")
+        deg = degrees or (holo_angles.parse_degrees(said) if said else
+                          (180.0 if act == "flip" else holo_angles.DEFAULT_DEGREES))
+        if act == "flip":
+            ax = ax or "x"
+        payload.update({"action": "rotate", "axis": ax, "degrees": float(deg)})
+        spoken = (f"Turning it {abs(deg):.0f} degrees {_AXIS_SAID.get(ax, 'round')}, sir."
+                  if abs(deg) != 360 else "Right the way round, sir.")
+    elif act == "scale":
+        import holo_angles
+        f = factor or (holo_angles.parse_scale(said) or 1.5)
+        payload["factor"] = float(f)
+        spoken = "Closer, sir." if f > 1 else "Backing off, sir."
+    elif act == "section":
+        import holo_angles
+        sec = ({"axis": axis, "at": at} if axis else None) or \
+            holo_angles.parse_section(said) or {"axis": "z", "at": 0.5}
+        payload.update(sec)
+        spoken = "Cutting it open, sir."
+    elif act == "explode":
+        # An exploded view of one solid body is one solid body, moved. Saying
+        # "separating it" and then showing him nothing move is worse than saying
+        # there is nothing to separate.
+        n = int(_current.get("body_count") or 1)
+        if n < 2:
+            return {"error": "it's a single body, sir — there's nothing to separate"}
+        spoken = f"Separating the {n} parts, sir."
+    elif act == "reset":
+        spoken = "Back as it was, sir."
+    elif act == "fit":
+        spoken = "Framing it, sir."
+    elif act in ("layers", "solid"):
+        payload["action"] = "layers"
+        payload["on"] = act == "layers"
+        # Ask the DISK whether it has been sliced, not the in-memory check cache.
+        # The cache is only populated by `inspect_part`, so a part sliced
+        # yesterday would have been told it was never sliced at all after a
+        # restart — and the cache is bounded, so it forgets anyway.
+        if act == "layers" and not _sliced(_current.get("name", "")):
+            return {"error": "that part hasn't been sliced yet, sir — "
+                             "I'd need to slice it before I can show you the layers"}
+        spoken = "The toolpath, sir." if act == "layers" else "Back to the model, sir."
+
+    await bus.emit("holo_control", name=_current.get("name", ""), **payload)
+    return {"on_stage": True, "applied": payload, "spoken": spoken,
+            "note": "view only — the model on disk is unchanged"}
+
+
 async def hide_hologram() -> dict:
     _current.clear()
     await bus.emit("hologram", action="hide")
@@ -210,6 +324,25 @@ def register_all() -> None:
             "name": {"type": "string", "description": "a part name from the work folder"}},
             "required": []},
         risk=Risk.SAFE, handler=inspect_part, timeout=120))
+    registry.register(Tool(
+        name="holo_control",
+        description="Move the hologram already on the stage: rotate, flip, scale, "
+                    "section (cut it open), explode, reset, fit, layers (show the "
+                    "sliced toolpath) or solid. This is the VIEW only — the model "
+                    "on disk is not changed and its millimetres do not move, so "
+                    "never say the part got bigger or smaller. To change the real "
+                    "part, use edit_part.",
+        parameters={"type": "object", "properties": {
+            "action": {"type": "string", "enum": list(_ACTIONS)},
+            "axis": {"type": "string", "enum": ["x", "y", "z"],
+                     "description": "z is vertical, the axis it stands on the bed on"},
+            "degrees": {"type": "number", "description": "for rotate; negative turns back"},
+            "factor": {"type": "number", "description": "for scale; 1.5 is closer"},
+            "at": {"type": "number", "description": "for section; 0-1 along the axis"},
+            "phrase": {"type": "string",
+                       "description": "what he said, if the action is not obvious"}},
+            "required": []},
+        risk=Risk.SAFE, handler=holo_control, timeout=20))
     registry.register(Tool(
         name="hide_hologram",
         description="Take the hologram down.",

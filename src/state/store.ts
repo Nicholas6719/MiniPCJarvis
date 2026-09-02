@@ -99,6 +99,13 @@ export interface HoloState {
   // /holo/printcheck, for the same reason the mesh comes from /holo/geometry.
   check?: { overhangFaces: number; layers: number | null; ts: number };
   showLayers?: boolean;
+  // The last control, with a sequence number. `seq` is what the renderer watches:
+  // "turn it ninety degrees" said twice must turn it twice, and identical
+  // payloads would otherwise be indistinguishable from no new command at all.
+  cmd?: {
+    seq: number; action: string;
+    axis?: string; degrees?: number; factor?: number; at?: number; on?: boolean;
+  };
 }
 
 export interface ImagesState {
@@ -569,6 +576,19 @@ export const useStore = create<Store>((set, get) => ({
           }));
           push({ id: evt.id, ts: evt.ts, kind: "web", summary: `hologram: ${evt.name}` });
         }
+        break;
+      // A control is a COMMAND, not a state: "turn it ninety degrees" twice
+      // should turn it twice. So each one lands with its own sequence number and
+      // the renderer applies it once, rather than the store holding a rotation
+      // the renderer keeps re-reading and re-applying.
+      case "holo_control":
+        set((st) => (st.holo
+          ? { holo: { ...st.holo,
+                      showLayers: evt.action === "layers" ? !!evt.on : st.holo.showLayers,
+                      cmd: { seq: (st.holo.cmd?.seq ?? 0) + 1, action: evt.action,
+                             axis: evt.axis, degrees: evt.degrees, factor: evt.factor,
+                             at: evt.at, on: evt.on } } }
+          : {}));
         break;
       case "reflex":
         set((st) => ({

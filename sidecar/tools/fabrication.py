@@ -242,6 +242,177 @@ async def generate_part(description: str, name: str = "") -> dict:
             "size_kb": round(stl.stat().st_size / 1024, 1), "source": code}
 
 
+async def edit_part(change: str, name: str = "") -> dict:
+    """Change a part he already has: "make the hole bigger", "twice as tall".
+
+    THIS IS THE ONE THING ON THE STAGE THAT CHANGES THE REAL MODEL. Rotating,
+    scaling and sectioning are all view state — the STL is untouched and its
+    millimetres do not move. This rewrites the source and re-renders, so what
+    comes back is a different part, and it says so.
+
+    It works at all only because `generate_part` keeps the `.scad` beside the
+    `.stl`. Editing a MESH — moving vertices to widen a hole — is a research
+    problem with unreliable results; editing the source that produced it is a
+    parameter change and a re-render, which either compiles or does not.
+
+    So a part with no source cannot be edited, and is told so plainly rather
+    than being silently approximated. That is every tier-3 and tier-4 part: a
+    mesh from a photo has no parameters to change.
+
+    THE PREVIOUS VERSION IS KEPT (`<name>.prev.scad`) so "no, put it back" is a
+    file copy rather than an apology.
+    """
+    want = (change or "").strip()
+    if not want:
+        return {"error": "what should I change, sir?"}
+    exe = openscad_path()
+    if not exe:
+        return {"error": "OpenSCAD is not installed — set fabrication.openscad_binary",
+                "unavailable": True}
+
+    d = work_dir()
+    base = safe_name(name) if name else ""
+    if not base:
+        try:
+            scads = sorted(d.glob("*.scad"), key=lambda f: f.stat().st_mtime)
+            scads = [s for s in scads if not s.name.endswith(".prev.scad")]
+            base = scads[-1].stem if scads else ""
+        except OSError:
+            base = ""
+    if not base:
+        return {"error": "I don't have a part to change, sir"}
+
+    scad = d / f"{base}.scad"
+    if not scad.exists():
+        return {"error": f"I don't have the source for {base}, sir — "
+                         "it wasn't one I wrote, so there are no dimensions to change"}
+    try:
+        source = scad.read_text(encoding="utf-8")
+    except OSError as e:
+        return {"error": f"I couldn't read that part's source: {e}"}
+
+    from llm.provider import local_llm
+    prompt = (
+        "Here is OpenSCAD source for a part:\n\n"
+        f"{source}\n\n"
+        f"Change it so that: {want}\n\n"
+        "Output ONLY the complete revised OpenSCAD source — no prose, no markdown "
+        "fences, no explanation. Change as little as possible: keep the same "
+        "structure, the same variable names and everything he did not ask about. "
+        "Keep the $fn line. Millimetres throughout.")
+    try:
+        code = ""
+        async for ch in local_llm.stream([{"role": "user", "content": prompt}],
+                                         max_tokens=900,
+                                         sampling={"temperature": 0.15, "top_p": 0.9}):
+            code += ch.text
+            if ch.done:
+                break
+    except Exception as e:
+        return {"error": f"I couldn't work out that change: {e}"}
+    code = re.sub(r"^```[a-zA-Z]*\n|```$", "", (code or "").strip(), flags=re.M).strip()
+    if not code:
+        return {"error": "the model returned no source"}
+    if code == source.strip():
+        return {"error": "that would leave it exactly as it is, sir"}
+
+    # Keep the old one BEFORE overwriting, and render to a scratch file: a
+    # failed edit must not leave him with neither the new part nor the old.
+    prev = d / f"{base}.prev.scad"
+    tmp_scad, tmp_stl = d / f"{base}.next.scad", d / f"{base}.next.stl"
+    tmp_scad.write_text(code, encoding="utf-8")
+    rc, out, err = await _run([exe, "-o", str(tmp_stl), str(tmp_scad)], GEN_TIMEOUT_S)
+    if rc != 0 or not tmp_stl.exists():
+        for f in (tmp_scad, tmp_stl):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        return {"error": f"that change wouldn't build: {(err or out or '').strip()[:200]}",
+                "unchanged": True}
+
+    stl = d / f"{base}.stl"
+
+    # Measure the OLD part before it is replaced. Being told "it was six
+    # millimetres thick, it's twelve now" is the useful half of an A/B, and it is
+    # the half that works when he is not looking at the screen.
+    import meshio
+    was = None
+    if stl.exists():
+        try:
+            was = (await asyncio.to_thread(meshio.describe, str(stl)))["size_mm"]
+        except Exception:
+            log.debug("could not measure the part before editing", exc_info=True)
+
+    try:
+        prev.write_text(source, encoding="utf-8")
+        tmp_scad.replace(scad)
+        tmp_stl.replace(stl)
+    except OSError as e:
+        return {"error": f"I couldn't save that change: {e}", "unchanged": True}
+
+    out_d = {"name": base, "scad": str(scad), "stl": str(stl), "source": code,
+             "previous": str(prev), "changed": True}
+    if was:
+        out_d["was_size_mm"] = was
+    try:
+        info = await asyncio.to_thread(meshio.describe, str(stl))
+        w, h, dp = info["size_mm"]
+        out_d["size_mm"] = info["size_mm"]
+        out_d["spoken_size"] = f"{round(w)} by {round(h)} by {round(dp)} millimetres"
+    except Exception:
+        log.debug("could not measure the edited part", exc_info=True)
+
+    await _reproject(base)
+    return out_d
+
+
+async def _reproject(base: str) -> None:
+    """If that part is on the stage, put the new one up in its place.
+
+    An edit he cannot see is an edit he has to ask to see. Only when it is
+    ALREADY up: re-rendering a part he is not looking at should not seize the
+    screen, the same rule `inspect_part` follows.
+    """
+    try:
+        from tools.holo_tools import current, show_hologram
+        if (current().get("name") or "") == base:
+            await show_hologram(name=base)
+    except Exception:
+        log.debug("could not re-project the edited part", exc_info=True)
+
+
+async def revert_part(name: str = "") -> dict:
+    """Put the last edit back. A file copy, because the previous source was kept."""
+    d = work_dir()
+    base = safe_name(name) if name else ""
+    if not base:
+        try:
+            prevs = sorted(d.glob("*.prev.scad"), key=lambda f: f.stat().st_mtime)
+            base = prevs[-1].name[:-len(".prev.scad")] if prevs else ""
+        except OSError:
+            base = ""
+    prev = d / f"{base}.prev.scad" if base else None
+    if not prev or not prev.exists():
+        return {"error": "I don't have an earlier version of that, sir"}
+    exe = openscad_path()
+    if not exe:
+        return {"error": "OpenSCAD is not installed", "unavailable": True}
+    scad, stl = d / f"{base}.scad", d / f"{base}.stl"
+    # Swap, rather than overwrite: undoing an undo is the next thing he asks for.
+    current_src = scad.read_text(encoding="utf-8") if scad.exists() else ""
+    scad.write_text(prev.read_text(encoding="utf-8"), encoding="utf-8")
+    rc, out, err = await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
+    if rc != 0:
+        if current_src:
+            scad.write_text(current_src, encoding="utf-8")
+        return {"error": f"the earlier version wouldn't build: {(err or out or '').strip()[:200]}"}
+    if current_src:
+        prev.write_text(current_src, encoding="utf-8")
+    await _reproject(base)
+    return {"name": base, "stl": str(stl), "reverted": True}
+
+
 def mesh_warning_for(stl_path: str) -> str | None:
     """What is wrong with this mesh, in a sentence, or None if nothing is.
 
@@ -329,6 +500,24 @@ def register_all() -> None:
             "description": {"type": "string"},
             "name": {"type": "string"}}, "required": ["description"]},
         risk=Risk.LOW, handler=generate_part, timeout=GEN_TIMEOUT_S + 30))
+    registry.register(Tool(
+        name="edit_part",
+        description="Change a part he already has, by rewriting its OpenSCAD source and "
+                    "re-rendering: 'make the hole bigger', 'twice as tall', 'round the "
+                    "corners'. This CHANGES THE REAL MODEL on disk, unlike holo_control "
+                    "which only moves the view. Only works on parts JARVIS generated — a "
+                    "mesh from a photo has no source to edit, and it says so.",
+        parameters={"type": "object", "properties": {
+            "change": {"type": "string", "description": "what to change, in his words"},
+            "name": {"type": "string", "description": "which part; the newest if omitted"}},
+            "required": ["change"]},
+        risk=Risk.LOW, handler=edit_part, timeout=GEN_TIMEOUT_S + 30))
+    registry.register(Tool(
+        name="revert_part",
+        description="Undo the last edit to a part and put the previous version back.",
+        parameters={"type": "object", "properties": {
+            "name": {"type": "string"}}, "required": []},
+        risk=Risk.LOW, handler=revert_part, timeout=GEN_TIMEOUT_S + 30))
     registry.register(Tool(
         name="slice_part",
         description="Slice an STL into G-code and report the real print time and filament "

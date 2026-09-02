@@ -169,6 +169,42 @@ CASES = [
     ("when i say lights out, mute and open spotify", "teach"),
     ("no i meant open spotify", "correction"),
     ("undelete report.docx", "restore_file"),
+    # ---- the hologram (phase C) ------------------------------------------
+    # THE CORRECTION HE MADE HIMSELF, and the reason these are gated in both
+    # directions: "show me Spider-Man" means PICTURES. A hologram is only ever
+    # an explicit request. Getting this backwards would make every image search
+    # start a 3D render.
+    ("show me spider-man", "images"),
+    ("show me pictures of a bracket", "images"),
+    ("show me spider-man as a hologram", "holo_show"),
+    ("show me that as a hologram", "holo_show"),
+    ("project the bracket as a hologram", "holo_show"),
+    ("let me see it in 3d", "holo_show"),
+    ("hide the hologram", "holo_hide"),
+    ("take the hologram down", "holo_hide"),
+    # ...and "open the hologram" must not launch an app called hologram, which
+    # is what _CANON's "open APP" rewrite made of it before the exclusion.
+    ("open the hologram", "holo_show"),
+    ("open spotify", "open_app"),          # ...and the exclusion breaks nothing
+    ("rotate it 90 degrees", "holo_move"),
+    ("turn it upside down", "holo_move"),
+    ("cut it in half", "holo_move"),
+    ("show me the layers", "holo_move"),
+    ("put it back the way it was", "holo_move"),
+    ("pull it apart", "holo_move"),
+    ("will it print", "holo_check"),
+    ("does it fit on the bed", "holo_check"),
+    ("will it need supports", "holo_check"),
+    # Editing the REAL part, which is a different thing from moving the view.
+    ("make the hole bigger", "holo_edit"),
+    ("make it taller", "holo_edit"),
+    ("round off the corners", "holo_edit"),
+    ("put the old version back", "holo_revert"),
+    ("undo that change", "holo_revert"),
+    # ...and "go back to the previous version" must not go looking for a window
+    # called `previous version`, which is what "switch to APP" made of it.
+    ("go back to the previous version", "holo_revert"),
+    ("go back to notepad", "switch"),      # ...and the exclusion breaks nothing
 ]
 
 async def main() -> int:

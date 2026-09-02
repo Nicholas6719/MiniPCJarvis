@@ -175,6 +175,53 @@ def feature_edges(tris: np.ndarray, angle_deg: float = FEATURE_ANGLE_DEG,
     return verts
 
 
+def bodies(tris: np.ndarray) -> np.ndarray:
+    """Which separate body each triangle belongs to. One int per triangle.
+
+    "Explode it" only means something if there is more than one thing to pull
+    apart, and an STL is a bag of triangles with no notion of parts — so the
+    parts have to be found: weld the vertices, then union-find triangles that
+    share one. Two bodies touching but not welded are correctly separate, which
+    is exactly the case an exploded view exists for.
+
+    Iterative union-find with path halving. Recursion would blow the stack on a
+    photo-derived mesh, which is precisely the kind with the most components.
+    """
+    if tris.size == 0:
+        return np.zeros(0, dtype=np.int32)
+
+    flat = tris.reshape(-1, 3)
+    span = float(np.max(np.ptp(flat, axis=0))) or 1.0
+    quant = np.round(flat / (span * 1e-5)).astype(np.int64)
+    _, inverse = np.unique(quant, axis=0, return_inverse=True)
+    idx = inverse.reshape(-1, 3)
+
+    parent = np.arange(len(tris), dtype=np.int64)
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = int(parent[i])
+        return i
+
+    # Group faces by welded vertex, then union every face touching that vertex.
+    order = np.argsort(idx.reshape(-1), kind="stable")
+    verts = idx.reshape(-1)[order]
+    faces = (order // 3).astype(np.int64)
+    starts = np.flatnonzero(np.r_[True, verts[1:] != verts[:-1]])
+    for s, e in zip(starts, np.r_[starts[1:], len(verts)]):
+        group = faces[s:e]
+        root = find(int(group[0]))
+        for f in group[1:]:
+            r = find(int(f))
+            if r != root:
+                parent[r] = root
+
+    roots = np.array([find(int(i)) for i in range(len(tris))])
+    _, labels = np.unique(roots, return_inverse=True)
+    return labels.astype(np.int32)
+
+
 def describe(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     """Everything the hologram and the print checks need, from one parse."""
     tris = load_stl(path)
@@ -182,10 +229,14 @@ def describe(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     hi = tris.reshape(-1, 3).max(axis=0)
     size = (hi - lo)
     edges = feature_edges(tris, angle_deg)
+    lab = bodies(tris)
     return {
         "path": path,
         "triangles": int(len(tris)),
         "edges": int(len(edges)),
+        # Counted here so `holo_control explode` can refuse honestly on a single
+        # body without re-parsing the file to find out.
+        "body_count": int(lab.max()) + 1 if len(lab) else 0,
         "size_mm": [round(float(v), 2) for v in size],
         "min_mm": [round(float(v), 2) for v in lo],
         "max_mm": [round(float(v), 2) for v in hi],
@@ -204,4 +255,21 @@ def to_payload(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     d["edge_positions"] = ((edges.reshape(-1, 3) - centre).astype(np.float32)
                            .round(4).ravel().tolist()) if len(edges) else []
     d["centre_mm"] = [round(float(v), 2) for v in centre]
+
+    # Separate bodies, for the exploded view — and ONLY when there is more than
+    # one, because a per-triangle label array on every single-body part is
+    # kilobytes over the wire to say "there is nothing to explode".
+    lab = bodies(tris)
+    n_bodies = int(lab.max()) + 1 if len(lab) else 0
+    d["body_count"] = n_bodies
+    if n_bodies > 1:
+        d["bodies"] = lab.tolist()
+        # Where each body sits relative to the model's middle, so the renderer
+        # knows which way to push it. Computed here because it is the same
+        # arithmetic as the centring above and must not disagree with it.
+        cent = []
+        mids = tris.reshape(len(tris), 3, 3).mean(axis=1) - centre
+        for i in range(n_bodies):
+            cent.append([round(float(v), 3) for v in mids[lab == i].mean(axis=0)])
+        d["body_centres"] = cent
     return d
