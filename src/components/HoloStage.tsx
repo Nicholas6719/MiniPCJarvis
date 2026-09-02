@@ -1,4 +1,5 @@
-// The hologram (§ hologram plan, phase A). A model, projected.
+// The hologram (§ hologram plan, phases A and B). A model, projected — and
+// then interrogated.
 //
 // Three rules this file exists inside, all learned the hard way elsewhere:
 //
@@ -16,6 +17,15 @@
 // post-processing chain, a bed footprint underneath in true proportion, and
 // millimetre callouts. Effects on the object and its instrumentation; nothing on
 // the empty room.
+//
+// WHICH WAY IS UP. STL — and every slicer, and the overhang maths in
+// printcheck.py — treats +Z as up. three.js treats +Y as up. Phase A fed STL
+// coordinates straight in and hung the bed grid off size_mm[1], so the part was
+// lying on its side on a bed drawn through the wrong plane. Harmless while the
+// hologram was only pretty; wrong the moment overhangs are painted on it, since
+// a face flagged as facing "down" would have pointed sideways on screen. So an
+// inner `orient` group rotates the model -90° about X once, and everything
+// downstream — bed, overhangs, toolpath — lives in that group and agrees.
 import { useEffect, useRef } from "react";
 // Named imports, not `import * as THREE`. The namespace form pulls the whole
 // library past the bundler's tree-shaker; this build only needs a scene, a
@@ -29,7 +39,8 @@ import { useStore } from "../state/store";
 import { api } from "../lib/sidecar";
 
 const CYAN = 0x27c7ff;
-const GREEN = 0x59e0a5;
+const AMBER = 0xffb454;       // overhangs: the one thing allowed to alarm
+const GREEN = 0x59e0a5;       // the real toolpath
 
 type Geometry = {
   positions: number[];
@@ -40,10 +51,31 @@ type Geometry = {
   error?: string;
 };
 
+type Layer = { z: number; paths: number[][] };
+type Check = {
+  overhang_positions?: number[];
+  report?: {
+    bed?: { fits: boolean; footprint_mm: number[]; too_tall?: boolean };
+    overhangs?: { faces: number; worst_deg: number };
+    wall?: { estimate_mm: number | null; below_minimum?: boolean };
+    integrity?: { sliceable: boolean | null };
+  };
+  gcode?: { layers: Layer[]; count: number; shown?: number;
+            truncated?: boolean; layer_height: number | null };
+  error?: string;
+};
+
 export function HoloStage() {
   const host = useRef<HTMLDivElement>(null);
   const label = useRef<HTMLDivElement>(null);
+  const note = useRef<HTMLDivElement>(null);
+  // The renderer is built once per model. A check arrives later and must not
+  // tear the scene down and rebuild it — that would restart the spin and flash
+  // the panel — so it reaches the live scene through this.
+  const applyCheck = useRef<((wantLayers: boolean) => void) | null>(null);
   const holo = useStore((s) => s.holo);
+  const checkTs = holo?.check?.ts ?? 0;
+  const showLayers = holo?.showLayers ?? false;
 
   useEffect(() => {
     const el = host.current;
@@ -57,7 +89,14 @@ export function HoloStage() {
     el.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
 
-    const group = new Group();
+    const group = new Group();          // spun by the frame loop
+    const orient = new Group();         // STL Z-up -> three.js Y-up, once
+    orient.rotation.x = -Math.PI / 2;
+    group.add(orient);
+    const shell = new Group();          // the model itself
+    const marks = new Group();          // overhangs
+    const path = new Group();           // the sliced toolpath
+    orient.add(shell, marks, path);
     const bed = new Group();
     scene.add(group);
     scene.add(bed);
@@ -79,16 +118,15 @@ export function HoloStage() {
       settled = false;
     };
 
-    function clear() {
-      for (const g of [group, bed]) {
-        while (g.children.length) {
-          const c = g.children.pop()!;
-          const any = c as unknown as { geometry?: BufferGeometry; material?: Material };
-          any.geometry?.dispose();
-          any.material?.dispose();
-        }
+    function empty(g: Group) {
+      while (g.children.length) {
+        const c = g.children.pop()!;
+        const any = c as unknown as { geometry?: BufferGeometry; material?: Material };
+        any.geometry?.dispose();
+        any.material?.dispose();
       }
     }
+    const clear = () => [shell, marks, path, bed].forEach(empty);
 
     async function load() {
       let geo: Geometry;
@@ -103,7 +141,7 @@ export function HoloStage() {
       const faces = new BufferGeometry();
       faces.setAttribute("position", new Float32BufferAttribute(geo.positions, 3));
       faces.computeVertexNormals();
-      group.add(new Mesh(faces, new MeshBasicMaterial({
+      shell.add(new Mesh(faces, new MeshBasicMaterial({
         color: CYAN, transparent: true, opacity: 0.075,
         side: DoubleSide, depthWrite: false,
       })));
@@ -118,8 +156,8 @@ export function HoloStage() {
           color: CYAN, transparent: true, opacity: 0.16,
         }));
         halo.scale.setScalar(1.015);
-        group.add(halo);
-        group.add(new LineSegments(lines, new LineBasicMaterial({
+        shell.add(halo);
+        shell.add(new LineSegments(lines, new LineBasicMaterial({
           color: CYAN, transparent: true, opacity: 0.95,
         })));
       }
@@ -131,12 +169,14 @@ export function HoloStage() {
       camera.position.set(0, span * 0.34, span * 2.5);
       camera.lookAt(0, 0, 0);
 
-      // The bed, in true proportion to the part — 220 mm from the slicer profile.
+      // The bed, in true proportion to the part — 220 mm from the slicer
+      // profile. It sits under the part's Z extent, which after `orient` is the
+      // vertical one; hanging it off size_mm[1] put it through the part.
       const grid = new GridHelper(220, 11, CYAN, CYAN);
       const gm = grid.material as Material & { opacity: number; transparent: boolean };
       gm.opacity = 0.14;
       gm.transparent = true;
-      grid.position.y = -h / 2 - span * 0.12;
+      grid.position.y = -d / 2 - span * 0.04;
       bed.add(grid);
 
       if (label.current) {
@@ -146,6 +186,108 @@ export function HoloStage() {
       }
       settled = false;
     }
+
+    // ---- the print check, painted onto the model already on the stage --------
+    let lastCheck: Check | null = null;
+    let loadedLayers = false;
+
+    function draw(c: Check, wantLayers: boolean) {
+      empty(marks);
+      if (c.overhang_positions?.length) {
+        const g = new BufferGeometry();
+        g.setAttribute("position", new Float32BufferAttribute(c.overhang_positions, 3));
+        marks.add(new Mesh(g, new MeshBasicMaterial({
+          color: AMBER, transparent: true, opacity: 0.42, side: DoubleSide,
+          depthWrite: false,
+        })));
+      }
+      if (c.gcode?.layers?.length && !path.children.length) {
+        // One LineSegments for the whole print rather than one per layer: a
+        // hundred draw calls to show a cube is how a preview becomes the reason
+        // the HUD stutters.
+        const pts: number[] = [];
+        for (const L of c.gcode.layers) {
+          for (const poly of L.paths) {
+            for (let i = 0; i + 3 < poly.length; i += 2) {
+              pts.push(poly[i], poly[i + 1], L.z, poly[i + 2], poly[i + 3], L.z);
+            }
+          }
+        }
+        const g = new BufferGeometry();
+        g.setAttribute("position", new Float32BufferAttribute(pts, 3));
+        // Dim on purpose. A hundred layers of solid infill at full opacity is a
+        // solid green block — technically the whole toolpath, and completely
+        // unreadable. At this weight the layer banding and the skirt loop on the
+        // bed are both visible, which is the thing worth looking at.
+        path.add(new LineSegments(g, new LineBasicMaterial({
+          color: GREEN, transparent: true, opacity: 0.34,
+        })));
+      }
+      path.visible = wantLayers && path.children.length > 0;
+      // Showing the real toolpath and the shell at once is visual mush; the
+      // toolpath IS the object when it is up.
+      shell.visible = !path.visible;
+
+      const r = c.report;
+      if (note.current && r) {
+        // Faults first, then the measurements. Keeping them in one list made a
+        // solid 20 mm cube report "WALL = 20 MM" and nothing else — the reading
+        // was true and the verdict, which is what he actually wants, never
+        // appeared at all.
+        const faults: string[] = [];
+        if (r.bed && !r.bed.fits) faults.push("TOO LARGE FOR BED");
+        if (r.bed?.too_tall) faults.push("TOO TALL");
+        if (r.integrity?.sliceable === false) faults.push("NOT WATERTIGHT");
+        if (r.overhangs?.faces) {
+          faults.push(`${r.overhangs.faces} OVERHANGS · ${Math.round(r.overhangs.worst_deg)}°`);
+        }
+        if (r.wall?.below_minimum) faults.push("WALL UNDER MINIMUM");
+
+        const facts: string[] = [];
+        if (r.wall?.estimate_mm != null) facts.push(`WALL ≈ ${r.wall.estimate_mm} MM`);
+        // Read the CHECK from the store, not from the `holo` this effect closed
+        // over: the effect is keyed on the model name, so its `holo` is the one
+        // from before any check existed, and `holo.check.layers` was always
+        // undefined. The layer count simply never appeared.
+        const live = useStore.getState().holo?.check;
+        // The hint stays up whichever way round it is: once the toolpath was
+        // showing, the only key that would put the model back stopped being
+        // mentioned anywhere.
+        const nLayers = c.gcode?.count ?? live?.layers;
+        if (nLayers) facts.push(`${nLayers} LAYERS · L`);
+        // A capped toolpath must say so. Naming the true layer count while
+        // drawing fewer of them would have him reading a preview as complete
+        // when the top of the print is simply not on screen.
+        if (c.gcode?.truncated && c.gcode.shown) {
+          facts.push(`${c.gcode.shown} DRAWN`);
+        }
+
+        note.current.textContent =
+          [...(faults.length ? faults : ["PRINTS AS IT IS"]), ...facts].join("  ·  ");
+        note.current.dataset.bad = String(faults.length > 0);
+      }
+      settled = false;
+    }
+
+    applyCheck.current = async (wantLayers: boolean) => {
+      // Fetch once, and once more only if layers are wanted and were not asked
+      // for the first time. Re-parsing a 6,000-line G-code file on every toggle
+      // would be work done for nothing.
+      const needFetch = !lastCheck || (wantLayers && !loadedLayers);
+      if (needFetch) {
+        try {
+          const q = `/holo/printcheck?name=${encodeURIComponent(holo?.name ?? "")}` +
+                    (wantLayers ? "&layers=true" : "");
+          const got: Check = await api(q);
+          if (disposed || got.error) return;
+          lastCheck = got;
+          if (wantLayers) loadedLayers = true;
+        } catch {
+          return;
+        }
+      }
+      if (lastCheck) draw(lastCheck, wantLayers);
+    };
 
     const tick = () => {
       raf = requestAnimationFrame(tick);
@@ -176,6 +318,7 @@ export function HoloStage() {
 
     return () => {
       disposed = true;
+      applyCheck.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
       clear();
@@ -183,6 +326,12 @@ export function HoloStage() {
       if (renderer.domElement.parentNode === el) el.removeChild(renderer.domElement);
     };
   }, [holo?.name]);
+
+  // A check arrives after the scene is built, and toggling the layer view must
+  // not rebuild it either.
+  useEffect(() => {
+    if (checkTs) void applyCheck.current?.(showLayers);
+  }, [checkTs, showLayers]);
 
   return (
     <>
@@ -192,6 +341,7 @@ export function HoloStage() {
           <span ref={label} className="holo__dims" />
         </div>
         <div ref={host} className="holo__canvas" />
+        {holo?.check && <div ref={note} className="holo__check mono-sub" />}
       </div>
     </>
   );

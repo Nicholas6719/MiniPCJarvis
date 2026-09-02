@@ -242,6 +242,38 @@ async def generate_part(description: str, name: str = "") -> dict:
             "size_kb": round(stl.stat().st_size / 1024, 1), "source": code}
 
 
+def mesh_warning_for(stl_path: str) -> str | None:
+    """What is wrong with this mesh, in a sentence, or None if nothing is.
+
+    Looked at BEFORE the file is handed to the slicer. Non-manifold geometry is
+    the commonest reason a slicer refuses a file, but the failure mode that
+    actually costs something is the other one: PrusaSlicer accepts a leaky mesh,
+    repairs it by its own rules, and prints a part that is not quite the part he
+    asked for. So this WARNS rather than refuses — the slicer's repair is usually
+    right, and refusing his file outright would be worse than telling him. It
+    reports only; nothing is written back over his model.
+
+    Its own function so the sentence can be gated without a slicer installed.
+    """
+    try:
+        import meshio
+        import printcheck
+        integ = printcheck.integrity(meshio.load_stl(str(stl_path)))
+    except Exception:
+        log.debug("pre-slice integrity check failed", exc_info=True)
+        return None
+    if integ.get("sliceable") is not False:
+        return None
+    bits = []
+    if integ.get("watertight") is False:
+        n = integ.get("open_edges")
+        bits.append(f"{n} open edges" if n else "it isn't closed")
+    if integ.get("winding_consistent") is False:
+        bits.append("inconsistent normals")
+    return ("the mesh isn't watertight — " + ", ".join(bits) +
+            " — so the slicer will repair it its own way")
+
+
 async def slice_part(stl_path: str) -> dict:
     """PrusaSlicer, headless, with the real time and filament estimates."""
     stl = Path(str(stl_path or "")).expanduser()
@@ -251,6 +283,8 @@ async def slice_part(stl_path: str) -> dict:
     if not exe:
         return {"error": "PrusaSlicer is not installed — set fabrication.prusaslicer_binary",
                 "unavailable": True}
+
+    mesh_warning = await asyncio.to_thread(mesh_warning_for, str(stl))
     gcode = work_dir() / (stl.stem + ".gcode")
     args = [exe, "-g", str(stl), "--output", str(gcode)]
     profile = config.get("fabrication", "slicer_profile", default="")
@@ -275,8 +309,11 @@ async def slice_part(stl_path: str) -> dict:
     if not est:
         # The file sliced but no numbers came back — say so rather than implying
         # a successful estimate that does not exist.
-        return {"gcode": str(gcode), "warning": "sliced, but no estimate was reported"}
-    return {"gcode": str(gcode), **est}
+        return {"gcode": str(gcode),
+                "warning": "sliced, but no estimate was reported",
+                **({"mesh_warning": mesh_warning} if mesh_warning else {})}
+    return {"gcode": str(gcode), **est,
+            **({"mesh_warning": mesh_warning} if mesh_warning else {})}
 
 
 async def printer_status() -> dict:

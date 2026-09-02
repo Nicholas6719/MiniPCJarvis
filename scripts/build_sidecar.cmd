@@ -27,6 +27,7 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_fabrication.py || (echo FABRICATION FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_meshio.py || (echo MESH PARSE FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_holo.py || (echo HOLOGRAM FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_printcheck.py || (echo PRINT CHECK FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)

@@ -94,6 +94,11 @@ export interface HoloState {
   triangles: number;
   size_mm: number[];
   ts: number;
+  // Set by `inspect_part`. Still no geometry in the store — only the counts the
+  // header line reads. The overhang triangles and the toolpath come from
+  // /holo/printcheck, for the same reason the mesh comes from /holo/geometry.
+  check?: { overhangFaces: number; layers: number | null; ts: number };
+  showLayers?: boolean;
 }
 
 export interface ImagesState {
@@ -158,6 +163,7 @@ interface Store {
   dismissStage: () => void;
   restoreStage: () => void;
   pinStage: (pinned: boolean, minutes?: number) => void;
+  toggleLayers: () => void;
   setSettingsSection: (s: SettingsSection) => void;
 }
 
@@ -241,6 +247,10 @@ export const useStore = create<Store>((set, get) => ({
         ...extra,
       },
     })),
+  // The sliced toolpath, on or off. Phase C gives this a spoken command; it has
+  // a key now so the preview is a feature rather than dead code waiting for one.
+  toggleLayers: () =>
+    set((st) => (st.holo ? { holo: { ...st.holo, showLayers: !st.holo.showLayers } } : {})),
   dismissStage: () =>
     set((st) => {
       // An answerless prose stage (a bare "hide everything" turn) isn't worth
@@ -543,6 +553,14 @@ export const useStore = create<Store>((set, get) => ({
       case "hologram":
         if (evt.action === "hide") {
           set((st) => (st.stage?.kind === "holo" ? { stage: null, holo: null } : { holo: null }));
+        } else if (evt.action === "inspect") {
+          // A check ANNOTATES whatever is up; it does not seize the stage.
+          // Asking whether a part he is not looking at will print should answer
+          // him, not replace what is on screen.
+          set((st) => (st.holo && st.holo.name === evt.name
+            ? { holo: { ...st.holo, check: { overhangFaces: evt.overhang_faces ?? 0,
+                                             layers: evt.layers ?? null, ts: evt.ts } } }
+            : {}));
         } else {
           set((st) => ({
             holo: { name: evt.name, triangles: evt.triangles, size_mm: evt.size_mm, ts: evt.ts },

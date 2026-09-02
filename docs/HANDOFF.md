@@ -1450,6 +1450,94 @@ write. Every hotswap deploy left it stale — it pointed at a port from the
 previous evening — so a full suite run would have failed wholesale for reasons no
 commit could fix. It asks the running process now.
 
+## 2026-09-02 — the hologram, phase B: will it print?
+
+Phase A put a model on the stage. Phase B asks the questions worth asking before
+plastic is spent, and every threshold is the industry one rather than a number I
+picked: **45 degrees from vertical** for overhangs, **0.8 mm** as the thinnest
+wall any FDM machine will lay down, **1.5 mm** as the thinnest worth trusting
+with load. New: `sidecar/printcheck.py`, `sidecar/gcode.py`, the `inspect_part`
+tool, `/holo/printcheck`, and `tests/test_printcheck.py` (60 assertions, gated in
+`build_sidecar.cmd`).
+
+**The layer preview is the real toolpath, not a simulation.** `gcode.py` parses
+the file PrusaSlicer actually wrote. A simulated preview agrees with itself and
+therefore tells him nothing; this one disagrees with his expectations exactly
+where the slicer did something he did not expect, which is the only time a
+preview earns its keep. Verified against a real 100-layer slice of a 20 mm cube:
+0.25 first layer, 0.2 steps, top at 20.05 mm — the profile's arithmetic, exactly.
+
+**G-code is a dialect, not a format**, and the parser handles the differences
+that silently produce nothing: M82 vs M83 (PrusaSlicer writes absolute extrusion,
+Cura relative — read a Cura file as absolute and every move looks like a
+retraction, so the preview comes back EMPTY rather than wrong), G92 extruder
+resets, `;LAYER_CHANGE` vs `;LAYER:` vs no comments at all, and travel moves that
+must not be drawn. Each has its own gate.
+
+**Four bugs, all mine, found by tests written to fail:**
+
+1. **A 45 degree chamfer was flagged as an overhang.** `asin(-nz)` for a true 45
+   degree face returns 45.00000000000001, and a bare `> 45.0` therefore reported
+   the commonest deliberate feature in a printable part as a defect. There is a
+   0.1 degree tolerance now — nothing about FDM is precise to a tenth of a
+   degree, so it costs nothing real and removes a whole class of false alarm.
+2. **`bed_fit` called a 50 x 50 x 400 tower too wide for the bed.** It sorted the
+   three dimensions and called the two largest the footprint. The footprint is X
+   by Y, and height is checked separately against the printer's 250 mm Z, because
+   "turn it" and "cut it in half" are completely different answers.
+3. **The model was lying on its side on its own bed.** STL, every slicer and the
+   overhang maths all treat +Z as up; three.js treats +Y as up. Phase A fed STL
+   coordinates straight in and hung the bed grid off `size_mm[1]`. Harmless while
+   the hologram was only pretty — wrong the moment overhang faces are painted on
+   it, since a face flagged as pointing "down" would have pointed sideways on
+   screen. An inner `orient` group rotates once and everything downstream agrees.
+4. **`degenerate_faces` could never be anything but zero.** It asked a
+   `trimesh.Trimesh` built with `process=True`, which drops zero-area faces on
+   load. A check that cannot fail says nothing; it counts the raw triangles now.
+
+**The wall estimate needed no compiled dependency after all.** trimesh's ray
+engines all want `rtree`, which is a PyInstaller problem for one number. But
+these rays are axis-aligned, which makes the general Möller-Trumbore machinery
+unnecessary — project each triangle onto the other two axes, test containment in
+2D, solve the plane for the third coordinate. Pure numpy, 0.14 s for a real part,
+and it catches a 0.6 mm plate. It is still an ESTIMATE and is labelled one in the
+tool description, in the returned dict and in the sentence JARVIS speaks:
+rigorous minimum thickness needs a medial-axis transform, and telling him a part
+is sound when it is not would be worse than saying nothing.
+
+**`slice_part` now looks at the mesh before handing it over.** Not to refuse —
+the slicer's own repair is usually right, and refusing his file would be worse —
+but because the failure that costs something is the quiet one: PrusaSlicer
+accepts a leaky mesh, repairs it its own way, and prints a part that is not
+quite the part he asked for.
+
+**Inspecting does not seize the stage.** Asking whether a part he is not looking
+at will print should answer him, not replace what is on screen. Gated live.
+
+**Deferred to phase C, deliberately:** the exploded view, which the plan lists
+under B. It is a control like rotate, section and reset, and it belongs with the
+control surface rather than ahead of it.
+
+**A third orphaned scheduled task, found by looking rather than by being bitten.**
+The habit that grew around real-session verification was
+`schtasks /Create /SC ONCE /ST 23:59`, with 23:59 used to mean "never". It does
+not mean never; it means tonight. `JARVIS_PCLIVE` — a task I registered this
+morning to run the phase B live check — was still registered and would have run
+a generate-and-slice against his live app at 23:59 while he slept.
+`JARVIS_SOUND`, written the same way on 2026-08-29, had already fired at exactly
+that time. Same shape as the orphaned `JARVIS_SUITES_FULL` that sent him Telegram
+messages at midnight. Both deleted, and `.agent\scripts\runonce.ps1` now does
+create-run-wait-delete with the delete in a `finally`, so a one-off check cannot
+outlive itself. **Rule: never leave a schtasks entry registered after the thing
+it ran has finished.** Only `JARVIS_SELFTEST` remains, and that one is meant to.
+
+**Two environment facts worth not rediscovering:** node is a portable install at
+`C:\Users\nicho\Tools\node`, on nobody's PATH — not the agent shell's, not the
+real session's; `where node` finds nothing in either.
+`.agent\scripts\jarvis_tscheck.cmd` names the path outright. And
+`JARVIS_SELFTEST` (daily 03:30) is legitimate, not another orphan: its suite list
+contains no Telegram suite and it deletes the test reminder it creates.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

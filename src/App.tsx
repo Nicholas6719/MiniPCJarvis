@@ -74,6 +74,12 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") useStore.getState().dismissStage();
+      // L swaps the model for the real sliced toolpath, but only once a part has
+      // actually been checked — otherwise the key would appear to do nothing,
+      // which is worse than not having it.
+      if ((e.key === "l" || e.key === "L") && useStore.getState().holo?.check) {
+        useStore.getState().toggleLayers();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

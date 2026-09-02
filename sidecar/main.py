@@ -1016,6 +1016,46 @@ async def holo_geometry(x_jarvis_token: str | None = Header(None)):
         return {"error": str(e)}
 
 
+@app.get("/holo/printcheck")
+async def holo_printcheck(name: str = "", layers: bool = False,
+                          x_jarvis_token: str | None = Header(None)):
+    """Overhang triangles, and the real toolpath if the part has been sliced.
+
+    Same reasoning as /holo/geometry: this is thousands of floats, so it goes to
+    the HUD directly rather than through a tool result and the model's context.
+    And like that endpoint it serves only what `inspect_part` has already looked
+    at, so the HUD cannot use it to read an arbitrary file off disk.
+    """
+    _auth(x_jarvis_token)
+    from tools.holo_tools import check_for, current
+    got = check_for(name or (current().get("name") or ""))
+    if not got:
+        return {"error": "that part has not been checked"}
+    rep = dict(got["report"])
+    out = {"overhang_positions": rep.pop("_overhang_positions", []),
+           "report": rep}
+    if layers and got.get("gcode"):
+        import gcode as _gc
+        g = await asyncio.to_thread(_gc.parse, got["gcode"])
+        # G-code is in BED coordinates — the slicer put the part in the middle of
+        # a 220 mm bed, so a 20 mm cube's toolpath sits around X=110. The mesh on
+        # the stage is centred on its own middle, so the toolpath is centred on
+        # ITS own bounds to match. Centring both on the model's origin instead
+        # would leave the preview half a bed away from the part it belongs to.
+        xs = [p[i] for L in g.get("layers", []) for p in L["paths"] for i in range(0, len(p), 2)]
+        ys = [p[i] for L in g.get("layers", []) for p in L["paths"] for i in range(1, len(p), 2)]
+        if xs and ys:
+            cx = (min(xs) + max(xs)) / 2.0
+            cy = (min(ys) + max(ys)) / 2.0
+            cz = g["z_max"] / 2.0
+            for L in g["layers"]:
+                L["z"] = round(L["z"] - cz, 3)
+                L["paths"] = [[round(v - (cx if i % 2 == 0 else cy), 3)
+                               for i, v in enumerate(p)] for p in L["paths"]]
+        out["gcode"] = g
+    return out
+
+
 @app.get("/camera/status")
 async def camera_status(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
