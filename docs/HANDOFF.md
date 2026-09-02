@@ -2332,6 +2332,66 @@ on disk and "show me the bracket" brings it back. Asked whether it should also
 time out while AWAKE, he said leave it: a part is not an answer, and snatching
 one away mid-thought is worse than a stale panel.
 
+## 2026-09-02 — silence, then a YouTube video nobody asked for
+
+He tested, heard nothing at all, asked some questions, and got a YouTube video.
+Three separate faults, and **the second one was a regression I had shipped an
+hour earlier**.
+
+**HE HEARD NOTHING because the output device was asleep.** His monitor's speakers
+sit on DisplayPort; the machine had been idle thirteen minutes, the panel had
+blanked, and the audio endpoint went with it:
+
+    19:21:24  audio write hung (0.4s of audio, 5s budget) — output device is
+              not accepting data; aborting, and not trying again for 60s
+    19:21:25  speech aborted: the audio output device stopped responding
+
+That handling is correct and hard-won — it aborts rather than wedging the turn,
+which is the 2026-08-27 ninety-minute freeze lesson. But the 60-second deaf
+window was exactly the window he was testing in. **Left alone deliberately.**
+
+**THE YOUTUBE VIDEO WAS MINE.** An hour earlier I made proactive announcements
+arm the follow-up window, so that "the plate is ready, sir" could be answered
+with "rotate it" instead of another wake word. It armed UNCONDITIONALLY:
+
+    19:21:25  speech aborted (he heard nothing)
+    19:21:28  follow-up speech (conversation window)   <- armed anyway
+    19:21:33  user: "Two video."                        <- not addressed to JARVIS
+    19:21:52  assistant: "Two videos are playing now."
+
+JARVIS spoke into a dead speaker, opened the microphone regardless, and acted on
+a two-word fragment. It now arms **only if audio actually reached the speakers**:
+if he could not hear it there is nothing to reply to, and an open microphone is
+worse than a missed follow-up.
+
+The general lesson, which is worth more than the fix: **a feature that opens a
+microphone must be designed around its failure path first.** I designed this one
+around the success path and shipped it the same hour.
+
+**AND SELF-TRAINING HAD BEEN POISONED.** He never mentioned this; it was in the
+same log. A wake word fired at 0.82 on him talking to someone else, the model
+put JARVIS to sleep, and `_maybe_learn` wrote it down:
+
+    brain learned: 'i was like this is the challenge wait i need to go on
+                    easier.' -> sleep
+
+A mislearned `sleep` means stray speech dismisses him. Listing every learned
+example found four more that were never commands he gave, the worst being
+**"show me" -> screenshot**, two words of pure scaffolding that drag every "show
+me X" toward photographing the screen. Five removed; the remaining fourteen are
+real commands.
+
+`_teachable()` now refuses rambling (over ten words), multi-sentence, self-talk
+markers ("I was like", "wait", "um"), and utterances made ENTIRELY of command
+scaffolding with no object. **Not a minimum word count** — that was the first
+attempt and it rejected "open spotify".
+
+**No fourth bug: the phone fallback did work.** Verified rather than assumed —
+`deliver()` returns `delivered: telegram, why: "could not speak"` when the
+speaker raises, so the render announcement did reach him. Now gated, because the
+code was only ever asking "is he present?" and never "can he be spoken to?",
+which are two different questions.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

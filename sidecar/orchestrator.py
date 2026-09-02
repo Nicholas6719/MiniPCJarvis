@@ -167,6 +167,59 @@ class TurnMetrics:
                 "median_total_ms": med("total_ms")}
 
 
+# Pure command scaffolding: verbs, pronouns and determiners that carry no
+# subject of their own. An utterance made ENTIRELY of these is a fragment.
+_NO_SUBJECT_WORDS = {
+    "show", "me", "tell", "give", "get", "find", "do", "it", "that", "this",
+    "them", "those", "these", "the", "a", "an", "my", "your", "again", "now",
+    "more", "please", "one", "some", "here", "there", "what", "about",
+    "you", "i", "is", "are", "was", "ok", "okay", "yes", "no", "and", "to",
+}
+
+
+def _teachable(text: str) -> bool:
+    """Does this look like an instruction, or like a person talking?
+
+    Self-training turns "the LLM solved this with one tool" into a permanent
+    reflex, and it does not care whether the words were ever addressed to
+    JARVIS. On 2026-09-02 a wake word fired at 0.82 on him talking to someone
+    else, the sentence "I was like this is the challenge? Wait, I need to go on
+    easier." reached the model, the model put JARVIS to sleep, and the brain
+    duly learned that sentence AS THE SLEEP COMMAND. A mislearned `sleep` is
+    particularly bad: it makes random speech dismiss him.
+
+    Commands are SHORT and they are one sentence. This does not have to be
+    clever — it has to refuse the obvious non-commands, because the cost of
+    declining to learn is that a phrasing stays slow, and the cost of learning
+    wrongly is that it does the wrong thing forever.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    words = t.split()
+    if len(words) > 10:
+        return False
+    # ...and it has to be ABOUT something. Self-training had already learned the
+    # bare phrase "show me" as SCREENSHOT, which drags every "show me X" he ever
+    # says toward taking a picture of the screen.
+    #
+    # NOT a minimum word count, which was the first attempt and was too blunt:
+    # "open spotify" is two words and a perfectly good command. The difference is
+    # that "show me" is nothing but command scaffolding with no object in it.
+    if not [w for w in words
+            if w.strip(".,!?").lower() not in _NO_SUBJECT_WORDS]:
+        return False
+    # Two sentences is a person thinking aloud, not an instruction.
+    if len(re.findall(r"[.!?]+(?=\s|$)", t)) > 1:
+        return False
+    # Self-talk and narration markers. "Wait" and "I was like" are never how an
+    # instruction opens.
+    if re.search(r"\b(?:i was like|i mean|you know|wait|um|uh|hmm|actually,)\b",
+                 t, re.I):
+        return False
+    return True
+
+
 class Orchestrator:
     def __init__(self) -> None:
         self.sm = StateMachine()
@@ -619,6 +672,7 @@ class Orchestrator:
         await self.sm.to(State.SPEAKING, force=True)
         cancel = asyncio.Event()
         self._speak_cancel = cancel
+        heard = False        # did any audio actually reach the speakers?
         try:
             await self.play_sound("attention")  # 'this wasn't asked for'
             await asyncio.sleep(0.3)
@@ -627,6 +681,7 @@ class Orchestrator:
                 if cancel.is_set():
                     break
                 await speaker.play_chunk(chunk, tts.sample_rate)
+                heard = True
         finally:
             if self.sm.state == State.SPEAKING:
                 await self.sm.to(State.IDLE, force=True)
@@ -642,8 +697,19 @@ class Orchestrator:
             # and reasonably concluded it had stopped listening. It had not; it
             # was waiting to be named again after speaking to him unprompted,
             # which is not how being spoken to works.
-            self._arm_conversation()
-            self._last_active = time.time()   # ...and he is plainly still here
+            # ONLY IF HE COULD ACTUALLY HEAR IT.
+            #
+            # This armed unconditionally for about an hour and it cost him: the
+            # output device stalled (his monitor's speakers, asleep), JARVIS
+            # spoke into a dead device, and the window opened anyway. He heard
+            # nothing, said something that was not to JARVIS, and the mic was
+            # sitting open — "Two video." became a YouTube video playing.
+            #
+            # If he did not hear it, there is nothing for him to be replying to,
+            # and an open microphone is worse than a missed follow-up.
+            if heard and not cancel.is_set():
+                self._arm_conversation()
+                self._last_active = time.time()   # ...and he is plainly still here
 
     # ---------- wake word ----------
 
@@ -1955,6 +2021,12 @@ class Orchestrator:
             return
         skill = brain.learned_from_tool(used_tools[0][0])
         if not skill or not user_text.strip():
+            return
+        if not _teachable(user_text):
+            # Not everything the microphone hears is a command being given, and
+            # a reflex learned from something that was not one is permanent.
+            log.info("not learning %r -> %s: it does not look like a command",
+                     user_text[:60], skill)
             return
         try:
             if await brain.learn(user_text, skill):

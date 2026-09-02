@@ -183,6 +183,33 @@ def main() -> int:
     # A hologram deliberately HOLDS the frame while he is working, but sleep is
     # the resting state; he watched a finished part sit projected for half an
     # hour with no way to talk to it.
+    # --- speaking into a dead speaker must not open the microphone ----------
+    # The arming above shipped unconditional and cost him within the hour: the
+    # output device stalled (his monitor's speakers, asleep), JARVIS spoke into
+    # nothing, and the window opened regardless. He heard silence, said something
+    # that was not addressed to JARVIS, and "Two video." became a YouTube video
+    # playing. If he cannot hear it there is nothing to reply to, and an open
+    # microphone is worse than a missed follow-up.
+    check("the window only opens if the speech was actually heard",
+          "if heard" in ann and "heard = True" in ann, ann[-900:])
+
+    # --- and not everything the microphone hears is a command ---------------
+    # A wake word fired at 0.82 on him talking to someone else; the model put
+    # JARVIS to sleep; self-training learned that sentence AS the sleep command.
+    from orchestrator import _teachable
+    for bad in ("I was like this is the challenge? Wait, I need to go on easier.",
+                "um yeah I think so maybe we should try that later on",
+                "so anyway. what were we saying.",
+                "never ever leave gaps issues or bugs, and always tell me",
+                "show me", "what about now", "show me that again"):
+        check(f"refuses to learn {bad[:34]!r}", not _teachable(bad))
+    # ...and a two-word command with an OBJECT in it still teaches. A minimum
+    # word count was the first attempt and rejected "open spotify".
+    for good in ("go to sleep", "open spotify", "show me the layers",
+                 "make me a 20 mm cube", "rotate it ninety degrees",
+                 "what is the cpu at"):
+        check(f"still learns {good!r}", _teachable(good))
+
     check("going to sleep takes the hologram down",
           "hide_hologram" in inspect.getsource(orch_mod),
           "a part left projected through sleep is just stuck")

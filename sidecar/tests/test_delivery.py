@@ -180,6 +180,52 @@ def main() -> int:
         else:
             _sys.modules.pop("orchestrator", None)
 
+    # --- a dead speaker must not swallow the message ------------------------
+    # On 2026-09-02 his monitor's speakers were asleep, the output device refused
+    # the audio, and he heard nothing at all when a render finished. The design
+    # already says the phone is better than losing it — this is the check that
+    # says so out loud, because "he is present" and "he can be spoken to" are two
+    # different questions and only the first was ever asked.
+    import asyncio as _aio
+
+    import delivery as _D
+    from audio.io import SpeakerStalled
+    from state_machine import State as _S
+
+    sent = []
+
+    class _DeafOrch:
+        class sm:
+            state = _S.IDLE
+
+        async def announce(self, text):
+            raise SpeakerStalled("the audio output device is not accepting data")
+
+    class _FakeTG:
+        async def send_proactive(self, text, tier=None, subject=None):
+            sent.append(text)
+
+    real_orch = _D.delivery.orchestrator
+    real_present, real_avail = _D.is_present, _D.telegram_available
+    import remote_telegram as _rt
+    real_tg = _rt.telegram
+    try:
+        _D.delivery.orchestrator = _DeafOrch()
+        _D.is_present = lambda: True          # he IS at the machine...
+        _D.telegram_available = lambda: True
+        _rt.telegram = _FakeTG()
+        r = _aio.run(_D.delivery.deliver("The plate is ready, sir.", _D.ALERT,
+                                         key="render-done:gate"))
+        check("a render he cannot hear still reaches his phone",
+              r.get("delivered") == "telegram"
+              and sent == ["The plate is ready, sir."], (r, sent))
+        check("...and says why, rather than claiming he was away",
+              "could not speak" in (r.get("why") or ""), r)
+    finally:
+        _D.delivery.orchestrator = real_orch
+        _D.is_present, _D.telegram_available = real_present, real_avail
+        _rt.telegram = real_tg
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 
