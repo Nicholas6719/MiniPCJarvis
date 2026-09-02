@@ -205,6 +205,14 @@ CASES = [
     # called `previous version`, which is what "switch to APP" made of it.
     ("go back to the previous version", "holo_revert"),
     ("go back to notepad", "switch"),      # ...and the exclusion breaks nothing
+    # MAKING a model, as against showing one he already has. One is instant; the
+    # other can be three minutes and asks first, so they must not blur.
+    ("make me a 3d model of a dragon", "holo_make"),
+    ("create a 3d model of that", "holo_make"),
+    ("design me a phone stand", "holo_make"),
+    ("stop the render", "render_stop"),
+    ("how's the model coming along", "render_how"),
+    ("is that model done yet", "render_how"),
 ]
 
 async def main() -> int:

@@ -1621,6 +1621,77 @@ only went red when phase C added skills pointing at them. It now parses
 `main.py` for `X.register_all()` and fails if its own list is missing any of
 them — proven against exactly the drift that occurred.
 
+## 2026-09-02 — the hologram, phase D: in the background, with an estimate
+
+Anything can become a hologram now, and it happens while he keeps talking. New:
+`sidecar/render_queue.py`, `sidecar/render_estimates.py`, `sidecar/create3d.py`
+(the four tiers), `tools/render_tools.py`, three skills (`holo_make`,
+`render_stop`, `render_how`), and `tests/test_render.py`. Routing is 183/183.
+
+**The estimate is measured, not invented — and the first measurement proved my
+seed wrong.** I seeded tier 1 at 8 seconds on the reasoning that OpenSCAD is
+fast, deliberately under the ask threshold so it would never interrupt him. The
+first real run measured **27.97 seconds**, because the slow part is not OpenSCAD
+at all: it is llama-server writing the source. The seed is 25 s now and tier 1
+asks, which is right — half a minute of waiting deserves a heads-up. Tier 2, a
+traced contour with no model involved, is the one that stays under the threshold.
+This is the calibration doing exactly what it was built for, one run in.
+
+**The question is a COST question and deliberately not the risk gate.** His
+correction: an estimate alone is not enough, "because maybe I don't want to do
+it if it's going to take over an hour". `generate_part` writes a file and is
+honestly LOW; promoting it to MEDIUM to force a confirmation would corrupt what
+the tier means — the same error as `face_confirm` at SAFE while able to open the
+webcam. So a tool returns `_ask` and the orchestrator arms a conversational
+yes/no on the clarify machinery. **Declining runs nothing**: the "leave it"
+branch has no tool at all, so there is no half-written file to tidy up. `Branch`
+with an empty tool is new, and `validate` skips it rather than calling
+`risk_of("")` and refusing the whole question.
+
+**Asking for a hologram of something he hasn't got now offers to make one.**
+"I don't have a model to project" is true and useless; the machinery to say how
+long and ask already existed, so `show_hologram` uses it. Only when he NAMED
+something — with no name the newest part is meant.
+
+**The four tiers, and honesty about which one ran.** Tier 1 OpenSCAD (exact,
+voice-editable), tier 2 an image traced and extruded (sharp, cv2 + OpenSCAD),
+tier 3 photo→mesh, tier 4 text→mesh. Every result carries its tier and a note,
+because what he can do NEXT depends entirely on it — a tier-1 part can be edited
+by voice, a tier-3 mesh has no parameters at all.
+
+**Tiers 3 and 4 are NOT installed and say so.** They need PyTorch (~2.5 GB); the
+sidecar is already 980 MB. They live under `C:\AI\model3d` in their own
+environment, invoked as a subprocess, the same shape as `llm.server_binary`
+pointing at llama.cpp. Missing means a sentence naming where it would live — and
+specifically NOT a fall back to another tier, which would look like success and
+be wrong. Their gate cases SKIP LOUDLY. **Worth knowing before installing them:**
+the GPU here is an AMD Radeon 780M, so stock PyTorch on Windows would run them on
+CPU (CUDA is NVIDIA-only; DirectML is the only other route). Expect minutes
+rather than the plan's 40 seconds, and let the calibration find the real number.
+
+**Two weak assertions of my own, both caught by looking rather than by a gate.**
+The live cancel check asserted `cancelled in (True, False)` — a check that cannot
+fail — and it passed while quietly testing an empty queue, because tier 1 had
+started asking and nothing was ever submitted. And a queue test waited on the
+jobs recording themselves rather than on the queue going idle, which is a race:
+a job appends from inside its own thread a moment before `busy` goes false.
+
+**A sliver is a failed generation, not a part.** Watching the finished loop in
+the HUD turned this up: asked for "a hex spacer 12 mm tall", the local model
+produced OpenSCAD for something **0.4 mm wide**, and the pipeline measured it,
+projected it and announced it as ready. The only clue was a dimension rounding to
+zero in the panel header. Anything under half a millimetre in its smallest
+dimension now says so in the same breath as "ready" — half a millimetre being
+comfortably under the 0.8 mm minimum wall, so a legitimately thin plate is never
+caught by it. Tier 1's quality is the local model's quality; the pipeline's job
+is to notice when it has produced nonsense, and now it does.
+
+**Verified:** 56 build gates; 25 live checks against the deployed build,
+including a real background render with the sidecar answering throughout —
+40 status calls, worst response well under a second — the duration landing in
+`render_times.json` under its tier, and the finished part projecting itself onto
+the stage without being asked.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

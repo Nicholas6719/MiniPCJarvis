@@ -1078,6 +1078,49 @@ def say_holo_check(slots: dict, res: dict) -> str:
     return res.get("spoken") or "I couldn't tell, sir."
 
 
+_MAKE_STRIP = re.compile(
+    r"^(?:please\s+)?(?:can you\s+|could you\s+)?"
+    r"(?:make|create|build|generate|design|model|print)\s+"
+    r"(?:me\s+)?(?:a|an|the)?\s*"
+    r"(?:3d\s+)?(?:hologram|holographic|model|version|mesh|part|object)?\s*"
+    r"(?:of\s+)?", re.I)
+
+
+def slots_holo_make(t: str) -> dict:
+    """What he wants made, with the asking-verb stripped off the front.
+
+    "make me a 3d model of a dragon" must reach the tier chooser as "a dragon",
+    not as the whole sentence — `choose_tier` looks for words like `bracket` and
+    `mm`, and "model" appearing in every request would tell it nothing.
+    """
+    said = (t or "").strip()
+    desc = _MAKE_STRIP.sub("", said).strip(" .,")
+    return {"description": desc or said}
+
+
+def say_holo_make(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    note = res.get("note")
+    line = res.get("spoken") or "Starting now, sir."
+    # A finished result rather than a submission — the queue announces those,
+    # but a caller that awaits the build gets it here.
+    if res.get("mesh_warning"):
+        return f"{line} Though {res['mesh_warning']}."
+    # Which tier made it decides what he can do NEXT — a tier-1 part can be
+    # edited by voice, a tier-3 mesh has no parameters at all — so it is said
+    # once, when the work starts, rather than left for him to discover.
+    return f"{line} It'll be {note}." if note else line
+
+
+def say_render_stop(slots: dict, res: dict) -> str:
+    return res.get("spoken") or "Stopped, sir."
+
+
+def say_render_how(slots: dict, res: dict) -> str:
+    return res.get("spoken") or "Nothing's rendering, sir."
+
+
 def slots_holo_edit(t: str) -> dict:
     """The change, in his own words — the model doing the edit reads English."""
     return {"change": (t or "").strip()}
@@ -1619,6 +1662,33 @@ SKILLS: list[Skill] = [
         "back to the model", "hide the layers",
         "fit it on the screen", "centre the model"],
         slots=slots_holo_move, speak=say_holo_move),
+    # MAKING one, as against showing one he already has. Every seed here names
+    # the act of creation — "make", "create", "turn that into" — because
+    # `holo_show` owns "show me the X" and the two must not blur: one is instant,
+    # the other can be three minutes and asks first.
+    Skill("holo_make", "make_hologram", [
+        "make me a hologram of a dragon", "create a 3d model of that",
+        "make a 3d model of this", "build me a model of a bracket",
+        "turn that picture into a model", "make a model from this photo",
+        "make me a keychain from this logo", "generate a 3d model of it",
+        "print me a model of a gear", "design me a bracket",
+        "make a 3d version of that",
+        # Requests that name the OBJECT and not the format. He does not always
+        # say "3d model"; "design me a stand" is the same ask, and without these
+        # it sat at 0.69 and fell through to the model.
+        "design me a stand", "make me a holder for it",
+        "design a mount for my phone", "make me a case for it"],
+        slots=slots_holo_make, speak=say_holo_make),
+    Skill("render_stop", "cancel_render", [
+        "stop the render", "cancel the model", "stop making that",
+        "cancel that render", "don't bother making it",
+        "stop building the model", "forget that model"],
+        speak=say_render_stop),
+    Skill("render_how", "render_status", [
+        "how's the model coming along", "is that model done yet",
+        "how much longer for the model", "how's that render going",
+        "what's the render doing", "is it still rendering"],
+        speak=say_render_how),
     Skill("holo_show", "show_hologram", [
         "show me that as a hologram", "project that as a hologram",
         "put it up as a hologram", "show me the hologram",

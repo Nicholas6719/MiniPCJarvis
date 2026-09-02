@@ -1282,6 +1282,22 @@ class Orchestrator:
                 res.setdefault("error", "failed")
             if not isinstance(res, dict):
                 res = {"value": res}
+        # A COST QUESTION, raised by the tool rather than detected from his words.
+        # `_ask` means "this would take a while — say how long and let him
+        # decide". It is not the risk gate: the tool is honestly LOW and stays
+        # LOW, and promoting it to force a confirmation would corrupt what the
+        # tier means. The question is asked here, the answer arrives as the next
+        # utterance, and `_answer_clarification` runs the branch he picked.
+        asked = res.pop("_ask", None) if isinstance(res, dict) else None
+        if asked:
+            installed = self._install_cost_question(asked)
+            if installed:
+                reply = polish(asked.get("question") or "Shall I, sir?")
+                self.metrics.mark("first_token_ms")
+                await bus.emit("assistant_delta", text=reply)
+                await queue.put(clean_for_speech(reply))
+                return reply
+
         if skill.speak_first and skill.tool:
             if "error" in res:
                 extra = skill.speak(args, res)
@@ -1337,6 +1353,42 @@ class Orchestrator:
             self._clarify.cancel()
             log.info("clarification dropped (%s)", why)
             self._clarify = None
+
+    def _install_cost_question(self, asked: dict) -> bool:
+        """Arm the yes/no a tool asked for, so his next words answer it.
+
+        Nothing is fetched and nothing is started — both branches are deferred,
+        because the whole point of asking is that the expensive thing has not
+        happened yet. Returns False if it could not be armed, in which case the
+        caller speaks normally and nothing is lost but the question.
+        """
+        try:
+            tool = str(asked.get("tool") or "")
+            if not tool or registry.get(tool) is None:
+                return False
+
+            def render(a, r, _t=tool):
+                if not isinstance(r, dict):
+                    return "Started, sir."
+                if r.get("error"):
+                    return f"{str(r['error']).rstrip('.')}, sir."
+                return str(r.get("spoken") or "Starting now, sir.")
+
+            amb = clarify.approval(
+                subject=str(asked.get("subject") or "that"),
+                question=str(asked.get("question") or "Shall I, sir?"),
+                tool=tool, args=dict(asked.get("args") or {}), render=render)
+            self._drop_clarification("superseded")
+            self._clarify = clarify.Pending(amb)
+            # He must be able to answer without saying the name again — but only
+            # if he is in the room. A question asked over Telegram must not open
+            # the microphone here.
+            if not self.remote_turn:
+                self._arm_conversation()
+            return True
+        except Exception:
+            log.exception("could not ask whether to start that")
+            return False
 
     async def _ask_clarification(self, amb, t_start: float) -> bool:
         """Ask which reading he meant, and start fetching ALL of them right now.
@@ -1423,7 +1475,9 @@ class Orchestrator:
         said = []
         for b in chosen:
             try:
-                if b.label not in pending.tasks:
+                if not b.tool:
+                    res = {}          # declining runs nothing, which is the point
+                elif b.label not in pending.tasks:
                     # A deferred branch: nothing was run on speculation, so it
                     # runs NOW, having been chosen. This is the only path on
                     # which a clarified answer costs a round trip, and it is the

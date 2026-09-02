@@ -80,6 +80,26 @@ async def show_hologram(path: str = "", name: str = "") -> dict:
     """Project a model. `path` is an STL; `name` picks one from the work folder."""
     target = _pick(path, name)
     if target is None or target.suffix.lower() != ".stl":
+        # He NAMED something and it isn't here. "I don't have a model to project"
+        # is true and useless: the obvious next thing is to make one, and the
+        # machinery to say how long that takes and ask already exists. Offered
+        # only when he named it — with no name the newest part is meant, and a
+        # missing one there means the work folder is simply empty.
+        if name and not path:
+            import create3d
+            import render_estimates as est
+            t = create3d.choose_tier(name, "")
+            if not (t in (3, 4) and not create3d.available().get(t)):
+                secs = est.estimate(t)
+                return {"_ask": {
+                    "subject": name,
+                    "question": (f"I don't have {'a' if name[:1].lower() not in 'aeiou' else 'an'} "
+                                 f"{name}, sir. I could make one — {est.spoken(secs)}"
+                                 f"{est.confidence_note(t)}. Shall I?"),
+                    "tool": "make_hologram",
+                    "args": {"description": name, "tier": t, "name": name,
+                             "confirmed": True},
+                }}
         return {"error": "I don't have a model to project, sir"}
 
     import asyncio

@@ -281,12 +281,49 @@ def _say_quote(args: dict, res: dict) -> str:
     return say_quote(args, res)
 
 
+def approval(subject: str, question: str, tool: str, args: dict, render,
+             *, yes_words: tuple = (), no_words: tuple = ()) -> Ambiguity:
+    """"About two minutes, sir. Shall I?" — a COST question, not a risk one.
+
+    His correction: an estimate on its own is not enough, because he may not want
+    to spend an hour. So JARVIS says how long and asks.
+
+    Deliberately NOT the risk gate. `generate_part` writes a file and is honestly
+    LOW; promoting it to MEDIUM to force a confirmation would corrupt what the
+    tier means — the same error as `face_confirm` sitting at SAFE while able to
+    switch the webcam on. This asks conversationally, through the machinery that
+    already exists for asking, and the answer is his to give.
+
+    Declining is a REAL answer with its own branch. It runs nothing — a branch
+    with no tool is a branch that does nothing — so nothing is left half written.
+    """
+    return Ambiguity(
+        subject=subject,
+        question=question,
+        branches=(
+            Branch("go ahead", tool, dict(args),
+                   ("yes", "yeah", "yep", "go", "ahead", "do", "please", "sure",
+                    "ok", "okay", "fine", "start", "carry", "on") + tuple(yes_words),
+                   render=render, speculative=False),
+            Branch("leave it", "", {},
+                   ("no", "nope", "don't", "dont", "skip", "leave", "later",
+                    "not", "forget", "stop") + tuple(no_words),
+                   render=lambda a, r: "Of course, sir.", speculative=False),
+        ),
+    )
+
+
 def validate(amb: Ambiguity, risk_of) -> bool:
     """Refuse to speculate on anything that acts. `risk_of(tool) -> bool` says
     whether that tool needs confirmation; an unknown tool counts as unsafe."""
     if not amb.branches or len(amb.branches) > MAX_BRANCHES:
         return False
     for b in amb.branches:
+        # A branch with no tool does nothing, which is exactly what declining is.
+        # It has nothing to be unsafe about, and asking `risk_of("")` would raise
+        # and refuse the whole question.
+        if not b.tool:
+            continue
         try:
             if risk_of(b.tool):
                 log.warning("refusing to speculate on %r - it needs confirmation", b.tool)

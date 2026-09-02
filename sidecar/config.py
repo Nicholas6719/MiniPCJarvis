@@ -116,6 +116,16 @@ DEFAULTS: dict[str, Any] = {
         "prusaslicer_binary": r"C:\AI\PrusaSlicer\prusa-slicer-console.exe",
         "work_dir": "",            # "" = %APPDATA%\JARVIS\fabrication
         "slicer_profile": "",      # "" = the bundled generic 0.4 mm FDM profile
+        # Above this many seconds, JARVIS reports the estimate and ASKS before
+        # starting a render. His words: "maybe I don't want to do it if it's
+        # going to take over an hour". Under it he simply does it and reports,
+        # because asking permission to spend four seconds is friction.
+        "ask_above_seconds": 10,
+        # Tiers 3 and 4 need PyTorch (~2.5 GB) and are NOT bundled — the sidecar
+        # is already 980 MB. Their own environment lives here and is invoked as a
+        # subprocess, the same shape as llm.server_binary pointing at llama.cpp.
+        # Not installed simply means those two tiers say so.
+        "model3d_dir": r"C:\AI\model3d",
     },
     # Face confirmation for HIGH-risk tools. It is ADDITIVE ONLY: the spoken
     # yes/no gate stays mandatory and there is deliberately no flag here that

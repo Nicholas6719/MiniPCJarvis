@@ -581,6 +581,21 @@ export const useStore = create<Store>((set, get) => ({
       // should turn it twice. So each one lands with its own sequence number and
       // the renderer applies it once, rather than the store holding a rotation
       // the renderer keeps re-reading and re-applying.
+      // A render runs in the background for minutes, so it leaves a trail he can
+      // scroll back to rather than a status that vanishes. Only the moments that
+      // matter — started, finished, failed — never the progress ticks, which
+      // would bury everything else in the history.
+      case "render":
+        if (evt.action === "started") {
+          push({ id: evt.id, ts: evt.ts, kind: "web",
+                 summary: `making ${evt.label} — tier ${evt.tier}` });
+        } else if (evt.action === "done") {
+          push({ id: evt.id, ts: evt.ts, kind: "web", summary: `${evt.label} ready` });
+        } else if (evt.action === "failed") {
+          push({ id: evt.id, ts: evt.ts, kind: "web",
+                 summary: `${evt.label} failed` });
+        }
+        break;
       case "holo_control":
         set((st) => (st.holo
           ? { holo: { ...st.holo,

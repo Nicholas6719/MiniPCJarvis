@@ -1,0 +1,144 @@
+"""Turning something into a hologram: the estimate, the question, the queue.
+
+This is the tool surface for phase D. The interesting decision is where the
+QUESTION lives.
+
+His correction, verbatim: an estimate on its own is not enough — "he should ask
+me if I'm okay with that time and if he should proceed, because maybe I don't
+want to do it if it's going to take over an hour". So above a threshold JARVIS
+says how long and asks, and the render does not start until he answers.
+
+IT IS A COST QUESTION, NOT A RISK ONE, and it deliberately does not use the risk
+gate. `generate_part` writes a file and is honestly LOW; promoting it to MEDIUM
+to force a confirmation would corrupt what the tier means — the same mistake as
+`face_confirm` sitting at SAFE while able to switch the webcam on. So the tool
+returns `_ask` and the orchestrator arms a conversational yes/no, which he
+answers in his own words.
+
+BELOW the threshold there is no question at all. Asking permission to spend four
+seconds is friction, not courtesy — which is why the tier-1 seed sits under it.
+
+DECLINING IS A REAL ANSWER: the "leave it" branch runs nothing, so there is no
+half-written file in the work folder to tidy up afterwards.
+"""
+from __future__ import annotations
+
+import logging
+
+import create3d
+import render_estimates as est
+from render_queue import queue
+from tools.registry import Risk, Tool, registry
+
+log = logging.getLogger("jarvis.tools.render")
+
+
+def _label(description: str, image_path: str, tier: int) -> str:
+    """What it gets called in "the dragon is ready, sir"."""
+    d = (description or "").strip().strip(".")
+    if d:
+        d = d[:48]
+        return d if d.lower().startswith(("a ", "an ", "the ")) else d
+    if image_path:
+        return "model from that picture"
+    return f"tier {tier} model"
+
+
+async def make_hologram(description: str = "", image_path: str = "", tier: int = 0,
+                        name: str = "", confirmed: bool = False) -> dict:
+    """Make a 3D model and put it up, in the background, with an estimate."""
+    desc = (description or "").strip()
+    if not desc and not image_path:
+        return {"error": "what should I make, sir?"}
+
+    t = int(tier) if tier in create3d.TIERS else create3d.choose_tier(desc, image_path)
+
+    # An unavailable tier is refused BEFORE he is asked to wait for it. Being
+    # asked "about three minutes, shall I?" and then told the model is not
+    # installed is the worst possible order for those two sentences.
+    avail = create3d.available()
+    if t in (3, 4) and not avail.get(t):
+        return create3d._missing(t)
+
+    seconds = est.estimate(t)
+    label = _label(desc, image_path, t)
+
+    if not confirmed and seconds > est.ask_threshold():
+        return {"_ask": {
+            "subject": label,
+            "question": (f"That's {est.spoken(seconds)}{est.confidence_note(t)}, sir. "
+                         f"Shall I?"),
+            "tool": "make_hologram",
+            # confirmed=True, so answering "go ahead" runs this same tool and
+            # takes the other path rather than asking again.
+            "args": {"description": desc, "image_path": image_path,
+                     "tier": t, "name": name, "confirmed": True},
+        }}
+
+    async def job():
+        r = await create3d.build(t, desc, image_path, name)
+        if r.get("stl") and not r.get("error"):
+            # Put it up the moment it exists. "Anything becomes a hologram" is
+            # the phase; a finished mesh he has to ask to see is half of it.
+            try:
+                from tools.holo_tools import show_hologram
+                await show_hologram(path=r["stl"])
+            except Exception:
+                log.debug("could not project the finished model", exc_info=True)
+        return r
+
+    sub = queue.submit(t, label, job)
+    if sub.get("error"):
+        return sub
+    behind = sub.get("queued_behind") or 0
+    spoken = (f"Starting now, sir — {sub['estimate_spoken']}."
+              if not behind else
+              f"It's queued behind {behind} other{'s' if behind > 1 else ''}, sir.")
+    return {"started": True, "tier": t, "label": label, **sub,
+            "note": create3d.TIER_NOTE.get(t, ""), "spoken": spoken}
+
+
+async def render_status() -> dict:
+    """What is being made, and how much longer. Answers instantly, always."""
+    s = queue.status()
+    if not s.get("busy"):
+        return {**s, "spoken": "Nothing's rendering, sir."}
+    return {**s, "spoken": f"The {s['label']} has {s['remaining_spoken']} to go, sir."}
+
+
+async def cancel_render() -> dict:
+    """Stop it. A render that cannot be stopped is a machine holding him hostage."""
+    r = queue.cancel()
+    if not r.get("cancelled"):
+        return {**r, "spoken": "Nothing was running, sir."}
+    return {**r, "spoken": f"Stopped the {r['label']}, sir."}
+
+
+def register_all() -> None:
+    registry.register(Tool(
+        name="make_hologram",
+        description="Make a 3D model from a description or a picture and project it. "
+                    "Runs in the BACKGROUND — it returns immediately and JARVIS keeps "
+                    "answering. Picks the technique itself: OpenSCAD for a part with "
+                    "dimensions, a traced extrusion for a logo, a mesh model for a photo "
+                    "or an arbitrary object. If it will take a while, it reports the "
+                    "estimate and asks first rather than starting.",
+        parameters={"type": "object", "properties": {
+            "description": {"type": "string", "description": "what to make, in his words"},
+            "image_path": {"type": "string", "description": "a picture to build from"},
+            "tier": {"type": "integer",
+                     "description": "1 OpenSCAD, 2 traced extrusion, 3 photo to mesh, "
+                                    "4 text to mesh; omit to choose automatically"},
+            "name": {"type": "string"}},
+            "required": []},
+        risk=Risk.LOW, handler=make_hologram, timeout=60))
+    registry.register(Tool(
+        name="render_status",
+        description="How the model being made is coming along, and how much longer.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.SAFE, handler=render_status, timeout=10))
+    registry.register(Tool(
+        name="cancel_render",
+        description="Stop the model currently being made and drop anything queued.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.SAFE, handler=cancel_render, timeout=10))

@@ -1,0 +1,212 @@
+"""One render at a time, in the background, cancellable, and never silent.
+
+His requirement, verbatim: every render runs in the background — he keeps
+talking, JARVIS keeps working, and asking the CPU load while a mesh is
+generating must answer immediately.
+
+THE FOUR RULES THIS FILE EXISTS TO KEEP.
+
+ONE AT A TIME. Tiers 3 and 4 want the GPU that llama-server is already holding
+9.6 GB of. Two renders at once would not be twice as fast; they would be two
+renders that both miss their estimates and a JARVIS that cannot answer while
+they run. A second request queues.
+
+NOTHING TOUCHES THE EVENT LOOP. The work is handed to a thread or a subprocess
+and awaited. The forty-minute freeze was an audio lock held on the loop, and a
+render is a far bigger block than audio ever was — so `submit` takes a plain
+blocking callable and the queue is the only thing that knows about threads.
+
+IT CAN BE STOPPED. "Stop that" cancels the running job and drops the queue. A
+render that cannot be cancelled is a machine holding its user hostage, and this
+one can run for minutes.
+
+IT SAYS SO WHEN IT IS WRONG. If a job passes its estimate by enough to notice,
+JARVIS says so and offers to stop — "this is running longer than I said, sir,
+about four minutes more. Shall I carry on?" Being wrong about an estimate is
+forgivable; going quiet about it is not.
+
+Completion goes through `delivery`, which already decides speak-versus-send by
+whether he is at the machine, and already carries the dedup and hourly ceiling
+from the 2,600-message night.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+import uuid
+from dataclasses import dataclass, field
+
+import render_estimates as est
+from events import bus, spawn
+
+log = logging.getLogger("jarvis.render.queue")
+
+# How far past the estimate before he is told. 1.6x and at least 20 seconds, so
+# a 6-second tier-2 job that takes 10 does not interrupt him to say so.
+OVERRUN_FACTOR = 1.6
+OVERRUN_FLOOR_S = 20.0
+MAX_QUEUED = 4
+
+
+@dataclass
+class Job:
+    id: str
+    tier: int
+    label: str                       # "a dragon", for the sentence
+    run: object                      # a BLOCKING callable -> dict; run off the loop
+    estimate_s: float = 0.0
+    submitted: float = field(default_factory=time.time)
+    started: float = 0.0
+    result: dict | None = None
+    state: str = "queued"            # queued | running | done | failed | cancelled
+
+
+class RenderQueue:
+    def __init__(self) -> None:
+        self._jobs: list[Job] = []
+        self._current: Job | None = None
+        self._task: asyncio.Task | None = None
+        self._pump: asyncio.Task | None = None
+        self._warned = False
+
+    # ---- what he can ask about ------------------------------------------
+    @property
+    def busy(self) -> bool:
+        return self._current is not None
+
+    def status(self) -> dict:
+        cur = self._current
+        if cur is None:
+            return {"busy": False, "queued": len(self._jobs)}
+        left = max(0.0, cur.estimate_s - (time.time() - cur.started))
+        return {"busy": True, "label": cur.label, "tier": cur.tier,
+                "elapsed_s": round(time.time() - cur.started, 1),
+                "remaining_s": round(left, 1),
+                "remaining_spoken": est.spoken(left) if left > 1 else "any moment now",
+                "queued": len(self._jobs)}
+
+    # ---- putting work in -------------------------------------------------
+    def submit(self, tier: int, label: str, run) -> dict:
+        """Queue a render. Returns immediately — that is the entire point."""
+        if len(self._jobs) >= MAX_QUEUED:
+            return {"error": "I've got too much queued already, sir"}
+        job = Job(id=uuid.uuid4().hex[:8], tier=int(tier), label=label, run=run,
+                  estimate_s=est.estimate(tier))
+        self._jobs.append(job)
+        spawn(self._announce("queued", job), name=f"render:queued:{job.id}")
+        if self._pump is None or self._pump.done():
+            self._pump = spawn(self._drain(), name="render:pump")
+        return {"job": job.id, "tier": job.tier,
+                "estimate_s": round(job.estimate_s, 1),
+                "estimate_spoken": est.spoken(job.estimate_s),
+                "queued_behind": max(0, len(self._jobs) - 1)}
+
+    # ---- stopping it -----------------------------------------------------
+    def cancel(self) -> dict:
+        """Stop what is running and drop what is waiting."""
+        dropped = len(self._jobs)
+        self._jobs.clear()
+        cur = self._current
+        if cur is None:
+            return {"cancelled": False, "dropped": dropped,
+                    "why": "nothing was running"}
+        cur.state = "cancelled"
+        if self._task and not self._task.done():
+            self._task.cancel()
+        return {"cancelled": True, "label": cur.label, "dropped": dropped}
+
+    # ---- the pump --------------------------------------------------------
+    async def _drain(self) -> None:
+        while self._jobs:
+            job = self._jobs.pop(0)
+            self._current = job
+            self._warned = False
+            job.started = time.time()
+            job.state = "running"
+            await self._announce("started", job)
+            timer = est.Timer(job.tier)
+            watch = spawn(self._watch_overrun(job), name=f"render:watch:{job.id}")
+            try:
+                # OFF THE LOOP, whichever kind of callable it is. A tier written
+                # around async subprocesses (OpenSCAD, PrusaSlicer) is awaited
+                # directly because it already yields; a tier that grinds in numpy
+                # or blocks on a model goes to a thread. Getting this wrong in
+                # either direction blocks the loop, and the loop is where he
+                # waits for answers.
+                if asyncio.iscoroutinefunction(job.run):
+                    self._task = asyncio.ensure_future(job.run())
+                else:
+                    self._task = asyncio.ensure_future(asyncio.to_thread(job.run))
+                job.result = await self._task
+                job.state = "failed" if (job.result or {}).get("error") else "done"
+                if job.state == "done":
+                    timer.done()          # only a real success calibrates
+            except asyncio.CancelledError:
+                job.state = "cancelled"
+                job.result = {"cancelled": True}
+            except Exception as e:
+                log.exception("render failed")
+                job.state = "failed"
+                job.result = {"error": str(e)}
+            finally:
+                watch.cancel()
+                self._task = None
+                self._current = None
+            await self._announce(job.state, job)
+
+    async def _watch_overrun(self, job: Job) -> None:
+        """Say so if it runs long. Once — a job that is late is not more useful
+        for being mentioned every minute."""
+        limit = max(job.estimate_s * OVERRUN_FACTOR, job.estimate_s + OVERRUN_FLOOR_S)
+        try:
+            await asyncio.sleep(limit)
+        except asyncio.CancelledError:
+            return
+        if self._current is not job or self._warned:
+            return
+        self._warned = True
+        over = time.time() - job.started
+        await self._say(
+            f"That {job.label} is running longer than I said, sir — "
+            f"it's been {est.spoken(over)}. Shall I carry on?",
+            key=f"render-overrun:{job.id}")
+
+    # ---- what he hears ---------------------------------------------------
+    async def _announce(self, what: str, job: Job) -> None:
+        await bus.emit("render", action=what, job=job.id, tier=job.tier,
+                       label=job.label, estimate_s=round(job.estimate_s, 1),
+                       **({"result": {k: v for k, v in (job.result or {}).items()
+                                      if k != "source"}} if job.result else {}))
+        if what == "done":
+            took = time.time() - job.started
+            r = job.result or {}
+            line = f"The {job.label} is ready, sir — {est.spoken(took)}."
+            if r.get("spoken_size"):
+                line = f"The {job.label} is ready, sir — {r['spoken_size']}."
+            # A part that came out wrong must say so in the SAME breath as
+            # "ready". The background path is the one he actually hears, and
+            # announcing a 0.4 mm sliver as finished is how he finds out at the
+            # printer instead of here.
+            if r.get("mesh_warning"):
+                line += f" Though {r['mesh_warning']}."
+            await self._say(line, key=f"render-done:{job.id}")
+        elif what == "failed":
+            why = (job.result or {}).get("error") or "it didn't come out"
+            await self._say(f"I couldn't make the {job.label}, sir — {why}.",
+                            key=f"render-failed:{job.id}")
+        # A cancellation is NOT announced: he is the one who cancelled it, and
+        # the skill that took the instruction has already answered him.
+
+    async def _say(self, line: str, key: str) -> None:
+        """Through delivery, so it is spoken if he is here and sent if he is not
+        — and so it is subject to the dedup and the hourly ceiling like
+        everything else JARVIS says on its own initiative."""
+        try:
+            from delivery import ALERT, delivery
+            await delivery.deliver(line, ALERT, key=key)
+        except Exception:
+            log.exception("could not announce a render")
+
+
+queue = RenderQueue()
