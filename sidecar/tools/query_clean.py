@@ -16,7 +16,8 @@ from __future__ import annotations
 import re
 
 _MEDIA = r"(?:picture|photo|image|pic|shot|wallpaper)s?"
-_COUNT = r"(\d{1,2}|a|an|some|a\s+few|a\s+couple(?:\s+of)?|several)"
+_COUNT = (r"(\d{1,2}|a|an|some|a\s+few|a\s+couple(?:\s+of)?|several|"
+          r"one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)")
 
 _HEY = re.compile(r"^(?:hey\s+|ok\s+|okay\s+)?jarvis[,.!]?\s+", re.I)
 _POLITE = re.compile(r"^(?:can\s+you\s+|could\s+you\s+|would\s+you\s+|please\s+)+", re.I)
@@ -39,8 +40,16 @@ _TRAIL = re.compile(r"[\s,]*\b(?:please|for\s+me|thanks|thank\s+you)\b[.!?\s]*$"
 _TRAIL_MEDIA = re.compile(rf"\s+{_MEDIA}$", re.I)
 _QUESTION = re.compile(r"^(?:how|what|why|when|where|who|which|is|are|do|does|can)\b", re.I)
 
+# SPELLED-OUT NUMBERS COUNT TOO. "5 images of spiderman" gave ("spiderman", 5)
+# and "two images of iron man" gave ("two images of iron man", None) — the digit
+# was understood and the word was not, so the count was lost AND the phrase
+# "two images of" went to the search engine as part of the subject. He heard it
+# back as "Here are some pictures of two images of iron man."
 _NUM_WORDS = {"a": 1, "an": 1, "some": None, "a few": 3, "several": 4, "a couple": 2,
-              "a couple of": 2}
+              "a couple of": 2,
+              "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+              "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+              "twelve": 12}
 
 
 def _count_of(word: str | None) -> int | None:
@@ -72,6 +81,31 @@ def clean_image_query(text: str) -> tuple[str, int | None]:
         q = _TRAIL_MEDIA.sub("", q)
     q = q.strip(" .?!,")
     return (q, count) if len(q) >= 2 else (text.strip(), None)
+
+
+# "MORE" IS NOT A SUBJECT. After "show me two images of Iron Man", the natural
+# follow-up is "show me three more images" — and cleaning that gives the keywords
+# "three more", which went to the search engine literally. He got pictures of the
+# words "three more" and was told "Here are some pictures of three more."
+#
+# Matched against the ALREADY-CLEANED query, so the lead verb is gone by now.
+_MORE = re.compile(
+    rf"^(?:{_COUNT}\s+)?(?:more|other|another|extra|additional)"
+    rf"(?:\s+(?:one|ones|{_MEDIA}))?"
+    rf"(?:\s+of\s+(?:it|them|those|these|that|him|her|the\s+same))?$", re.I)
+
+
+def more_request(cleaned: str) -> tuple[bool, int | None]:
+    """Is this "some more of what we were just looking at", and how many?
+
+    Returns (False, None) for anything that names a subject of its own, so only
+    a bare follow-up inherits the previous one.
+    """
+    q = re.sub(r"\s+", " ", (cleaned or "").strip().strip(" .?!,"))
+    m = _MORE.match(q)
+    if not m:
+        return False, None
+    return True, _count_of(m.group(1))
 
 
 def clean_search_query(text: str) -> str:

@@ -66,6 +66,47 @@ check("slots_images passes the count", (slots_images("show me 5 images of spider
       slots_images("show me 5 images of spiderman"))
 check("'search the web for the best mini pc' -> keywords",
       clean_search_query("search the web for the best mini pc") == "the best mini pc")
+
+# --- spoken numbers count too, and "more" is not a subject (2026-09-02) -------
+# He said "show me two images of Iron Man" and heard back "Here are some pictures
+# of two images of iron man" — the DIGIT 5 was understood and the WORD two was
+# not, so the count was lost and "two images of" went to the search engine as
+# part of the subject.
+from tools.query_clean import more_request  # noqa: E402
+
+check("'two images of iron man' -> ('iron man', 2)",
+      clean_image_query("show me two images of iron man") == ("iron man", 2),
+      clean_image_query("show me two images of iron man"))
+check("'three pictures of a dragon' -> 3",
+      clean_image_query("show me three pictures of a dragon")[1] == 3)
+check("...and digits still work", clean_image_query("show me 5 images of spiderman")[1] == 5)
+
+# "Show me three more images" after "show me two images of Iron Man" must mean
+# three more of IRON MAN. It meant a literal search for the words "three more".
+for said, want in (("show me three more images", 3),
+                   ("show me more", None),
+                   ("show me more images", None),
+                   ("show me another one", None),
+                   ("show me a few more", 3),
+                   ("show me three more of them", 3)):
+    q = clean_image_query(said)[0]
+    got = more_request(q)
+    check(f"{said!r} asks for more of the last subject", got[0] is True, (q, got))
+    if want is not None:
+        check(f"...{want} of them", got[1] == want, got)
+# ...but a follow-up that NAMES something is not a follow-up
+for said in ("show me more cats", "show me another dragon",
+             "show me two images of iron man"):
+    check(f"{said!r} keeps its own subject",
+          more_request(clean_image_query(said)[0])[0] is False,
+          clean_image_query(said))
+
+# And the sentence he hears must name what he was actually shown, not the slot.
+from brain.skills import say_images  # noqa: E402
+check("the reply names the resolved subject, not 'three more'",
+      say_images({"query": "three more"}, {"query": "iron man", "shown": 3})
+      == "Here are some pictures of iron man.",
+      say_images({"query": "three more"}, {"query": "iron man", "shown": 3}))
 check("'look up who won the game' -> keywords", clean_search_query("look up who won the game") == "who won the game")
 check("'show me the latest nvidia drivers' -> keywords",
       clean_search_query("show me the latest nvidia drivers") == "the latest nvidia drivers")

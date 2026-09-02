@@ -119,6 +119,13 @@ async def research(query: str, num_sources: int = 4) -> dict:
     }
 
 
+# The subject of the last picture search, so "show me three more" has something
+# to be three more OF. Deliberately not tied to the conversation window: the
+# window decides whether he needs the wake word, this decides what JARVIS
+# remembers, and they are different questions.
+_last_subject: dict = {"q": ""}
+
+
 async def show_images(query: str, count: int = 8) -> dict:
     """Find pictures and display them in the JARVIS interface."""
     from search_brave_web import brave_web
@@ -127,9 +134,28 @@ async def show_images(query: str, count: int = 8) -> dict:
         return {"error": "image search needs the Brave browser installed"}
     # "show me 5 images of spiderman" -> query "spiderman", count 5 — whether the
     # brain or the LLM built this call, the engine sees keywords only.
+    from tools.query_clean import more_request
     query, spoken_count = clean_image_query(query)
     if spoken_count:
         count = spoken_count
+    # "SHOW ME THREE MORE" MEANS THREE MORE OF WHAT WE WERE LOOKING AT.
+    #
+    # His requirement, and it is about memory rather than about the follow-up
+    # window: "if I say 'Show me two images of Iron Man' ... then the
+    # conversation window closes, and then I use the wake word and say 'Show me
+    # three more images' — it should know that we're talking about Iron Man."
+    #
+    # Fixed HERE rather than in the brain's slot extractor because both roads
+    # arrive here: the reflex, and the model writing its own query. It had
+    # written "three more" and the engine was duly asked for pictures of the
+    # words "three more".
+    more, more_count = more_request(query)
+    if more:
+        if not _last_subject["q"]:
+            return {"error": "more of what, sir?"}
+        query = _last_subject["q"]
+        if more_count:
+            count = more_count
     await bus.emit("web", stage="images_searching", query=query)
     try:
         imgs = await brave_web.images(query, max(1, min(12, count)))
@@ -137,6 +163,7 @@ async def show_images(query: str, count: int = 8) -> dict:
         return {"error": f"image search failed: {e}"}
     if not imgs:
         return {"error": "no images found"}
+    _last_subject["q"] = query
     await bus.emit("images", query=query, images=imgs)
     return {"shown": len(imgs), "query": query,
             "instruction": "The pictures are now displayed on screen. Say so briefly."}

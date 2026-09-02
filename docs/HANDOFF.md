@@ -2236,6 +2236,58 @@ That last one is also the compound-request fix he asked for. The 8-round tool
 loop already supported several calls per turn — what it did not have was a way to
 recover from the first miss.
 
+## 2026-09-02 — the follow-up window, and what "more" means
+
+He asked for the conversation window at five seconds, and for context to survive
+it closing: *"if I say 'Show me two images of Iron Man' ... then the conversation
+window closes, and then I use the wake word and say 'Show me three more images'
+... it should know that we're talking about Iron Man."*
+
+**FIRST, I HAD TOLD HIM THE WRONG NUMBER.** Asked how long the window was, I read
+the DEFAULT out of `config.py` and said eight seconds. His saved config said
+**thirty**, which is why it felt long — nearly four times the default. The
+default is what a fresh install gets; `%APPDATA%\JARVIS\config.json` is what he
+is running. Read the file, not the source. Set to 5 through `PATCH /config` so
+the running process and the file agree without a restart, and the default lowered
+to match.
+
+**The window and the memory were already separate**, which is the right design:
+`_armed_until` decides whether the WAKE WORD is needed and is cleared on sleep,
+idle and follow-up; `_history` holds the last 20 messages and is not touched by
+any of them. Nothing needed fixing there.
+
+**What was broken was "more".** Two faults, both found by running his exact
+sequence rather than reasoning about it:
+
+* `clean_image_query` understood the DIGIT and not the WORD. "5 images of
+  spiderman" gave `("spiderman", 5)`; "two images of iron man" gave
+  `("two images of iron man", None)` — the count lost AND the phrase "two images
+  of" sent to the search engine as part of the subject. He heard "Here are some
+  pictures of two images of iron man."
+* "show me three more images" cleaned to the keywords **"three more"**, which
+  went to the engine literally. He was shown pictures of the words "three more"
+  and told so.
+
+Fixed in `show_images` rather than in the brain's slot extractor, because both
+roads arrive there — the reflex AND the model writing its own query, which had
+also written "three more". `_last_subject` remembers what was last searched;
+`more_request()` recognises a bare follow-up and only a bare one, so "show me
+more cats" and "show me another dragon" keep their own subject. `say_images` now
+reads the RESOLVED query off the result instead of the slot, or it would still
+have said "pictures of three more".
+
+**Two of my own checks could not fail, in one session.** The first version of the
+context test searched the whole transcript for "iron man" — which turn ONE
+contains, so it passed no matter what turn two did. Then when the probe read the
+wrong JSON key and every reply came back empty, "does not search for the words
+three more" passed on an empty string. Both were caught by looking at the output
+rather than the verdict. **A green check on a value you have not printed is not
+evidence.**
+
+Verified on the deployed build with the window shut in between: turn one says
+"pictures of iron man", nine seconds of silence, then "show me three more images"
+answers "Here are some pictures of iron man."
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

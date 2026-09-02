@@ -227,7 +227,14 @@ DEFAULTS: dict[str, Any] = {
         "mmproj": r"C:\AI\models\gemma-3-4b-it-mmproj.gguf",
         "device": "auto",   # auto | cpu ; forced to cpu when the active LLM fills the iGPU
     },
-    "conversation": {"window_s": 8},      # follow-up without wake word after a reply
+    # Follow-up without the wake word after a reply. FIVE, at his instruction —
+    # his saved config was on 30 and it felt like being listened to rather than
+    # talked with. The window governs the WAKE WORD only: what JARVIS remembers
+    # is `_history`, which is 20 messages deep and is not touched when the window
+    # closes, when he goes idle, or when he is put to sleep. "Show me two images
+    # of Iron Man", a silence, then "JARVIS, show me three more" still knows it
+    # is Iron Man.
+    "conversation": {"window_s": 5},
     "interrupt": {"mode": "wake_word"},   # wake_word | any_speech
     # MCP plugin servers: {"name": {"command": "...", "args": [...], "risk": "medium"}}
     "mcp": {"servers": {}},

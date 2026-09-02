@@ -1315,9 +1315,16 @@ def say_screenshot(slots: dict, res: dict) -> str:
 
 
 def say_images(slots: dict, res: dict) -> str:
+    # THE TOOL'S QUERY, not the slot's. They differ exactly when it matters: for
+    # "show me three more images" the slot says "three more" and the tool has
+    # resolved it to what he was actually looking at. Reading the slot back gave
+    # "Here are some pictures of three more."
+    subject = (res.get("query") or slots.get("query") or "").strip()
     if "error" in res:
-        return f"I couldn't find pictures of {slots['query']}."
-    return f"Here are some pictures of {slots['query']}."
+        return (f"I couldn't find pictures of {subject}." if subject
+                else "I couldn't find any pictures.")
+    return f"Here are some pictures of {subject}." if subject \
+        else "Here are some pictures."
 
 
 def say_screen(_: dict, res: dict) -> str:
