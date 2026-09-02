@@ -92,6 +92,10 @@ export function HoloStage() {
   // tear the scene down and rebuild it — that would restart the spin and flash
   // the panel — so it reaches the live scene through this.
   const applyCheck = useRef<((wantLayers: boolean) => void) | null>(null);
+  // The layer scale. Written to directly from the rAF/scrub path, never through
+  // React state — the same rule as every other moving thing in this file.
+  const scale = useRef<HTMLDivElement | null>(null);
+  const applyHands = useRef<((state: string) => void) | null>(null);
   // Same reasoning as applyCheck: a control must reach the live scene without
   // rebuilding it, or every "turn it" would restart the spin and flash the panel.
   const applyCmd = useRef<((c: NonNullable<HoloState["cmd"]>) => void) | null>(null);
@@ -121,6 +125,15 @@ export function HoloStage() {
     const path = new Group();           // the sliced toolpath
     orient.add(shell, marks, path);
     const bed = new Group();
+    // The grab affordance: eight corner brackets around the model's bounds.
+    // Mixed-reality toolkits all landed on the same answer — show what is
+    // grabbable BEFORE the grab, or the user waves at an object with no idea
+    // whether it is listening. Ours had exactly that gap: the camera was armed
+    // and the model looked identical either way, so the only way to find out was
+    // to try. It lives outside `orient` because it wraps the model as displayed.
+    const grabber = new Group();
+    grabber.visible = false;
+    group.add(grabber);
     scene.add(group);
     scene.add(bed);
 
@@ -150,6 +163,12 @@ export function HoloStage() {
     let explodeTarget = 0;
     let faceGeom: BufferGeometry | null = null;
     let lastSize: number[] | null = null;   // millimetres, for the cut plane
+    // The sliced toolpath, and how far up it he is looking. Layers are laid into
+    // ONE buffer in order, so scrubbing is a `setDrawRange` — one draw call and
+    // instant — rather than a hundred meshes toggled on and off.
+    let pathGeom: BufferGeometry | null = null;
+    let layerEnds: number[] = [];           // cumulative vertex count per layer
+    let shownLayer = -1;                    // -1 = the whole print
 
     const size = () => {
       const w = el.clientWidth || 800;
@@ -226,6 +245,7 @@ export function HoloStage() {
       // to choose a distance that fits the largest dimension.
       const [w, h, d] = geo.size_mm;
       lastSize = [w, h, d];
+      buildGrabber(w, d, h);   // after `orient`, the part's Z is the screen's Y
       const span = Math.max(w, h, d) || 1;
       camera.position.set(0, span * 0.34, span * 2.5);
       camera.lookAt(0, 0, 0);
@@ -267,15 +287,20 @@ export function HoloStage() {
         // hundred draw calls to show a cube is how a preview becomes the reason
         // the HUD stutters.
         const pts: number[] = [];
+        layerEnds = [];
         for (const L of c.gcode.layers) {
           for (const poly of L.paths) {
             for (let i = 0; i + 3 < poly.length; i += 2) {
               pts.push(poly[i], poly[i + 1], L.z, poly[i + 2], poly[i + 3], L.z);
             }
           }
+          // Where this layer ends in the buffer. Because layers go in bottom to
+          // top and in order, "show me up to layer N" is a draw range.
+          layerEnds.push(pts.length / 3);
         }
         const g = new BufferGeometry();
         g.setAttribute("position", new Float32BufferAttribute(pts, 3));
+        pathGeom = g;
         // Dim on purpose. A hundred layers of solid infill at full opacity is a
         // solid green block — technically the whole toolpath, and completely
         // unreadable. At this weight the layer banding and the skirt loop on the
@@ -285,6 +310,20 @@ export function HoloStage() {
         })));
       }
       path.visible = wantLayers && path.children.length > 0;
+      // The scale belongs to the toolpath: no toolpath, no ruler. It also gets
+      // reset to the whole print, so switching the layers back on does not
+      // resume halfway up a part he stopped looking at ten minutes ago.
+      if (!path.visible && scale.current) {
+        scale.current.dataset.on = "";
+        shownLayer = -1;
+        pathGeom?.setDrawRange(0, Infinity);
+      } else if (path.visible && layerEnds.length) {
+        // Up the MOMENT the toolpath is, reading "ALL 30" — not only once he has
+        // already scrubbed. A ruler that appears after you use it does not tell
+        // you the control exists, which is the same gap the grab affordance was
+        // added to close.
+        showLayer(shownLayer);
+      }
       // Showing the real toolpath and the shell at once is visual mush; the
       // toolpath IS the object when it is up.
       shell.visible = !path.visible;
@@ -376,6 +415,76 @@ export function HoloStage() {
       settled = false;
     }
 
+    function showLayer(n: number) {
+      if (!pathGeom || !layerEnds.length) return;
+      const last = layerEnds.length - 1;
+      shownLayer = n < 0 ? -1 : Math.max(0, Math.min(last, n));
+      // Built UP, not one layer in isolation: that is what a print looks like as
+      // it happens, and a single floating layer tells him nothing about where it
+      // sits in the part.
+      pathGeom.setDrawRange(0, shownLayer < 0 ? Infinity : layerEnds[shownLayer]);
+      const el = scale.current;
+      if (el) {
+        const n = layerEnds.length;
+        const at = shownLayer < 0 ? n : shownLayer + 1;
+        el.dataset.on = "true";
+        el.style.setProperty("--at", String(at / n));
+        const txt = el.firstElementChild as HTMLElement | null;
+        if (txt) txt.textContent = shownLayer < 0 ? `ALL ${n}` : `${at} / ${n}`;
+      }
+      settled = false;
+    }
+
+    function buildGrabber(bx: number, by: number, bz: number) {
+      empty(grabber);
+      const [x, y, z] = [bx / 2, by / 2, bz / 2];
+      // A twelfth of the shortest side, so the brackets read as corners of THIS
+      // object rather than a fixed-size widget that swamps a 6 mm spacer and
+      // vanishes on a 200 mm plate.
+      const a = Math.max(1, Math.min(bx, by, bz) / 12);
+      const pts: number[] = [];
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+        const [px, py, pz] = [sx * x, sy * y, sz * z];
+        // Three short strokes meeting at the corner — the corner itself, not a
+        // full wireframe box. A complete box hides the part inside it.
+        pts.push(px, py, pz, px - sx * a, py, pz);
+        pts.push(px, py, pz, px, py - sy * a, pz);
+        pts.push(px, py, pz, px, py, pz - sz * a);
+      }
+      const g = new BufferGeometry();
+      g.setAttribute("position", new Float32BufferAttribute(pts, 3));
+      grabber.add(new LineSegments(g, new LineBasicMaterial({
+        color: GREEN, transparent: true, opacity: 0.5,
+      })));
+      // Re-apply the state: the geometry can finish loading AFTER he has already
+      // put his hands up, and a fresh set of brackets built at the default
+      // opacity would say "watching" while he was actually holding the thing.
+      applyHands.current?.(useStore.getState().holo?.hands ?? "off");
+    }
+
+    // Arrow keys scrub. Voice is the precise path and hands are the fast one,
+    // but a layer preview that cannot be nudged one layer at a time is missing
+    // the gesture every slicer trained him to expect.
+    const onKey = (e: KeyboardEvent) => {
+      if (!path.visible || !layerEnds.length) return;
+      const step = e.key === "ArrowUp" ? 1 : e.key === "ArrowDown" ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      showLayer((shownLayer < 0 ? layerEnds.length - 1 : shownLayer) + step);
+    };
+    window.addEventListener("keydown", onKey);
+
+    // Armed and holding are different states and must LOOK different: armed says
+    // it will respond, holding says it is responding. One appearance for both is
+    // how he ends up unsure whether a gesture registered.
+    applyHands.current = (state: string) => {
+      grabber.visible = state !== "off";
+      const m = (grabber.children[0] as LineSegments | undefined)?.material as
+        (Material & { opacity: number }) | undefined;
+      if (m) m.opacity = state === "holding" ? 1 : 0.5;
+      settled = false;
+    };
+
     applyCmd.current = (c) => {
       switch (c.action) {
         case "rotate": {
@@ -411,6 +520,18 @@ export function HoloStage() {
         case "layers":
           void applyCheck.current?.(!!c.on);
           break;
+        case "layer": {
+          // Turn the toolpath on if it is not already, then scrub.
+          const go = () => showLayer(
+            c.delta != null
+              ? (shownLayer < 0 ? layerEnds.length - 1 : shownLayer) + c.delta
+              : (c.layer ?? -1));
+          // Always through applyCheck: it is a redraw once the G-code is parsed,
+          // and going straight to `go()` when the store still thinks the layers
+          // are off let the visibility effect switch them back off underneath.
+          void Promise.resolve(applyCheck.current?.(true)).then(go);
+          break;
+        }
       }
       settled = false;
     };
@@ -475,6 +596,8 @@ export function HoloStage() {
 
     return () => {
       disposed = true;
+      window.removeEventListener("keydown", onKey);
+      applyHands.current = null;
       applyCheck.current = null;
       applyCmd.current = null;
       cancelAnimationFrame(raf);
@@ -497,6 +620,10 @@ export function HoloStage() {
     if (cmd) applyCmd.current?.(cmd);
   }, [cmd?.seq]);
 
+  useEffect(() => {
+    applyHands.current?.(holo?.hands ?? "off");
+  }, [holo?.hands]);
+
   return (
     <>
       <div className="holo" style={{position:"relative"}}>
@@ -506,6 +633,9 @@ export function HoloStage() {
         </div>
         <div ref={host} className="holo__canvas" />
         {holo?.check && <div ref={note} className="holo__check mono-sub" />}
+        <div ref={scale} className="holo__layers mono-sub">
+          <span className="holo__layers-n" />
+        </div>
         {holo?.hands && holo.hands !== "off" && (
           <div className="holo__hands mono-sub" data-holding={holo.hands === "holding"}>
             {holo.hands === "holding" ? "HOLDING" : "WATCHING YOUR HANDS"}

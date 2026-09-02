@@ -1015,6 +1015,8 @@ def slots_holo_move(t: str) -> dict | None:
     elif act == "section":
         sec = holo_angles.parse_section(t) or {"axis": "z", "at": 0.5}
         out.update(sec)
+    elif act == "layer":
+        out.update(holo_angles.parse_layer(t) or {"layer": -1})
     return out
 
 
@@ -1110,9 +1112,18 @@ def say_holo_make(slots: dict, res: dict) -> str:
     note = res.get("note")
     line = res.get("spoken") or "Starting now, sir."
     # A finished result rather than a submission — the queue announces those,
-    # but a caller that awaits the build gets it here.
-    if res.get("mesh_warning"):
-        return f"{line} Though {res['mesh_warning']}."
+    # but a caller that awaits the build gets it here. Same sentence-builder the
+    # queue uses, so the two can never say different things about one part.
+    try:
+        import create3d
+        extra = create3d.spoken_caveats(res)
+    except Exception:
+        # The same fallback the queue uses. A broken sentence-builder must not
+        # swallow a mesh warning — that is the one line standing between him and
+        # handing a slicer a file with holes in it.
+        extra = f"Though {res['mesh_warning']}." if res.get("mesh_warning") else ""
+    if extra:
+        return f"{line} {extra}"
     # Which tier made it decides what he can do NEXT — a tier-1 part can be
     # edited by voice, a tier-3 mesh has no parameters at all — so it is said
     # once, when the work starts, rather than left for him to discover.
@@ -1666,6 +1677,11 @@ SKILLS: list[Skill] = [
         "put it back the way it was", "reset the model", "straighten it up",
         "show me the layers", "show me the toolpath", "show me how it prints",
         "back to the model", "hide the layers",
+        # Scrubbing the toolpath. Deliberately seeded separately from "show me
+        # the layers": one turns the preview on, the other moves through it, and
+        # the parser tells them apart by whether he named a layer.
+        "show me layer fifty", "go to layer 20", "next layer", "the top layer",
+        "back a layer", "show me the first layer",
         "fit it on the screen", "centre the model"],
         slots=slots_holo_move, speak=say_holo_move),
     # MAKING one, as against showing one he already has. Every seed here names

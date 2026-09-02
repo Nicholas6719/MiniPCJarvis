@@ -11,6 +11,7 @@ units; every slicer treats them as millimetres and so does this.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -213,7 +214,7 @@ async def inspect_part(path: str = "", name: str = "") -> dict:
 
 
 _ACTIONS = ("rotate", "flip", "scale", "section", "explode", "reset", "fit",
-            "layers", "solid")
+            "layers", "solid", "layer")
 
 
 def _sliced(name: str) -> bool:
@@ -233,6 +234,7 @@ _AXIS_SAID = {"x": "forwards", "y": "sideways", "z": "round"}
 
 async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
                        factor: float = 0.0, at: float = 0.5,
+                       layer: int = -1, delta: int = 0,
                        phrase: str = "") -> dict:
     """Move the model that is already on the stage.
 
@@ -298,6 +300,28 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
         spoken = "Back as it was, sir."
     elif act == "fit":
         spoken = "Framing it, sir."
+    elif act == "layer":
+        # Scrubbing through the sliced toolpath, the way every slicer does it.
+        # Drawing all hundred layers at once is why a cube looked like a solid
+        # green block; going up through them is how a toolpath is actually read.
+        import holo_angles
+        if not _sliced(_current.get("name", "")):
+            return {"error": "that part hasn't been sliced yet, sir"}
+        # The slots parse the sentence and pass the answer down; re-parsing here
+        # is the fallback for when the MODEL calls the tool with an action and no
+        # numbers. Both roads lead to the same parser, which is the whole reason
+        # holo_angles exists as its own module.
+        if delta:
+            want = {"delta": int(delta)}
+        elif layer != -1:
+            want = {"layer": int(layer)}
+        else:
+            want = holo_angles.parse_layer(said) or {"layer": -1}
+        payload.update(want)
+        spoken = ("Layer by layer, sir." if "delta" in want
+                  else "The top, sir." if want.get("layer") == -1
+                  else "The first layer, sir." if want.get("layer") == 0
+                  else f"Layer {want['layer']}, sir.")
     elif act in ("layers", "solid"):
         payload["action"] = "layers"
         payload["on"] = act == "layers"
@@ -323,14 +347,38 @@ async def hand_control(on: bool = True) -> dict:
         await bus.emit("hands", action="off")
         return {**r, "spoken": "Hands off, sir." if r.get("was")
                 else "They weren't on, sir."}
+    # TURN THE CAMERA ON OURSELVES. It used to refuse and tell him to say "turn
+    # the camera on" as a separate sentence, so that the decision stayed his —
+    # but the decision IS his: "control it with my hands" is an explicit request
+    # for a camera-driven feature, and making him ask twice was not consent, it
+    # was friction.
+    #
+    # It was also actively broken. Saying "turn the camera on" runs `set_camera`,
+    # and the camera panel takes the stage — so the model he was about to grab
+    # vanished behind a webcam feed. A screenshot of the armed state found that;
+    # every other check passed, because the gestures worked perfectly on a
+    # hologram nobody could see.
+    #
+    # Off the loop, like every other camera start: `camera.start` blocks.
+    turned_on = False
+    from camera import camera
+    if not camera.is_on:
+        res = await asyncio.to_thread(camera.start)
+        if not res.get("ok"):
+            return {"error": res.get("error") or "the camera would not open"}
+        turned_on = True
     r = control.arm()
     if r.get("error"):
+        if turned_on:                  # don't leave it running for nothing
+            await asyncio.to_thread(camera.stop)
         return r
     # The HUD says so from the moment it is armed, not from the first grab. A
     # camera reading continuously has to be visible while it is doing it.
     await bus.emit("hands", action="armed")
-    return {**r, "spoken": "Pinch to take hold of it, sir — open your hand to "
-                           "let go."}
+    line = ("Camera on. Pinch to take hold of it, sir — open your hand to let go."
+            if turned_on else
+            "Pinch to take hold of it, sir — open your hand to let go.")
+    return {**r, "camera_started": turned_on, "spoken": line}
 
 
 async def hide_hologram() -> dict:

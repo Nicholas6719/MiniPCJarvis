@@ -826,3 +826,29 @@ body.compact .wedge { padding: calc(12px * var(--s)) calc(18px * var(--s)) calc(
 }
 .holo__hands[data-holding="true"] { color: #59e0a5; border-color: #59e0a5; }
 body.compact .holo__hands { display: block; }
+
+/* The layer scale. Every slicer has one and it is the control he already knows:
+   how far up the print he is looking, and how much is left above him. Hidden
+   until there is a toolpath to scrub — an empty ruler is furniture. */
+.holo__layers {
+  position: absolute; right: calc(14px * var(--s)); top: 22%; bottom: 22%;
+  width: calc(3px * var(--s)); opacity: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--rim) 18%, transparent);
+  transition: opacity .3s ease;
+}
+.holo__layers[data-on="true"] { opacity: 1; }
+/* Filled from the bed up, because that is the direction a print grows. */
+.holo__layers::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: calc(var(--at, 1) * 100%);
+  background: #59e0a5;
+  transition: height .18s ease-out;
+}
+.holo__layers-n {
+  position: absolute; right: calc(9px * var(--s));
+  bottom: calc(var(--at, 1) * 100%); transform: translateY(50%);
+  white-space: nowrap; color: #59e0a5;
+  letter-spacing: .1em; font-variant-numeric: tabular-nums;
+  transition: bottom .18s ease-out;
+}
+body.compact .holo__layers { display: block; }

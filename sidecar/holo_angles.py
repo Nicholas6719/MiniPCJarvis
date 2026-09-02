@@ -136,6 +136,34 @@ def parse_scale(text: str) -> float | None:
     return None
 
 
+def parse_layer(text: str) -> dict | None:
+    """Which layer of the sliced toolpath he means, or None if not about layers.
+
+    Every slicer has a layer slider and ours drew the whole print at once, which
+    is why a cube looked like a solid block. Scrubbing is how anyone actually
+    reads a toolpath: you go up through it and watch the part appear.
+
+    Distinguished from "show me the layers", which turns the preview ON. A NUMBER
+    or a position word means he wants a particular one.
+    """
+    t = (text or "").lower()
+    if not re.search(r"\blayer", t):
+        return None
+    if re.search(r"\b(?:top|last|highest|all of them|the lot|everything)\b", t):
+        return {"layer": -1}
+    if re.search(r"\b(?:first|bottom|lowest|start)\b", t):
+        return {"layer": 0}
+    if re.search(r"\b(?:next|up|higher|forward|another)\b", t):
+        return {"delta": 1}
+    if re.search(r"\b(?:previous|back|down|lower|before)\b", t):
+        return {"delta": -1}
+    m = re.search(r"\blayer\s*(?:number\s*)?(\d+)", t) or \
+        re.search(r"(\d+)(?:st|nd|rd|th)?\s+layer", t)
+    if m:
+        return {"layer": int(m.group(1))}
+    return None
+
+
 def parse_action(text: str) -> str | None:
     """Which control he means, or None if the sentence names none of them.
 
@@ -154,6 +182,10 @@ def parse_action(text: str) -> str | None:
     if re.search(r"\b(?:solid|the model again|hide the layers|back to the model|"
                  r"stop the layers)\b", t):
         return "solid"
+    # A PARTICULAR layer is a scrub; "the layers" is a switch. Checked first, or
+    # "show me layer fifty" would merely turn the preview on again.
+    if parse_layer(t):
+        return "layer"
     if re.search(r"\b(?:layers?|toolpath|tool path|how it'?s printed|"
                  r"the print path|slicing preview)\b", t):
         return "layers"

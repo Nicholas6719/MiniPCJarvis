@@ -23,6 +23,7 @@ wrong way — which reads as broken rather than reversed.
 
 Run: python tests/test_hand_control.py
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -177,9 +178,73 @@ def main() -> int:
     r = hand_control.control.arm()
     check("a hologram alone is not enough — the camera must be on",
           bool(r.get("error")), r)
-    check("...and it does NOT switch the camera on itself",
+    check("...and the PRIMITIVE does not switch the camera on itself",
           "camera" in (r.get("error") or "").lower(),
-          "a camera that turns itself on is a surprise nobody wants")
+          "arm() is not a request from him; it must never start a camera")
+
+    # ---- but the TOOL does, because that one IS a request from him ----------
+    # This reverses an earlier decision and the reasoning is worth keeping. The
+    # old behaviour refused and told him to say "turn the camera on" as a second
+    # sentence, so that the choice stayed his. It was not consent, it was
+    # friction — "control it with my hands" is already an explicit request for a
+    # camera-driven feature — and it was BROKEN: `set_camera` gives the camera
+    # panel the stage, so the model he was about to grab disappeared behind a
+    # webcam feed. A screenshot of the armed state found it; every functional
+    # check passed, because the gestures worked on a hologram nobody could see.
+    #
+    # The line drawn is between layers: the primitive above still refuses, the
+    # tool below starts it, says "Camera on", and the HUD shows WATCHING YOUR
+    # HANDS the whole time.
+    import camera as camera_mod
+    real = camera_mod.camera
+    started = {"n": 0, "stopped": 0}
+
+    class FakeCamera:
+        is_on = False
+
+        def start(self):
+            started["n"] += 1
+            FakeCamera.is_on = True
+            return {"ok": True, "on": True, "backend": "fake"}
+
+        def stop(self):
+            started["stopped"] += 1
+            FakeCamera.is_on = False
+            return {"ok": True, "on": False}
+
+    camera_mod.camera = FakeCamera()
+    try:
+        r = asyncio.run(holo_tools.hand_control(on=True))
+        check("asking for hand control turns the camera on rather than refusing",
+              not r.get("error") and r.get("armed") is True, r)
+        check("...it actually started it", started["n"] == 1, started)
+        check("...and says so, so a live camera is never silent",
+              "camera on" in (r.get("spoken") or "").lower(), r.get("spoken"))
+        hand_control.control.disarm("test")
+
+        # A camera we switched on for a grab that then fails must not be left
+        # running. Nothing is on the stage, so arm() refuses.
+        FakeCamera.is_on = False
+        started["n"] = started["stopped"] = 0
+        holo_tools._current.clear()
+        r = asyncio.run(holo_tools.hand_control(on=True))
+        check("a camera opened for an arm that fails is closed again",
+              bool(r.get("error")) and started["stopped"] == 1,
+              (r.get("error"), started))
+        holo_tools._current.update({"name": "x", "path": "x.stl"})
+
+        # And it does NOT restart a camera that was already on — he may have it
+        # up for something else, and stopping it later would be a surprise.
+        FakeCamera.is_on = True
+        started["n"] = started["stopped"] = 0
+        r = asyncio.run(holo_tools.hand_control(on=True))
+        check("a camera already on is left alone", started["n"] == 0, started)
+        check("...and the reply does not claim to have started it",
+              "camera on" not in (r.get("spoken") or "").lower(), r.get("spoken"))
+        hand_control.control.disarm("test")
+    finally:
+        camera_mod.camera = real
+        FakeCamera.is_on = False
     check("disarming when it was never armed is not an error",
           hand_control.control.disarm().get("armed") is False)
     check("the resting state is off", hand_control.control.armed is False)

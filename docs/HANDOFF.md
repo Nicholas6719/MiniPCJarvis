@@ -1961,6 +1961,106 @@ memory whole. And `hand_control` cancelled its own task from inside its own loop
 which delivers a `CancelledError` to whatever happens to be awaiting next; it
 stands down and breaks instead.
 
+## 2026-09-02 — what the research changed, and the bug it uncovered
+
+Four changes taken from the research pass, in the order they mattered. The third
+one turned into the most important finding of the session.
+
+**A layer slider on the toolpath preview.** Every slicer has one; ours drew all
+hundred layers at once, which is why a sliced cube looked like a solid green
+block. He can now say "show me layer fifty", "next layer", "the top layer", or
+nudge it with the arrow keys, and a scale up the right-hand edge shows how far up
+the print he is looking.
+
+The layers go into ONE buffer bottom to top, so scrubbing is a
+`geometry.setDrawRange` — one draw call, instant, no per-layer meshes. Two things
+had to agree for it to work: asking for a LAYER implies wanting the layers up, so
+the store sets `showLayers` for the `layer` action too (without it the visibility
+effect switched the toolpath back off a frame after the scrub appeared), and
+`parse_layer` is checked BEFORE the `layers` switch in `parse_action`, or "show me
+layer fifty" merely turns the preview on again. `_CANON` erases plain digits before
+embedding, so the 50 only survives because the slots parse the RAW sentence.
+
+**A grab affordance.** The mixed-reality toolkits all landed on the same answer:
+show what is grabbable before the grab. Ours had exactly that gap — the camera
+could be armed and the model looked identical either way, so the only way to find
+out whether it was listening was to wave at it. Eight corner brackets now appear
+when hands arm and brighten when he has hold. Corners rather than a full
+wireframe box, because a box hides the part inside it, and sized at a twelfth of
+the shortest side so they read as the corners of THIS object.
+
+**Fillets and chamfers — where the real bug was.** OpenSCAD has no fillet
+operator, so anything rounded goes to the model. I asked the running JARVIS for
+three rounded or chamfered parts and built what came back. **One of the three
+worked.** The three failures were all different and all real:
+
+1. **`max_tokens` was a budget for the ANSWER, and this model spends it on
+   THINKING FIRST.** "A 20 mm cube with a 2 mm chamfer" at `max_tokens=700`
+   returned `finish_reason=length`, 2,443 characters of reasoning and **zero
+   characters of code** — and `generate_part` reported "the model returned no
+   source", which names the symptom and hides the cause completely. The same
+   prompt finishes in about 560 tokens when it is allowed to think first. Fixed
+   at the call site (700 → 2000) and made visible everywhere: `llm/provider.py`
+   now logs a warning naming this exact condition when it sees it, so the next
+   occurrence in any other call site is greppable instead of silent.
+   **There are other small `max_tokens` in the tree** — `vision_tools` at 120,
+   `vision_analyze` at 260, `facts` and `night_school` at 400–600. They have not
+   been shown to starve, but they are the same shape of risk.
+
+2. **It writes OpenSCAD like Python.** `arm1 = cube([40,20,4]);` — geometry
+   assigned to a variable, which is a parser error, so the part never existed.
+   Telling it not to in the prompt was not enough on its own, and feeding back
+   OpenSCAD's own complaint made it worse: "syntax error in file ..., line 6"
+   names a position and no cause, and the retry produced the same mistake one
+   line lower. `_GEOMETRY_AS_VALUE` in `tools/fabrication.py` recognises the
+   pattern so the retry can say the actual lesson.
+
+3. **Its instinct for rounding is `minkowski()` with a sphere**, which rounds the
+   BOTTOM face too — the part rocks on the bed, needs supports, and grows by the
+   radius in every direction. "A plate 40 by 30 by 5 with rounded corners" came
+   back 11 mm thick with a domed underside, and **built cleanly**, which is the
+   dangerous kind of wrong. The prompt now gives the flat-bottomed idiom
+   (`minkowski()` with a thin CYLINDER) and the size compensation.
+
+Also: a build failure used to be terminal. It now retries once with the compiler's
+own words fed back — not when it is already a retry from `create3d`, because a
+retry of a retry is four model calls for a request that plainly is not landing.
+
+**After the fixes, three of three build**, all spec-verified against the
+dimensions in his sentence, with no libraries, no geometry-in-a-variable and no
+sphere-minkowski. One of them failed its first attempt and the retry recovered it,
+which is the loop proving itself on a real failure rather than a synthetic one.
+
+The lesson worth carrying: **I found all of this by asking the running system for
+three ordinary parts and looking at what came out.** The offline gates were green
+throughout — they tested the parser, the queue and the maths, and nothing tested
+whether the model could actually write a rounded box.
+
+**And then the screenshot found a second one.** Photographing the armed hand-
+control state showed the webcam feed where the hologram should have been: `set_
+camera` gives the camera panel the stage, and hand control required him to turn
+the camera on as a separate sentence — so the model he was reaching for vanished
+behind a picture of his bedroom. Every functional check passed. The gestures
+worked perfectly on a hologram nobody could see.
+
+Two changes, and one of them REVERSES AN EARLIER DECISION, so the reasoning is
+recorded rather than just the outcome:
+
+* **`hand_control` now turns the camera on itself.** It used to refuse — "the
+  camera's off, sir, say the word" — deliberately, so the choice stayed his. That
+  was not consent, it was friction: "control it with my hands" is already an
+  explicit request for a camera-driven feature. The privacy line still holds and
+  is now drawn between LAYERS: `control.arm()`, the primitive, still refuses to
+  start a camera (it is not a request from him), while the TOOL starts it, says
+  "Camera on", and the HUD shows WATCHING YOUR HANDS the whole time. A camera
+  opened for an arm that then fails is closed again. All four halves are gated.
+* **The camera panel no longer takes the stage from a hologram.** Turning it on
+  with a model up is nearly always the first half of reaching for the model.
+
+Worth remembering next time: **a feature you can only judge by looking has to be
+looked at.** The layer scale and the grab affordance both routed, acknowledged
+and gated perfectly while one of them was invisible.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

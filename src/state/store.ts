@@ -109,6 +109,9 @@ export interface HoloState {
   cmd?: {
     seq: number; action: string;
     axis?: string; degrees?: number; factor?: number; at?: number; on?: boolean;
+    // Scrubbing the sliced toolpath: an absolute layer (-1 = the whole print)
+    // or a step from wherever he is.
+    layer?: number; delta?: number;
   };
 }
 
@@ -424,8 +427,20 @@ export const useStore = create<Store>((set, get) => ({
         // feature, so it does not wait to be asked for separately.
         if (evt.tool === "set_camera" && evt.status === "success") {
           const on = JSON.stringify(evt.result ?? "").includes("\"on\"");
-          if (on) get().openStage("camera", { holdUntil: 0, pinned: true });
-          else set((st) => (st.stage?.kind === "camera" ? { stage: null } : {}));
+          // ...but NOT over a hologram. Turning the camera on while a model is
+          // up is nearly always the first half of "let me grab it with my
+          // hands", and replacing the model with a webcam feed hid the very
+          // thing he was reaching for. Found by screenshotting the armed state:
+          // the gestures worked perfectly on a hologram nobody could see.
+          // The "WATCHING YOUR HANDS" badge is what keeps the live camera
+          // honest here — the panel is not the only way he is told.
+          if (on) {
+            if (get().stage?.kind !== "holo") {
+              get().openStage("camera", { holdUntil: 0, pinned: true });
+            }
+          } else {
+            set((st) => (st.stage?.kind === "camera" ? { stage: null } : {}));
+          }
         }
         // A confirmation that resolves ANYWHERE has to take the card with it.
         // clearConfirmation was only ever called by tapping a button here, so a
@@ -613,10 +628,15 @@ export const useStore = create<Store>((set, get) => ({
       case "holo_control":
         set((st) => (st.holo
           ? { holo: { ...st.holo,
-                      showLayers: evt.action === "layers" ? !!evt.on : st.holo.showLayers,
+                      // Asking for a LAYER implies wanting the layers up. Left
+                      // out, the visibility effect fought the scrub and switched
+                      // the toolpath off again a frame after it appeared.
+                      showLayers: evt.action === "layers" ? !!evt.on
+                        : evt.action === "layer" ? true : st.holo.showLayers,
                       cmd: { seq: (st.holo.cmd?.seq ?? 0) + 1, action: evt.action,
                              axis: evt.axis, degrees: evt.degrees, factor: evt.factor,
-                             at: evt.at, on: evt.on } } }
+                             at: evt.at, on: evt.on,
+                             layer: evt.layer, delta: evt.delta } } }
           : {}));
         break;
       case "reflex":

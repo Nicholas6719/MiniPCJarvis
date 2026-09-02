@@ -239,11 +239,16 @@ class RenderQueue:
             if r.get("spoken_size"):
                 line = f"The {job.label} is ready, sir — {r['spoken_size']}."
             # A part that came out wrong must say so in the SAME breath as
-            # "ready". The background path is the one he actually hears, and
-            # announcing a 0.4 mm sliver as finished is how he finds out at the
-            # printer instead of here.
-            if r.get("mesh_warning"):
-                line += f" Though {r['mesh_warning']}."
+            # "ready" — and so must a number we chose for him. The background
+            # path is the one he actually hears, and announcing a 0.4 mm sliver
+            # as finished is how he finds out at the printer instead of here.
+            try:
+                import create3d
+                extra = create3d.spoken_caveats(r)
+            except Exception:
+                extra = f"Though {r['mesh_warning']}." if r.get("mesh_warning") else ""
+            if extra:
+                line += " " + extra
             await self._say(line, key=f"render-done:{job.id}")
         elif what == "failed":
             why = (job.result or {}).get("error") or "it didn't come out"

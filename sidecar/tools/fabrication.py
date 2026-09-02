@@ -34,6 +34,22 @@ from tools.registry import Risk, Tool, registry
 log = logging.getLogger("jarvis.tools.fabrication")
 
 GEN_TIMEOUT_S = 120
+
+# THE ONE OPENSCAD MISTAKE THIS MODEL KEEPS MAKING: writing it like Python.
+#
+#     arm1 = cube([40,20,4]);
+#     base = union() { arm1; arm2; }
+#
+# OpenSCAD is declarative — a shape is not a value, so this is a parser error and
+# the part never exists. It survived being told not to in the prompt and survived
+# having OpenSCAD's own complaint fed back, because that complaint is "syntax
+# error, line 6" and names no cause. Recognising it here is what lets the retry
+# say the actual lesson. Anchored to an assignment whose right-hand side opens
+# with a geometry call, so `r = 2;` and `w = 40 - 2*r;` are untouched.
+_GEOMETRY_AS_VALUE = re.compile(
+    r"^\s*\w+\s*=\s*(?:cube|cylinder|sphere|square|circle|polygon|polyhedron|"
+    r"union|difference|intersection|hull|minkowski|translate|rotate|scale|"
+    r"mirror|linear_extrude|rotate_extrude|offset)\s*\(", re.M)
 SLICE_TIMEOUT_S = 300
 
 
@@ -209,8 +225,15 @@ def parse_slicer_output(text: str, gcode: Path | None = None) -> dict:
 
 
 # --------------------------------------------------------------------- tools
-async def generate_part(description: str, name: str = "") -> dict:
-    """OpenSCAD source for a simple part, rendered to STL."""
+async def generate_part(description: str, name: str = "",
+                        retry_note: str = "") -> dict:
+    """OpenSCAD source for a simple part, rendered to STL.
+
+    `retry_note` is what was wrong with the last attempt, fed back into the
+    prompt. Asking the model the same question twice and hoping is not a retry.
+    A retry note also SKIPS the template, because a template is deterministic:
+    if it produced the wrong thing once it will produce it again.
+    """
     desc = (description or "").strip()
     if not desc:
         return {"error": "what should I make, sir?"}
@@ -225,17 +248,20 @@ async def generate_part(description: str, name: str = "") -> dict:
     # because the numbers come from his own sentence. `match` returns None for
     # anything it is not certain about, which is most requests.
     import parts_library
-    templated = parts_library.match(desc)
+    templated = None if retry_note else parts_library.match(desc)
     if templated:
         base = safe_name(name or desc)
         d = work_dir()
         scad, stl = d / f"{base}.scad", d / f"{base}.stl"
-        scad.write_text(templated, encoding="utf-8")
+        scad.write_text(templated.source, encoding="utf-8")
         rc, out, err = await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
         if rc == 0 and stl.exists():
             return {"scad": str(scad), "stl": str(stl), "from": "template",
                     "size_kb": round(stl.stat().st_size / 1024, 1),
-                    "source": templated}
+                    "source": templated.source,
+                    # The numbers WE chose, so they can be said out loud rather
+                    # than discovered at the printer.
+                    "chose": templated.defaults, "shape": templated.shape}
         # A template that will not build is a bug in the template, not in his
         # request — fall through to the model rather than refusing him.
         log.warning("template for %r did not build: %s", desc,
@@ -250,6 +276,12 @@ async def generate_part(description: str, name: str = "") -> dict:
         "Write OpenSCAD source for this part. Output ONLY code, no prose and no "
         "markdown fences. Use millimetres. Keep it simple and printable: no "
         "supports needed, nothing thinner than 1.2 mm, and a flat face on the bed. "
+        # Fed back from a verification that failed. TalkCAD's idea: check the
+        # result against the stated spec and say what was wrong rather than
+        # asking again in the same words and hoping.
+        + (f"A previous attempt was wrong: {retry_note}. Fix exactly that. "
+           if retry_note else "")
+        +
         # Start the file with $fn=48. OpenSCAD's default curve resolution gave a
         # 5 mm hole about a dozen segments, and the first hologram rendered on
         # 2026-09-02 showed them as visibly faceted — which is not a cosmetic
@@ -257,28 +289,105 @@ async def generate_part(description: str, name: str = "") -> dict:
         # print exactly the polygon it was given.
         "Begin the file with the line: $fn = 48; so holes and fillets are round "
         "rather than faceted. "
+        # THE THREE MISTAKES THIS MODEL ACTUALLY MAKES, measured by asking it for
+        # rounded and chamfered parts and building what came back. Each line here
+        # is a real build failure, not a precaution.
+        #
+        # 1. It writes OpenSCAD as if it were Python. "a bracket with a fillet"
+        #    came back as `arm1 = cube([40,4,4]); arm2 = translate(...) arm2;`
+        #    — geometry assigned to a variable, which is a parser error, and the
+        #    part never existed.
+        "OpenSCAD is declarative, not imperative: geometry is NOT a value. "
+        "`a = cube([10,10,10]);` is a syntax error. Build shapes in place inside "
+        "difference(), union(), hull() and modules. "
+        # 2. It reaches for libraries it has seen online. None are installed.
+        "There are NO libraries available: do not include or use BOSL2, "
+        "Round-Anything, MCAD or dotSCAD. Only built-in OpenSCAD. "
+        # 3. Its instinct for rounding is minkowski() with a sphere, which rounds
+        #    the BOTTOM too — so the part rocks on the bed, needs supports, and
+        #    grows by the radius in every direction. "a plate 40x30x5 with rounded
+        #    corners" came back 11 mm thick with a domed underside, and built
+        #    cleanly, which is the dangerous kind of wrong.
+        "For rounded vertical corners use minkowski() with a THIN CYLINDER, never "
+        "a sphere: minkowski() { cube([w-2*r, d-2*r, h]); cylinder(r=r, h=0.01); } "
+        "— a sphere rounds the bottom face as well and the part will not sit flat "
+        "on the bed. Remember minkowski grows the shape by r on every side, so "
+        "subtract 2*r from the cube first to keep the finished size correct. "
+        "For a chamfer, subtract a rotated cube with difference(), or hull() two "
+        "stacked shapes. "
         f"Part: {desc}")
-    try:
-        code = ""
-        async for ch in local_llm.stream([{"role": "user", "content": prompt}],
-                                         max_tokens=700,
-                                         sampling={"temperature": 0.2, "top_p": 0.9}):
-            code += ch.text
-            if ch.done:
-                break
-    except Exception as e:
-        return {"error": f"I couldn't write the model: {e}"}
-    code = re.sub(r"^```[a-zA-Z]*\n|```$", "", (code or "").strip(), flags=re.M).strip()
-    if not code:
-        return {"error": "the model returned no source"}
+    async def write_source(extra: str = "") -> tuple[str, str]:
+        """One call to the model. Returns (source, why_not)."""
+        try:
+            code = ""
+            # 2000, not 700. This is a REASONING model and max_tokens covers the
+            # thinking as well as the answer: at 700 the chamfer request spent
+            # every token on analysis and returned an empty string, which
+            # surfaced as "the model returned no source" — a message about the
+            # symptom that gave no hint of the cause. The same prompt finishes in
+            # about 560 tokens when it is allowed to think first.
+            async for ch in local_llm.stream(
+                    [{"role": "user", "content": prompt + extra}],
+                    max_tokens=2000,
+                    sampling={"temperature": 0.2, "top_p": 0.9}):
+                code += ch.text
+                if ch.done:
+                    break
+        except Exception as e:
+            return "", f"I couldn't write the model: {e}"
+        code = re.sub(r"^```[a-zA-Z]*\n|```$", "", (code or "").strip(),
+                      flags=re.M).strip()
+        if not code:
+            return "", "the model thought about it and never answered"
+        return code, ""
 
     base = safe_name(name or desc)
     d = work_dir()
     scad, stl = d / f"{base}.scad", d / f"{base}.stl"
-    scad.write_text(code, encoding="utf-8")
-    rc, out, err = await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
-    if rc != 0 or not stl.exists():
-        return {"error": f"OpenSCAD could not build that: {(err or out or '').strip()[:200]}",
+
+    # ONE RETRY ON A BUILD FAILURE, with OpenSCAD's own words fed back.
+    #
+    # This was previously terminal: source that did not compile ended the
+    # request, and he got "OpenSCAD could not build that: Parser error" for a
+    # bracket that was one line from working. The compiler has already said
+    # precisely what is wrong and where, so handing that back is the cheapest
+    # correction available — the same feedback loop `_verify_and_retry` uses for
+    # a part that builds but comes out the wrong size.
+    #
+    # NOT retried when we are already a retry: create3d calls back in here with a
+    # `retry_note`, and a retry of a retry is four model calls and a minute of
+    # his time for a request that is plainly not landing.
+    extra, last = "", ""
+    for attempt in range(1 if retry_note else 2):
+        code, why = await write_source(extra)
+        if not code:
+            return {"error": why}
+        scad.write_text(code, encoding="utf-8")
+        rc, out, err = await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
+        if rc == 0 and stl.exists():
+            break
+        last = (err or out or "").strip()
+        log.warning("OpenSCAD rejected attempt %d for %r: %s",
+                    attempt + 1, desc, last[:200])
+        # OpenSCAD's own message is often just "syntax error in file ..., line 6",
+        # which names a position and no cause — fed back verbatim it produced the
+        # SAME mistake one line lower on the retry. When we can see what the
+        # mistake actually is, say that instead: we know this language and the
+        # compiler is not going to explain it.
+        bad = _GEOMETRY_AS_VALUE.search(code)
+        if bad:
+            extra = (" Your previous source did not compile because it assigned "
+                     f"geometry to a variable: `{bad.group(0).strip()}...`. In "
+                     "OpenSCAD that is a syntax error — a shape is not a value "
+                     "and cannot be stored, passed or reassigned. Write the "
+                     "shapes directly inside union(), difference() and hull(), "
+                     "or wrap each one in its own module and CALL it. Variables "
+                     "may only hold numbers, strings and vectors.")
+        else:
+            extra = (" Your previous source did not compile. OpenSCAD said: "
+                     f"{last[:400]} . Write it again and fix exactly that.")
+    else:
+        return {"error": f"OpenSCAD could not build that: {last[:200]}",
                 "scad": str(scad)}
     return {"scad": str(scad), "stl": str(stl), "from": "model",
             "size_kb": round(stl.stat().st_size / 1024, 1), "source": code}

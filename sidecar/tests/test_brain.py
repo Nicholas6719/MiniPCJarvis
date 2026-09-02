@@ -190,6 +190,13 @@ CASES = [
     ("turn it upside down", "holo_move"),
     ("cut it in half", "holo_move"),
     ("show me the layers", "holo_move"),
+    # Scrubbing the toolpath. The number is the hazard: _CANON erases plain
+    # numbers before embedding, so "layer 50" must still route AND the slots
+    # must still see the 50 in the raw sentence.
+    ("show me layer 50", "holo_move"),
+    ("next layer", "holo_move"),
+    ("go back a layer", "holo_move"),
+    ("show me the top layer", "holo_move"),
     ("put it back the way it was", "holo_move"),
     ("pull it apart", "holo_move"),
     ("will it print", "holo_check"),

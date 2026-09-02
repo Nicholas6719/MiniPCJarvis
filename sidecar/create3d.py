@@ -509,6 +509,96 @@ async def from_text(description: str, name: str = "") -> dict:
             "note": TIER_NOTE[4], "reference_used": True, "repair_likely": True}
 
 
+def spoken_caveats(r: dict) -> str:
+    """What else he needs to hear about a finished part, in one sentence or none.
+
+    THREE THINGS, in order of how much they matter:
+
+      * it did not come out as asked — the loudest, and the one that used to be
+        silent;
+      * numbers WE chose rather than he did, because a default nobody mentioned
+        is a default he discovers at the printer;
+      * the mesh needs repairing.
+
+    One place, so the immediate answer and the background announcement cannot
+    tell him different things about the same part.
+    """
+    bits: list[str] = []
+    if r.get("spec_problems"):
+        bits.append("but " + "; ".join(r["spec_problems"][:2]))
+    elif r.get("retried"):
+        bits.append("it took a second attempt to get the dimensions right")
+    chose = r.get("chose") or {}
+    if chose:
+        bits.append("I chose " + " and ".join(str(v) for v in list(chose.values())[:2]))
+    if r.get("mesh_warning"):
+        bits.append(str(r["mesh_warning"]))
+    if not bits:
+        return ""
+    line = "; ".join(bits)
+    return line[:1].upper() + line[1:] + "."
+
+
+async def _measure(stl_path: str) -> list | None:
+    """The part's extents, or None if it will not read."""
+    try:
+        import meshio
+        info = await asyncio.to_thread(meshio.describe, str(stl_path))
+        return info["size_mm"]
+    except Exception:
+        log.debug("could not measure for verification", exc_info=True)
+        return None
+
+
+async def _verify_and_retry(r: dict, description: str, name: str) -> dict:
+    """Check the part against what he stated, and have one more go if it is wrong.
+
+    Borrowed from TalkCAD, which verifies generated CAD against the spec with a
+    tolerance rather than trusting it. The retry only applies to the MODEL — a
+    template is deterministic and would produce the identical wrong part again,
+    so a template that fails verification is a bug in the template and says so.
+    """
+    import partspec
+
+    if r.get("error") or not r.get("stl"):
+        return r
+    spec = partspec.extract(description)
+    if not spec:
+        return r                       # nothing stated, nothing to check
+
+    size = await _measure(r["stl"])
+    check = partspec.verify(spec, size, description)
+    r["spec_checked"] = check.get("checked") or []
+    if check.get("ok") is not False:
+        return r
+
+    if r.get("from") == "template":
+        log.warning("a TEMPLATE produced a part that fails its own spec: %s",
+                    check["problems"])
+        r["spec_problems"] = check["problems"]
+        return r
+
+    from tools.fabrication import generate_part
+    note = "; ".join(check["problems"])
+    log.info("regenerating: %s", note)
+    again = await generate_part(description, name, retry_note=note)
+    if again.get("error") or not again.get("stl"):
+        r["spec_problems"] = check["problems"]
+        r["retry_failed"] = True
+        return r
+
+    again = {**again, "tier": 1, "note": TIER_NOTE[1], "retried": True}
+    again.setdefault("name", name or "")
+    size2 = await _measure(again["stl"])
+    check2 = partspec.verify(spec, size2, description)
+    again["spec_checked"] = check2.get("checked") or []
+    if check2.get("ok") is False:
+        # Still wrong. He is told, rather than handed it quietly — the second
+        # attempt being no better is exactly the moment to stop pretending.
+        again["spec_problems"] = check2["problems"]
+    return again
+
+
 async def build(tier: int, description: str = "", image_path: str = "",
                 name: str = "") -> dict:
     """Run one tier and return its result, tier included.
@@ -528,6 +618,12 @@ async def build(tier: int, description: str = "", image_path: str = "",
         actual = 0 if r.get("from") == "template" else 1
         r = {**r, "tier": actual, "note": TIER_NOTE[actual]}
         r.setdefault("name", name or "")
+
+        # DOES IT MATCH WHAT HE ASKED FOR? Nothing checked this before, which is
+        # how "a hex spacer 12 mm tall" came back 0.4 mm wide and was announced
+        # as ready. One retry with the failure fed back — asking the same
+        # question twice and hoping is not a retry.
+        r = await _verify_and_retry(r, description, name)
     elif tier == 2:
         # Which KIND of tier 2: an extruded outline for a logo, a relief for a
         # photograph. Decided from his words, and reported either way.

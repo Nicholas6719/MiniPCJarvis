@@ -253,6 +253,45 @@ async def main() -> int:
                        ("show me pictures of a bracket as a hologram", "hologram")):
         check(f"{word!r} survives canonicalisation of {said!r}",
               word in _norm(said), _norm(said))
+    # ---- scrubbing the toolpath -----------------------------------------
+    # The layer slider is the one control every slicer has and we did not, and
+    # the failure it fixes is visible: a hundred layers drawn at once is a solid
+    # block. The parse must tell "the layers" (a switch) from "layer 50" (a
+    # position), because they arrive in the same sentence shape.
+    check("'show me the layers' is not a scrub", A.parse_layer("show me the layers") is None)
+    check("a numbered layer is a position", A.parse_layer("show me layer 50") == {"layer": 50},
+          str(A.parse_layer("show me layer 50")))
+    check("ordinals are read", A.parse_layer("show me the 20th layer") == {"layer": 20})
+    check("'next layer' steps up", A.parse_layer("next layer") == {"delta": 1})
+    check("'back a layer' steps down", A.parse_layer("go back a layer") == {"delta": -1})
+    check("'the top layer' is the whole print", A.parse_layer("the top layer") == {"layer": -1})
+    check("'the first layer' is the bed", A.parse_layer("show me the first layer") == {"layer": 0})
+    check("a sentence with no layer in it is not a scrub",
+          A.parse_layer("rotate it ninety degrees") is None)
+    # And the ACTION splits the same way, in the right order: "layer 50" must not
+    # merely switch the preview on again.
+    check("a numbered layer is the 'layer' action", A.parse_action("show me layer 50") == "layer")
+    check("'the layers' is still the 'layers' action",
+          A.parse_action("show me the layers") == "layers")
+    check("'back to the model' still wins over 'layer'",
+          A.parse_action("back to the model") == "solid")
+    # The slots carry the number down, because _CANON erases plain digits before
+    # embedding and only the RAW sentence still has the 50 in it.
+    import brain.skills as SK
+    check("the slots carry the layer number",
+          SK.slots_holo_move("show me layer 50") ==
+          {"action": "layer", "phrase": "show me layer 50", "layer": 50},
+          str(SK.slots_holo_move("show me layer 50")))
+    check("the slots carry the step",
+          (SK.slots_holo_move("next layer") or {}).get("delta") == 1)
+    # An unsliced part cannot be scrubbed, and says so rather than showing an
+    # empty ruler.
+    import tools.holo_tools as HT
+    HT._current.clear(); HT._current.update({"name": "definitely-not-sliced-xyz"})
+    r = await HT.holo_control(action="layer", layer=5)
+    check("scrubbing an unsliced part is refused", bool(r.get("error")), str(r))
+    HT._current.clear()
+
     # ...and the rewrites they were carved out of still work on everything else
     check("'open spotify' still canonicalises to open APP", _norm("open spotify") == "open APP")
     check("'hide everything' still does", _norm("hide everything") == "hide everything")

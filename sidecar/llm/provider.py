@@ -65,6 +65,19 @@ class LocalLLM:
 
         # Accumulate streamed tool-call fragments by index.
         pending_tools: dict[int, dict] = {}
+        # A REASONING MODEL SPENDS max_tokens ON THINKING FIRST. gpt-oss-20b
+        # streams its analysis in `reasoning_content` and its answer in
+        # `content`, and both come out of the SAME budget — so a max_tokens set
+        # for the size of the answer can be consumed entirely by the thinking and
+        # yield an empty string with no error anywhere.
+        #
+        # Measured, not theorised: "a 20 mm cube with a 2 mm chamfer" at
+        # max_tokens=700 returned finish_reason=length, 2,443 characters of
+        # reasoning and ZERO characters of content, and `generate_part` reported
+        # "the model returned no source" — which named the symptom and hid the
+        # cause. At 1,600 the same prompt finished in 561 tokens.
+        saw_content = False
+        reasoned = 0
         headers = {"Authorization": f"Bearer {llama.api_key}"} if llama.api_key else {}
         async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10),
                                      headers=headers) as c:
@@ -85,7 +98,10 @@ class LocalLLM:
                     choice = (obj.get("choices") or [{}])[0]
                     delta = choice.get("delta") or {}
                     finish = choice.get("finish_reason")
+                    if delta.get("reasoning_content"):
+                        reasoned += len(delta["reasoning_content"])
                     if delta.get("content"):
+                        saw_content = True
                         yield Chunk(text=delta["content"])
                     for tc in delta.get("tool_calls") or []:
                         idx = tc.get("index", 0)
@@ -100,6 +116,11 @@ class LocalLLM:
                         if fn.get("arguments"):
                             slot["arguments"] += fn["arguments"]
                     if finish:
+                        if finish == "length" and not saw_content and reasoned:
+                            log.warning(
+                                "the model thought past its budget: max_tokens=%d "
+                                "spent entirely on %d chars of reasoning, no answer. "
+                                "Raise max_tokens for this call.", max_tokens, reasoned)
                         calls = [
                             {"id": t["id"] or f"call_{i}", "name": t["name"],
                              "arguments": t["arguments"]}

@@ -112,11 +112,11 @@ async def main() -> int:
             ("a hex spacer 12 mm tall", ["h = 12", "$fn = 6"]),
             ("a plate 40 by 30 by 6 mm with a 5 mm hole",
              ["cube([40, 30, 6])", "d = 5"])):
-        src = PL.match(said)
-        check(f"{said!r} is written from a template", src is not None)
+        m = PL.match(said)
+        check(f"{said!r} is written from a template", m is not None)
+        src = m.source if m else ""
         for frag in want:
-            check(f"  ...containing {frag!r}", src is not None and frag in src,
-                  src)
+            check(f"  ...containing {frag!r}", frag in src, src)
 
     # DECLINES. Each of these has numbers in it, so a careless matcher would fire.
     # The last four are MORE THAN ONE of something, and every template here makes
@@ -143,14 +143,14 @@ async def main() -> int:
           and PL.match("a plate 40 by 30 by 6 mm with a 5 mm hole") is not None)
 
     check("every template sets the curve resolution",
-          all("$fn" in (PL.match(s) or "")
+          all("$fn" in (PL.match(s).source if PL.match(s) else "")
               for s in ("a 20 mm cube", "a hex spacer 12 mm tall",
                         "a sphere 25 mm diameter")),
           "OpenSCAD's default gives a 5 mm hole about a dozen segments, and a "
           "bolt does not fit a hexagon")
     # A hole cut exactly flush leaves coincident faces, which is a classic way to
     # hand a slicer a solid that renders fine and slices wrong.
-    src = PL.match("a plate 40 by 30 by 6 mm with a 5 mm hole")
+    src = PL.match("a plate 40 by 30 by 6 mm with a 5 mm hole").source
     check("a hole is cut proud of both faces", "6.2" in src and "-0.1" in src, src)
 
     check("a templated part is tier 0",
@@ -158,6 +158,107 @@ async def main() -> int:
     check("...and tier 0 never asks",
           est.SEED[0] <= est.ask_threshold(),
           "nobody wants to be asked permission to spend a fifth of a second")
+
+    # --------------------------------------- did he get what he asked for?
+    # Nothing checked this until 2026-09-02. "A hex spacer 12 mm tall" came back
+    # 0.4 mm wide, and because it WAS twelve millimetres tall it passed every
+    # test there was. Borrowed from TalkCAD: verify the result against the stated
+    # spec with a tolerance, and separate what he stated from what we chose.
+    import partspec
+
+    check("a stated cube is extracted",
+          partspec.extract("a 20 mm cube").get("cube_mm") == 20.0)
+    check("three dimensions are extracted",
+          partspec.extract("a plate 40 by 30 by 6 mm").get("dims_mm") == [40.0, 30.0, 6.0])
+    check("a height is extracted",
+          partspec.extract("a hex spacer 12 mm tall").get("height_mm") == 12.0)
+    check("a hole is recorded but never asserted",
+          "hole_mm_unchecked" in partspec.extract("a plate with a 5 mm hole"),
+          "a hole is invisible in the extents; claiming to have checked it "
+          "would be worse than not checking")
+
+    def v(said, size):
+        return partspec.verify(partspec.extract(said), size, said)
+
+    check("a correct cube passes", v("a 20 mm cube", [20, 20, 20])["ok"] is True)
+    check("a 14 mm cube fails", v("a 20 mm cube", [20, 20, 14])["ok"] is False)
+    check("...and says both numbers",
+          "20" in v("a 20 mm cube", [20, 20, 14])["problems"][0]
+          and "14" in v("a 20 mm cube", [20, 20, 14])["problems"][0])
+    check("a correct plate passes",
+          v("a plate 40 by 30 by 6 mm", [40, 30, 6])["ok"] is True)
+    check("a plate 3 mm thick instead of 6 fails",
+          v("a plate 40 by 30 by 6 mm", [40, 30, 3])["ok"] is False)
+    check("...but the same plate lying on a different axis passes",
+          v("a plate 40 by 30 by 6 mm", [30, 6, 40])["ok"] is True,
+          "that is an orientation he can turn, not a mistake")
+
+    # THE ONE THAT STARTED IT. Every stated dimension correct, and not a spacer.
+    real = v("a hex spacer 12 mm tall", [6, 5.2, 12])
+    sliver = v("a hex spacer 12 mm tall", [0.4, 2, 12])
+    check("a real hex spacer passes", real["ok"] is True, real)
+    check("the 0.4 mm sliver is caught", sliver["ok"] is False, sliver)
+    check("...on its proportions, since its height was right",
+          "proportions" in sliver["checked"], sliver["checked"])
+    check("a lithophane is not called a sliver for being thin",
+          v("a lithophane of my photo", [80, 60, 3.8])["ok"] is not False,
+          "the things that are meant to be thin are exempt, or the check gets "
+          "switched off")
+    check("saying nothing measurable is neither pass nor fail",
+          v("a bracket", [60, 40, 6])["ok"] is None)
+
+    # ...and the numbers WE chose are declared rather than buried in a comment.
+    m = PL.match("a hex spacer 12 mm tall")
+    check("a template reports the defaults it picked", bool(m.defaults), m.defaults)
+    check("...naming the M3 bore", any("M3" in str(v_) for v_ in m.defaults.values()),
+          m.defaults)
+    check("a fully specified part defaults nothing",
+          not PL.match("a 20 mm cube").defaults)
+    say = create3d.spoken_caveats({"chose": m.defaults})
+    check("...and they are said out loud", say.startswith("I chose"), say)
+    check("a wrong part leads with what is wrong, not with what we chose",
+          create3d.spoken_caveats(
+              {"spec_problems": ["it came out 3 mm thick"], "chose": m.defaults}
+          ).startswith("But"))
+    check("a part with nothing to report says nothing",
+          create3d.spoken_caveats({}) == "")
+
+    # ------------------------------------------- source that will not compile
+    # Measured on the real model, not imagined: asked for three parts with
+    # rounded or chamfered edges, only one built. The other two failed as
+    # OpenSCAD written like Python — `arm1 = cube([40,20,4]);` — which is a
+    # parser error, and OpenSCAD reports it as "syntax error, line 6" with no
+    # cause, so feeding its own message back produced the same mistake one line
+    # lower. Recognising the pattern here is what lets the retry say the lesson.
+    from tools.fabrication import _GEOMETRY_AS_VALUE as GAV
+    for src in ("arm1 = cube([40,20,4]);",
+                "arm2 = translate([0,20,0]) cube([20,20,4]);",
+                "base = union() { arm1; arm2; }",
+                "filleted = minkowski() { base; cylinder(r=2,h=0.01); }",
+                "    indented = sphere(3);"):
+        check(f"caught as geometry-in-a-variable: {src.strip()[:34]}",
+              bool(GAV.search(src)))
+    # ...and the assignments that are FINE stay fine. A lint that fires on
+    # `r = 2;` would rewrite every working part in the library.
+    for src in ("r = 2;", "w = 40 - 2*r;", "$fn = 48;", "size = [40,30,5];",
+                "name = \"bracket\";", "h = max(1.2, t);",
+                "module plate() { cube([10,10,2]); }"):
+        check(f"left alone: {src.strip()[:34]}", not GAV.search(src))
+
+    # The prompt has to carry the three corrections that produced 3-of-3 builds,
+    # because they are the difference between a part and an apology.
+    import inspect as _inspect
+    import tools.fabrication as _fab
+    body = _inspect.getsource(_fab.generate_part)
+    check("the prompt forbids the libraries that are not installed",
+          "BOSL2" in body and "Round-Anything" in body)
+    check("the prompt says geometry is not a value", "declarative" in body)
+    check("the prompt gives the flat-bottomed rounding idiom",
+          "THIN CYLINDER" in body and "never" in body)
+    # A REASONING model spends max_tokens on thinking first. At 700 the chamfer
+    # request returned 2,443 characters of reasoning and no code at all.
+    check("the source budget leaves room to think first",
+          "max_tokens=2000" in body, body[body.find("max_tokens"):][:40])
 
     # ----------------------------------------------------------- the tiers
     for desc, img, want in (("a bracket 40 mm wide", "", 1),

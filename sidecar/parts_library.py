@@ -21,6 +21,25 @@ for ("a bracket shaped like a swan") is left alone.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Match:
+    """A template that fired, and the numbers WE chose rather than he did.
+
+    The defaults matter as much as the source. A spacer with no stated width gets
+    a 6 mm body and a 3.2 mm M3 bore; that was written in a source comment he
+    will never read, and a number nobody told him about is a number he discovers
+    at the printer. Borrowed from TalkCAD, which separates explicit specs from
+    the ones the agent picked.
+    """
+    source: str
+    shape: str = ""
+    defaults: dict = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        return bool(self.source)
 
 # OpenSCAD's default curve resolution gives a 5 mm hole about a dozen segments,
 # and a bolt does not fit a hexagon. Same value the model is told to use.
@@ -77,16 +96,16 @@ def _centred_hole(d: float, h: float) -> str:
 
 
 # --------------------------------------------------------------- recognizers
-def _cube(t: str) -> str | None:
+def _cube(t: str) -> Match | None:
     m = re.search(rf"{_NUM}{_MM}\s*(?:cube|box|block)\b", t) or \
         re.search(rf"\b(?:cube|box|block)\s*(?:of\s*)?{_NUM}{_MM}\s*(?:on (?:a|each|every) side)?", t)
     if m and len(_dims(t)) <= 1:
         s = _n(m)
-        return f"{HEADER}cube([{s:g}, {s:g}, {s:g}]);\n"
+        return Match(f"{HEADER}cube([{s:g}, {s:g}, {s:g}]);\n", "cube")
     return None
 
 
-def _boxy(t: str) -> str | None:
+def _boxy(t: str) -> Match | None:
     """"a plate 40 by 30 by 6 mm", optionally with a hole through it."""
     if not re.search(r"\b(?:plate|box|block|slab|bar|panel|base|pad)\b", t):
         return None
@@ -96,15 +115,16 @@ def _boxy(t: str) -> str | None:
     x, y, z = _n(m, 1), _n(m, 2), _n(m, 3)
     hole = _hole(t)
     if hole is None:
-        return f"{HEADER}cube([{x:g}, {y:g}, {z:g}]);\n"
-    return (f"{HEADER}difference() {{\n"
-            f"  cube([{x:g}, {y:g}, {z:g}]);\n"
-            f"  translate([{x / 2:g}, {y / 2:g}, 0])\n"
-            f"{_centred_hole(hole, z)}"
-            f"}}\n")
+        return Match(f"{HEADER}cube([{x:g}, {y:g}, {z:g}]);\n", "plate")
+    return Match(f"{HEADER}difference() {{\n"
+                 f"  cube([{x:g}, {y:g}, {z:g}]);\n"
+                 f"  translate([{x / 2:g}, {y / 2:g}, 0])\n"
+                 f"{_centred_hole(hole, z)}"
+                 f"}}\n", "plate",
+                 {"the hole": "centred, since you didn't say where"})
 
 
-def _cylinder(t: str) -> str | None:
+def _cylinder(t: str) -> Match | None:
     if not re.search(r"\b(?:cylinder|rod|disc|disk|puck|peg|dowel|post)\b", t):
         return None
     dia = _named(t, "diameter", "wide", "across", "thick") or None
@@ -117,21 +137,22 @@ def _cylinder(t: str) -> str | None:
     hole = _hole(t)
     body = f"cylinder(d = {dia:g}, h = {hi:g}, $fn = {_sides(t)});\n"
     if hole is None:
-        return HEADER + body
-    return (f"{HEADER}difference() {{\n  {body}{_centred_hole(hole, hi)}}}\n")
+        return Match(HEADER + body, "cylinder")
+    return Match(f"{HEADER}difference() {{\n  {body}{_centred_hole(hole, hi)}}}\n",
+                 "cylinder")
 
 
-def _sphere(t: str) -> str | None:
+def _sphere(t: str) -> Match | None:
     if not re.search(r"\b(?:sphere|ball|orb)\b", t):
         return None
     dia = _named(t, "diameter", "wide", "across")
     nums = _dims(t)
     if dia is None and len(nums) == 1:
         dia = nums[0]
-    return f"{HEADER}sphere(d = {dia:g});\n" if dia else None
+    return Match(f"{HEADER}sphere(d = {dia:g});\n", "sphere") if dia else None
 
 
-def _spacer(t: str) -> str | None:
+def _spacer(t: str) -> Match | None:
     """A spacer or standoff: a post with a bore through it."""
     if not re.search(r"\b(?:spacer|standoff|stand-off|bushing|bush|sleeve|collar)\b", t):
         return None
@@ -145,21 +166,26 @@ def _spacer(t: str) -> str | None:
         hi = _n(m) if m else None
     if hi is None:
         return None
+    chosen: dict = {}
     if outer is None:
         # A spacer with no stated width is a standard one; 6 mm across is the
-        # common M3 size and is stated in the source so it is never a mystery.
+        # common M3 size. DECLARED rather than buried in a source comment he
+        # will never read — a number nobody told him about is a number he
+        # discovers at the printer.
         outer = 6.0
+        chosen["body"] = "6 millimetres across, the usual M3 size"
     if bore is None:
-        bore = 3.2                      # clearance for an M3 screw
-    return (f"{HEADER}// spacer: {outer:g} mm across, {hi:g} mm tall, "
-            f"{bore:g} mm bore\n"
-            f"difference() {{\n"
-            f"  cylinder(d = {outer:g}, h = {hi:g}, $fn = {_sides(t)});\n"
-            f"{_centred_hole(bore, hi)}"
-            f"}}\n")
+        bore = 3.2
+        chosen["bore"] = "3.2 millimetres, clearance for an M3 screw"
+    return Match(f"{HEADER}// spacer: {outer:g} mm across, {hi:g} mm tall, "
+                 f"{bore:g} mm bore\n"
+                 f"difference() {{\n"
+                 f"  cylinder(d = {outer:g}, h = {hi:g}, $fn = {_sides(t)});\n"
+                 f"{_centred_hole(bore, hi)}"
+                 f"}}\n", "spacer", chosen)
 
 
-def _washer(t: str) -> str | None:
+def _washer(t: str) -> Match | None:
     if not re.search(r"\b(?:washer|ring|annulus|gasket)\b", t):
         return None
     outer = _named(t, "outer", "od", "outside")
@@ -172,15 +198,17 @@ def _washer(t: str) -> str | None:
         thick = nums[2]
     if outer is None or inner is None:
         return None
+    chosen: dict = {}
     if thick is None:
         thick = 2.0
-    return (f"{HEADER}difference() {{\n"
-            f"  cylinder(d = {outer:g}, h = {thick:g});\n"
-            f"{_centred_hole(inner, thick)}"
-            f"}}\n")
+        chosen["thickness"] = "2 millimetres, since you didn't say"
+    return Match(f"{HEADER}difference() {{\n"
+                 f"  cylinder(d = {outer:g}, h = {thick:g});\n"
+                 f"{_centred_hole(inner, thick)}"
+                 f"}}\n", "washer", chosen)
 
 
-def _tube(t: str) -> str | None:
+def _tube(t: str) -> Match | None:
     if not re.search(r"\b(?:tube|pipe|hollow cylinder)\b", t):
         return None
     outer = _named(t, "outer", "od", "outside", "diameter", "wide")
@@ -191,10 +219,10 @@ def _tube(t: str) -> str | None:
         outer, inner, hi = nums[0], nums[1], nums[2]
     if outer is None or inner is None or hi is None:
         return None
-    return (f"{HEADER}difference() {{\n"
-            f"  cylinder(d = {outer:g}, h = {hi:g});\n"
-            f"{_centred_hole(inner, hi)}"
-            f"}}\n")
+    return Match(f"{HEADER}difference() {{\n"
+                 f"  cylinder(d = {outer:g}, h = {hi:g});\n"
+                 f"{_centred_hole(inner, hi)}"
+                 f"}}\n", "tube")
 
 
 # Order matters: the more specific shape wins. A "spacer" is a cylinder, and a
@@ -231,8 +259,8 @@ _MULTIPLE = re.compile(
     r"|\band\s+(?:a|an|the|another)\b", re.I)
 
 
-def match(description: str) -> str | None:
-    """OpenSCAD for a part we can write exactly, or None to ask the model.
+def match(description: str) -> Match | None:
+    """A Match we can write exactly, or None to ask the model.
 
     None is the safe answer and the common one. This exists to make the easy
     third of requests instant, not to replace the model.
