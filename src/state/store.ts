@@ -17,6 +17,7 @@ export type StageKind =
   | "file"       // the file, open, matches lit
   | "folder"     // a folder listing (no designed surface; kept minimal)
   | "camera"     // the live webcam view: "toggle camera view mode"
+  | "holo"       // a 3D model, projected — only ever on an explicit request
   | "settings";  // settings rail incl. History
 
 export type SettingsSection =
@@ -36,6 +37,7 @@ interface StageSnapshot {
   stage: StageState;
   web: WebState | null;
   images: ImagesState | null;
+  holo: HoloState | null;
   files: FilesState | null;
   filePreview: FilePreview | null;
 }
@@ -84,6 +86,16 @@ export interface WebState {
   ts: number;
 }
 
+// A model on the holographic stage. The geometry itself never travels through
+// here — HoloStage fetches it from /holo/geometry, because a few hundred
+// kilobytes of float list has no business in a zustand store that re-renders.
+export interface HoloState {
+  name: string;
+  triangles: number;
+  size_mm: number[];
+  ts: number;
+}
+
 export interface ImagesState {
   query: string;
   images: { src: string; alt: string; w: number; h: number; page?: string }[];
@@ -126,6 +138,7 @@ interface Store {
   stage: StageState | null;
   web: WebState | null;
   images: ImagesState | null;
+  holo: HoloState | null;
   files: FilesState | null;
   filePreview: FilePreview | null;
   turn: TurnState | null;
@@ -202,6 +215,7 @@ export const useStore = create<Store>((set, get) => ({
   stage: null,
   web: null,
   images: null,
+  holo: null,
   files: null,
   filePreview: null,
   turn: null,
@@ -236,7 +250,7 @@ export const useStore = create<Store>((set, get) => ({
       if (st.stage && worthKeeping) {
         lastSnapshot = {
           stage: { ...st.stage, pinned: false, pinUntil: undefined },
-          web: st.web, images: st.images, files: st.files, filePreview: st.filePreview,
+          web: st.web, images: st.images, holo: st.holo, files: st.files, filePreview: st.filePreview,
         };
       }
       return { stage: null };
@@ -307,7 +321,7 @@ export const useStore = create<Store>((set, get) => ({
           if (outgoing && !outgoing.pinned && outgoing.kind !== "prose") {
             lastSnapshot = {
               stage: { ...outgoing, pinned: false, pinUntil: undefined },
-              web: st.web, images: st.images, files: st.files, filePreview: st.filePreview,
+              web: st.web, images: st.images, holo: st.holo, files: st.files, filePreview: st.filePreview,
             };
           }
           return {
@@ -522,6 +536,21 @@ export const useStore = create<Store>((set, get) => ({
           stage: { kind: "images" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
+        break;
+      // The hologram opens and closes its own stage, the way the camera does —
+      // the panel appearing IS the feature. It is PINNED because a model he is
+      // working on must not evaporate on the panel-hold timer mid-sentence.
+      case "hologram":
+        if (evt.action === "hide") {
+          set((st) => (st.stage?.kind === "holo" ? { stage: null, holo: null } : { holo: null }));
+        } else {
+          set((st) => ({
+            holo: { name: evt.name, triangles: evt.triangles, size_mm: evt.size_mm, ts: evt.ts },
+            stage: { kind: "holo" as StageKind, openedTs: Date.now(), holdUntil: 0,
+                     pinned: true, pinUntil: st.stage?.pinUntil },
+          }));
+          push({ id: evt.id, ts: evt.ts, kind: "web", summary: `hologram: ${evt.name}` });
+        }
         break;
       case "reflex":
         set((st) => ({

@@ -125,10 +125,16 @@ export default function App() {
   // thinking and speaking used to flip the frame radial, which faded the live
   // feed out mid-conversation. A confirmation gate or a fault still takes the
   // whole room - those are the moments nothing may compete with.
+  // A hologram holds the frame for exactly the reason the camera does: it is a
+  // thing he is WORKING ON, not an answer that has finished being useful. Left
+  // out of this list the stage opened correctly and was then never drawn, because
+  // every RADIAL state — sleeping, listening, waiting — outranks a stage. The
+  // event arrived, the store updated, and nothing appeared.
   const cameraHeld = stage?.kind === "camera";
+  const holoHeld = stage?.kind === "holo";
   const geometry: "radial" | "anchor" =
     gateOpen || faultOpen ? "radial"
-    : cameraHeld ? "anchor"
+    : cameraHeld || holoHeld ? "anchor"
     : RADIAL.has(state) ? "radial"
     : stage ? "anchor"
     : state === "idle" ? "radial"

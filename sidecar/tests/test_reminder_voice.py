@@ -58,6 +58,27 @@ def main() -> int:
     check("a phrasing that lost the subject is rejected",
           "retainer" in out.lower(), out)
 
+    # --- HIS words, spoken by SOMEONE ELSE -----------------------------------
+    # He got "Time to wear MY retainers, sir." at 6:17 on 2026-09-02, which
+    # sounds like JARVIS owns a set of retainers. He writes a reminder in the
+    # first person because he is talking about himself; when the sentence
+    # changes speaker the pronouns have to turn round. This is the FALLBACK
+    # path — the model was still starting — so it is gated on the fallback.
+    with_model("", boom=True)
+    for said, must_have, must_not in [
+        ("wear my retainers", "your retainers", " my "),
+        ("take my medication", "your medication", " my "),
+        ("call my mother", "your mother", " my "),
+        ("send myself the invoice", "yourself", "myself"),
+        ("check on our order", "your order", " our "),
+    ]:
+        out = say(said)
+        check(f"{said!r} is said back as {must_have!r}",
+              must_have in out.lower() and must_not not in f" {out.lower()} ", out)
+
+    check("...and a reminder with no pronoun is untouched",
+          "bins" in say("take the bins out").lower())
+
     # --- the model misbehaving in the usual ways -----------------------------
     for label, reply in (
             ("empty", ""),

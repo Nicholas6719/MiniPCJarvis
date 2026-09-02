@@ -88,6 +88,21 @@ def _as_errand(text: str) -> str:
     t = re.sub(r"^(?:to|please|remember to|remind me to|don'?t forget to)\s+", "", t, flags=re.I)
     if not t:
         return ""
+    # HIS words, spoken by SOMEONE ELSE. He sets a reminder as "wear my
+    # retainers" — first person, because he is talking about himself — and the
+    # fallback template turned that into "Time to wear MY retainers, sir",
+    # which sounds like JARVIS owns a set of retainers. Reported 2026-09-02.
+    # The pronouns have to turn round when the sentence changes speaker. This
+    # also cleans the text handed to the model, so the LLM path stops being
+    # tempted to echo the first person back.
+    for pat, rep in (
+        (r"\bmy\b", "your"), (r"\bmine\b", "yours"),
+        (r"\bmyself\b", "yourself"), (r"\bme\b", "you"),
+        (r"\bi'?m\b", "you're"), (r"\bi'?ve\b", "you've"),
+        (r"\bi\b", "you"), (r"\bour\b", "your"), (r"\bours\b", "yours"),
+        (r"\bwe\b", "you"),
+    ):
+        t = re.sub(pat, rep, t, flags=re.I)
     # A bare noun ("retainers") needs a verb in front of it, or the fallback
     # sentences read as "time to retainers".
     if len(t.split()) == 1:

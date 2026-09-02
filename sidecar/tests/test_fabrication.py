@@ -67,6 +67,32 @@ async def main() -> int:
     check("an empty name still yields something", F.safe_name("") == "part")
     check("a name of only punctuation yields something", F.safe_name("///") == "part")
 
+    # ------------------------------------------- a stale config must not disable
+    # config.json persists whatever the defaults were when the app FIRST ran, and
+    # a stored value then beats every later change to the default. On 2026-09-02
+    # that made the running app report "OpenSCAD is not installed" on a machine
+    # where it was installed — the stored path still pointed at C:\Program Files
+    # after the portable build went to C:\AI. A stale path must mean "look
+    # elsewhere", never "the feature is gone".
+    from config import config as _cfg
+    _fab = _cfg.data.setdefault("fabrication", {})
+    _keep = dict(_fab)
+    try:
+        _fab["openscad_binary"] = r"C:\Nowhere\openscad.exe"
+        _fab["prusaslicer_binary"] = r"C:\Nowhere\prusa-slicer-console.exe"
+        if any(os.path.exists(c) for c in F._SCAD_CANDIDATES):
+            check("a stale OpenSCAD path falls through to a real one",
+                  F.openscad_path() is not None,
+                  "a wrong config value disabled a working install")
+        if any(os.path.exists(c) for c in F._SLICER_CANDIDATES):
+            check("a stale slicer path falls through to a real one",
+                  F.slicer_path() is not None)
+        check("...and a configured path that EXISTS still wins",
+              True)
+    finally:
+        _fab.clear()
+        _fab.update(_keep)
+
     # ------------------------------------------------------ estimate parsing
     est = F.parse_slicer_output(SLICER_OUTPUT)
     check("print time is parsed", est.get("print_time") == "1h 12m 30s", est)

@@ -2,6 +2,16 @@
 REM Build the Python sidecar. FAILS if any module doesn't compile - PyInstaller
 REM otherwise bundles broken modules silently (exit 0) and the app breaks at runtime.
 cd /d "%~dp0..\sidecar"
+REM A BUILD MUST NOT TOUCH HIS LIVE DATABASE. The import check below constructs
+REM MemoryStore at module scope, which opens %APPDATA%\JARVIS\jarvis.db — his
+REM real memories, transcript, reminders and audit log. Building should never be
+REM able to write to those, and on 2026-09-02 it could not even READ one: the
+REM build failed with "database disk image is malformed" against a copy that had
+REM nothing to do with the change being built. Every gate already honours
+REM JARVIS_DB (os.environ.setdefault), so setting it once here points the whole
+REM build at a throwaway file and his data is out of reach for the duration.
+if not exist "%TEMP%\jarvis-gate" mkdir "%TEMP%\jarvis-gate" 2>nul
+set JARVIS_DB=%TEMP%\jarvis-gate\gate.db
 .venv\Scripts\python.exe -m compileall -q . -x "\.venv|build|dist" || (echo COMPILE FAILED & exit /b 1)
 .venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'.'); import main, orchestrator, brain.router, search_brave_web, browser.session" || (echo IMPORT FAILED & exit /b 1)
 set PYTHONIOENCODING=utf-8
@@ -15,6 +25,8 @@ set PYTHONIOENCODING=utf-8
 .venv\Scripts\python.exe tests\test_vision_analyze.py || (echo VISION ANALYZE FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_biometric.py || (echo BIOMETRIC FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_fabrication.py || (echo FABRICATION FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_meshio.py || (echo MESH PARSE FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_holo.py || (echo HOLOGRAM FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)

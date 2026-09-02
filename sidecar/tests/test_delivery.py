@@ -72,6 +72,14 @@ def setup(present: bool, state=State.IDLE, telegram=True):
 
 def main() -> int:
     real_present, real_avail = dv.is_present, dv.telegram_available
+    real_quiet = dv._in_quiet_hours
+    # PIN THE CLOCK. Without this the suite passes by day and fails at night:
+    # the hourly ceiling drops from twelve to three inside quiet hours, so five
+    # of these cases ran out of budget and reported "nothing delivered" — which
+    # looks exactly like a routing bug and is not one. Found at 06:05 on
+    # 2026-09-02, having passed every run before that. test_delivery_budget.py
+    # already pins it this way; this file never did.
+    dv._in_quiet_hours = lambda: False
     try:
         # --- he is at the machine -------------------------------------------
         orch, tg = setup(present=True)
@@ -135,6 +143,7 @@ def main() -> int:
         check("a locked machine means he is not there", dv.is_present() is False)
     finally:
         dv.is_present, dv.telegram_available = real_present, real_avail
+        dv._in_quiet_hours = real_quiet
         sys.modules.pop("remote_telegram", None)
 
     # --- what he is told unprompted is part of the conversation --------------

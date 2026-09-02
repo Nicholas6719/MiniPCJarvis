@@ -7,6 +7,7 @@ import { api, sidecarInfo } from "../lib/sidecar";
 import { SettingsView } from "./SettingsView";
 import { MemoryView } from "./MemoryView";
 import { TasksView } from "./TasksView";
+import { HoloStage } from "./HoloStage";
 
 // ---------------------------------------------------------------- shared chrome
 
@@ -710,6 +711,7 @@ export function Stage() {
     case "file": return <FileStage />;
     case "folder": return <FolderStage />;
     case "camera": return <CameraStage />;
+    case "holo": return <HoloStage />;
     case "settings": return <SettingsStage />;
     default: return null;
   }

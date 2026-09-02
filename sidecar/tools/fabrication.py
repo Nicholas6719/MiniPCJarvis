@@ -74,19 +74,50 @@ def work_dir() -> Path:
     return p
 
 
+# Where these actually live, in the order worth trying. A CONFIGURED path always
+# wins — but only if it exists.
+#
+# It has to work that way because config.json persists whatever the defaults were
+# on the day the app first ran, and a stored value then beats every later change
+# to the default in this file. That caught three separate things on 2026-09-02:
+# his quiet hours stayed at 08:00 after being set to 05:30, and both of these
+# binaries stayed at C:\Program Files after being installed to C:\AI — so
+# "OpenSCAD is not installed" was reported on a machine where it plainly was.
+# A stale path in config must degrade to "look elsewhere", never to "unavailable".
+_SCAD_CANDIDATES = (
+    r"C:\AI\OpenSCAD\openscad.exe",
+    r"C:\Program Files\OpenSCAD\openscad.exe",
+    r"C:\Program Files (x86)\OpenSCAD\openscad.exe",
+)
+_SLICER_CANDIDATES = (
+    r"C:\AI\PrusaSlicer\prusa-slicer-console.exe",
+    r"C:\AI\PrusaSlicer\prusa-slicer.exe",
+    r"C:\Program Files\Prusa3D\PrusaSlicer\prusa-slicer-console.exe",
+)
+
+
+def _first_existing(configured: str, candidates: tuple, *which: str) -> str | None:
+    if configured and os.path.exists(configured):
+        return configured
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    for w in which:
+        found = shutil.which(w)
+        if found:
+            return found
+    return None
+
+
 def openscad_path() -> str | None:
-    p = config.get("fabrication", "openscad_binary", default="")
-    if p and os.path.exists(p):
-        return p
-    return shutil.which("openscad")
+    return _first_existing(config.get("fabrication", "openscad_binary", default=""),
+                           _SCAD_CANDIDATES, "openscad")
 
 
 def slicer_path() -> str | None:
-    p = config.get("fabrication", "prusaslicer_binary", default="")
-    if p and os.path.exists(p):
-        return p
-    return (shutil.which("prusa-slicer-console") or shutil.which("prusa-slicer")
-            or shutil.which("PrusaSlicer"))
+    return _first_existing(config.get("fabrication", "prusaslicer_binary", default=""),
+                           _SLICER_CANDIDATES,
+                           "prusa-slicer-console", "prusa-slicer", "PrusaSlicer")
 
 
 def safe_name(name: str, fallback: str = "part") -> str:
@@ -177,6 +208,13 @@ async def generate_part(description: str, name: str = "") -> dict:
         "Write OpenSCAD source for this part. Output ONLY code, no prose and no "
         "markdown fences. Use millimetres. Keep it simple and printable: no "
         "supports needed, nothing thinner than 1.2 mm, and a flat face on the bed. "
+        # Start the file with $fn=48. OpenSCAD's default curve resolution gave a
+        # 5 mm hole about a dozen segments, and the first hologram rendered on
+        # 2026-09-02 showed them as visibly faceted — which is not a cosmetic
+        # problem: a bolt does not fit a hexagon, and the slicer will happily
+        # print exactly the polygon it was given.
+        "Begin the file with the line: $fn = 48; so holes and fillets are round "
+        "rather than faceted. "
         f"Part: {desc}")
     try:
         code = ""

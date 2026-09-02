@@ -59,8 +59,9 @@ async def lifespan(app: FastAPI):
     # The Evolution (2026-09-01). Registered as stubs in Phase 0 on purpose: the
     # wiring is proved by the gated build BEFORE any of them has behaviour, so an
     # integration mistake surfaces on its own rather than buried under a feature.
-    from tools import (biometric, fabrication, health, location, projects,
-                       vision_analyze)
+    from tools import (biometric, fabrication, health, holo_tools, location,
+                       projects, vision_analyze)
+    holo_tools.register_all()     # the holographic stage
     projects.register_all()       # phase 1
     location.register_all()       # phase 2 — rides the existing Telegram poller
     health.register_all()         # phase 2 — same poller, same allowed-chat check
@@ -992,6 +993,27 @@ async def transcript(limit: int = 30, x_jarvis_token: str | None = Header(None))
     _auth(x_jarvis_token)
     # the History pane asks for 200; cap so a bad param can't drag the whole DB out
     return {"transcript": memory.recent_transcript(max(1, min(500, limit)))}
+
+
+@app.get("/holo/geometry")
+async def holo_geometry(x_jarvis_token: str | None = Header(None)):
+    """The mesh currently on the stage, as flat float lists.
+
+    A separate endpoint rather than a tool result on purpose: this is a few
+    hundred kilobytes of geometry, and a tool result travels into the model's
+    context. It also serves only what `show_hologram` has already opened, so the
+    HUD cannot use it to read an arbitrary file off disk.
+    """
+    _auth(x_jarvis_token)
+    from tools.holo_tools import current
+    cur = current()
+    if not cur.get("path"):
+        return {"error": "nothing is on the stage"}
+    import meshio
+    try:
+        return meshio.to_payload(cur["path"])
+    except meshio.BadMesh as e:
+        return {"error": str(e)}
 
 
 @app.get("/camera/status")

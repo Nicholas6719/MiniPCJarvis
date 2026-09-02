@@ -770,3 +770,30 @@ body.compact .wedge { padding: calc(12px * var(--s)) calc(18px * var(--s)) calc(
 .camera__off {
   opacity: .55; letter-spacing: .08em; text-transform: uppercase;
 }
+
+/* The hologram (§ hologram plan, phase A). The canvas fills the stage and is
+   sized by a ResizeObserver rather than by CSS percentages — WebGL needs real
+   pixels, and a drawing buffer that disagrees with its element is how you get a
+   blurry or clipped scene. No background of its own: the frame's own atmosphere
+   shows through, which is what makes it read as projected rather than displayed. */
+.holo {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+}
+.holo__head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: calc(12px * var(--s));
+  padding-bottom: calc(8px * var(--s));
+  border-bottom: 1px solid color-mix(in srgb, var(--rim) 16%, transparent);
+}
+.holo__name {
+  color: var(--rim); letter-spacing: .14em; text-transform: uppercase;
+}
+.holo__dims {
+  color: var(--text-dim); letter-spacing: .06em;
+  font-variant-numeric: tabular-nums;
+}
+.holo__canvas {
+  flex: 1; min-height: 0; position: relative;
+  margin-top: calc(10px * var(--s));
+}
+.holo__canvas canvas { width: 100%; height: 100%; display: block; }

@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 
 class Scheduler:
+    # How late a RECURRING reminder may be and still be worth saying. An hour is
+    # generous for "wear your retainers at nine"; nine hours, which is what he
+    # actually got, is not a reminder, it is an apology.
+    STALE_AFTER_S = 3600.0
+
     def __init__(self) -> None:
         self.db = memory.db  # same connection (thread-safe usage is serialized here)
         self.db.executescript(_SCHEMA)
@@ -89,6 +94,8 @@ class Scheduler:
                 for tid, due_ts, text, recurrence in rows:
                     if self._suppressed(tid, due_ts, now):
                         continue
+                    if self._too_late(tid, due_ts, now, recurrence):
+                        continue
                     await self._fire(tid, due_ts, text, recurrence)
             except asyncio.CancelledError:
                 raise
@@ -116,6 +123,34 @@ class Scheduler:
         if until > now:
             return True                     # its schedule could not be written
         return False
+
+    def _too_late(self, tid: int, due_ts: float, now: float, recurrence: str) -> bool:
+        """A RECURRING reminder whose moment has long passed is not worth saying.
+
+        On 2026-09-02 he was told "time to wear your retainers" at 6:17 in the
+        morning. The reminder was due at nine the previous night; its advance had
+        failed, and both guards above are in MEMORY, so the restart that came
+        with a deploy cleared them and the scheduler said it nine hours late.
+        The write-lock fix stopped the flood; nothing stopped the staleness.
+
+        Recurring tasks are skipped silently and moved to their next occurrence —
+        the moment is gone, and it comes round again tonight anyway. One-off
+        reminders are NOT skipped however late they are: he asked once, nobody
+        told him, and quietly dropping it would be worse than telling him late.
+        """
+        late = now - due_ts
+        if late <= self.STALE_AFTER_S:
+            return False
+        if (recurrence or "none") == "none":
+            return False                      # a one-off still gets said
+        if self._advance(tid, due_ts, recurrence):
+            log.info("skipped a stale recurring reminder (%d): %.1f h late, "
+                     "moved to its next occurrence", tid, late / 3600.0)
+            return True
+        # The advance did not stick, so the write lock is held again. Saying it
+        # now would be the 2,600-message night starting over; stay quiet and let
+        # the existing block do its work.
+        return True
 
     def _advance(self, tid: int, due_ts: float, recurrence: str) -> bool:
         """Move the task on BEFORE it is announced. False if that did not stick.

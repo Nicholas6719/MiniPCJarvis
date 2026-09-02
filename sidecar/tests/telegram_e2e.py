@@ -84,6 +84,33 @@ async def main() -> int:
         print("  SKIPPED - this sends real messages to his phone.\n"
               "  Set JARVIS_TELEGRAM_E2E=1 to run it.\n\nTELEGRAM E2E: SKIPPED")
         return 0
+
+    # NEVER AT NIGHT, whatever the env var says.
+    #
+    # On 2026-09-01 a scheduled task I created and failed to delete fired at
+    # 23:59 and ran the whole suite. This file duly sent a stock quote, a button
+    # prompt, a test voice clip and a weather answer to his phone at 12:09 AM.
+    # His words: "I know for a fact we weren't running any tests at midnight."
+    #
+    # The orphaned task was the fault and it is gone. This is the guard that
+    # makes the class of mistake harmless: an opt-in flag can be set by a script,
+    # inherited by a scheduler, or left behind in an environment — none of which
+    # is consent to wake him. The clock is not so easily fooled. Anything that
+    # can put a notification on his phone refuses to do it inside the hours he
+    # set aside for sleeping, exactly as delivery.py already refuses.
+    try:
+        import sys as _s
+        _s.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from proactive import proactive
+        if proactive.in_quiet_hours():
+            print("  SKIPPED - it is inside his quiet hours, and this test messages\n"
+                  "  his phone. Run it during the day.\n\nTELEGRAM E2E: SKIPPED")
+            return 0
+    except Exception as e:
+        # Cannot tell what time it is for him? Then do not risk it.
+        print(f"  SKIPPED - could not confirm this is a reasonable hour ({e}).\n"
+              "\nTELEGRAM E2E: SKIPPED")
+        return 0
     ev: list = []
 
     async def listen():

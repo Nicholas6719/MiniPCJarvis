@@ -55,7 +55,12 @@ def main() -> int:
         said.append(t)
 
     s = fresh(announce)
-    yesterday_9pm = time.time() - 3600            # due, and in the past
+    # Ten minutes late, not an hour. This case is about firing ONCE, and the
+    # lateness is incidental — but an hour sits exactly on the staleness
+    # threshold added on 2026-09-02, so the original -3600 made this test decide
+    # a coin flip on microseconds. A fixture on a boundary tests the boundary,
+    # not the thing it claims to.
+    yesterday_9pm = time.time() - 600             # due, and in the past
     tid = s.add("wear my retainers", yesterday_9pm, "daily")
 
     async def tick(sched, n=6):
@@ -67,6 +72,10 @@ def main() -> int:
                 "WHERE status='pending' AND due_ts <= ?", (now,)).fetchall()
             for r in rows:
                 if sched._suppressed(r[0], r[1], now):
+                    continue
+                # Mirrors the real loop exactly. If this helper drifts from
+                # _loop() the gate stops describing the thing it guards.
+                if sched._too_late(r[0], r[1], now, r[3]):
                     continue
                 await sched._fire(r[0], r[1], r[2], r[3])
 
@@ -92,7 +101,7 @@ def main() -> int:
     # update that would move it on. The old code announced on every tick.
     said.clear()
     s3 = fresh(announce)
-    s3.add("wear my retainers", time.time() - 3600, "daily")
+    s3.add("wear my retainers", time.time() - 600, "daily")   # under the staleness bar
 
     real_db = s3.db
 
@@ -132,10 +141,47 @@ def main() -> int:
         raise RuntimeError("telegram is down")
 
     s4 = fresh(refuses)
-    s4.add("wear my retainers", time.time() - 3600, "daily")
+    s4.add("wear my retainers", time.time() - 600, "daily")   # under the staleness bar
     asyncio.run(tick(s4, n=20))
     check("a failing announce is attempted once, not per tick",
           len(tried) == 1, f"{len(tried)} attempts")
+
+    # ---- and a reminder whose moment has long passed -----------------------
+    # He was told "time to wear your retainers" at 6:17 in the MORNING on
+    # 2026-09-02. It had been due at nine the night before; its advance had
+    # failed, and both existing guards live in memory, so the restart that came
+    # with a deploy cleared them and the scheduler said it nine hours late.
+    # A reminder that late is not a reminder.
+    late = []
+
+    async def note_late(t, **kw):
+        late.append(t)
+
+    s5 = fresh(note_late)
+    nine_hours = time.time() - 9 * 3600
+    tid5 = s5.add("wear my retainers", nine_hours, "daily")
+    asyncio.run(tick(s5, n=4))
+    check("a recurring reminder nine hours late is NOT announced", not late, late)
+    row = s5.db.execute("SELECT due_ts, status FROM tasks WHERE id=?", (tid5,)).fetchone()
+    check("...it is moved to its next occurrence instead",
+          row and row[0] > time.time(), row)
+    check("...and stays pending, so tonight still happens",
+          row and row[1] == "pending", row)
+
+    # A ONE-OFF is different: he asked once, nobody told him, and dropping it
+    # silently would be worse than telling him late.
+    late.clear()
+    s6 = fresh(note_late)
+    s6.add("collect the parcel", time.time() - 9 * 3600, "none")
+    asyncio.run(tick(s6, n=4))
+    check("a ONE-OFF reminder is still delivered however late", len(late) == 1, late)
+
+    # And an on-time one is untouched by the new guard.
+    late.clear()
+    s7 = fresh(note_late)
+    s7.add("wear my retainers", time.time() - 60, "daily")
+    asyncio.run(tick(s7, n=4))
+    check("a reminder a minute late is still announced", len(late) == 1, late)
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
