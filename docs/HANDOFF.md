@@ -1526,10 +1526,16 @@ morning to run the phase B live check — was still registered and would have ru
 a generate-and-slice against his live app at 23:59 while he slept.
 `JARVIS_SOUND`, written the same way on 2026-08-29, had already fired at exactly
 that time. Same shape as the orphaned `JARVIS_SUITES_FULL` that sent him Telegram
-messages at midnight. Both deleted, and `.agent\scripts\runonce.ps1` now does
-create-run-wait-delete with the delete in a `finally`, so a one-off check cannot
-outlive itself. **Rule: never leave a schtasks entry registered after the thing
-it ran has finished.** Only `JARVIS_SELFTEST` remains, and that one is meant to.
+messages at midnight. Both deleted — and then made structural, because a rule written in this file is
+not a guard and this one had already been written here before the third escape.
+`scripts/runonce.ps1` (tracked, not under the gitignored `.agent\`) does
+create-run-wait-delete with the delete in a `finally`, and
+`sidecar/tests/check_stray_tasks.py` is now the FIRST gate of every sidecar
+build: it refuses to build while any task pointing into `.agent\` or named
+`JARVIS_RUNONCE_*` is still registered, and prints the exact `schtasks /Delete`
+line for each. Proven by planting one and watching the gate go red — a check
+that has never failed says nothing. His own tasks are left alone;
+`JARVIS_SELFTEST` is allowlisted by name and is the only permanent one.
 
 **Two environment facts worth not rediscovering:** node is a portable install at
 `C:\Users\nicho\Tools\node`, on nobody's PATH — not the agent shell's, not the

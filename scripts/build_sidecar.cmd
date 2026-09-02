@@ -15,6 +15,10 @@ set JARVIS_DB=%TEMP%\jarvis-gate\gate.db
 .venv\Scripts\python.exe -m compileall -q . -x "\.venv|build|dist" || (echo COMPILE FAILED & exit /b 1)
 .venv\Scripts\python.exe -c "import sys; sys.path.insert(0,'.'); import main, orchestrator, brain.router, search_brave_web, browser.session" || (echo IMPORT FAILED & exit /b 1)
 set PYTHONIOENCODING=utf-8
+REM Before anything else: no scheduled task of mine may still be armed. Three of
+REM those have escaped now, and one of them woke him at midnight. The build is the
+REM last thing that runs before a deploy, so it is where this gets caught.
+.venv\Scripts\python.exe tests\check_stray_tasks.py || (echo STRAY SCHEDULED TASK & exit /b 1)
 .venv\Scripts\python.exe tests\check_names.py || (echo NAME CHECK FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\seed_collisions.py || (echo SEED CLASH FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_canon_erasure.py || (echo CANON ERASURE FAILED & exit /b 1)
