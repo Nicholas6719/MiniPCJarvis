@@ -312,6 +312,18 @@ class Orchestrator:
                 log.info("idle %.0f min - minimising and going to sleep", mins)
                 from tools.windows_tools import enter_sleep_mode
                 await asyncio.to_thread(enter_sleep_mode)
+                # TAKE THE STAGE DOWN ON THE WAY OUT. A hologram deliberately
+                # HOLDS the frame while he is working — it is a thing he is
+                # working on, not an answer that has stopped being useful — but
+                # sleep is the resting state, and a part left projected through
+                # it is just stuck. He watched one sit there for half an hour.
+                # The file is still on disk: "show me the bracket" brings it back.
+                try:
+                    from tools.holo_tools import current, hide_hologram
+                    if current():
+                        await hide_hologram()
+                except Exception:
+                    log.debug("could not take the stage down for sleep", exc_info=True)
                 self._armed_until = 0.0
                 await bus.emit("conversation", armed=False)
                 await bus.emit("sleep", reason="idle", after_minutes=mins)
@@ -618,6 +630,20 @@ class Orchestrator:
         finally:
             if self.sm.state == State.SPEAKING:
                 await self.sm.to(State.IDLE, force=True)
+            # IT JUST SPOKE TO HIM, SO IT SHOULD BE READY FOR THE ANSWER.
+            #
+            # This is a REPLY-SHAPED moment even though he did not start it: a
+            # render finishing, a reminder, an alert. Without arming, JARVIS says
+            # "the plate is ready, sir", he says "thank you" and then "rotate it",
+            # and nothing happens — because the follow-up window is only opened
+            # at the end of a turn HE began.
+            #
+            # He hit exactly that: a part finished, he spoke twice, got no reply,
+            # and reasonably concluded it had stopped listening. It had not; it
+            # was waiting to be named again after speaking to him unprompted,
+            # which is not how being spoken to works.
+            self._arm_conversation()
+            self._last_active = time.time()   # ...and he is plainly still here
 
     # ---------- wake word ----------
 

@@ -2288,6 +2288,50 @@ Verified on the deployed build with the window shut in between: turn one says
 "pictures of iron man", nine seconds of silence, then "show me three more images"
 answers "Here are some pictures of iron man."
 
+## 2026-09-02 — the render worked and then he could not talk to it
+
+Three things he found in one sitting, and the middle one was the serious one.
+
+**THE LAYOUT WAS THE CAMERA'S, NOT THE HOLOGRAM'S.** The plan asked for a full
+frame: *"the core shrinks to the corner and visibly projects the model"*, with
+`App.tsx` listed for "full-frame geometry, shrunken projecting core". What
+shipped was the side-panel geometry the camera uses — core at 380 px, vertically
+centred, at 0.85 scale, stage starting at 760 px — so the model got half a
+screen. Now, for holograms ONLY, the core drops to the bottom-left corner at
+0.44 and the stage spans the frame. Every other anchored stage keeps the layout
+he approved for the camera.
+
+`.column` had to go with it. It is the divider between a left-hand core and a
+right-hand panel — "the core casting light on the stage" — pinned at 722 px for
+that two-column geometry. With the core in the corner it stood in the middle of
+the bed like a post through the part.
+
+**HE SPOKE TO IT AND IT DID NOT ANSWER.** The part was made, JARVIS said so, and
+then "thank you" and "rotate it" got nothing; he hovered the core, saw "Toggle
+listening", and concluded it had stopped listening. The log is unambiguous:
+wake word at 18:22:29, the plate at 18:22:35, "Go for it" at 18:22:40, and then
+NOTHING until it slept at 18:25:01.
+
+`announce()` — the path a finished render, a reminder or an alert speaks through
+— never called `_arm_conversation()`. That window is only armed at the end of a
+turn HE started. So JARVIS spoke to him unprompted and then required its own name
+again before it would hear the reply. **Being spoken to and then having to
+reintroduce yourself is not how being spoken to works.** It now arms the window
+and refreshes `_last_active`, so it also cannot drift toward sleep in the middle
+of a conversation it began.
+
+His inference was right even though his evidence was not: "Toggle listening" is a
+static button label, not a status. Worth remembering — the HUD has no honest
+indicator of whether the wake word is currently listening.
+
+**AND SLEEP LEFT THE STAGE UP.** A hologram deliberately HOLDS the frame while he
+works — it is a thing he is working on, not an answer that has stopped being
+useful — but nothing took it down on the way into sleep, so a finished part sat
+projected in front of him for half an hour. Sleep now hides it; the file is still
+on disk and "show me the bracket" brings it back. Asked whether it should also
+time out while AWAKE, he said leave it: a part is not an answer, and snatching
+one away mid-thought is worse than a stale panel.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

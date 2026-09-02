@@ -184,7 +184,7 @@ export default function App() {
 
   return (
     <div
-      className={`frame frame--${geometry}`}
+      className={`frame frame--${geometry}${holoHeld ? " frame--holo" : ""}`}
       style={{
         // @ts-ignore custom properties drive the whole room (§11)
         "--rim": rim, "--air": air, "--chr": chr,
@@ -219,8 +219,17 @@ export default function App() {
         onClick={micClick}
         title="Toggle listening (Ctrl+Shift+J)"
         style={{
-          left: anchored ? `calc(380px * var(--s))` : "50%",
-          transform: `translate(-50%, -50%) scale(${coreScale})`,
+          // THE HOLOGRAM GETS THE ROOM. The plan's words: full frame, not a side
+          // panel — "the core shrinks to the corner and visibly projects the
+          // model". Every other anchored stage keeps the side-panel layout he
+          // approved for the camera, so this is a holo-only move: down to the
+          // bottom-left corner, out of the way, still projecting.
+          left: holoHeld ? `calc(190px * var(--s))`
+            : anchored ? `calc(380px * var(--s))` : "50%",
+          top: holoHeld ? undefined : "50%",
+          bottom: holoHeld ? `calc(96px * var(--s))` : undefined,
+          transform: `translate(-50%, ${holoHeld ? "50%" : "-50%"}) `
+            + `scale(${holoHeld ? 0.44 : coreScale})`,
         }}
       >
         <ArcReactor state={gateOpen && state !== "waiting" ? "waiting" : state} size={380 * s} charge={charge} />

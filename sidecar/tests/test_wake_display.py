@@ -166,6 +166,27 @@ def main() -> int:
     check("while a wake at the machine still does come to the front",
           touched == ["surfaced"], touched)
 
+    # --- being spoken to opens a window to answer in ------------------------
+    # He asked for a plate, it was made, JARVIS said so — and then he said
+    # "thank you" and "rotate it" and got nothing, because the follow-up window
+    # is only armed at the end of a turn HE started. A render finishing, a
+    # reminder, an alert: those are all JARVIS talking to HIM, and being spoken
+    # to and then having to say the name again is not how being spoken to works.
+    # He reasonably concluded it had stopped listening.
+    ann = inspect.getsource(orch_mod.Orchestrator.announce)
+    check("speaking unprompted arms the follow-up window",
+          "_arm_conversation" in ann, "he must be able to just answer")
+    check("...and counts him as present, so it does not sleep mid-conversation",
+          "_last_active" in ann)
+
+    # --- and sleep clears the stage ----------------------------------------
+    # A hologram deliberately HOLDS the frame while he is working, but sleep is
+    # the resting state; he watched a finished part sit projected for half an
+    # hour with no way to talk to it.
+    check("going to sleep takes the hologram down",
+          "hide_hologram" in inspect.getsource(orch_mod),
+          "a part left projected through sleep is just stuck")
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

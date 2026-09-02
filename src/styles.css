@@ -852,3 +852,22 @@ body.compact .holo__hands { display: block; }
   transition: bottom .18s ease-out;
 }
 body.compact .holo__layers { display: block; }
+
+/* ---------------------------------------------------------- the hologram room
+   The plan asked for a full frame rather than a side panel: the core shrinks
+   into the corner and the model gets almost the whole screen. Every other
+   anchored stage keeps the side-panel geometry he approved for the camera, so
+   this overrides only while a hologram is up. */
+.frame--holo .stage {
+  left: calc(96px * var(--s));
+  right: calc(96px * var(--s));
+  top: calc(104px * var(--s));
+  bottom: calc(84px * var(--s));
+}
+.frame--holo .coreslot { top: auto; }
+/* No column divider in here. `.column` is the line between a left-hand core and
+   a right-hand panel — "the core casting light on the stage" — and it is pinned
+   at 722px for that two-column geometry. With the core down in the corner and
+   the model across the whole frame there are no columns to divide, and it was
+   left standing in the middle of the bed like a post through the part. */
+.frame--holo .column { opacity: 0; }
