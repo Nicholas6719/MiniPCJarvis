@@ -6,16 +6,28 @@
     1     the model writes OpenSCAD        ~27 s    yes, by voice   yes, exactly
     2     an image traced and extruded     ~1 s     thickness/scale yes, sharp
     2     a photo as a relief (lithophane) ~0.1 s   thickness/scale yes, watertight
-    3     a photo to a mesh (TripoSR)      minutes  no              a likeness
-    4     text to a mesh (Shap-E)          minutes  no              rarely, unrepaired
+    3     a photo to a mesh (TripoSR)      ~19 s    no              a likeness
+    4     text -> reference picture -> 3    ~35 s    no              a likeness
 
-WHY TIERS 3 AND 4 ARE NOT THE DEFAULT FOR A PICTURE. Measured on this machine on
-2026-09-02: torch-directml does drive the Radeon 780M, and it is 1.3x the Ryzen
-7 8845HS on a 2048-square matmul — an integrated GPU sharing system RAM against
-eight Zen 4 cores. It is also the GPU llama-server is already holding 9.6 GB of.
-So there is no acceleration to be had here, tiers 3 and 4 would be minutes of CPU
-either way, and a picture defaults to the relief, which takes a tenth of a second
-and is the thing people actually print from photographs.
+WHAT THE RADEON 780M IS ACTUALLY WORTH, because the first answer here was wrong
+and it changed a decision. A 2048-square matmul under `torch-directml` came back
+1.3x the Ryzen 7 8845HS, and that was written down as "no acceleration to be
+had". A matmul is a bad proxy: it is memory-bound, it flatters eight Zen 4 cores
+with AVX-512, and `torch-directml` is not the best DirectML implementation
+available. Re-measured on 2026-09-02 against the ONNX models this project
+ALREADY ships, through ONNX Runtime's DirectML provider:
+
+    yolox   1x3x640x640   CPU  65.3 ms    780M  17.3 ms    3.76x
+    sface   1x3x112x112   CPU   7.9 ms    780M   4.7 ms    1.67x
+
+So the iGPU is worth roughly 4x on a real convolutional workload, and the
+smaller the tensor the less it wins — which is the shape of every GPU, and the
+reason the first measurement misled.
+
+A PICTURE STILL DEFAULTS TO THE RELIEF regardless, because that takes a tenth of
+a second and is the thing people actually print from photographs. Tier 3 is for
+when he asks for a real reconstruction.
+
 
 EVERY RESULT SAYS WHICH TIER MADE IT, because what he can do next depends
 entirely on that. A tier-1 part can be edited by voice — "make the hole bigger"
@@ -34,6 +46,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -59,7 +72,8 @@ TIER_NOTE = {
     1: "written as OpenSCAD, so it's exact and you can change it by voice",
     2: "traced from the picture and extruded, so the outline is sharp",
     3: "a mesh built from the photo — a likeness rather than a measured part",
-    4: "generated from the description — expect it to be rough",
+    4: "built from a reference picture I found, so it's a likeness of that "
+       "picture rather than a measured part",
 }
 
 # Words that say he wants a FLAT emblem out of a picture rather than a 3D
@@ -347,15 +361,17 @@ def model3d_python() -> str | None:
 
 
 def available() -> dict:
-    """Which of the heavy tiers can actually run right now."""
+    """Which of the heavy tiers can actually run right now.
+
+    Tier 4 needs exactly what tier 3 needs, because it IS tier 3 with a
+    reference picture in front of it. Whether the image search can reach the web
+    is checked when it runs rather than here — a browser that is installed but
+    offline is a different failure and deserves a different sentence.
+    """
     py = model3d_python()
     d = model3d_dir()
-    return {
-        "python": py,
-        "dir": str(d),
-        3: bool(py and (d / "photo_to_mesh.py").exists()),
-        4: bool(py and (d / "text_to_mesh.py").exists()),
-    }
+    has3 = bool(py and (d / "photo_to_mesh.py").exists())
+    return {"python": py, "dir": str(d), 3: has3, 4: has3}
 
 
 def _missing(tier: int) -> dict:
@@ -365,7 +381,7 @@ def _missing(tier: int) -> dict:
     something he asked for as a photo scan would look like success and be wrong,
     and he would only find out when the shape was not the thing in the photo.
     """
-    what = "photo-to-mesh" if tier == 3 else "text-to-mesh"
+    what = "photo-to-mesh" if tier == 3 else "the model that builds from a picture"
     return {"error": f"I don't have the {what} model installed, sir — "
                      f"it lives outside the app, in {model3d_dir()}",
             "unavailable": True, "tier": tier}
@@ -409,21 +425,75 @@ async def from_photo(image_path: str, name: str = "") -> dict:
             "repair_likely": True}
 
 
-async def from_text(description: str, name: str = "") -> dict:
-    """TIER 4: text to a mesh. The slow one, and the roughest."""
+async def reference_image(description: str) -> str:
+    """A picture of the thing he described, saved to the work folder.
+
+    TIER 4 IS TEXT -> PICTURE -> MESH, not a text-to-3D model, and that is a
+    deliberate choice rather than a shortcut. Direct text-to-3D (Shap-E and its
+    kin) is another 1.3 GB, minutes of CPU here, and produces the blobs the
+    plan itself called "rarely printable". Finding a reference photograph and
+    reconstructing THAT reuses the image search JARVIS already has and the
+    tier-3 model already installed, and the result is markedly better.
+
+    It is also the honest version only if it SAYS so, which TIER_NOTE[4] does:
+    what comes back is a mesh of a picture of a dragon, not a dragon.
+    """
+    from search_brave_web import brave_web
     from tools.fabrication import safe_name, work_dir
+
+    if not brave_web.available:
+        return ""
+    try:
+        imgs = await brave_web.images(description, 4)
+    except Exception:
+        log.debug("reference image search failed", exc_info=True)
+        return ""
+
+    import httpx
+    d = work_dir()
+    for i, img in enumerate(imgs or []):
+        src = (img or {}).get("src") or ""
+        if not src.startswith(("http://", "https://")):
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
+                resp = await c.get(src)
+            if resp.status_code != 200 or len(resp.content) < 2048:
+                continue
+            ext = ".png" if resp.content[:4] == b"\x89PNG" else ".jpg"
+            p = d / f"{safe_name(description)}-ref{ext}"
+            p.write_bytes(resp.content)
+            return str(p)
+        except Exception:
+            log.debug("reference image %d would not download", i, exc_info=True)
+    return ""
+
+
+async def from_text(description: str, name: str = "") -> dict:
+    """TIER 4: a description to a mesh, by way of a reference picture."""
+    from tools.fabrication import safe_name
     if not available()[4]:
         return _missing(4)
     desc = (description or "").strip()
     if not desc:
         return {"error": "what should I make, sir?", "tier": 4}
-    base = safe_name(name or desc)
-    stl = work_dir() / f"{base}.stl"
-    r = await _run_model3d("text_to_mesh.py", [desc, str(stl)], 1800)
+
+    ref = await reference_image(desc)
+    if not ref:
+        return {"error": "I couldn't find a picture to build that from, sir",
+                "tier": 4}
+    r = await from_photo(ref, name or desc)
+    # Tidy the reference away: it was scaffolding, and his work folder is for
+    # parts. Only after the mesh is made, so a failure leaves it to look at.
+    try:
+        if not r.get("error"):
+            os.remove(ref)
+    except OSError:
+        pass
     if r.get("error"):
-        return {**r, "tier": 4}
-    return {"tier": 4, "name": base, "stl": str(stl), "note": TIER_NOTE[4],
-            "repair_likely": True}
+        return {**r, "tier": 4, "reference": ref}
+    return {**r, "tier": 4, "name": safe_name(name or desc),
+            "note": TIER_NOTE[4], "reference_used": True, "repair_likely": True}
 
 
 async def build(tier: int, description: str = "", image_path: str = "",

@@ -1697,13 +1697,16 @@ the stage without being asked.
 He asked for it to be fast and performant. The measurement said the bottleneck
 was not where the plan assumed.
 
-**THE GPU IS NOT THE ANSWER HERE, and this is measured rather than guessed.**
-`torch-directml` installs cleanly and does drive the Radeon 780M — but on a
-2048-square matmul it is **1.3x** the Ryzen 7 8845HS, because the 780M is an
-integrated GPU sharing system RAM against eight Zen 4 cores. It is also the GPU
-llama-server is already holding 9.6 GB of, so using it would contend with the
-thing that has to stay responsive. 1.3 GB of environment for 1.3x that fights
-the LLM: removed. **Nobody should repeat this experiment.**
+**THE GPU CLAIM HERE WAS WRONG AND IS CORRECTED BELOW** (see the 2026-09-02
+tiers 3 and 4 entry). `torch-directml` on a 2048-square matmul came back **1.3x**
+the Ryzen 7 8845HS, and I wrote that down as "no acceleration to be had". A
+matmul is a bad proxy — memory-bound, flattering to eight Zen 4 cores with
+AVX-512, and `torch-directml` is not the best DirectML implementation available.
+Re-measured against the ONNX models this project already ships, through ONNX
+Runtime's DirectML provider, the 780M is **3.76x** on YOLOX at 640×640. The
+conclusion that followed from the bad number — that the fast paths below were
+the only option — happened to be right for a different reason, but the number
+itself should not be trusted or repeated.
 
 **The real bottleneck was llama-server writing OpenSCAD.** Tier 1 measured 27.5 s,
 of which OpenSCAD is about 0.2. So most requests no longer go near the model:
@@ -1810,16 +1813,94 @@ First measurement: **+49% of a core** over the camera alone. Decoding frames at
 half size (`IMREAD_REDUCED_COLOR_2` — a quarter of the pixels, and landmarks are
 normalised so nothing downstream changes) took that to +43%, which showed the
 decode was never the cost: the landmarker is, at ~30 ms a frame. So the rate is
-the lever, and 14 fps became 10. **Final: +13% of a core**, about 3.7x cheaper
-than where it started, with 100 ms of latency — fine for the coarse path, and
-the precise path is a sentence. The live gate asserts under 30% so it will catch
-a regression rather than sit where the old number happened to land.
+the lever, and 14 fps became 10. **Final: about +30% of a core** — which is
+arithmetic, not luck: 10 detections a second at ~30 ms each. Repeated runs read
++13% and +32%, because the camera's own CPU swings with what the HUD is doing and
+the delta is therefore noisy; **the +13% first reported was the lucky sample, not
+the truth.** The live gate asserts under 45%: above the true value with real
+headroom, still below the ~49% that full-size decoding at 14 fps cost, which is
+the regression worth catching. 100 ms of latency, fine for the coarse path when
+the precise path is a sentence.
 
 **A sixth canon erasure**, found by the seed-collision gate:
 `stop watching my hands` folded onto `stop watching METRIC` — the system-monitor
 rule — so turning the gesture tracker off collided head-on with cancelling a CPU
 alert, and the word `hands` was erased before anything could act on it. Excluded
 now, with cases both ways in `test_brain.py`.
+
+## 2026-09-02 — tiers 3 and 4 are real, and the GPU number was wrong
+
+He asked for tiers 3 and 4 to be made possible. They are, and getting there
+overturned the measurement the previous entry rested on.
+
+**THE 780M IS WORTH ~4x, NOT 1.3x. I was wrong, and the bad number was mine.**
+The 1.3x came from a `torch-directml` 2048-square matmul — memory-bound work that
+flatters eight Zen 4 cores with AVX-512, run through what turns out to be the
+weaker of the two DirectML implementations. Re-measured against the ONNX models
+this project already ships, through ONNX Runtime's DirectML provider:
+
+```
+yolox  1x3x640x640   CPU 65.3 ms   780M 17.3 ms   3.76x
+sface  1x3x112x112   CPU  7.9 ms   780M  4.7 ms   1.67x
+```
+
+A real convnet gets nearly 4x; the smaller the tensor the less it wins. The
+lesson is not about DirectML, it is about benchmarks: **a microbenchmark that
+does not resemble the workload is not evidence.**
+
+**Tier 3 is TripoSR (MIT), running here, measured.** 18.8 s inside the worker,
+**32.8 s end to end through the sidecar** — the difference is starting the
+subprocess and importing torch. Watertight, sliceable, and scaled into real
+millimetres, because TripoSR works in a normalised space and an unscaled mesh
+measures about two millimetres across, which the sliver check would rightly
+reject.
+
+**Background removal was 20 of the first 36 seconds, and was almost entirely a
+bad default.** rembg 2.x defaults to `bria-rmbg`, a far heavier transformer:
+
+```
+bria-rmbg   CPU 11.16 s/image   780M 5.51 s     (the default)
+u2net       CPU  0.28 s/image   780M 0.06 s     (what TripoSR was built around)
+```
+
+Forty times the cost for one silhouette. Asking for `u2net` explicitly, and
+passing `DmlExecutionProvider` explicitly — rembg's own provider selection checks
+CUDA, ROCm and OpenVINO and then falls through to CPU, so it would never touch
+the iGPU here — took a warm run from **36.6 s to 18.8 s**.
+
+**Tier 4 is tier 3 with a reference picture in front of it, deliberately.**
+Direct text-to-3D (Shap-E) is another 1.3 GB, minutes of CPU, and produces the
+blobs the plan itself called "rarely printable". Finding a picture and
+reconstructing that reuses the image search JARVIS already has and the model
+already installed. It is honest only because it says so, and `TIER_NOTE[4]` does:
+what comes back is a mesh of a picture of a duck.
+
+**Marching cubes without a compiler.** TripoSR imports `torchmcubes`, a CUDA/C++
+extension. `model3d/_mcubes_shim.py` registers a scikit-image implementation
+under that name before `tsr` is imported.
+
+**It is reproducible.** The worker and its shim live in the repo under
+`model3d/`, and `scripts\install_model3d.ps1` rebuilds `C:\AI\model3d` from a
+clone — venv, CPU torch, deps, the TripoSR checkout, the worker, and the weights
+pulled up front so his first request is not a minute of downloading. The first
+version of this existed only on this machine, which is the same mistake as the
+camera stack's undeclared dependencies.
+
+**Two false matches in the template library, found by probing rather than by a
+test.** "A plate with 4 mounting holes 60 by 60 by 5 mm" came back as a plate
+with ONE centred hole, and "a cube 20 mm and a plate 30 by 30 by 2 mm" came back
+as just the cube — confident, exact, and not what he asked for, which is the one
+failure that library must not have. And the first fix broke what it protected: a
+rule counting `\d+` read "a 25 mm sphere" as a count and declined it. A digit
+before a unit is a dimension; the real signals are plural nouns, counting words,
+and "and a".
+
+**Two stale assertions the new capability exposed**, both now testing the better
+behaviour: `test_holo` asserted that naming an unknown part is an error, which
+became an offer to make one; and `test_render` asserted tiers 3 and 4 refuse,
+which they no longer do. The refusal path is now forced by pointing
+`model3d_dir` at nowhere, so it is exercised deliberately rather than depending
+on what happens to be installed.
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en

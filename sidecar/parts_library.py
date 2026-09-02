@@ -210,6 +210,26 @@ _TOO_RICH = re.compile(
     r"rounded|curve[sd]?|slot|groove|rib|fin|text|letter|logo|shaped like|"
     r"looks like|similar to|organic|dragon|figure|statue)\b", re.I)
 
+# MORE THAN ONE OF SOMETHING. Every template here makes exactly one body with at
+# most one hole through the middle, so a request for several is a request it
+# cannot honour — and honouring it wrongly is the failure that matters, because
+# what comes back is confident, exact and not what he asked for.
+#
+# Both of these were real false matches, found by throwing realistic phrasings at
+# it rather than by a test written from the code:
+#   "a plate with 4 mounting holes 60 by 60 by 5 mm"  -> one centred hole
+#   "a cube 20 mm and a plate 30 by 30 by 2 mm"       -> just the cube
+# A DIGIT IS A DIMENSION, NOT A COUNT — which the first version of this got
+# wrong and thereby declined "a 25 mm sphere" and "a plate ... with a 5 mm hole",
+# because `\d+ \w+ <noun>` happily matches "25 mm sphere". The real signals are a
+# PLURAL noun, a counting WORD, and a conjunction joining two parts.
+_MULTIPLE = re.compile(
+    r"\b(?:holes|cubes|plates|spacers|washers|tubes|cylinders|spheres|discs|"
+    r"disks|rods|bores)\b"
+    r"|\b(?:two|three|four|five|six|seven|eight|nine|ten|several|multiple|"
+    r"a couple of|a few)\b"
+    r"|\band\s+(?:a|an|the|another)\b", re.I)
+
 
 def match(description: str) -> str | None:
     """OpenSCAD for a part we can write exactly, or None to ask the model.
@@ -218,7 +238,7 @@ def match(description: str) -> str | None:
     third of requests instant, not to replace the model.
     """
     t = (description or "").strip().lower()
-    if not t or _TOO_RICH.search(t):
+    if not t or _TOO_RICH.search(t) or _MULTIPLE.search(t):
         return None
     for fn in _RECOGNIZERS:
         try:

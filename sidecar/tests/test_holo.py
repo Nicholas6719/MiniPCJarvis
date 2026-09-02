@@ -97,10 +97,26 @@ async def main() -> int:
         for label, kwargs in [
             ("a path that does not exist", {"path": os.path.join(d, "nope.stl")}),
             ("a file that is not an STL", {"path": notmesh}),
-            ("a name nothing matches", {"name": "no-such-part"}),
         ]:
             out = await H.show_hologram(**kwargs)
             check(f"{label} is a sentence", isinstance(out.get("error"), str) and out["error"], out)
+
+        # A NAME nothing matches is different from a PATH that does not exist,
+        # and stopped being a plain error in phase D. "I don't have a model to
+        # project" is true and useless when he has just named a thing; the
+        # obvious next move is to offer to make one, with the estimate attached.
+        # It is still a sentence when there is no technique that could make it.
+        out = await H.show_hologram(name="no-such-part")
+        asked = out.get("_ask")
+        check("a name nothing matches offers to make it, or says so",
+              bool(asked) or isinstance(out.get("error"), str), out)
+        if asked:
+            check("...saying how long it would take",
+                  "second" in asked["question"] or "minute" in asked["question"],
+                  asked["question"])
+            check("...and asking rather than starting",
+                  asked["question"].rstrip().endswith("?"), asked["question"])
+            check("...and nothing was made yet", not out.get("on_stage"), out)
 
         broken = os.path.join(str(work), "gatetest-broken.stl")
         with open(broken, "wb") as fh:

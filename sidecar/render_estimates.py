@@ -37,8 +37,13 @@ log = logging.getLogger("jarvis.render.estimates")
 #   1  the model writes OpenSCAD and OpenSCAD renders it — two seconds of
 #      generation on a warm llama-server, plus a render
 #   2  an image traced to a contour and extruded: OpenCV and OpenSCAD, no model
-#   3  a photo to a mesh (TripoSR), on the 780M
-#   4  text to a mesh (Shap-E), which is the slow one and is honest about it
+#   3  a photo to a mesh (TripoSR). MEASURED: 18.8 s inside the worker — 3.8 s to
+#      load, 2.3 s to cut the background out on the 780M, 9.4 s of reconstruction
+#      and 3.3 s of marching cubes — and 32.8 s end to end THROUGH THE SIDECAR,
+#      because starting the subprocess and importing torch is most of the
+#      difference. The seed is the end-to-end number, since that is the one he
+#      waits for.
+#   4  the same, with a web image search and a download in front of it
 #
 # TIER 1 WAS SEEDED AT 8 s AND MEASURED AT 28. I had reasoned that OpenSCAD is
 # fast and set the seed under the ask threshold so it would never interrupt him;
@@ -54,7 +59,7 @@ log = logging.getLogger("jarvis.render.estimates")
 # at 0.12-0.30 s on this machine; seeded at 2 s so a cold OpenSCAD start is still
 # inside it, and comfortably under the ask threshold — nobody wants to be asked
 # permission to spend a fifth of a second.
-SEED = {0: 2.0, 1: 25.0, 2: 6.0, 3: 60.0, 4: 210.0}
+SEED = {0: 2.0, 1: 25.0, 2: 6.0, 3: 35.0, 4: 55.0}
 
 KEEP = 9                       # how many measured runs count toward the median
 _PATH = APP_DIR / "render_times.json"

@@ -1,9 +1,10 @@
 """Phase D: the render queue, the estimate, and the question before a long job.
 
-Offline. The heavy tiers are not installed on this machine and must therefore be
-SKIPPED LOUDLY rather than quietly passing — the Evolution's phase 5 skip hid a
-real parser bug, and a green tick for something that never ran teaches the suite
-means more than it does.
+Offline. Tiers 3 and 4 ARE installed now, but running them takes 33 and 55
+seconds, which is not a build gate — so what is checked here is everything around
+the model, and the run itself is skipped LOUDLY and done by the live script. A
+green tick for something that never ran teaches the suite means more than it
+does; the Evolution's phase 5 skip hid a real parser bug and that lesson stands.
 
 WHAT THIS IS REALLY GUARDING.
 
@@ -88,7 +89,9 @@ async def main() -> int:
     check("tier 1 is over it, as measured", est.SEED[1] > est.ask_threshold(),
           f"{est.SEED[1]}")
     check("tier 3 is over it", est.SEED[3] > est.ask_threshold())
-    check("tier 4 is well over it", est.SEED[4] > est.ask_threshold() * 5)
+    check("tier 4 is over it too", est.SEED[4] > est.ask_threshold())
+    check("...and tier 4 costs more than tier 3, since it is tier 3 plus a search",
+          est.SEED[4] > est.SEED[3], (est.SEED[3], est.SEED[4]))
 
     # ------------------------------------------------- the parametric templates
     # This is now the path most requests take, so it carries most of the risk.
@@ -116,12 +119,28 @@ async def main() -> int:
                   src)
 
     # DECLINES. Each of these has numbers in it, so a careless matcher would fire.
+    # The last four are MORE THAN ONE of something, and every template here makes
+    # exactly one body with at most one hole. Two of them were real false matches
+    # found by throwing realistic phrasings at it: "a plate with 4 mounting holes"
+    # came back as a plate with one centred hole, and "a cube 20 mm and a plate
+    # 30 by 30 by 2 mm" came back as just the cube — confident, exact, and not
+    # what he asked for, which is the whole failure this library must not have.
     for said in ("a bracket 40 mm wide", "a phone stand", "a dragon",
                  "a gear with 20 teeth", "a plate with rounded corners 40 by 30 by 5 mm",
                  "a case for a raspberry pi 90 by 60 by 30 mm",
-                 "a hook 40 mm long", "a knob 30 mm across", ""):
+                 "a hook 40 mm long", "a knob 30 mm across", "",
+                 "a plate with 4 mounting holes 60 by 60 by 5 mm",
+                 "a cube 20 mm and a plate 30 by 30 by 2 mm",
+                 "two 20 mm cubes", "three spacers 10 mm tall"):
         check(f"{said!r} is left to the model", PL.match(said) is None,
               PL.match(said))
+
+    # ...and a DIGIT is a dimension, not a count. The first version of the
+    # multiple-parts rule read "25 mm sphere" and "a 5 mm hole" as counts and
+    # declined both — a fix that broke the thing it was protecting.
+    check("a digit before a unit is a dimension, not a count",
+          PL.match("a 25 mm sphere") is not None
+          and PL.match("a plate 40 by 30 by 6 mm with a 5 mm hole") is not None)
 
     check("every template sets the curve resolution",
           all("$fn" in (PL.match(s) or "")
@@ -288,11 +307,29 @@ async def main() -> int:
     await render_tools.cancel_render()
 
     # An UNINSTALLED tier is refused before he is asked to wait for it. Being
-    # asked "about three minutes, shall I?" and only then told the model is not
+    # asked "about a minute, shall I?" and only then told the model is not
     # installed is the worst possible order for those two sentences.
-    r = await render_tools.make_hologram(description="a dragon")
-    check("an uninstalled tier is refused rather than asked about",
-          r.get("unavailable") is True and r.get("_ask") is None, r)
+    #
+    # Forced rather than assumed: tiers 3 and 4 are installed on this machine
+    # now, so pointing the directory at nowhere is the only way to exercise the
+    # refusal deliberately instead of depending on what happens to be present.
+    _real_dir = create3d.model3d_dir
+    create3d.model3d_dir = lambda: __import__("pathlib").Path(
+        os.path.join(tempfile.mkdtemp(), "not-installed"))
+    try:
+        r = await render_tools.make_hologram(description="a dragon")
+        check("an uninstalled tier is refused rather than asked about",
+              r.get("unavailable") is True and r.get("_ask") is None, r)
+        check("...naming where it would live", "not-installed" in (r.get("error") or ""),
+              r.get("error"))
+    finally:
+        create3d.model3d_dir = _real_dir
+
+    # ...and when it IS installed, the same request asks instead, with a number.
+    if create3d.available().get(4):
+        r = await render_tools.make_hologram(description="a dragon")
+        check("an installed tier asks, with an estimate", bool(r.get("_ask")), r)
+        check("...and does not start until he answers", not r.get("started"), r)
 
     # The ask itself, on a tier that IS installed. Measured slow here on purpose:
     # this is exactly how the estimate is meant to move — on a machine where the
@@ -330,10 +367,29 @@ async def main() -> int:
 
     # ------------------------------------------------- the heavy tiers, honestly
     avail = create3d.available()
-    for tier, what in ((3, "photo-to-mesh"), (4, "text-to-mesh")):
-        if avail.get(tier):
-            skip(f"tier {tier} live run", "installed — exercised by the live script")
-        else:
+    check("tier 4 needs exactly what tier 3 needs",
+          avail.get(3) == avail.get(4),
+          "tier 4 IS tier 3 with a reference picture in front of it")
+    if avail.get(3):
+        # INSTALLED. The model itself is not run here — 33 seconds is not a build
+        # gate — but everything around it is, and a missing input must be refused
+        # before a subprocess is started rather than after it fails.
+        check("the worker script is where the tool expects it",
+              (create3d.model3d_dir() / "photo_to_mesh.py").exists())
+        check("the interpreter is its own, not the sidecar's",
+              "model3d" in (create3d.model3d_python() or ""),
+              create3d.model3d_python())
+        r = await create3d.from_photo(os.path.join(tempfile.mkdtemp(), "nope.png"))
+        check("a missing picture is refused before anything heavy starts",
+              bool(r.get("error")) and not r.get("stl"), r)
+        check("...and it is not reported as unavailable, because it is available",
+              r.get("unavailable") is not True, r)
+        r = await create3d.from_text("")
+        check("an empty description is refused too", bool(r.get("error")), r)
+        skip("tiers 3 and 4 producing a real mesh",
+             "33 s and 55 s — run by .agent/scripts/render_live.py, not by a gate")
+    else:
+        for tier in (3, 4):
             r = await (create3d.from_photo("x.png") if tier == 3
                        else create3d.from_text("a dragon"))
             check(f"tier {tier} says it is not installed", r.get("unavailable") is True, r)
@@ -343,8 +399,8 @@ async def main() -> int:
                   r.get("tier") == tier and not r.get("stl"),
                   "handing him a different technique's output would look like "
                   "success and be wrong")
-            skip(f"tier {tier} produces a mesh",
-                 f"{what} is not installed at {create3d.model3d_dir()}")
+        skip("tiers 3 and 4 producing a mesh",
+             f"not installed at {create3d.model3d_dir()}")
 
     # ------------------------------------------------- a photograph, as a relief
     # The fast, printable answer to "make something 3D out of this picture" —
