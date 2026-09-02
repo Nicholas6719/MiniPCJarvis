@@ -322,11 +322,31 @@ class Orchestrator:
                 log.exception("idle watch failed")
                 await asyncio.sleep(30)
 
-    async def wake_if_sleeping(self) -> bool:
-        """Any deliberate approach — hotkey, tray, a typed turn — also ends sleep."""
+    async def wake_if_sleeping(self, surface: bool = True) -> bool:
+        """Any deliberate approach — hotkey, tray, a typed turn — also ends sleep.
+
+        `surface=False` ends the SLEEPING state WITHOUT touching the machine: no
+        monitor wake, no window raised to the front.
+
+        Because those are two different things, and treating them as one had a
+        consequence he found himself: he messaged JARVIS from Telegram at night
+        with the monitor off, and the PC's screen came on. A message from his
+        phone is a REMOTE conversation. It has to un-sleep the state machine —
+        the turn path only runs from IDLE, so without that he is answered by
+        nothing at all — but it has no business lighting up a monitor in a room
+        he is not in, or shoving a window in front of whatever was there.
+        """
         if self.sm.state != State.SLEEPING:
             return False
-        await self._wake_from_sleep()
+        if surface:
+            await self._wake_from_sleep()
+        else:
+            # Still announce it, so the app's own state stays consistent — the
+            # HUD does not raise itself on this, it only stops looking asleep.
+            try:
+                await bus.emit("awake", summary="woken by a remote message")
+            except Exception:
+                log.exception("could not announce waking")
         await self.sm.to(State.IDLE, force=True)
         return True
 

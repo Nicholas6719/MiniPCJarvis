@@ -116,6 +116,56 @@ def main() -> int:
         wt.wake_display, wt._our_windows = real_wake, real_windows
         wt.display_is_off = real_off
 
+    # --- but a message from his PHONE must not light up the room ------------
+    # He found this one: messaged JARVIS on Telegram at night with the monitor
+    # off, and the PC's screen came on. Waking the STATE MACHINE and waking the
+    # MACHINE are two different things, and the remote path only needs the first
+    # — the turn path runs only from IDLE, so it must leave SLEEPING, but it has
+    # no business raising a window in a room he is not in.
+    import asyncio
+    import inspect
+
+    import orchestrator as orch_mod
+    from state_machine import State
+
+    src = inspect.getsource(orch_mod.Orchestrator.wake_if_sleeping)
+    check("waking can be asked NOT to surface", "surface" in src, src[:120])
+
+    import remote_telegram
+    tg = inspect.getsource(remote_telegram.TelegramBridge._remote_turn)
+    check("...and the Telegram path asks for exactly that",
+          "surface=False" in tg,
+          "a message from his phone would otherwise wake the monitor")
+
+    # And the wiring, not just the spelling: a non-surfacing wake must reach
+    # IDLE without calling the thing that touches the screen.
+    o = orch_mod.Orchestrator.__new__(orch_mod.Orchestrator)
+    touched = []
+
+    class FakeSM:
+        state = State.SLEEPING
+
+        async def to(self, s, force=False):
+            FakeSM.state = s
+
+    o.sm = FakeSM()
+
+    async def boom():
+        touched.append("surfaced")
+
+    o._surface = boom
+    o._wake_from_sleep = boom
+    woke = asyncio.run(o.wake_if_sleeping(surface=False))
+    check("a remote wake still leaves the sleeping state", woke is True)
+    check("...reaching IDLE, so the turn can actually run",
+          FakeSM.state == State.IDLE, FakeSM.state)
+    check("...and NOTHING touched the screen or the window", not touched, touched)
+
+    FakeSM.state = State.SLEEPING
+    asyncio.run(o.wake_if_sleeping())
+    check("while a wake at the machine still does come to the front",
+          touched == ["surfaced"], touched)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

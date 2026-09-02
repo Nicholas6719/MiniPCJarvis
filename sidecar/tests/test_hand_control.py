@@ -242,9 +242,41 @@ def main() -> int:
         check("...and the reply does not claim to have started it",
               "camera on" not in (r.get("spoken") or "").lower(), r.get("spoken"))
         hand_control.control.disarm("test")
+
+        # ---- and it can be ASKED whether it is watching --------------------
+        # `armed` on its own is a flag, and a flag is exactly what survives a
+        # tracking loop that has died: the badge stays lit, his hands stop
+        # working, and nothing is logged anywhere. The frame counter is the only
+        # honest witness, so it is exposed alongside the flag.
+        st = asyncio.run(holo_tools.hand_status())
+        check("it can say it is not watching", st.get("armed") is False, st)
+        check("...in a sentence", "not watching" in (st.get("spoken") or ""), st)
+        FakeCamera.is_on = True
+        asyncio.run(holo_tools.hand_control(on=True))
+        st = asyncio.run(holo_tools.hand_status())
+        check("...and that it is, when it is", st.get("armed") is True, st)
+        check("...reporting the frames it has read, not just the flag",
+              "frames" in st,
+              "a dead loop leaves armed=True forever; only the counter differs")
+        hand_control.control.disarm("test")
     finally:
         camera_mod.camera = real
         FakeCamera.is_on = False
+
+    # The tier IS the security boundary, so it is asserted rather than assumed.
+    # hand_status reads a counter: it opens nothing and turns nothing on.
+    from tools.registry import registry
+    import tools.holo_tools as _ht
+    _ht.register_all() if not registry.get("hand_status") else None
+    t = registry.get("hand_status")
+    check("hand_status is registered", t is not None)
+    if t:
+        check("...at SAFE, because it only reads a counter", t.risk.value == "safe",
+              f"is {t.risk.value}")
+    ht = registry.get("hand_control")
+    if ht:
+        check("...while hand_control stays LOW, because it reads the webcam",
+              ht.risk.value == "low", f"is {ht.risk.value}")
     check("disarming when it was never armed is not an error",
           hand_control.control.disarm().get("armed") is False)
     check("the resting state is off", hand_control.control.armed is False)

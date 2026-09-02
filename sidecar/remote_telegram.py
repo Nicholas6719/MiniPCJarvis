@@ -555,7 +555,12 @@ class TelegramBridge:
                 if self._orch.sm.state.value in ("idle", "sleeping"):
                     break
                 await asyncio.sleep(2)
-            await self._orch.wake_if_sleeping()
+            # NOT surfacing. A message from his phone must not wake the PC's
+            # monitor or pull the window to the front — he found this himself,
+            # messaging at night with the screen off and having the screen come
+            # on. The state machine still has to leave SLEEPING, because the turn
+            # path only runs from IDLE.
+            await self._orch.wake_if_sleeping(surface=False)
             self._collect = {"text": ""}
             self._turn_done = asyncio.Event()
             self._orch.remote_turn = True

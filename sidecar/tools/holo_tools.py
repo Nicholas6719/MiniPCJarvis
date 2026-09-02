@@ -381,6 +381,24 @@ async def hand_control(on: bool = True) -> dict:
     return {**r, "camera_started": turned_on, "spoken": line}
 
 
+async def hand_status() -> dict:
+    """Is it watching, and is the loop actually turning?
+
+    `armed` on its own is a flag, and a flag is exactly what survives a loop
+    that has died — the badge stays lit, his hands stop working, and nothing is
+    logged. `frames` is the honest witness: it only advances if the camera is
+    genuinely being read, so a frozen counter is a stopped tracker.
+    """
+    from hand_control import control
+    st = control.status()
+    if not st.get("armed"):
+        return {**st, "spoken": "I'm not watching your hands, sir."}
+    seen = st.get("detects", 0)
+    return {**st, "spoken": ("I'm watching, sir — I can see your hands."
+                             if seen else "I'm watching, sir, but I can't see "
+                                          "your hands at the moment.")}
+
+
 async def hide_hologram() -> dict:
     _current.clear()
     # The hand tracker has nothing to move now. It checks this itself every
@@ -450,6 +468,14 @@ def register_all() -> None:
         # LOW, not SAFE: it reads the webcam continuously for as long as it is
         # armed. The tier describes what the handler DOES.
         risk=Risk.LOW, handler=hand_control, timeout=20))
+    registry.register(Tool(
+        name="hand_status",
+        description="Whether his hands are being watched right now, and how many "
+                    "frames have been read since it armed.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        # SAFE: it reads a counter. It opens nothing and turns nothing on — the
+        # tier describes what the handler DOES, and this one does arithmetic.
+        risk=Risk.SAFE, handler=hand_status, timeout=10))
     registry.register(Tool(
         name="hide_hologram",
         description="Take the hologram down.",

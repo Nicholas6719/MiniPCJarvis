@@ -2061,6 +2061,120 @@ Worth remembering next time: **a feature you can only judge by looking has to be
 looked at.** The layer scale and the grab affordance both routed, acknowledged
 and gated perfectly while one of them was invisible.
 
+## 2026-09-02 (later) — auditing against the plan, and a test that lied
+
+Went back through `get-ready-for-the-quirky-lightning.md` looking for gates the
+plan asked for that nobody had actually run. Three were outstanding, and chasing
+them turned up a test that had been reporting a working feature as broken.
+
+**The soak was the point of phase E and it did not touch phase E.** The plan
+says, in as many words: run `soak_e2e` after phase E, *because the landmark
+stream is a new always-resident path*. `soak_e2e` exercises audio, COM, UI
+Automation and the browser — and nothing to do with the hologram. Running it as
+written would have satisfied the sentence and tested none of the new long-lived
+code. It now puts a model on the stage and arms hand tracking for the whole run,
+hits `/holo/geometry` and `/holo/printcheck` at the rate a person looks at a
+model, and tears both down at the end — a camera left on by a test is exactly
+the surprise this project spends so much effort avoiding.
+
+Two new assertions there are worth keeping:
+
+* **RSS growth per minute**, because a leak in a camera loop reading ten frames
+  a second is a crash three days later, and nothing else in the suite would see
+  it coming.
+* **`frames`, not `armed`.** A tracking loop that dies leaves `armed` true
+  forever: the badge stays lit, his hands stop working, and nothing is logged.
+  The frame counter is the only honest witness, so `hand_status` now exposes it
+  (SAFE — it reads a counter; `hand_control` stays LOW because it reads the
+  webcam).
+
+**Idle CPU with the stage open — the phase A gate nobody measured.** Now
+`.agent/scripts/holo_idle.py`. The first version of it reported 0.4% in every
+state and passed every threshold, which is the "a check that cannot fail says
+nothing" trap in its purest form: it was sampling four processes with the window
+minimised, and WebView2 throttles requestAnimationFrame to nothing when the
+window is not visible. Fixed — raise the window, walk process descendants to
+every depth (the rAF loop runs in a GRANDCHILD of jarvis.exe, not a child) and
+exclude llama-server, which burns whole cores and would swamp the number.
+
+The real figures, on the deployed build:
+
+| state | CPU (of one core) |
+|---|---|
+| no stage | 1.8% |
+| hologram up, nothing moving | 2.7% |
+| toolpath up | 2.8% |
+| ten seconds after a scrub | 2.7% |
+
+**A hologram costs about nine tenths of one percent of a core**, and the toolpath
+costs nothing measurable on top of the model — which is the `setDrawRange`
+design paying off, since it is one draw call whether it is showing one layer or
+all thirty. Nothing fails to settle.
+
+**A TEST THAT LIED, AND THE LESSON UNDER IT.** `render_live.py` reported three
+failures — "a real mesh came out of the photograph" and two more — for tier 3.
+Tier 3 was fine. The script WRITES the test photograph, and run from the agent
+shell that write lands in the virtualized shadow of `%APPDATA%` while the sidecar
+reads the real one: the picture "exists" here, the job starts, and the render
+fails instantly with nothing to work from. Run through `schtasks` in his own
+session the same script gives **tier 3 in 26.3 s, a real 60 x 46 x 20 mm mesh,
+ALL PASS**.
+
+The sandbox trap is the first thing in this document and it still caught me,
+because it wore a new costume: not "the install did not happen" but "the feature
+is broken". So `render_live.py` now refuses to run in the wrong session — and
+getting that guard right needed the trap understood properly:
+
+> **Reads are MERGED; only WRITES diverge.** A file the sidecar writes IS visible
+> from the agent shell. So "make a file and stat it" passes in both sessions and
+> proves nothing — my first guard did exactly that and sailed through. The only
+> question that distinguishes the two views is the other direction: write a
+> marker here, and ask the SIDECAR to open it.
+
+Comparing the path strings does not work either. Both sides print the identical
+path and resolve it differently. That is the whole trap.
+
+Also measured, the last item on the plan's verification list — **GPU contention
+against llama-server**, the stated risk, since the 780M has no dedicated memory
+and the HUD and the model share one piece of silicon. Measured as the thing he
+would feel: how long a real answer takes, with and without a hologram and its
+toolpath being drawn.
+
+The soak, with the hologram and hand tracking resident: **36 rounds over 185 s,
+same process throughout, memory flat (-6.8 MB/min), and the tracking loop turned
+379 frames before standing itself down.** That stand-down is the fatigue rule
+working, not a fault — and the first version of this test asserted the opposite,
+demanding the tracker still be armed at the end when nobody had been in front of
+the camera for three minutes. The assertion now checks what actually matters:
+that the loop RAN, and that if it stood down it did so having run first, because
+an instant disarm with zero frames is a broken tracker wearing the fatigue rule
+as a disguise.
+
+## 2026-09-02 — a message from his phone turned his monitor on
+
+His report: messaged JARVIS on Telegram at night with the monitor off, and the
+PC's screen came on. He does not want that — Telegram is how he talks to JARVIS
+when he is NOT at the machine, so anything the remote path does to the screen
+happens in a room he is not in.
+
+`_remote_turn` called `wake_if_sleeping()`, which calls `_wake_from_sleep()` ->
+`exit_sleep_mode()` -> `wake_display()` plus `SetForegroundWindow`. It needs the
+first part: the turn path only runs from IDLE, so without leaving SLEEPING he is
+answered by nothing at all. It does not need the second.
+
+So **waking the STATE MACHINE and waking the MACHINE are now two different
+things**: `wake_if_sleeping(surface=False)`, which the Telegram bridge passes.
+Saying his name at the desk still brings him to the front and still lights a dark
+panel — that behaviour is untouched and gated alongside the new one.
+
+Checked while fixing it: nothing else on the remote path reaches the screen by
+itself. The Tauri shell's three `unminimize()/show()/set_focus()` sites are all
+user-initiated (hotkey, tray menu, tray double-click) and none reacts to sidecar
+state; `search_brave_web` uses SW_SHOWNOACTIVATE and does not steal focus. The
+`exit_sleep_mode` TOOL is left alone deliberately — if he asks from his phone to
+bring JARVIS forward, that is the request. **The rule is about side effects he
+did not ask for.**
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
