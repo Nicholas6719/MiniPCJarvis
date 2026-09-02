@@ -816,3 +816,13 @@ body.compact .wedge { padding: calc(12px * var(--s)) calc(18px * var(--s)) calc(
   font-variant-numeric: tabular-nums;
 }
 .holo__check[data-bad="true"] { color: #ffb454; }
+/* The camera is reading continuously while this is up, so it is deliberately
+   not subtle. Brighter still while he actually has hold of the model. */
+.holo__hands {
+  position: absolute; right: calc(14px * var(--s)); top: calc(34px * var(--s));
+  letter-spacing: .12em; color: var(--text-dim);
+  border: 1px solid color-mix(in srgb, var(--rim) 22%, transparent);
+  padding: calc(3px * var(--s)) calc(8px * var(--s));
+}
+.holo__hands[data-holding="true"] { color: #59e0a5; border-color: #59e0a5; }
+body.compact .holo__hands { display: block; }

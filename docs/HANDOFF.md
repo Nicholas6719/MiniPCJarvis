@@ -1763,6 +1763,64 @@ minutes of CPU whatever we do, and the fast paths above cover what he actually
 wants from a picture. The seam is there for when a machine with real GPU compute
 is.
 
+## 2026-09-02 — the hologram, phase E: hands, designed around fatigue
+
+New: `sidecar/hand_gestures.py` (pure functions over landmarks),
+`sidecar/hand_control.py` (the tracking loop), `vision_hands.read_pose`, the
+`hand_control` tool, `hands_on`/`hands_off` skills, a HUD indicator, and
+`tests/test_hand_control.py`. Routing is 188/188.
+
+**The research is blunt and it shaped the design rather than decorating it.**
+Sustained mid-air gesturing causes measurable arm fatigue within a minute or
+two — "gorilla arm" — so three rules, each of which is asserted in the gate:
+
+1. **Hands are never required.** Every gesture emits exactly the payload a
+   spoken command emits, so `holo_control` stays the single control surface.
+   The gate asserts the gesture vocabulary is a subset of `_ACTIONS`: if they
+   ever diverge, hands become a second way to do things words cannot.
+2. **Supported postures.** `ROTATE_GAIN` is set so a quarter of the frame turns
+   the model most of the way round — a few centimetres of travel with the elbow
+   bent and the forearm resting, not an arm outstretched sweeping the screen.
+   That number is asserted, not left to drift.
+3. **Short engagements.** Tracking ARMS on a pinch and RELEASES on an open palm
+   or a hand leaving frame, so the resting state is hands down and nothing idles
+   waiting for him to hold a pose.
+
+**`read_pose` is deliberately not `read_many`.** The existing hand reader takes a
+majority vote across six frames, which is right for "how many fingers am I
+holding up" and completely wrong for following a hand: a vote over half a second
+is half a second of lag, and lag is the whole difference between a control that
+feels attached to his hand and one that does not.
+
+**It does not switch the camera on.** A hologram appearing arms nothing; he has
+to ask. The tool is LOW rather than SAFE because it reads the webcam
+continuously for as long as it is armed, and it disarms itself when the stage
+closes, when the camera stops, and after 45 s with nothing in frame. The HUD
+shows WATCHING YOUR HANDS the whole time — a camera reading continuously has to
+be visible while it is doing it.
+
+**The mirror.** No `cv2.flip` anywhere in the capture path and no CSS mirror in
+the HUD — checked rather than assumed — so the flip belongs in `grip_point`. He
+moves his hand right, the raw pixel moves left, and without the flip the model
+turns the wrong way, which reads as broken rather than reversed. Gated in both
+directions.
+
+**What it costs, measured rather than assumed — and made three times cheaper.**
+First measurement: **+49% of a core** over the camera alone. Decoding frames at
+half size (`IMREAD_REDUCED_COLOR_2` — a quarter of the pixels, and landmarks are
+normalised so nothing downstream changes) took that to +43%, which showed the
+decode was never the cost: the landmarker is, at ~30 ms a frame. So the rate is
+the lever, and 14 fps became 10. **Final: +13% of a core**, about 3.7x cheaper
+than where it started, with 100 ms of latency — fine for the coarse path, and
+the precise path is a sentence. The live gate asserts under 30% so it will catch
+a regression rather than sit where the old number happened to land.
+
+**A sixth canon erasure**, found by the seed-collision gate:
+`stop watching my hands` folded onto `stop watching METRIC` — the system-monitor
+rule — so turning the gesture tracker off collided head-on with cancelling a CPU
+alert, and the word `hands` was erased before anything could act on it. Excluded
+now, with cases both ways in `test_brain.py`.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

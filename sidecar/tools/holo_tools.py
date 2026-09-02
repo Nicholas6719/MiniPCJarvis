@@ -315,8 +315,34 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
             "note": "view only — the model on disk is unchanged"}
 
 
+async def hand_control(on: bool = True) -> dict:
+    """Watch his hands and let them move the model. Off is the resting state."""
+    from hand_control import control
+    if not on:
+        r = control.disarm("he asked")
+        await bus.emit("hands", action="off")
+        return {**r, "spoken": "Hands off, sir." if r.get("was")
+                else "They weren't on, sir."}
+    r = control.arm()
+    if r.get("error"):
+        return r
+    # The HUD says so from the moment it is armed, not from the first grab. A
+    # camera reading continuously has to be visible while it is doing it.
+    await bus.emit("hands", action="armed")
+    return {**r, "spoken": "Pinch to take hold of it, sir — open your hand to "
+                           "let go."}
+
+
 async def hide_hologram() -> dict:
     _current.clear()
+    # The hand tracker has nothing to move now. It checks this itself every
+    # frame, but stopping it here means the camera work ends with the stage
+    # rather than up to a frame later.
+    try:
+        from hand_control import control
+        control.disarm("the stage closed")
+    except Exception:
+        log.debug("could not stop hand tracking", exc_info=True)
     await bus.emit("hologram", action="hide")
     return {"on_stage": False}
 
@@ -363,6 +389,19 @@ def register_all() -> None:
                        "description": "what he said, if the action is not obvious"}},
             "required": []},
         risk=Risk.SAFE, handler=holo_control, timeout=20))
+    registry.register(Tool(
+        name="hand_control",
+        description="Let his hands move the hologram: pinch to take hold, drag to "
+                    "turn it, two pinched hands to zoom, open palm to let go. Reads "
+                    "the camera continuously while armed, so it is off by default "
+                    "and turns itself off when the model comes down. Every gesture "
+                    "has a spoken equivalent — hands are never required.",
+        parameters={"type": "object", "properties": {
+            "on": {"type": "boolean", "description": "true to watch, false to stop"}},
+            "required": []},
+        # LOW, not SAFE: it reads the webcam continuously for as long as it is
+        # armed. The tier describes what the handler DOES.
+        risk=Risk.LOW, handler=hand_control, timeout=20))
     registry.register(Tool(
         name="hide_hologram",
         description="Take the hologram down.",

@@ -478,13 +478,18 @@ export function HoloStage() {
 
   return (
     <>
-      <div className="holo">
+      <div className="holo" style={{position:"relative"}}>
         <div className="holo__head mono-sub">
           <span className="holo__name">{holo?.name ?? "hologram"}</span>
           <span ref={label} className="holo__dims" />
         </div>
         <div ref={host} className="holo__canvas" />
         {holo?.check && <div ref={note} className="holo__check mono-sub" />}
+        {holo?.hands && holo.hands !== "off" && (
+          <div className="holo__hands mono-sub" data-holding={holo.hands === "holding"}>
+            {holo.hands === "holding" ? "HOLDING" : "WATCHING YOUR HANDS"}
+          </div>
+        )}
       </div>
     </>
   );

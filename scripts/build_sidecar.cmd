@@ -34,6 +34,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_printcheck.py || (echo PRINT CHECK FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_holo_control.py || (echo HOLO CONTROL FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_render.py || (echo RENDER QUEUE FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_hand_control.py || (echo HAND CONTROL FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_brain.py || (echo BRAIN TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audit_fixes.py || (echo AUDIT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA TEST FAILED & exit /b 1)

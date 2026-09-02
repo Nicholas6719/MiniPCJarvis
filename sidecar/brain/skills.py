@@ -1086,6 +1086,12 @@ _MAKE_STRIP = re.compile(
     r"(?:of\s+)?", re.I)
 
 
+def say_hands(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    return res.get("spoken") or "Done, sir."
+
+
 def slots_holo_make(t: str) -> dict:
     """What he wants made, with the asking-verb stripped off the front.
 
@@ -1689,6 +1695,19 @@ SKILLS: list[Skill] = [
         "how much longer for the model", "how's that render going",
         "what's the render doing", "is it still rendering"],
         speak=say_render_how),
+    # Hands. Armed by asking, never by a hologram appearing — this reads the
+    # webcam continuously, and a camera that switches itself on is a surprise
+    # nobody wants however good the reason.
+    Skill("hands_on", "hand_control", [
+        "let me move it with my hands", "turn on hand control",
+        "i want to use my hands", "hand controls on",
+        "let me grab it", "watch my hands", "enable gestures"],
+        fixed_args={"on": True}, speak=say_hands),
+    Skill("hands_off", "hand_control", [
+        "stop watching my hands", "turn off hand control",
+        "hands off", "hand controls off", "stop the gestures",
+        "i'm done with my hands"],
+        fixed_args={"on": False}, speak=say_hands),
     Skill("holo_show", "show_hologram", [
         "show me that as a hologram", "project that as a hologram",
         "put it up as a hologram", "show me the hologram",

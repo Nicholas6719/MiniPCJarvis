@@ -213,6 +213,13 @@ CASES = [
     ("stop the render", "render_stop"),
     ("how's the model coming along", "render_how"),
     ("is that model done yet", "render_how"),
+    # Hands (phase E). "Stop watching my hands" must not be read as cancelling a
+    # CPU alert, which is what "stop watching METRIC" made of it.
+    ("let me move it with my hands", "hands_on"),
+    ("turn on hand control", "hands_on"),
+    ("stop watching my hands", "hands_off"),
+    ("hands off", "hands_off"),
+    ("stop watching the cpu", "unwatch"),      # ...and the exclusion breaks nothing
 ]
 
 async def main() -> int:

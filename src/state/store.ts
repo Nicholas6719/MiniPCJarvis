@@ -99,6 +99,10 @@ export interface HoloState {
   // /holo/printcheck, for the same reason the mesh comes from /holo/geometry.
   check?: { overhangFaces: number; layers: number | null; ts: number };
   showLayers?: boolean;
+  // Whether his hands are being watched, and whether he is holding the model
+  // right now. A camera reading continuously must be VISIBLE — the indicator is
+  // the honest half of that feature.
+  hands?: "off" | "watching" | "holding";
   // The last control, with a sequence number. `seq` is what the renderer watches:
   // "turn it ninety degrees" said twice must turn it twice, and identical
   // payloads would otherwise be indistinguishable from no new command at all.
@@ -595,6 +599,16 @@ export const useStore = create<Store>((set, get) => ({
           push({ id: evt.id, ts: evt.ts, kind: "web",
                  summary: `${evt.label} failed` });
         }
+        break;
+      // Hands. A tracker reading the webcam has to show that it is, and the
+      // grab/release states are also the only feedback that a pinch registered.
+      case "hands":
+        set((st) => (st.holo
+          ? { holo: { ...st.holo,
+                      hands: evt.action === "grab" ? "holding"
+                        : evt.action === "release" ? "watching"
+                        : evt.action === "armed" ? "watching" : "off" } }
+          : {}));
         break;
       case "holo_control":
         set((st) => (st.holo

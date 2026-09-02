@@ -135,6 +135,48 @@ class Hands:
             log.exception("hand read failed")
             return {"error": "the hand read failed"}
 
+    def read_pose(self, frame_bgr) -> dict:
+        """One frame -> the twenty-one LANDMARKS per hand, kept rather than counted.
+
+        `read` computes exactly these and throws them away, because counting
+        fingers only needs the total. Tracking a hand needs where it is, so this
+        is the same detection with nothing discarded.
+
+        Deliberately NOT `read_many`: that takes a majority vote across six
+        frames, which is right for answering "how many fingers" and completely
+        wrong for following a hand — a vote over half a second is half a second
+        of lag, and lag is the whole difference between a control that feels
+        attached to his hand and one that does not.
+        """
+        lm = self._landmarker()
+        if lm is None:
+            return {"error": "the hand model is unavailable"}
+        try:
+            import cv2
+            import mediapipe as mp
+            rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            t0 = time.time()
+            with self._lock:
+                res = lm.detect(img)
+            hands = []
+            for i, marks in enumerate(res.hand_landmarks):
+                side = ""
+                try:
+                    side = res.handedness[i][0].category_name.lower()
+                except Exception:
+                    pass
+                hands.append({
+                    "hand": side,
+                    "fingers": count_extended(marks),
+                    "landmarks": [(round(float(p.x), 4), round(float(p.y), 4),
+                                   round(float(p.z), 4)) for p in marks],
+                })
+            return {"hands": hands, "detect_ms": round((time.time() - t0) * 1000, 1)}
+        except Exception:
+            log.exception("hand pose read failed")
+            return {"error": "the hand read failed"}
+
     def read_many(self, frames: list) -> dict:
         """Several frames; the answer is the majority, not one blurry moment."""
         if not frames:
