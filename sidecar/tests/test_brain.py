@@ -227,6 +227,24 @@ CASES = [
     ("stop watching my hands", "hands_off"),
     ("hands off", "hands_off"),
     ("stop watching the cpu", "unwatch"),      # ...and the exclusion breaks nothing
+    # MAKING a part, not EDITING one. He asked for "a plate 40 by 30 by 6
+    # millimetres with a 5 millimetre hole", waited thirty seconds, was told it
+    # was made, and never saw it — because that sentence contains "make", "hole"
+    # and a measurement, and holo_edit owns "make the hole bigger". Every
+    # holo_make seed named an object abstractly or named the format; not one
+    # looked like the dimensioned part a person asks for when the point is
+    # printing it. The signal is "me a" (a NEW thing) against "the" (the one
+    # already on the stage).
+    ("make me a plate 40 by 30 by 6 millimetres with a 5 millimetre hole", "holo_make"),
+    ("make me a plate 40 by 30 by 6 mm with a 5 mm hole", "holo_make"),
+    ("make me a 20 mm cube", "holo_make"),
+    ("make me a hex spacer 12 mm tall", "holo_make"),
+    ("make me a bracket with two holes", "holo_make"),
+    ("print me a washer 20 mm across", "holo_make"),
+    # ...and the edits it must NOT swallow
+    ("make the hole bigger", "holo_edit"),
+    ("make the wall thicker", "holo_edit"),
+    ("change the hole to 5 millimetres", "holo_edit"),
 ]
 
 async def main() -> int:

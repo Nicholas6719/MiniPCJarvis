@@ -1707,7 +1707,33 @@ SKILLS: list[Skill] = [
         # say "3d model"; "design me a stand" is the same ask, and without these
         # it sat at 0.69 and fell through to the model.
         "design me a stand", "make me a holder for it",
-        "design a mount for my phone", "make me a case for it"],
+        "design a mount for my phone", "make me a case for it",
+        # A PART WITH DIMENSIONS ON IT, which is what he actually says when the
+        # point is printing something rather than looking at it. Every seed above
+        # names an object abstractly ("a dragon", "a stand") or names the format
+        # ("a 3d model of"), and none of them looks like "a plate 40 by 30 by 6
+        # millimetres with a 5 millimetre hole".
+        #
+        # The consequence was not a near miss, it was the wrong skill: that
+        # sentence contains "make", "hole" and a measurement, and holo_edit owns
+        # "make the hole bigger" and "change the hole to 5 millimetres" — so
+        # asking for a NEW plate was read as EDITING one. He asked for a plate,
+        # waited thirty seconds, was told it was made, and never saw it.
+        #
+        # The signal that separates them is "a"/"me a" — a NEW thing — against
+        # "the" — the thing already on the stage.
+        "make me a plate 40 by 30 by 6 millimetres with a 5 millimetre hole",
+        "make me a plate 50 by 50 by 4 mm",
+        "make me a 20 millimetre cube",
+        "make me a cube 30 mm on each side",
+        "make me a spacer 12 millimetres tall",
+        "make me a washer with a 5 mm hole",
+        "make me a bracket 60 mm long with two holes",
+        "make me a cylinder 20 millimetres across",
+        "make me a tube 30 mm long",
+        "print me a plate 40 by 40 by 3 millimetres",
+        "i need a disc 25 mm across",
+        "make me a block 20 by 20 by 10 millimetres"],
         slots=slots_holo_make, speak=say_holo_make),
     Skill("render_stop", "cancel_render", [
         "stop the render", "cancel the model", "stop making that",
