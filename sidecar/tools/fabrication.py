@@ -199,6 +199,28 @@ async def generate_part(description: str, name: str = "") -> dict:
         return {"error": "OpenSCAD is not installed — set fabrication.openscad_binary",
                 "unavailable": True}
 
+    # THE FAST PATH, first. Most of what anyone asks a 3D printer for is
+    # parametric — a cube, a plate, a spacer, a washer, a tube — and those need
+    # no language model at all. Measured: 0.2 s against 27.5 s, and exact,
+    # because the numbers come from his own sentence. `match` returns None for
+    # anything it is not certain about, which is most requests.
+    import parts_library
+    templated = parts_library.match(desc)
+    if templated:
+        base = safe_name(name or desc)
+        d = work_dir()
+        scad, stl = d / f"{base}.scad", d / f"{base}.stl"
+        scad.write_text(templated, encoding="utf-8")
+        rc, out, err = await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
+        if rc == 0 and stl.exists():
+            return {"scad": str(scad), "stl": str(stl), "from": "template",
+                    "size_kb": round(stl.stat().st_size / 1024, 1),
+                    "source": templated}
+        # A template that will not build is a bug in the template, not in his
+        # request — fall through to the model rather than refusing him.
+        log.warning("template for %r did not build: %s", desc,
+                    (err or out or "").strip()[:200])
+
     # The model already running, collected to a full reply — the same pattern
     # reminder_voice uses. Temperature is LOW here on purpose: this is not
     # creative writing, it is source that has to compile, and an invented
@@ -238,7 +260,7 @@ async def generate_part(description: str, name: str = "") -> dict:
     if rc != 0 or not stl.exists():
         return {"error": f"OpenSCAD could not build that: {(err or out or '').strip()[:200]}",
                 "scad": str(scad)}
-    return {"scad": str(scad), "stl": str(stl),
+    return {"scad": str(scad), "stl": str(stl), "from": "model",
             "size_kb": round(stl.stat().st_size / 1024, 1), "source": code}
 
 

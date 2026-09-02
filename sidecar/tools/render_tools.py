@@ -15,8 +15,10 @@ to force a confirmation would corrupt what the tier means — the same mistake a
 returns `_ask` and the orchestrator arms a conversational yes/no, which he
 answers in his own words.
 
-BELOW the threshold there is no question at all. Asking permission to spend four
-seconds is friction, not courtesy — which is why the tier-1 seed sits under it.
+BELOW the threshold there is no question at all. Asking permission to spend a
+fifth of a second is friction, not courtesy — which is why tier 0 (a parametric
+template) and tier 2 (a traced contour or a relief) sit under it, and tier 1 —
+which wakes llama-server and measured 27 s — sits above it.
 
 DECLINING IS A REAL ANSWER: the "leave it" branch runs nothing, so there is no
 half-written file in the work folder to tidy up afterwards.
@@ -44,14 +46,18 @@ def _label(description: str, image_path: str, tier: int) -> str:
     return f"tier {tier} model"
 
 
-async def make_hologram(description: str = "", image_path: str = "", tier: int = 0,
+async def make_hologram(description: str = "", image_path: str = "", tier: int = -1,
                         name: str = "", confirmed: bool = False) -> dict:
     """Make a 3D model and put it up, in the background, with an estimate."""
     desc = (description or "").strip()
     if not desc and not image_path:
         return {"error": "what should I make, sir?"}
 
-    t = int(tier) if tier in create3d.TIERS else create3d.choose_tier(desc, image_path)
+    # -1, not 0, for "he did not name a tier". 0 became a real tier when the
+    # parametric templates landed, and the old sentinel silently made every
+    # request tier 0 — "a dragon" came back as a template in a fifth of a second,
+    # which is exactly as wrong as it sounds.
+    t = int(tier) if int(tier) in create3d.TIERS else create3d.choose_tier(desc, image_path)
 
     # An unavailable tier is refused BEFORE he is asked to wait for it. Being
     # asked "about three minutes, shall I?" and then told the model is not
@@ -95,7 +101,7 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
               if not behind else
               f"It's queued behind {behind} other{'s' if behind > 1 else ''}, sir.")
     return {"started": True, "tier": t, "label": label, **sub,
-            "note": create3d.TIER_NOTE.get(t, ""), "spoken": spoken}
+            "note": create3d.note_for(t, desc, image_path), "spoken": spoken}
 
 
 async def render_status() -> dict:
@@ -103,6 +109,9 @@ async def render_status() -> dict:
     s = queue.status()
     if not s.get("busy"):
         return {**s, "spoken": "Nothing's rendering, sir."}
+    if s.get("starting"):
+        return {**s, "spoken": f"The {s['label']} is just about to start, sir — "
+                               f"{s['remaining_spoken']}."}
     return {**s, "spoken": f"The {s['label']} has {s['remaining_spoken']} to go, sir."}
 
 
@@ -127,8 +136,10 @@ def register_all() -> None:
             "description": {"type": "string", "description": "what to make, in his words"},
             "image_path": {"type": "string", "description": "a picture to build from"},
             "tier": {"type": "integer",
-                     "description": "1 OpenSCAD, 2 traced extrusion, 3 photo to mesh, "
-                                    "4 text to mesh; omit to choose automatically"},
+                     "description": "0 parametric template, 1 OpenSCAD written by the "
+                                    "model, 2 traced extrusion or photo relief, "
+                                    "3 photo to mesh, 4 text to mesh; OMIT to choose "
+                                    "automatically, which is almost always right"},
             "name": {"type": "string"}},
             "required": []},
         risk=Risk.LOW, handler=make_hologram, timeout=60))

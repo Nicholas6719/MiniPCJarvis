@@ -2,10 +2,20 @@
 
     tier  technique                        typical  editable        printable
     ----  -------------------------------  -------  --------------  -----------------
-    1     the model writes OpenSCAD        ~4 s     yes, by voice   yes, exactly
-    2     an image traced and extruded     ~6 s     thickness/scale yes, sharp
-    3     a photo to a mesh (TripoSR)      ~60 s    no              a likeness
-    4     text to a mesh (Shap-E)          1-3 min  no              rarely, unrepaired
+    0     a parametric template            ~0.2 s   yes, by voice   yes, exactly
+    1     the model writes OpenSCAD        ~27 s    yes, by voice   yes, exactly
+    2     an image traced and extruded     ~1 s     thickness/scale yes, sharp
+    2     a photo as a relief (lithophane) ~0.1 s   thickness/scale yes, watertight
+    3     a photo to a mesh (TripoSR)      minutes  no              a likeness
+    4     text to a mesh (Shap-E)          minutes  no              rarely, unrepaired
+
+WHY TIERS 3 AND 4 ARE NOT THE DEFAULT FOR A PICTURE. Measured on this machine on
+2026-09-02: torch-directml does drive the Radeon 780M, and it is 1.3x the Ryzen
+7 8845HS on a 2048-square matmul — an integrated GPU sharing system RAM against
+eight Zen 4 cores. It is also the GPU llama-server is already holding 9.6 GB of.
+So there is no acceleration to be had here, tiers 3 and 4 would be minutes of CPU
+either way, and a picture defaults to the relief, which takes a tenth of a second
+and is the thing people actually print from photographs.
 
 EVERY RESULT SAYS WHICH TIER MADE IT, because what he can do next depends
 entirely on that. A tier-1 part can be edited by voice — "make the hole bigger"
@@ -32,7 +42,7 @@ from config import config
 
 log = logging.getLogger("jarvis.create3d")
 
-TIERS = (1, 2, 3, 4)
+TIERS = (0, 1, 2, 3, 4)
 
 # Below this in its SMALLEST dimension, a generated part is a sliver rather than
 # a part: no printer can lay it down and nobody asked for it. Half a millimetre
@@ -40,7 +50,12 @@ TIERS = (1, 2, 3, 4)
 # never caught by it.
 MIN_SENSIBLE_MM = 0.5
 
+TIER_NOTE_RELIEF = ("the picture as a relief — dark is thick, so hold it up to a "
+                    "light and the photograph appears")
+
 TIER_NOTE = {
+    0: "from a parametric template, so it's exact, instant, and you can change "
+       "it by voice",
     1: "written as OpenSCAD, so it's exact and you can change it by voice",
     2: "traced from the picture and extruded, so the outline is sharp",
     3: "a mesh built from the photo — a likeness rather than a measured part",
@@ -74,10 +89,153 @@ def choose_tier(description: str = "", image_path: str = "") -> int:
     """
     desc = (description or "").strip()
     if image_path:
-        return 2 if _FLAT.search(desc) else 3
+        # A picture defaults to the FAST printable thing, not a minutes-long
+        # reconstruction he did not ask for. A logo becomes an extruded outline;
+        # anything else becomes a relief, which takes about a second. A real
+        # mesh of the object is tier 3 and only on request.
+        if _FLAT.search(desc):
+            return 2
+        return 3 if _RECONSTRUCT.search(desc) else 2
+    # A shape we can write out exactly needs no model and takes a fifth of a
+    # second. Checked first, because it changes both the wait and whether he is
+    # asked about it at all.
+    import parts_library
+    if parts_library.match(desc):
+        return 0
     if _MECHANICAL.search(desc) or _DIMENSIONED.search(desc):
         return 1
     return 4
+
+
+# Words that ask for a RELIEF — the picture's brightness becoming height. This
+# is the lithophane, and it is the most useful thing anyone actually prints from
+# a photograph.
+_RELIEF = re.compile(r"\b(?:lithophane|litho|relief|emboss(?:ed)?|engrav\w*|"
+                     r"height ?map|3d photo|raised)\b", re.I)
+
+# ...and words that ask for a real reconstructed MESH of the thing in the photo,
+# which is tier 3 and slow. Only on request: the default for a picture is the
+# fast, printable thing, not a minutes-long reconstruction he did not ask for.
+_RECONSTRUCT = re.compile(r"\b(?:scan|mesh|photogrammetry|triposr|reconstruct\w*|"
+                          r"3d model of (?:the|this|that) (?:object|thing|item)|"
+                          r"actual shape|real shape|full 3d)\b", re.I)
+
+
+def note_for(tier: int, description: str = "", image_path: str = "") -> str:
+    """The one-line explanation, decided the same way `build` decides the work.
+
+    Tier 2 is two techniques wearing one number — an extruded outline for a logo,
+    a relief for a photograph — so the note has to be worked out rather than
+    looked up. Submitting a photograph and being told it would be "traced and
+    extruded", then getting a relief, is a small lie that costs trust in every
+    other thing the tool says about itself.
+    """
+    if int(tier) == 2:
+        desc = description or ""
+        outline = bool(_FLAT.search(desc)) and not _RELIEF.search(desc)
+        return TIER_NOTE[2] if outline else TIER_NOTE_RELIEF
+    return TIER_NOTE.get(int(tier), "")
+
+
+# ---------------------------------------------------------- tier 2, as a relief
+MAX_RELIEF_GRID = 120       # ~57k triangles: detailed enough, still light to draw
+
+
+def relief_stl(image_path: str, out_path: str, width_mm: float = 80.0,
+               thick_mm: float = 3.0, base_mm: float = 0.8) -> dict | None:
+    """A photograph as a printable relief. BLOCKING — numpy work, call in a thread.
+
+    A LITHOPHANE, in the ordinary sense: brightness becomes height, dark becomes
+    thick, and held up to a light the picture appears. It is the one thing almost
+    everybody wants from a photo and a printer, it needs no model of any kind,
+    and it takes about a second.
+
+    DARK IS THICK, which is the way round that works: thicker plastic passes less
+    light, so the dark parts of the picture stay dark when it is lit from behind.
+    Getting this backwards produces a photographic negative, which looks like a
+    bug and is one.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return None
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None or img.size == 0:
+        return None
+
+    h, w = img.shape
+    scale = MAX_RELIEF_GRID / float(max(h, w))
+    if scale < 1.0:
+        img = cv2.resize(img, (max(2, int(w * scale)), max(2, int(h * scale))),
+                         interpolation=cv2.INTER_AREA)
+    # A little blur first: printing per-pixel noise wastes detail the nozzle
+    # cannot reproduce anyway, and it makes the surface look sanded.
+    img = cv2.GaussianBlur(img, (3, 3), 0)
+    gh, gw = img.shape
+
+    z = base_mm + (1.0 - img.astype("float64") / 255.0) * thick_mm
+    px = width_mm / float(gw - 1)
+    xs = np.arange(gw) * px
+    ys = np.arange(gh) * px
+
+    def top(r, c):
+        return (xs[c], ys[gh - 1 - r], z[r, c])
+
+    def bot(r, c):
+        return (xs[c], ys[gh - 1 - r], 0.0)
+
+    tris = []
+    for r in range(gh - 1):
+        for c in range(gw - 1):
+            a, b, cc, d = top(r, c), top(r, c + 1), top(r + 1, c + 1), top(r + 1, c)
+            tris.append((a, d, cc))
+            tris.append((a, cc, b))
+            a2, b2, c2, d2 = bot(r, c), bot(r, c + 1), bot(r + 1, c + 1), bot(r + 1, c)
+            tris.append((a2, c2, d2))
+            tris.append((a2, b2, c2))
+    # The four walls, so it is a solid and not a sheet. A slicer will not print a
+    # surface, and printcheck would rightly call it not watertight.
+    for c in range(gw - 1):
+        for r, flip in ((0, False), (gh - 1, True)):
+            t1, t2 = top(r, c), top(r, c + 1)
+            b1, b2 = bot(r, c), bot(r, c + 1)
+            tris += ([(t1, b1, b2), (t1, b2, t2)] if flip
+                     else [(t1, t2, b2), (t1, b2, b1)])
+    for r in range(gh - 1):
+        for c, flip in ((0, True), (gw - 1, False)):
+            t1, t2 = top(r, c), top(r + 1, c)
+            b1, b2 = bot(r, c), bot(r + 1, c)
+            tris += ([(t1, b1, b2), (t1, b2, t2)] if flip
+                     else [(t1, t2, b2), (t1, b2, b1)])
+
+    import struct
+    arr = np.asarray(tris, dtype="float32")
+    with open(out_path, "wb") as f:
+        f.write(b"\0" * 80)
+        f.write(struct.pack("<I", len(arr)))
+        blank = struct.pack("<3f", 0.0, 0.0, 0.0)
+        for t in arr:
+            f.write(blank)
+            f.write(t.tobytes())
+            f.write(b"\0\0")
+    return {"triangles": int(len(arr)), "grid": [int(gw), int(gh)]}
+
+
+async def from_relief(image_path: str, name: str = "") -> dict:
+    """TIER 2, as a relief: a photograph made printable, in about a second."""
+    from tools.fabrication import safe_name, work_dir
+
+    p = Path(str(image_path or "")).expanduser()
+    if not p.exists():
+        return {"error": "I can't find that picture, sir", "tier": 2}
+    base = safe_name(name or p.stem)
+    stl = work_dir() / f"{base}.stl"
+    info = await asyncio.to_thread(relief_stl, str(p), str(stl))
+    if not info:
+        return {"error": "I couldn't read that picture, sir", "tier": 2}
+    return {"tier": 2, "name": base, "stl": str(stl), "mode": "relief",
+            "triangles": info["triangles"], "note": TIER_NOTE_RELIEF}
 
 
 # --------------------------------------------------------------------- tier 2
@@ -278,13 +436,21 @@ async def build(tier: int, description: str = "", image_path: str = "",
     what came out is reported rather than assumed.
     """
     tier = int(tier)
-    if tier == 1:
+    if tier in (0, 1):
         from tools.fabrication import generate_part
         r = await generate_part(description, name)
-        r = {**r, "tier": 1, "note": TIER_NOTE[1]}
+        # Which of the two actually produced it is decided inside generate_part
+        # — it takes the template whenever it can — so the tier is corrected here
+        # from what came back rather than from what was predicted.
+        actual = 0 if r.get("from") == "template" else 1
+        r = {**r, "tier": actual, "note": TIER_NOTE[actual]}
         r.setdefault("name", name or "")
     elif tier == 2:
-        r = await from_image(image_path, name)
+        # Which KIND of tier 2: an extruded outline for a logo, a relief for a
+        # photograph. Decided from his words, and reported either way.
+        outline = (note_for(2, description) == TIER_NOTE[2])
+        r = await (from_image(image_path, name) if outline
+                   else from_relief(image_path, name))
     elif tier == 3:
         r = await from_photo(image_path, name)
     elif tier == 4:

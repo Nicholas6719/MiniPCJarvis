@@ -1692,6 +1692,77 @@ including a real background render with the sidecar answering throughout —
 `render_times.json` under its tier, and the finished part projecting itself onto
 the stage without being asked.
 
+## 2026-09-02 — making it fast: 27 seconds to 0.2, and why the GPU was no help
+
+He asked for it to be fast and performant. The measurement said the bottleneck
+was not where the plan assumed.
+
+**THE GPU IS NOT THE ANSWER HERE, and this is measured rather than guessed.**
+`torch-directml` installs cleanly and does drive the Radeon 780M — but on a
+2048-square matmul it is **1.3x** the Ryzen 7 8845HS, because the 780M is an
+integrated GPU sharing system RAM against eight Zen 4 cores. It is also the GPU
+llama-server is already holding 9.6 GB of, so using it would contend with the
+thing that has to stay responsive. 1.3 GB of environment for 1.3x that fights
+the LLM: removed. **Nobody should repeat this experiment.**
+
+**The real bottleneck was llama-server writing OpenSCAD.** Tier 1 measured 27.5 s,
+of which OpenSCAD is about 0.2. So most requests no longer go near the model:
+`sidecar/parts_library.py` writes cubes, plates, cylinders, spheres, spacers,
+washers and tubes directly from his own numbers. **Measured 0.12–0.30 s against
+27.5 s**, and the parts come out exactly right — the dimensions are the ones he
+said. This is now **tier 0**, with its own estimate bucket, and it never asks.
+
+It is also more CORRECT than the model. Asked for "a hex spacer 12 mm tall" the
+local model produced OpenSCAD for something 0.4 mm wide; the template produces a
+6 mm hex post, 12 mm tall, with a 3.2 mm M3 bore. **The rule that keeps it
+honest: match only when certain.** Anything carrying meaning a template cannot
+hold — a bracket, a gear, a fillet, "shaped like a swan" — falls through to the
+model, because a confident, exact, WRONG part is far worse than waiting half a
+minute for a right one. The gate has more decline cases than match cases.
+
+**A photograph now becomes something printable in a tenth of a second.**
+`relief_stl` turns any picture into a lithophane — brightness becomes height,
+dark becomes thick, so held up to a light the photograph appears. No model of any
+kind, watertight, sliceable, 0.10 s measured. A picture therefore DEFAULTS to the
+relief rather than to a minutes-long reconstruction he did not ask for; tier 3 is
+reserved for when he says "scan" or "mesh". Dark-is-thick is gated explicitly:
+backwards, it prints a photographic negative.
+
+**A bug the new tier caused, and the gate caught.** `make_hologram` used
+`tier: int = 0` as its "he didn't say" sentinel — and 0 became a real tier. Every
+request skipped tier selection and came back as a parametric template; "a dragon"
+was answered in a fifth of a second. The sentinel is -1 now.
+
+**A race the speed exposed.** With tier 0 finishing in 0.2 s, jobs started
+landing exactly as the queue emptied — and the pump was restarted only when
+`self._pump.done()` was true. The drain coroutine passes its `while self._jobs`
+check, finds nothing and begins returning, and during that window the task is
+not yet done: a job appended right then saw a live pump and **sat in the queue
+forever**. It surfaced as a relief that never rendered and a "stop that" which
+said nothing was running while a job was plainly queued. A plain `_draining`
+flag closes it, cleared in a `finally` that re-checks the queue with no await in
+between. The slow paths hid this; making things fast is what found it.
+
+**And a status that lied, found the same way.** `status()` reported `busy: False`
+while a job was QUEUED but not yet picked up — so asking "is it done yet" one
+second after requesting something was answered "nothing's rendering, sir". Only
+visible once renders got fast enough for that window to matter. Queued now reads
+as busy with a `starting` flag, and JARVIS says "it's just about to start".
+The same window made a live check wait on the wrong condition and conclude a
+relief had failed when it simply had not begun.
+
+**A note that disagreed with the work.** Tier 2 is two techniques wearing one
+number, and the note was looked up by tier at submit time — so submitting a
+photograph promised "traced from the picture and extruded" and then delivered a
+relief. `create3d.note_for()` now decides it the same way `build()` decides the
+work, so they cannot drift.
+
+**Where tiers 3 and 4 stand:** still scaffolded, still honestly unavailable,
+still refusing to fall back to another technique. On this hardware they would be
+minutes of CPU whatever we do, and the fast paths above cover what he actually
+wants from a picture. The seam is there for when a machine with real GPU compute
+is.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

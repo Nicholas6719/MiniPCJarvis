@@ -90,12 +90,65 @@ async def main() -> int:
     check("tier 3 is over it", est.SEED[3] > est.ask_threshold())
     check("tier 4 is well over it", est.SEED[4] > est.ask_threshold() * 5)
 
+    # ------------------------------------------------- the parametric templates
+    # This is now the path most requests take, so it carries most of the risk.
+    # The dangerous failure is not a miss — a miss just wakes the model — it is a
+    # FALSE MATCH: a confident, exact, wrong part produced instantly. So the
+    # decline cases matter more than the match cases.
+    import parts_library as PL
+
+    for said, want in (
+            ("a 20 mm cube", ["cube([20, 20, 20])"]),
+            ("a plate 40 by 30 by 6 mm", ["cube([40, 30, 6])"]),
+            ("a cylinder 20 mm diameter 30 mm tall", ["cylinder(d = 20, h = 30"]),
+            ("a sphere 25 mm diameter", ["sphere(d = 25)"]),
+            ("a washer 20 mm outer 8 mm inner 2 mm thick",
+             ["cylinder(d = 20, h = 2)", "d = 8"]),
+            ("a tube 20 mm outer 14 mm inner 40 mm long",
+             ["cylinder(d = 20, h = 40)", "d = 14"]),
+            ("a hex spacer 12 mm tall", ["h = 12", "$fn = 6"]),
+            ("a plate 40 by 30 by 6 mm with a 5 mm hole",
+             ["cube([40, 30, 6])", "d = 5"])):
+        src = PL.match(said)
+        check(f"{said!r} is written from a template", src is not None)
+        for frag in want:
+            check(f"  ...containing {frag!r}", src is not None and frag in src,
+                  src)
+
+    # DECLINES. Each of these has numbers in it, so a careless matcher would fire.
+    for said in ("a bracket 40 mm wide", "a phone stand", "a dragon",
+                 "a gear with 20 teeth", "a plate with rounded corners 40 by 30 by 5 mm",
+                 "a case for a raspberry pi 90 by 60 by 30 mm",
+                 "a hook 40 mm long", "a knob 30 mm across", ""):
+        check(f"{said!r} is left to the model", PL.match(said) is None,
+              PL.match(said))
+
+    check("every template sets the curve resolution",
+          all("$fn" in (PL.match(s) or "")
+              for s in ("a 20 mm cube", "a hex spacer 12 mm tall",
+                        "a sphere 25 mm diameter")),
+          "OpenSCAD's default gives a 5 mm hole about a dozen segments, and a "
+          "bolt does not fit a hexagon")
+    # A hole cut exactly flush leaves coincident faces, which is a classic way to
+    # hand a slicer a solid that renders fine and slices wrong.
+    src = PL.match("a plate 40 by 30 by 6 mm with a 5 mm hole")
+    check("a hole is cut proud of both faces", "6.2" in src and "-0.1" in src, src)
+
+    check("a templated part is tier 0",
+          create3d.choose_tier("a 20 mm cube", "") == 0)
+    check("...and tier 0 never asks",
+          est.SEED[0] <= est.ask_threshold(),
+          "nobody wants to be asked permission to spend a fifth of a second")
+
     # ----------------------------------------------------------- the tiers
     for desc, img, want in (("a bracket 40 mm wide", "", 1),
                             ("a plate with a hole", "", 1),
-                            ("a 20 mm cube", "", 1),
+                            ("a 20 mm cube", "", 0),          # a template, not the model
                             ("the emblem", "logo.png", 2),
-                            ("this chair", "photo.jpg", 3),
+                            # a picture defaults to the RELIEF, which is instant and
+                            # printable; a real reconstruction is only on request
+                            ("this chair", "photo.jpg", 2),
+                            ("scan this chair", "photo.jpg", 3),
                             ("a dragon", "", 4),
                             ("a spaceship", "", 4)):
         got = create3d.choose_tier(desc, img)
@@ -122,6 +175,18 @@ async def main() -> int:
 
     check("nothing is running to start with", q.busy is False)
     check("...and status says so", q.status()["busy"] is False)
+
+    # A job that is QUEUED but not yet picked up still counts as busy. Reporting
+    # "nothing is rendering" one second after he asked for something is a lie he
+    # would catch immediately.
+    q0 = RenderQueue()
+    q0._jobs.append(__import__("render_queue").Job(
+        id="x", tier=1, label="the waiting one", run=lambda: {}, estimate_s=5.0))
+    s0 = q0.status()
+    check("a queued-but-not-started job still reads as busy", s0["busy"] is True, s0)
+    check("...and says it is about to start", s0.get("starting") is True, s0)
+    check("...and names it", s0.get("label") == "the waiting one", s0)
+    q0._jobs.clear()
 
     t0 = time.time()
     a = q.submit(1, "the first", slow("a"))
@@ -154,6 +219,28 @@ async def main() -> int:
         await asyncio.sleep(0.02)
     check("both jobs ran", order == ["a", "b"], order)
     check("...one at a time, in order", q.busy is False)
+
+    # A JOB SUBMITTED JUST AS THE QUEUE EMPTIES MUST STILL RUN. The pump used to
+    # be restarted only when `self._pump.done()` was true — but the drain
+    # coroutine passes its `while self._jobs` check, finds nothing and begins
+    # returning, and during that window the task is not yet done(). A job
+    # appended right then saw a live pump and sat in the queue forever. It looked
+    # like a render that never started, and a "stop that" which said nothing was
+    # running while a job was plainly queued.
+    q4 = RenderQueue()
+    q4.submit(1, "the first", slow("x", 0.05))
+    for _ in range(400):                      # right up to the edge of idle
+        if not q4.busy:
+            break
+        await asyncio.sleep(0.005)
+    ran2 = []
+    q4.submit(1, "the second", lambda: ran2.append(1) or {"ok": True})
+    for _ in range(300):
+        if ran2:
+            break
+        await asyncio.sleep(0.02)
+    check("a job submitted as the queue empties is not stranded", ran2 == [1],
+          "the pump did not restart")
 
     # ---------------------------------------------------------- cancelling
     q2 = RenderQueue()
@@ -195,6 +282,9 @@ async def main() -> int:
     check("a short job does not ask, it just starts",
           r.get("_ask") is None and r.get("started") is True, r)
     check("...and reports which tier made it", r.get("tier") == 2, r)
+    check("...and did not silently become tier 0",
+          r.get("tier") != 0,
+          "0 is a real tier now; -1 is the sentinel for 'he did not say'")
     await render_tools.cancel_render()
 
     # An UNINSTALLED tier is refused before he is asked to wait for it. Being
@@ -255,6 +345,67 @@ async def main() -> int:
                   "success and be wrong")
             skip(f"tier {tier} produces a mesh",
                  f"{what} is not installed at {create3d.model3d_dir()}")
+
+    # ------------------------------------------------- a photograph, as a relief
+    # The fast, printable answer to "make something 3D out of this picture" —
+    # a lithophane. No model of any kind, about a tenth of a second, and it must
+    # come out WATERTIGHT or a slicer will refuse it.
+    try:
+        import cv2
+        import numpy as np
+
+        d_img = tempfile.mkdtemp()
+        face = np.zeros((300, 400), np.uint8)
+        cv2.circle(face, (200, 150), 110, 200, -1)
+        cv2.circle(face, (160, 110), 30, 60, -1)
+        cv2.circle(face, (240, 110), 30, 60, -1)
+        photo = os.path.join(d_img, "face.png")
+        cv2.imwrite(photo, face)
+        out = os.path.join(d_img, "relief.stl")
+
+        t0 = time.time()
+        info = create3d.relief_stl(photo, out)
+        took = time.time() - t0
+        check("a photograph becomes a relief", info is not None, info)
+        check("...quickly", took < 3.0, f"{took:.2f}s")
+
+        import meshio
+        import printcheck
+        integ = printcheck.integrity(meshio.load_stl(out))
+        check("...and it is watertight, so a slicer will take it",
+              integ.get("watertight") is True, integ)
+        check("...with consistent winding", integ.get("winding_consistent") is True, integ)
+        size = meshio.describe(out)["size_mm"]
+        check("...at a sensible size", 70 < size[0] < 90 and 2 < size[2] < 6, size)
+
+        # DARK IS THICK. Backwards, this prints a photographic negative — it
+        # looks like a bug because it is one. A black patch must be taller than
+        # a white one.
+        contrast = np.zeros((40, 80), np.uint8)
+        contrast[:, 40:] = 255                       # left black, right white
+        cpath = os.path.join(d_img, "half.png")
+        cv2.imwrite(cpath, contrast)
+        cout = os.path.join(d_img, "half.stl")
+        create3d.relief_stl(cpath, cout)
+        tris = meshio.load_stl(cout)
+        pts = tris.reshape(-1, 3)
+        w_mm = pts[:, 0].max()
+        dark_h = pts[pts[:, 0] < w_mm * 0.25][:, 2].max()
+        light_h = pts[pts[:, 0] > w_mm * 0.75][:, 2].max()
+        check("dark is thick and light is thin", dark_h > light_h + 1.0,
+              f"dark {dark_h:.2f} vs light {light_h:.2f} — backwards prints a negative")
+
+        check("a picture with no reconstruction asked for stays fast",
+              create3d.choose_tier("make this 3d", "photo.jpg") == 2)
+        check("...and a real scan is only on request",
+              create3d.choose_tier("scan this object", "photo.jpg") == 3)
+        check("...and a logo is still an extruded outline",
+              create3d.choose_tier("the logo", "logo.png") == 2)
+        check("an unreadable picture makes no relief",
+              create3d.relief_stl(os.path.join(d_img, "nope.png"),
+                                  os.path.join(d_img, "x.stl")) is None)
+    except ImportError:
+        skip("the photo relief", "opencv is not importable here")
 
     # ------------------------------------------------- a generation that failed
     # Asked for "a hex spacer 12 mm tall" the local model produced something

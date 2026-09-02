@@ -68,6 +68,7 @@ class RenderQueue:
         self._current: Job | None = None
         self._task: asyncio.Task | None = None
         self._pump: asyncio.Task | None = None
+        self._draining = False
         self._warned = False
 
     # ---- what he can ask about ------------------------------------------
@@ -78,7 +79,19 @@ class RenderQueue:
     def status(self) -> dict:
         cur = self._current
         if cur is None:
-            return {"busy": False, "queued": len(self._jobs)}
+            # QUEUED IS STILL BUSY. There is a moment between submitting a job
+            # and the pump picking it up, and reporting "nothing is rendering"
+            # inside it is a lie he would catch immediately — he asked for the
+            # thing one second ago. It also made a test wait on the wrong
+            # condition and conclude a render had failed when it had not started.
+            if self._jobs:
+                nxt = self._jobs[0]
+                return {"busy": True, "starting": True, "label": nxt.label,
+                        "tier": nxt.tier, "elapsed_s": 0.0,
+                        "remaining_s": round(nxt.estimate_s, 1),
+                        "remaining_spoken": est.spoken(nxt.estimate_s),
+                        "queued": len(self._jobs)}
+            return {"busy": False, "queued": 0}
         left = max(0.0, cur.estimate_s - (time.time() - cur.started))
         return {"busy": True, "label": cur.label, "tier": cur.tier,
                 "elapsed_s": round(time.time() - cur.started, 1),
@@ -95,8 +108,7 @@ class RenderQueue:
                   estimate_s=est.estimate(tier))
         self._jobs.append(job)
         spawn(self._announce("queued", job), name=f"render:queued:{job.id}")
-        if self._pump is None or self._pump.done():
-            self._pump = spawn(self._drain(), name="render:pump")
+        self._ensure_pump()
         return {"job": job.id, "tier": job.tier,
                 "estimate_s": round(job.estimate_s, 1),
                 "estimate_spoken": est.spoken(job.estimate_s),
@@ -117,7 +129,33 @@ class RenderQueue:
         return {"cancelled": True, "label": cur.label, "dropped": dropped}
 
     # ---- the pump --------------------------------------------------------
+    def _ensure_pump(self) -> None:
+        """Start the drain loop unless one is already going.
+
+        NOT `self._pump.done()`, which had a real race and stranded jobs: the
+        drain coroutine can pass its `while self._jobs` check, find nothing, and
+        begin returning — and during that window the task is not yet `done()`, so
+        a job submitted right then was appended, saw a live pump, and sat in the
+        queue forever. It showed up as a render that never started and a "stop
+        that" which reported nothing was running while a job was plainly queued.
+
+        A plain flag closes it, because `_drain` clears the flag and re-checks
+        the queue with no await in between — so nothing can slip past.
+        """
+        if self._draining:
+            return
+        self._draining = True
+        self._pump = spawn(self._drain(), name="render:pump")
+
     async def _drain(self) -> None:
+        try:
+            await self._drain_loop()
+        finally:
+            self._draining = False
+            if self._jobs:              # arrived while we were finishing
+                self._ensure_pump()
+
+    async def _drain_loop(self) -> None:
         while self._jobs:
             job = self._jobs.pop(0)
             self._current = job
