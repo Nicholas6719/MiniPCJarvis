@@ -2279,6 +2279,15 @@ SKILLS: list[Skill] = [
     # NOT "put on some jazz" or "play some music on spotify": the first
     # canonicalizes to "open APP" and clashes with open_app, the second is
     # media_pause's territory. Play/pause stays a control; this is a search.
+    # MUSIC IS SPOTIFY, not the media key. "Play some music" pressed
+    # play/pause, which goes to whatever app owns the media session — a paused
+    # YouTube tab — so he asked for music and got a video. Ahead of the media
+    # controls, which keep every sentence that names what is already playing.
+    Skill("music_play", "play_music", [
+        "play some music", "put some music on", "play music",
+        "put music on", "i want some music", "play me some music",
+        "let's have some music", "music please"],
+        speak=None),
     Skill("video", "play_media", [
         "find me a youtube video of someone playing iron man",
         "find me a video of a rocket launch", "pull up a video about black holes",
@@ -2344,7 +2353,12 @@ SKILLS: list[Skill] = [
         # NOT "put on some music": "put on" canonicalizes to the open-APP form and
         # clashes with open_app; slots_app rejects music-words so it falls to the LLM.
         "pause spotify", "resume playback", "unpause", "pause that", "play pause",
-        "play some music",
+        # "PLAY SOME MUSIC" IS NOT HERE ANY MORE. It was, and it pressed the
+        # Windows play/pause key — which goes to whatever app holds the media
+        # session, so he asked for music and a paused YouTube tab started
+        # playing. This skill keeps the sentences about what is ALREADY
+        # playing; starting music from nothing is music_play, which opens
+        # Spotify first so the key lands somewhere sensible.
         # "play/pause the video" is a CONTROL, and was scoring 0.78 — under the
         # threshold, so it fell to the model and cost a round trip for a button
         # press. Seeded here it is also the guard that stops the video-search

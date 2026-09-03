@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import ctypes
 import re
+
+import psutil
 import datetime
 import logging
 
@@ -445,6 +447,69 @@ def _first_youtube_id(query: str) -> str | None:
         return None
 
 
+def open_application_sync(name: str) -> dict:
+    """Launch by name, synchronously — play_music is not async."""
+    import subprocess as _sp
+    try:
+        _sp.Popen(["cmd", "/c", "start", "", f"{name}:"],
+                  creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+        return {"launched": name}
+    except Exception as e:
+        log.debug("could not launch %s", name, exc_info=True)
+        return {"error": str(e)}
+
+
+def play_music(what: str = "") -> dict:
+    """Put music on — in Spotify, not in whatever tab last held the media keys.
+
+    "Play some music" used to reach media_control, which presses the Windows
+    play/pause key. That key goes to whatever app owns the media session, which
+    was a paused YouTube tab, so he asked for music and got a video.
+
+    Spotify is where he listens, so Spotify is what gets opened; the play key
+    then lands on it. Resuming is exactly "the last thing I was listening to".
+
+    A NAMED playlist is refused rather than approximated. Knowing his library
+    needs the Spotify Web API, an app registered under his account and a
+    consent only he can give — and quietly playing something else instead is
+    how "play some music" became a YouTube video in the first place.
+    """
+    import time as _t
+    want = (what or "").strip()
+    if want and not re.fullmatch(r"(?:some\s+)?music|something|anything",
+                                 want, re.I):
+        return {"error": "I can start Spotify and play, sir, but I can't pick a "
+                         "playlist out of your library yet — that needs a "
+                         "Spotify login you'd have to authorise",
+                "spoken": "I can put Spotify on, sir, but I can't reach your "
+                          "playlists yet — that needs a login you'd have to "
+                          "authorise. Shall I just play?"}
+
+    running = False
+    try:
+        for pr in psutil.process_iter(["name"]):
+            if (pr.info["name"] or "").lower() == "spotify.exe":
+                running = True
+                break
+    except Exception:
+        log.debug("could not check for spotify", exc_info=True)
+
+    if not running:
+        r = open_application_sync("spotify")
+        if r.get("error"):
+            return {"error": "I couldn't start Spotify, sir"}
+        # It has to be up and holding the media session before the key lands.
+        _t.sleep(4.0)
+    else:
+        focus_window("Spotify")
+        _t.sleep(0.4)
+
+    media_control("play_pause")
+    return {"playing": "spotify", "launched": not running,
+            "spoken": ("Spotify's on, sir." if not running
+                       else "Playing, sir.")}
+
+
 def search_in_browser(query: str, kind: str = "web") -> dict:
     """A search in HIS browser, because he asked for it there specifically.
 
@@ -832,6 +897,20 @@ def register_all() -> None:
         parameters={"type": "object", "properties": {
             "url": {"type": "string"}}, "required": ["url"]},
         risk=Risk.LOW, handler=open_url))
+    registry.register(T(
+        name="play_music",
+        description="Put MUSIC on, in Spotify. Use for 'play some music', 'put "
+                    "some music on', 'play my music'. Launches or focuses the "
+                    "Spotify desktop app and presses play, so the media key "
+                    "lands on Spotify rather than on whatever browser tab last "
+                    "held the media session. Does NOT know his library: a named "
+                    "playlist is refused with a reason, never approximated.",
+        parameters={"type": "object", "properties": {
+            "what": {"type": "string",
+                     "description": "leave empty for 'some music'; a named "
+                                    "playlist is refused with an explanation"}},
+            "required": []},
+        risk=Risk.LOW, handler=play_music, timeout=20))
     registry.register(T(
         name="play_media",
         description="Find a VIDEO, song or film for the user to watch or listen to, opened "
