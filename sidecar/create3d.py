@@ -122,6 +122,20 @@ def choose_tier(description: str = "", image_path: str = "") -> int:
         return 0
     if _MECHANICAL.search(desc) or _DIMENSIONED.search(desc):
         return 1
+    # A FLAT THING IS FLAT WHETHER OR NOT HE HANDED OVER THE PICTURE.
+    #
+    # `_FLAT` already knew "emblem" and "logo" — but it was only consulted when
+    # an image_path was given, so "create me a 3D image of the Spider-Man
+    # emblem" fell through to tier 4 and was RECONSTRUCTED: a single-photo mesh
+    # of a flat two-colour logo, which is a blob. His words: "doesn't really look
+    # right... didn't seem like it took any references".
+    #
+    # It did take a reference — that is what tier 4 does — and then used it for
+    # the wrong technique. An emblem wants its outline traced and extruded,
+    # which is sharp, fast and actually printable. Tier 2 fetches the reference
+    # itself when he has not supplied one.
+    if _FLAT.search(desc):
+        return 2
     return 4
 
 
@@ -315,6 +329,108 @@ def trace_outline(image_path: str, max_points: int = 400) -> list[list[float]] |
     return [[float(p[0][0]), float(h - p[0][1])] for p in approx.reshape(-1, 1, 2)]
 
 
+# HOW SMALL A SHAPE STILL COUNTS, as a fraction of the biggest one. A spider's
+# legs are small next to its body but they are the emblem; a stray speck of JPEG
+# noise is not.
+MIN_PART_FRACTION = 0.02
+
+
+def trace_shapes(image_path: str, max_points: int = 400) -> list[dict] | None:
+    """Every significant shape in the picture, with its holes.
+
+    `trace_outline` returns ONE outline and drops everything inside it, which is
+    fine for a silhouette and wrong for an emblem: the Spider-Man badge came back
+    as a plain oval disc, because `RETR_EXTERNAL` discards internal detail and
+    `max(contourArea)` then keeps only the outer boundary. A logo is a figure
+    WITH holes, and often several parts.
+
+    BLOCKING — cv2 work, called from a thread.
+    """
+    try:
+        import cv2
+    except Exception:
+        return None
+    img = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+
+    if img.ndim == 3 and img.shape[2] == 4 and img[:, :, 3].min() < 250:
+        mask = (img[:, :, 3] > 127).astype("uint8") * 255
+    else:
+        grey = (cv2.cvtColor(img[:, :, :3], cv2.COLOR_BGR2GRAY)
+                if img.ndim == 3 else img)
+        _, mask = cv2.threshold(grey, 0, 255,
+                                cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if mask.mean() > 127:
+            mask = 255 - mask
+
+    # RETR_CCOMP gives two levels: outer boundaries and the holes inside them,
+    # which is exactly the structure a logo has.
+    cnts, hier = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    if hier is None or not len(cnts):
+        return None
+    hier = hier[0]
+    h = mask.shape[0]
+
+    def simplify(c):
+        peri = cv2.arcLength(c, True)
+        eps = 0.0015 * peri
+        while True:
+            approx = cv2.approxPolyDP(c, eps, True)
+            # Stop simplifying much earlier than the silhouette tracer does. At
+            # 0.05 of the perimeter a spider becomes an ellipse, which is
+            # literally what he was shown.
+            if len(approx) <= max_points or eps > 0.008 * peri:
+                break
+            eps *= 1.4
+        return [[float(q[0][0]), float(h - q[0][1])] for q in approx]
+
+    outers = [(i, cv2.contourArea(c)) for i, c in enumerate(cnts)
+              if hier[i][3] < 0 and cv2.contourArea(c) > 32]
+    if not outers:
+        return None
+    biggest = max(a for _, a in outers)
+    shapes: list[dict] = []
+    for i, area in outers:
+        if area < biggest * MIN_PART_FRACTION:
+            continue          # noise, not a leg
+        outline = simplify(cnts[i])
+        if len(outline) < 3:
+            continue
+        holes = []
+        child = hier[i][2]
+        while child >= 0:
+            if cv2.contourArea(cnts[child]) > max(32.0, area * 0.004):
+                hp = simplify(cnts[child])
+                if len(hp) >= 3:
+                    holes.append(hp)
+            child = hier[child][0]
+        shapes.append({"outline": outline, "holes": holes})
+    return shapes or None
+
+
+def _shapes_scad(shapes: list[dict], height_mm: float, width_mm: float) -> str:
+    """Extrude every traced shape, with its holes cut out of it."""
+    body = []
+    for sh in shapes:
+        pts = list(sh["outline"])
+        paths = [list(range(len(pts)))]
+        for hole in sh["holes"]:
+            start = len(pts)
+            pts.extend(hole)
+            paths.append(list(range(start, len(pts))))
+        pt_s = ", ".join(f"[{x:.3f},{y:.3f}]" for x, y in pts)
+        pa_s = ", ".join("[" + ",".join(str(i) for i in path) + "]"
+                         for path in paths)
+        body.append(f"    polygon(points = [{pt_s}], paths = [{pa_s}]);")
+    joined = "\n".join(body)
+    return ("$fn = 48;\n"
+            f"// traced from an image, extruded {height_mm:g} mm\n"
+            f"linear_extrude(height = {height_mm:g})\n"
+            f"  resize([{width_mm:g}, 0, 0], auto = true)\n"
+            "    union() {\n" + joined + "\n    }\n")
+
+
 async def from_image(image_path: str, name: str = "", thickness_mm: float = 3.0,
                      width_mm: float = 60.0) -> dict:
     """TIER 2: trace a picture and extrude it. No model involved, no GPU."""
@@ -327,21 +443,27 @@ async def from_image(image_path: str, name: str = "", thickness_mm: float = 3.0,
     if not exe:
         return {"error": "OpenSCAD is not installed", "unavailable": True, "tier": 2}
 
-    pts = await asyncio.to_thread(trace_outline, str(p))
-    if not pts or len(pts) < 3:
+    # EVERY shape and its holes, not the single largest outline. The emblem came
+    # back as a plain oval because the old tracer kept the outer boundary and
+    # threw the spider away.
+    shapes = await asyncio.to_thread(trace_shapes, str(p))
+    if not shapes:
         return {"error": "I couldn't find a clear outline in that picture, sir",
                 "tier": 2}
+    pts = [q for sh in shapes for q in sh["outline"]]
 
     base = safe_name(name or p.stem)
     d = work_dir()
     scad, stl = d / f"{base}.scad", d / f"{base}.stl"
-    scad.write_text(_outline_scad(pts, thickness_mm, width_mm), encoding="utf-8")
+    scad.write_text(_shapes_scad(shapes, thickness_mm, width_mm), encoding="utf-8")
     rc, out, err = await _run([exe, "-o", str(stl), str(scad)], 180)
     if rc != 0 or not stl.exists():
         return {"error": f"OpenSCAD could not build that: {(err or out or '').strip()[:200]}",
                 "tier": 2}
     return {"tier": 2, "name": base, "scad": str(scad), "stl": str(stl),
-            "points": len(pts), "note": TIER_NOTE[2]}
+            "points": len(pts), "shapes": len(shapes),
+            "holes": sum(len(sh["holes"]) for sh in shapes),
+            "note": TIER_NOTE[2]}
 
 
 # ----------------------------------------------------------------- tiers 3, 4
@@ -429,7 +551,7 @@ async def from_photo(image_path: str, name: str = "") -> dict:
             "repair_likely": True}
 
 
-async def reference_image(description: str) -> str:
+async def reference_image(description: str, flat: bool = False) -> str:
     """A picture of the thing he described, saved to the work folder.
 
     TIER 4 IS TEXT -> PICTURE -> MESH, not a text-to-3D model, and that is a
@@ -447,15 +569,30 @@ async def reference_image(description: str) -> str:
 
     if not brave_web.available:
         return ""
+    # WHAT MAKES A GOOD REFERENCE DEPENDS ON WHAT IT IS FOR.
+    #
+    # Tier 3 wants a photograph of the object. Tier 2 wants a CLEAN LOGO: high
+    # contrast, plain background, ideally transparent. Asked for "the
+    # spider-man emblem" the plain search returned photographs, Otsu turned one
+    # into a single blob, and the traced result was an oval disc with a smudge
+    # in the middle. The tracer was not the problem by then — the picture was.
+    query = f"{description} logo silhouette black on white transparent png"         if flat else description
     try:
-        imgs = await brave_web.images(description, 4)
+        imgs = await brave_web.images(query, 8 if flat else 4)
     except Exception:
         log.debug("reference image search failed", exc_info=True)
         return ""
 
     import httpx
     d = work_dir()
-    for i, img in enumerate(imgs or []):
+    # A PNG WITH ALPHA IS THE BEST POSSIBLE TRACE — `trace_shapes` uses the alpha
+    # channel directly and does no guessing at all. Try those first when the
+    # picture is going to be traced rather than reconstructed.
+    ordered = list(imgs or [])
+    if flat:
+        ordered.sort(key=lambda im: 0 if ".png" in (im.get("src") or "").lower()
+                     else 1)
+    for i, img in enumerate(ordered):
         src = (img or {}).get("src") or ""
         if not src.startswith(("http://", "https://")):
             continue
@@ -625,11 +762,32 @@ async def build(tier: int, description: str = "", image_path: str = "",
         # question twice and hoping is not a retry.
         r = await _verify_and_retry(r, description, name)
     elif tier == 2:
+        # NO PICTURE? FIND ONE. "Create me a 3D image of the Spider-Man emblem"
+        # names a flat thing and hands over nothing to trace, and tier 2 without
+        # an image used to be an error. Fetching the reference here is the same
+        # move tier 4 makes — the difference is what happens to it afterwards:
+        # traced and extruded rather than reconstructed.
+        ref_fetched = ""
+        if not image_path and description:
+            image_path = ref_fetched = await reference_image(description, flat=True)
+            if not image_path:
+                return {"error": "I couldn't find a picture of that to trace, sir",
+                        "tier": 2}
+        if not image_path:
+            return {"error": "I need a picture to work from, sir", "tier": 2}
         # Which KIND of tier 2: an extruded outline for a logo, a relief for a
         # photograph. Decided from his words, and reported either way.
         outline = (note_for(2, description) == TIER_NOTE[2])
         r = await (from_image(image_path, name) if outline
                    else from_relief(image_path, name))
+        if ref_fetched:
+            r.setdefault("reference_used", True)
+            # Scaffolding, not a part. Kept on failure so it can be looked at.
+            try:
+                if not r.get("error"):
+                    os.remove(ref_fetched)
+            except OSError:
+                pass
     elif tier == 3:
         r = await from_photo(image_path, name)
     elif tier == 4:

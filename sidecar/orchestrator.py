@@ -444,6 +444,22 @@ class Orchestrator:
         """Open the follow-up window: speech alone opens a turn, no wake word."""
         mode = config.get("wake", "mode", default="push_to_talk")
         win = float(config.get("conversation", "window_s", default=8))
+        # WORKING ON A MODEL IS A CONVERSATION, NOT A COMMAND.
+        #
+        # Five seconds is right for "what's the weather" — ask, hear, done. It is
+        # wrong with a part on the stage: he turns it, looks at it, thinks, and
+        # says the next thing, and the window has shut every time. His
+        # instruction was 35-45 seconds while there is a hologram up, and the
+        # reason it can be that long here is that the stage says what the mode
+        # is — an open microphone is not a surprise when a model is in front of
+        # him and he is working on it.
+        try:
+            from tools.holo_tools import current
+            if current().get("path"):
+                win = float(config.get("conversation", "holo_window_s", default=40))
+        except Exception:
+            log.debug("could not check the stage for the window length",
+                      exc_info=True)
         if mode in ("wake_word", "both") and win > 0:
             self._armed_until = time.time() + win
             asyncio.create_task(bus.emit("conversation", armed=True,

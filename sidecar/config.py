@@ -234,7 +234,11 @@ DEFAULTS: dict[str, Any] = {
     # closes, when he goes idle, or when he is put to sleep. "Show me two images
     # of Iron Man", a silence, then "JARVIS, show me three more" still knows it
     # is Iron Man.
-    "conversation": {"window_s": 5},
+    # ...and LONGER while a model is on the stage. His instruction: 35-45
+    # seconds during holographic work. Turning a part, looking at it and
+    # thinking takes longer than asking the time, and the stage being up is
+    # itself the signal that he is mid-task.
+    "conversation": {"window_s": 5, "holo_window_s": 40},
     "interrupt": {"mode": "wake_word"},   # wake_word | any_speech
     # MCP plugin servers: {"name": {"command": "...", "args": [...], "risk": "medium"}}
     "mcp": {"servers": {}},

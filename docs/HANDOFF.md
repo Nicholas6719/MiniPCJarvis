@@ -2573,6 +2573,63 @@ wrong.
 **Not fixable here:** "Tom Hall" is a mis-hear of "Tom Holland". The query is
 clean now; the name is what the recogniser heard.
 
+## 2026-09-03 — the emblem was a disc, and metrics kept saying it was fine
+
+He asked for a 3D image of the Spider-Man emblem and got something that "doesn't
+really look right". It took THREE layers to fix, and I reported it fixed twice
+before it was.
+
+**LAYER ONE — the wrong TIER.** `_FLAT` already knew "emblem" and "logo", but it
+was only consulted when an image_path was given. Text-only fell through to tier
+4: find a photo, RECONSTRUCT it in 3D. A flat two-colour logo reconstructed as a
+solid is a blob. A flat thing is flat whether or not he handed over the picture,
+so tier 2 now claims it and fetches its own reference.
+
+**LAYER TWO — the wrong TRACE.** `RETR_EXTERNAL` discards everything inside the
+outer boundary and `max(contourArea)` then keeps only that boundary, so a badge's
+outer ring wins and the spider inside it is thrown away — then `approxPolyDP` at
+up to 0.05 of the perimeter rounds what is left into an ellipse. `trace_shapes`
+keeps every significant part WITH its holes (RETR_CCOMP), cuts them properly with
+OpenSCAD `paths`, and stops simplifying six times earlier.
+
+**LAYER THREE — the wrong PICTURE.** After both fixes it was STILL a disc: one
+polygon, no holes. The tracer was fine by then; a plain image search returns
+photographs, and Otsu on a photograph gives one blob. When the picture is going
+to be TRACED rather than reconstructed, `reference_image(flat=True)` searches for
+"logo silhouette black on white transparent png", pulls eight candidates instead
+of four, and tries transparent PNGs first — the alpha channel IS the outline, and
+the tracer then does no guessing at all.
+
+Result, rendered flat from the STL: a spider. Body, head, eight legs, sharp
+edges. 60 x 65 mm, 316 triangles.
+
+**THE PROCESS LESSON IS THE BIGGER ONE.** I called this fixed twice on evidence
+that could not see the problem:
+
+  * "tier 2, 22 KB, sliceable, zero overhangs" — every word true, and it was a
+    disc. None of those numbers is about SHAPE.
+  * "the tracer keeps holes now" — proven on a synthetic ring, and the real
+    output was still a disc, because the input picture was the problem.
+
+What settled it was `.agent/scripts/silhouette.py`, which projects the STL onto
+its own XY plane and draws it. A flat part photographed on the holo stage is seen
+nearly edge-on and tells you almost nothing. **For a shape, look at the shape.**
+
+**Also fixed in the same pass**, all from his message:
+
+* The camera view in hand mode never appeared: it was keyed to `cameraOn`, which
+  only the `set_camera` TOOL sets — and `hand_control` opens the device directly,
+  so nothing ever told the HUD. It now shows whenever hands are armed.
+* Hand control picked ONE axis per frame, whichever moved more, so a diagonal
+  drag flipped between spinning and tipping and the model lurched between two
+  motions. Both axes at once now, with eased velocity (the camera reads at 10 fps,
+  so raw deltas arrive as jerks) and gain 540 -> 450. Smoothing the POINT was the
+  first attempt and was wrong: the smoothed point lags, so a hand held still kept
+  turning the model. The deadzone reads the RAW movement; only the response is
+  eased.
+* The follow-up window is 40 s while a model is on the stage, 5 s otherwise.
+  Turning a part, looking at it and thinking takes longer than asking the time.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

@@ -119,12 +119,24 @@ def main() -> int:
     check("dragging turns it about the vertical axis",
           len(evs) == 1 and evs[0]["action"] == "rotate" and evs[0]["axis"] == "z", evs)
     check("...his right turns it positively", evs[0]["degrees"] > 0, evs)
+    # BOTH AXES AT ONCE on a diagonal. This asserted `evs[0]["axis"] == "x"` —
+    # one axis per frame, whichever moved more — and that is most of why he
+    # found it hard to control: a diagonal drag flipped between spinning and
+    # tipping frame by frame, so the model lurched between two motions instead
+    # of doing the one his hand was making. A trackball turns about both.
     evs = t.update([hand(0.44, 0.42)], 0.2)
-    check("dragging up tips it instead",
-          evs and evs[0]["axis"] == "x", evs)
+    axes = {e["axis"] for e in evs if e["action"] == "rotate"}
+    check("a diagonal drag turns AND tips, in the same frame",
+          axes == {"x", "z"}, evs)
+    # ONE update per check. Calling it again to build the failure message moved
+    # the hand twelve centimetres before the tremor case below, which then
+    # measured a drag and called it a tremor.
+    vert = t.update([hand(0.44, 0.30)], 0.3)
+    check("...and a purely vertical drag only tips",
+          {e["axis"] for e in vert if e["action"] == "rotate"} == {"x"}, vert)
 
     check("a tremor moves nothing",
-          actions(t.update([hand(0.4401, 0.4201)], 0.3)) == [],
+          actions(t.update([hand(0.4401, 0.3001)], 0.4)) == [],
           "hand tremor is not intent")
 
     # THE POSTURE RULE, as a number. A quarter of the frame must turn the model

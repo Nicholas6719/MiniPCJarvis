@@ -631,6 +631,9 @@ export const useStore = create<Store>((set, get) => ({
       // Hands. A tracker reading the webcam has to show that it is, and the
       // grab/release states are also the only feedback that a pinch registered.
       case "hands":
+        // Arming hands opens the webcam directly (not via the set_camera tool),
+        // so this is the only event that says the device went live.
+        set({ cameraOn: evt.action !== "off" && evt.action !== "disarmed" });
         set((st) => (st.holo
           ? { holo: { ...st.holo,
                       hands: evt.action === "grab" ? "holding"

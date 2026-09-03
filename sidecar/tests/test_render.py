@@ -694,8 +694,41 @@ async def main() -> int:
         cv2.imwrite(blank, np.zeros((50, 50), dtype="uint8"))
         check("a picture with nothing in it traces nothing, rather than inventing a shape",
               create3d.trace_outline(blank) is None)
+        # --- an emblem is a figure WITH HOLES, not a silhouette --------------
+        # "Create me a 3D image of the Spider-Man emblem" came back as a plain oval
+        # disc: RETR_EXTERNAL threw away everything inside the outer boundary, and
+        # max(contourArea) then kept only that boundary. A logo is a figure with
+        # holes and often several parts.
+        ring = os.path.join(tempfile.mkdtemp(), "ring.png")
+        a = np.zeros((400, 400), np.uint8)
+        cv2.circle(a, (180, 200), 120, 255, -1)
+        cv2.circle(a, (180, 200), 60, 0, -1)        # the hole
+        cv2.circle(a, (340, 60), 25, 255, -1)       # a separate part
+        cv2.imwrite(ring, a)
+        shapes = create3d.trace_shapes(ring)
+        check("both parts of the figure are traced", shapes and len(shapes) == 2,
+              shapes and len(shapes))
+        check("...and the hole inside it survives",
+              shapes and any(len(sh["holes"]) == 1 for sh in shapes),
+              [len(sh["holes"]) for sh in (shapes or [])])
+        check("...where the old tracer kept one outline and no holes",
+              len(create3d.trace_outline(ring) or []) >= 3)
+        scad = create3d._shapes_scad(shapes, 3.0, 60.0)
+        check("the hole is cut, not drawn over", "paths = [[" in scad, scad[:120])
+        check("...and every part is extruded together", scad.count("polygon(") == 2,
+              scad.count("polygon("))
+        # A speck of noise is not a leg.
+        b = a.copy()
+        cv2.circle(b, (10, 390), 2, 255, -1)
+        spk = os.path.join(tempfile.mkdtemp(), "speck.png")
+        cv2.imwrite(spk, b)
+        check("a speck of noise is not treated as a part",
+              len(create3d.trace_shapes(spk) or []) == 2,
+              len(create3d.trace_shapes(spk) or []))
+
         check("an unreadable file traces nothing",
-              create3d.trace_outline(os.path.join(tempfile.mkdtemp(), "nope.png")) is None)
+              create3d.trace_outline(
+                  os.path.join(tempfile.mkdtemp(), "nope.png")) is None)
     except ImportError:
         skip("tier 2 outline tracing", "opencv is not importable here")
 

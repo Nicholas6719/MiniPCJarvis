@@ -680,7 +680,12 @@ export function HoloStage() {
         <div ref={scale} className="holo__layers mono-sub">
           <span className="holo__layers-n" />
         </div>
-        {cameraOn && <HandCam />}
+        {/* Hands ARMED implies the camera is reading — hand_control opens the
+            device itself rather than through the set_camera tool, so `cameraOn`
+            never heard about it and this never appeared. He asked for the
+            camera view precisely so he could see how it reads his hands, so
+            hands-on is the case that matters most. */}
+        {(cameraOn || (holo?.hands && holo.hands !== "off")) && <HandCam />}
         {holo?.hands && holo.hands !== "off" && (
           <div className="holo__hands mono-sub" data-holding={holo.hands === "holding"}>
             {holo.hands === "holding" ? "HOLDING" : "WATCHING YOUR HANDS"}

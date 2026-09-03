@@ -48,8 +48,16 @@ PINCH_OFF = 0.55
 # frame's width turns the model most of the way round, which is what lets him do
 # this with a bent elbow and a resting forearm. Raising this makes it faster and
 # more tiring; that trade is the point.
-ROTATE_GAIN = 540.0        # degrees per unit of normalised travel
-DEADZONE = 0.006           # below this, it is hand tremor rather than intent
+ROTATE_GAIN = 450.0        # degrees per unit of normalised travel
+DEADZONE = 0.010           # below this, it is hand tremor rather than intent
+
+# HOW MUCH OF THE HAND'S MOVEMENT IS BELIEVED EACH FRAME. The camera reads at
+# ten frames a second and a hand is never perfectly still, so raw frame-to-frame
+# deltas arrive as a series of small jerks and the model twitches through a
+# gesture instead of following it. Smoothing trades a little lag for a lot of
+# steadiness; 0.45 is roughly two frames of settling, which is under a fifth of
+# a second and reads as "it follows my hand" rather than as delay.
+SMOOTHING = 0.45
 SCALE_GAIN = 1.6
 MIN_SCALE_STEP = 0.02
 
@@ -132,6 +140,9 @@ class GestureTracker:
         self.engaged = False
         self._pinching: dict[str, bool] = {}
         self._last: tuple[float, float] | None = None
+        # Eased hand velocity, so the model follows the drag instead of jerking
+        # once per camera frame. Reset with everything else on release.
+        self._vel: tuple[float, float] = (0.0, 0.0)
         self._two: float | None = None
         self._seen_at = 0.0
 
@@ -139,6 +150,7 @@ class GestureTracker:
         self.engaged = False
         self._pinching.clear()
         self._last = None
+        self._vel = (0.0, 0.0)
         self._two = None
 
     def _pinch_state(self, key: str, lm) -> bool:
@@ -206,16 +218,29 @@ class GestureTracker:
                 self._last = p
                 out.append({"action": "grab", "hands": 1})
                 return out
-            dx, dy = p[0] - self._last[0], p[1] - self._last[1]
-            if abs(dx) > DEADZONE or abs(dy) > DEADZONE:
+            # THE DEADZONE READS THE RAW MOVEMENT; THE SMOOTHING SHAPES THE
+            # AMOUNT. Smoothing the POINT instead was the obvious thing and it is
+            # wrong: the smoothed point lags behind the hand, so the frame after
+            # a real drag still shows a large gap, and a hand held perfectly
+            # still kept turning the model. Intent is measured from what he
+            # actually did this frame; only the size of the response is eased.
+            rdx, rdy = p[0] - self._last[0], p[1] - self._last[1]
+            if abs(rdx) > DEADZONE or abs(rdy) > DEADZONE:
                 self._last = p
-                # Horizontal travel spins it about the vertical axis; vertical
-                # travel tips it. The same two axes the spoken controls use, so
-                # "turn it" and a drag mean the same thing.
-                if abs(dx) >= abs(dy):
+                self._vel = (self._vel[0] + (rdx - self._vel[0]) * SMOOTHING,
+                             self._vel[1] + (rdy - self._vel[1]) * SMOOTHING)
+                dx, dy = self._vel
+                # BOTH AXES AT ONCE, not whichever is larger this frame.
+                #
+                # It used to pick one — `if abs(dx) >= abs(dy)` — so a diagonal
+                # drag flipped between spinning and tipping frame by frame, and
+                # the model lurched between two motions instead of doing the one
+                # he was making with his hand. That is most of why this was hard
+                # to control. A trackball turns about both at once; so does this.
+                if abs(dx) > DEADZONE:
                     out.append({"action": "rotate", "axis": "z",
                                 "degrees": round(dx * ROTATE_GAIN, 1)})
-                else:
+                if abs(dy) > DEADZONE:
                     out.append({"action": "rotate", "axis": "x",
                                 "degrees": round(dy * ROTATE_GAIN, 1)})
             return out
