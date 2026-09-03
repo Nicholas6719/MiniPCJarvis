@@ -836,6 +836,24 @@ async def main() -> int:
         check(f"supporting hardware is not the object ({repo.split('/')[-1]})",
               name is None, why)
 
+    # A SUBJECT WORD BURIED IN A LONGER ONE IS A DIFFERENT WORD. Live on the
+    # installed build, "a duck" was offered `00_Microduck_...stl`, 38 MB, from
+    # `fanhao375/microduck-replica` — a robot kit — because "duck" is inside
+    # "microduck". Whole-token matching alone is not the fix either: 3DBenchy
+    # and IronManMark41 concatenate everything. What separates them is how much
+    # longer the token is.
+    check("a word inside a token barely longer than it is that word",
+          create3d._names("benchy", ["3dbenchy"])
+          and create3d._names("helmet", ["helmet", "front"]))
+    check("...and a word buried in a much longer one is not",
+          not create3d._names("duck", ["00", "microduck"])
+          and not create3d._names("cat", ["catalogue"]),
+          "a robot kit called microduck was offered as a duck")
+    check("...and a name that is mostly digits still matches itself",
+          create3d._names("d20", ["animal", "d20"]),
+          "the piece-detection tokens strip trailing digits, which turns d20 "
+          "into d — so name matching has to use the token as written")
+
     name, got, _ = pick("a coffee mug", "SimonWaldherr/openscad-examples")
     check("a single whole object is not called a piece",
           name == "11_mug.scad.stl" and not got["is_piece"], name)

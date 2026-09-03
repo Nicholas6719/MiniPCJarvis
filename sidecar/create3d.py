@@ -1102,6 +1102,24 @@ MIN_MATCH = 3
 MIN_SCULPT_BYTES = 300 * 1024
 
 
+# How much longer than the subject word a filename token may be and still BE
+# that word. "benchy" inside "3dbenchy" is two characters of prefix and is the
+# same thing; "duck" inside "microduck" is five and is a robot kit — offered,
+# live, as a duck. Without this "cat" also matches "catalogue" and
+# "concatenate".
+MAX_WORD_PADDING = 3
+
+
+def _names(word: str, tokens) -> bool:
+    """Does any token in this filename actually mean `word`?"""
+    for t in tokens:
+        if t == word:
+            return True
+        if word in t and len(t) - len(word) <= MAX_WORD_PADDING:
+            return True
+    return False
+
+
 def _pick_mesh(meshes: list, description: str):
     """The file that is actually the thing he asked for, and its siblings.
 
@@ -1147,11 +1165,17 @@ def _pick_mesh(meshes: list, description: str):
         # A trailing version digit still names a piece: `helmet_back1` split to
         # "back1" and matched nothing, so a helmet's back panel was offered as a
         # whole helmet.
+        # TWO SETS, deliberately. Name matching needs the token as written —
+        # stripping the trailing digits turns "d20" into "d" and the real d20
+        # stopped matching. Piece detection needs them stripped, because
+        # "helmet_back1" is a back panel and "back1" matches nothing.
+        raw_tokens = [t for t in re.split(r"[^a-z0-9]+", fname) if t]
         tokens = {re.sub(r"\d+$", "", t) or t
                   for t in re.split(r"[^a-z0-9]+", fname)}
         supporting = sum(1 for bad in _SUPPORTING
                          if bad not in asked and bad in tokens)
-        named = sum((6 if w.isdigit() else 3) for w in words if w in fname)
+        named = sum((6 if w.isdigit() else 3) for w in words
+                    if _names(w, raw_tokens))
 
         if named - 3 * supporting >= MIN_MATCH:
             score, by_name = named - 3 * supporting, True
