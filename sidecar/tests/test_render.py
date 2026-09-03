@@ -1082,6 +1082,48 @@ async def main() -> int:
         print(f"  {len(skips)} case(s) SKIPPED — phase D's gate was NOT fully exercised:")
         for name, why in skips:
             print(f"     - {name}: {why}")
+    print("\n-- a job past its estimate does not claim to be nearly done --")
+    # 2026-09-03, from his own testing. "Render a duck" is tier 5; no publishable
+    # duck exists, so it falls back to tier 4 and takes ~175s. The estimate stays
+    # at tier 5's 45s. He asked where it was 90 seconds in and was told it was
+    # almost finished — because `left` was clamped at zero, so every status
+    # answer past the estimate became "any moment now" and stayed there for the
+    # remaining minute and a half. Sounding certain and being wrong is the exact
+    # thing render_queue's own header forbids.
+    import render_queue as _rq
+
+    def _status_at(elapsed, estimate=45.0):
+        j = _rq.Job(id="t", tier=5, label="a duck", run=lambda: {},
+                    estimate_s=estimate)
+        j.started = time.time() - elapsed
+        q = _rq.RenderQueue()
+        q._current = j
+        return q.status()
+
+    s = _status_at(90)
+    check("90s into a 45s estimate is reported as overdue",
+          s.get("overdue") is True, str(s.get("remaining_spoken"))[:80])
+    check("...and it does NOT say almost done",
+          "any moment" not in s["remaining_spoken"].lower(),
+          s["remaining_spoken"][:90])
+    check("...and it says how long it has actually been",
+          "longer than i said" in s["remaining_spoken"].lower(),
+          s["remaining_spoken"][:90])
+    check("...and it offers him the choice to stop",
+          "?" in s["remaining_spoken"], s["remaining_spoken"][:90])
+    check("...and the overdue amount is real",
+          40 <= s.get("overdue_s", 0) <= 50, str(s.get("overdue_s")))
+
+    on_time = _status_at(40)
+    check("a job still inside its estimate is unchanged",
+          on_time.get("overdue") is False and "longer than" not in
+          on_time["remaining_spoken"].lower(), on_time["remaining_spoken"][:60])
+    grace = _status_at(50)
+    check("...and a few seconds over is still 'any moment now', not an alarm",
+          "any moment" in grace["remaining_spoken"].lower(),
+          grace["remaining_spoken"][:60])
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}"
           f"{f' ({len(skips)} skipped)' if skips else ''}")
     return 1 if fails else 0

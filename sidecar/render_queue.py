@@ -101,11 +101,30 @@ class RenderQueue:
                         "remaining_spoken": est.spoken(nxt.estimate_s),
                         "queued": len(self._jobs)}
             return {"busy": False, "queued": 0}
-        left = max(0.0, cur.estimate_s - (time.time() - cur.started))
+        elapsed = time.time() - cur.started
+        left = cur.estimate_s - elapsed
+        # PAST THE ESTIMATE IS NOT "ALMOST DONE". This clamped `left` at zero,
+        # so once a job ran over, every status answer became "any moment now" —
+        # and stayed that way however long was really left. On 2026-09-03 he
+        # asked where his duck was 90s into a 175s job and was told it was
+        # nearly finished, twice, because tier 5 had fallen back to tier 4 and
+        # the estimate was still the 45s of the tier that no longer applied.
+        # Saying "I don't know" is allowed; sounding certain and being wrong is
+        # the thing this file exists to prevent.
+        if left > 1:
+            spoken = est.spoken(left)
+        elif left > -15:
+            spoken = "any moment now"
+        else:
+            spoken = (f"longer than I said, sir — it's been "
+                      f"{est.spoken(elapsed)} and I don't have a good estimate "
+                      f"left. Shall I keep going?")
         return {"busy": True, "label": cur.label, "tier": cur.tier,
-                "elapsed_s": round(time.time() - cur.started, 1),
-                "remaining_s": round(left, 1),
-                "remaining_spoken": est.spoken(left) if left > 1 else "any moment now",
+                "elapsed_s": round(elapsed, 1),
+                "remaining_s": round(max(0.0, left), 1),
+                "overdue_s": round(max(0.0, -left), 1),
+                "overdue": left <= -15,
+                "remaining_spoken": spoken,
                 "queued": len(self._jobs)}
 
     # ---- putting work in -------------------------------------------------
