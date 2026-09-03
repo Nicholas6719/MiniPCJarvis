@@ -46,8 +46,32 @@ def _label(description: str, image_path: str, tier: int) -> str:
     return f"tier {tier} model"
 
 
+# The last thing he asked to be made, so "find another design" has something to
+# re-roll. The DESIGN comes from the reference picture — a web image search —
+# rather than from the model, so another design is simply the next usable picture
+# down the list.
+_last_make: dict = {}
+
+
+async def another_design() -> dict:
+    """Make the same thing again from a DIFFERENT reference picture."""
+    if not _last_make.get("description"):
+        return {"error": "I haven't made anything to redo, sir"}
+    if _last_make.get("image_path"):
+        return {"error": "that one was made from a picture you gave me, sir — "
+                         "give me a different picture and I'll trace that"}
+    nxt = int(_last_make.get("skip", 0)) + 1
+    if nxt > 6:
+        return {"error": "I've been through the pictures I can find of that, sir"}
+    return await make_hologram(description=_last_make["description"],
+                               tier=int(_last_make.get("tier", -1)),
+                               name=_last_make.get("name", ""),
+                               confirmed=True, skip=nxt)
+
+
 async def make_hologram(description: str = "", image_path: str = "", tier: int = -1,
-                        name: str = "", confirmed: bool = False) -> dict:
+                        name: str = "", confirmed: bool = False,
+                        skip: int = 0) -> dict:
     """Make a 3D model and put it up, in the background, with an estimate."""
     desc = (description or "").strip()
     if not desc and not image_path:
@@ -81,8 +105,11 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                      "tier": t, "name": name, "confirmed": True},
         }}
 
+    _last_make.update({"description": desc, "image_path": image_path,
+                       "tier": t, "name": name, "skip": skip, "label": label})
+
     async def job():
-        r = await create3d.build(t, desc, image_path, name)
+        r = await create3d.build(t, desc, image_path, name, skip=skip)
         if r.get("stl") and not r.get("error"):
             # Put it up the moment it exists. "Anything becomes a hologram" is
             # the phase; a finished mesh he has to ask to see is half of it.
@@ -124,6 +151,13 @@ async def cancel_render() -> dict:
 
 
 def register_all() -> None:
+    registry.register(Tool(
+        name="another_design",
+        description="Make the last thing again from a DIFFERENT reference "
+                    "picture. Use for 'find another design', 'try a different "
+                    "one', 'that's not quite right, find another'.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.LOW, handler=another_design, timeout=20))
     registry.register(Tool(
         name="make_hologram",
         description="Make a 3D model from a description or a picture and project it. "

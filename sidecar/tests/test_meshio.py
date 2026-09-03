@@ -209,6 +209,29 @@ def main() -> int:
     check("...and its edge list is capped, not unbounded",
           m["edges"] <= 60000, m["edges"])
 
+    # A DOWNLOADED SCULPTURE IS TWENTY TIMES ANYTHING WE MAKE. Measured
+    # tonight: a Mandalorian helmet panel is 274,902 triangles and an
+    # anatomical skull is 632,304, against 30-60k for a reconstruction. Nine
+    # floats a triangle, so the skull is 22 MB of float32 and 30 MB base64 --
+    # and it was uncapped, because before tier 5 started downloading models
+    # nothing on that stage had ever been that big.
+    import base64 as _b64
+    huge_tris = rng.rand(meshio.MAX_PROJECT_TRIS + 5000, 3, 3).astype(np.float32) * 40
+    huge = os.path.join(d, "huge.stl")
+    write_binary(huge, huge_tris.tolist())
+    pay = meshio.to_payload(huge)
+    n_sent = len(_b64.b64decode(pay["positions_b64"])) // 4 // 9
+    check("a mesh too big for the stage is thinned rather than sent whole",
+          pay["simplified"] is True and n_sent <= meshio.MAX_PROJECT_TRIS,
+          f"{n_sent} triangles sent")
+    check("...and it says so, so the HUD is not quietly shown less than it thinks",
+          bool(pay.get("projected_triangles")) and pay["triangles"] > n_sent,
+          "the file on disk keeps every triangle; only the projection is thinned")
+    check("...and the exploded view is not sent as a third of a million integers",
+          "bodies" not in pay)
+    check("a part we made is not thinned at all",
+          meshio.to_payload(b)["simplified"] is False)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

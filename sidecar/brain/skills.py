@@ -822,11 +822,42 @@ _QUERY_LEAD = re.compile(
     r"find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+", re.I)
 
 
+# "another design", "a similar one", "a different version" — a demonstrative
+# with nothing to look up. Anything naming a subject ("another design for a
+# bracket") is a real search and is left alone.
+_NO_SUBJECT_FIND = re.compile(
+    r"(?:me\s+)?(?:a\s+|an\s+|the\s+)?"
+    r"(?:another|similar|different|other|new)\s+"
+    r"(?:design|version|one|take|option|idea|reference|picture|image)s?"
+    r"(?:\s+(?:of|for)\s+(?:that|it|this|the\s+same))?", re.I)
+
+
+# An explicit request for a printable MODEL rather than for reading material.
+# "stl" and "printable" are the words that separate the two; "3d model of X" on
+# its own is ambiguous enough that it stays a search unless one of those is
+# present or the verb was "download".
+_WANTS_A_MODEL = re.compile(
+    r"\bstl\b|\bprintable\b|\b3d\s*(?:model|print|file)s?\b", re.I)
+
+
 def slots_search(t: str) -> dict | None:
     q = _QUERY_LEAD.sub("", t.strip(), count=1).strip(" .?!")
     q = re.sub(r"\b(please|for me)\b", "", q).strip(" .?!")
     if _FOLDER_ONLY.match(q):
         return None   # "search my documents" means the user's files, not the web
+    # "FIND ANOTHER DESIGN" IS NOT A WEB SEARCH. `_CANON` rewrites "find X" into
+    # the search form, so this arrived here at 1.00 and he got a web search for
+    # the words "another design". There is no subject in it — it is about the
+    # thing already on the stage — so this steps aside and the next-best skill
+    # (holo_again, which re-renders from a different reference) gets its turn.
+    if _NO_SUBJECT_FIND.fullmatch(q):
+        return None
+    # "FIND ME A 3D MODEL OF X" IS NOT A WEB SEARCH EITHER. `_CANON` turns every
+    # "find X" into the search form, so this arrived here at 1.00 and he would
+    # have got a page of links instead of a model on the stage. Stepping aside
+    # hands it to model_find, which follows it all the way to a file.
+    if _WANTS_A_MODEL.search(q):
+        return None
     return {"query": q} if len(q) >= 3 and q != t.strip() else None
 
 
@@ -1167,7 +1198,7 @@ _MAKE_STRIP = re.compile(
     # description.
     r"(?:3d|3\s*d|three\s*d)?\s*"
     r"(?:hologram|holographic|model|version|mesh|part|object|image|picture|"
-    r"render|printout|print\s*out|print)?\s*"
+    r"rendering|render|printout|print\s*out|print)?\s*"
     r"(?:of\s+)?", re.I)
 
 
@@ -1187,6 +1218,33 @@ def slots_holo_make(t: str) -> dict:
     said = (t or "").strip()
     desc = _MAKE_STRIP.sub("", said).strip(" .,")
     return {"description": desc or said}
+
+
+_MODEL_FIND_STRIP = re.compile(
+    r"^(?:please\s+)?(?:can you\s+|could you\s+)?"
+    r"(?:find|download|get|search for|look for|is there)\s+"
+    r"(?:me\s+)?(?:an?\s+|the\s+)?"
+    r"(?:printable\s+|free\s+)?(?:3d\s+)?(?:stl|model|file)?\s*"
+    r"(?:of\s+)?", re.I)
+
+
+def slots_model_find(t: str) -> dict | None:
+    desc = _MODEL_FIND_STRIP.sub("", (t or "").strip()).strip(" .,?")
+    desc = re.sub(r"\bi can print\b|\bto print\b", "",
+                  desc, flags=re.I).strip(" .,?")
+    return {"description": desc} if len(desc) >= 3 else None
+
+
+def say_model_find(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    return res.get("spoken") or "Found one, sir."
+
+
+def say_holo_again(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return f"{res['error'].rstrip('.')}."
+    return res.get("spoken") or "Trying another one, sir."
 
 
 def say_holo_make(slots: dict, res: dict) -> str:
@@ -1823,6 +1881,8 @@ SKILLS: list[Skill] = [
         "make me a 3d image of the batman logo",
         "make me a 3d model of the spider-man emblem",
         "create a 3d model of a rubber duck",
+        "create a 3d render of iron man's arc reactor",
+        "make me a 3d render of the arc reactor",
         "make me a 3d print of the apple logo",
         "make me a plate 40 by 30 by 6 millimetres with a 5 millimetre hole",
         "make me a plate 50 by 50 by 4 mm",
@@ -1837,6 +1897,36 @@ SKILLS: list[Skill] = [
         "i need a disc 25 mm across",
         "make me a block 20 by 20 by 10 millimetres"],
         slots=slots_holo_make, speak=say_holo_make),
+    # ANOTHER DESIGN OF THE SAME THING. The design comes from the reference
+    # PICTURE — a web image search — so "find another one" means the next usable
+    # picture, not a new search. Without this it went to `search` at 1.00 and he
+    # got a web search for the words "another design".
+    # FINDING a model somebody already made, as against generating one. Nothing
+    # here can sculpt armour — reconstruction gives a lump and OpenSCAD is a
+    # solid modeller — so for a character, a helmet or a prop the honest answer
+    # is the one a person would reach for: download the model someone spent
+    # weeks on, and say whose it is.
+    Skill("model_find", "find_3d_model", [
+        # NOT the "find ..." phrasings as seeds: _CANON rewrites every "find X"
+        # into "search the web for THING", so they canonicalise onto the search
+        # skill's own form and the collision gate rightly refuses them.
+        # slots_search declines an explicit model request instead.
+        "download a model of the iron man mark 3",
+        "is there a model of the batmobile i can print",
+        "get me an stl of a stormtrooper helmet",
+        "download a printable model of a mandalorian helmet",
+        "get me a 3d model of the millennium falcon"],
+        slots=slots_model_find, speak=say_model_find),
+    Skill("holo_again", "another_design", [
+        # NOT "find another design" / "find a similar design" as seeds: _CANON
+        # rewrites "find X" into "search the web for THING", so they canonicalise
+        # onto the search skill's own form and the collision gate rightly refuses
+        # them. slots_search declines a subjectless "find another X" instead,
+        # which is the more honest fix — there is nothing there to look up.
+        "try a different design", "show me another version of that",
+        "make it again from a different picture", "try another reference",
+        "give me a different take on that", "another design please"],
+        speak=say_holo_again),
     Skill("render_stop", "cancel_render", [
         "stop the render", "cancel the model", "stop making that",
         "cancel that render", "don't bother making it",

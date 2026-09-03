@@ -212,6 +212,19 @@ CASES = [
     # extractor then declined, so the whole thing fell to the model — which HAD
     # make_hologram and did not call it.
     ("create me a 3d image of the spider emblem", "holo_make"),
+    # "3d RENDER of X" had no reflex at all — image/model/print were stripped and
+    # render was not, so his phrasing fell to the model.
+    ("create a 3d render of iron man's arc reactor", "holo_make"),
+    ("make me a 3d rendering of the batman logo", "holo_make"),
+    # ANOTHER DESIGN of the same thing. The design comes from the reference
+    # PICTURE, so this is the next usable picture, not a new search — and
+    # without it "another design" went to `search` and web-searched those words.
+    ("try a different design", "holo_again"),
+    ("another design please", "holo_again"),
+    ("show me another version of that", "holo_again"),
+    # ...and a real web search is untouched
+    ("search the web for the best mini pc", "search"),
+    ("look up the population of tokyo", "search"),
     # Dictation writes "3d" as a WORD at least as often as a digit.
     ("create me a three d image of the spider emblem", "holo_make"),
     # ...and spoken numbers must be as strong as typed ones: this was 0.81

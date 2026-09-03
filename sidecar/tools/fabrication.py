@@ -226,7 +226,7 @@ def parse_slicer_output(text: str, gcode: Path | None = None) -> dict:
 
 # --------------------------------------------------------------------- tools
 async def generate_part(description: str, name: str = "",
-                        retry_note: str = "") -> dict:
+                        retry_note: str = "", brief: str = "") -> dict:
     """OpenSCAD source for a simple part, rendered to STL.
 
     `retry_note` is what was wrong with the last attempt, fed back into the
@@ -281,6 +281,12 @@ async def generate_part(description: str, name: str = "",
         # asking again in the same words and hoping.
         + (f"A previous attempt was wrong: {retry_note}. Fix exactly that. "
            if retry_note else "")
+        # WHAT THE WEB SAYS THE THING ACTUALLY IS. Nobody can recall the
+        # dimensions of a Nintendo 2DS XL, and a baseball is 73 mm whether or
+        # not the model remembers it. Facts first, then the request.
+        + (f"Here is what the object actually is, researched: {brief} "
+           "Use these shapes and these millimetres. "
+           if brief else "")
         +
         # Start the file with $fn=48. OpenSCAD's default curve resolution gave a
         # 5 mm hole about a dozen segments, and the first hologram rendered on

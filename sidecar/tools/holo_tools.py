@@ -154,7 +154,7 @@ async def inspect_part(path: str = "", name: str = "") -> dict:
     import printcheck
 
     def work() -> dict:
-        tris = meshio.load_stl(str(target))
+        tris = meshio.load(str(target))
         flat = tris.reshape(-1, 3)
         lo, hi = flat.min(axis=0), flat.max(axis=0)
         rep = printcheck.report(tris, (hi - lo).tolist())

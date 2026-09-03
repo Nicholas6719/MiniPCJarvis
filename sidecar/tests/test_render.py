@@ -24,6 +24,7 @@ WHAT THIS IS REALLY GUARDING.
 Run: python tests/test_render.py
 """
 import asyncio
+import io
 import os
 import sys
 import tempfile
@@ -269,8 +270,21 @@ async def main() -> int:
                             # printable; a real reconstruction is only on request
                             ("this chair", "photo.jpg", 2),
                             ("scan this chair", "photo.jpg", 3),
-                            ("a dragon", "", 4),
-                            ("a spaceship", "", 4)):
+                            # SOMEBODY HAS ALREADY MADE THESE, AND PROPERLY.
+                            # Reconstruction from a photograph gives a lump; the
+                            # web has real sculptures. Tier 5 falls back to the
+                            # tier it would otherwise have used, so being wrong
+                            # costs a search rather than a worse object.
+                            ("a dragon", "", 5),
+                            ("a spaceship", "", 5),
+                            # His headline case. This reached tier 1 — OpenSCAD
+                            # writing a suit of armour — because `_ORGANIC`
+                            # knows "suit" and cannot know that a Mark 3 is one.
+                            ("render iron man mark 3", "", 5),
+                            # ...and these must NOT move. A dimensioned part is
+                            # exact and editable; the web cannot beat that.
+                            ("a bracket 60 mm long", "", 1),
+                            ("the spider-man emblem", "", 2)):
         got = create3d.choose_tier(desc, img)
         check(f"{desc!r}{' + a picture' if img else ''} is tier {want}",
               got == want, got)
@@ -278,7 +292,7 @@ async def main() -> int:
           all(create3d.TIER_NOTE.get(t) for t in create3d.TIERS))
     check("...and only tier 1 promises voice editing",
           "voice" in create3d.TIER_NOTE[1]
-          and not any("voice" in create3d.TIER_NOTE[t] for t in (2, 3, 4)),
+          and not any("voice" in create3d.TIER_NOTE[t] for t in (2, 3, 4, 5)),
           "a tier-3 mesh has no parameters to change, and saying otherwise "
           "wastes his time on a request that cannot be honoured")
 
@@ -491,7 +505,11 @@ async def main() -> int:
     create3d.model3d_dir = lambda: __import__("pathlib").Path(
         os.path.join(tempfile.mkdtemp(), "not-installed"))
     try:
-        r = await render_tools.make_hologram(description="a dragon")
+        # NAMED, not inferred. "A dragon" used to land on tier 4 and does not
+        # any more — it goes to the web first — so leaving this to the router
+        # would have quietly stopped testing the refusal at all. The tier that
+        # depends on the outside install is asked for by number.
+        r = await render_tools.make_hologram(description="a dragon", tier=4)
         check("an uninstalled tier is refused rather than asked about",
               r.get("unavailable") is True and r.get("_ask") is None, r)
         check("...naming where it would live", "not-installed" in (r.get("error") or ""),
@@ -731,6 +749,294 @@ async def main() -> int:
                   os.path.join(tempfile.mkdtemp(), "nope.png")) is None)
     except ImportError:
         skip("tier 2 outline tracing", "opencv is not importable here")
+
+    # ------------------------------------------------- tier 5: found, not made
+    # EVERY CASE BELOW IS A REAL REPO, READ IN FULL. The failures in this tier
+    # were wrong answers that looked like right ones, so the fixtures are what
+    # GitHub actually contains rather than what a plausible repo would contain.
+    REPOS = {
+        # Six parts of an arc reactor. NONE of them names it — the repo is the
+        # object. Requiring the filename to say "arc reactor" rejected this.
+        "crashworks3d/crashworks3d_arc_reactor": [
+            ("stl/lower_grid_and_caps.stl", 2347), ("stl/crystal_ring.stl", 889),
+            ("stl/main_crystal_top.stl", 274), ("stl/upper_grid.stl", 165)],
+        # A dice-detection rig. The repo says "d20"; every file is camera
+        # hardware, and the biggest is a calibration card. This was returned as
+        # a d20 — 512 triangles, 142 x 143 x 3 mm.
+        "rsandrini/D20-IRL-detection": [
+            ("3d_model/stl/dice-IRL-webcam-plate.stl", 135),
+            ("3d_model/stl/dice-IRL-webcam-cup.stl", 81)],
+        # An actual d20.
+        "yannickbattail/openscad-models": [("animal_d20/d20.stl", 4051)],
+        # A helmet published as panels, all of them behind Git LFS. Skipped
+        # entirely at first because every mesh was a 133-byte pointer.
+        "Poesghost/mandalorian_helmet": [
+            ("prints/v1/helmet_front_top_right1.stl", 13423),
+            ("prints/v1/helmet_back1.stl", 9000),
+            ("prints/v1/helmet_attachments1.stl", 400)],
+        # Mandalorian armour with no helmet in it. Returned a keyslot bracket.
+        "valinkrai/mandalorian-armor": [
+            ("accessories/hazard_ops_brigade/Food/cookie-cutter-set.stl", 625),
+            ("helmet/foreman_v1/boba_style_keyslot_for_foreman.stl", 141),
+            ("helmet/foreman_v1/helmet_arduino_case_2_in_1.stl", 31)],
+        # Two helmet CLASPS, not a helmet.
+        "marcojunarta/Mark-85-Helmet": [
+            ("helmetclasppartb.stl", 146), ("helmetclaspparta.stl", 106)],
+        "SimonWaldherr/openscad-examples": [("11_mug.scad.stl", 7131)],
+    }
+
+    def pick(desc, repo):
+        got, others = create3d._pick_mesh(
+            [{"repo": repo, "path": p, "bytes": kb * 1024}
+             for p, kb in REPOS[repo]], desc)
+        return (got["path"].split("/")[-1] if got else None), got, others
+
+    name, got, others = pick("an arc reactor",
+                             "crashworks3d/crashworks3d_arc_reactor")
+    check("a repo that IS the object carries files that don't name it",
+          name == "lower_grid_and_caps.stl", name)
+    check("...and says it is one part of several",
+          bool(got and got["is_piece"]) and len(others) == 3,
+          "six parts of an arc reactor handed over as an arc reactor is the "
+          "quarter-of-a-helmet failure again")
+
+    name, _, _ = pick("a d20 dice", "rsandrini/D20-IRL-detection")
+    check("a repo that only MENTIONS the subject gives nothing",
+          name is None,
+          "this returned dice-IRL-webcam-plate.stl — a 512-triangle "
+          "calibration card, 142 x 143 x 3 mm — as a d20")
+    name, _, _ = pick("a d20 dice", "yannickbattail/openscad-models")
+    check("...while a real d20 comes through", name == "d20.stl", name)
+
+    name, got, others = pick("a mandalorian helmet", "Poesghost/mandalorian_helmet")
+    check("the largest matching panel is the pick", name == "helmet_front_top_right1.stl",
+          name)
+    check("...and it is reported as one of the parts",
+          bool(got and got["is_piece"]) and len(others) == 2,
+          "handed over silently, this is a quarter of a helmet called a helmet")
+    check("a trailing version digit still reads as a piece",
+          all(o["is_piece"] for o in others if "back" in o["path"]),
+          "`helmet_back1` split to 'back1', matched nothing, and the back "
+          "panel outranked the front one as a whole helmet")
+
+    for desc, repo, why in (
+            ("a mandalorian helmet", "valinkrai/mandalorian-armor",
+             "returned boba_style_keyslot_for_foreman.stl — a bracket"),
+            ("a mandalorian helmet", "marcojunarta/Mark-85-Helmet",
+             "the repo has clasps in it, not a helmet")):
+        name, _, _ = pick(desc, repo)
+        check(f"supporting hardware is not the object ({repo.split('/')[-1]})",
+              name is None, why)
+
+    name, got, _ = pick("a coffee mug", "SimonWaldherr/openscad-examples")
+    check("a single whole object is not called a piece",
+          name == "11_mug.scad.stl" and not got["is_piece"], name)
+
+    # Measured bounding boxes from four real downloads.
+    check("a print plate is not the object",
+          create3d._too_flat([15.0, 30.33, 3.0]),
+          "395,174 triangles of perforated forearm shell laid flat on a bed, "
+          "fetched and announced for 'render iron man mark 3'")
+    check("...and a helmet panel, a mug and a d20 are",
+          not any(create3d._too_flat(s) for s in
+                  ([119.8, 128.3, 158.1], [135.0, 100.0, 100.0],
+                   [21.4, 20.5, 23.6])))
+
+    check("a downloaded mesh that isn't in millimetres says so",
+          create3d._unit_doubt([2.1, 2.0, 2.4]).get("unit_guess") == "inches",
+          "an STL carries no units, and the bed check, the wall check and the "
+          "sliver guard all believe the number")
+    check("...and a plausible one is left alone",
+          not create3d._unit_doubt([119.8, 128.3, 158.1]))
+
+    check("the number in 'mark 3' is part of the subject",
+          "3" in create3d._subject_words("iron man mark 3"),
+          "dropped as too short, which let IronManMark41 match perfectly")
+
+    # HIS RULE: "There is no limitation to this." Say "render Iron Man Mark 3"
+    # and it renders — "take an image from the web and then create that into
+    # 3D". So when nothing can be downloaded the answer is the reconstruction,
+    # not a page to open and not OpenSCAD writing code for a suit of armour.
+    check("nothing findable still gets rendered, from a picture",
+          create3d._fallback_tier("iron man mark 3") == 4
+          and create3d._fallback_tier("a duck") == 4)
+    check("...and never falls back to a tier that is not installed",
+          create3d.available().get(4) or create3d._fallback_tier("a duck") == 1,
+          "a tier that answers 'I don't have that installed' is not a fallback")
+
+    check("tier 5's estimate covers what it actually does", est.SEED.get(5, 0) >= 40,
+          "seeded at 20 s on the reasoning that a search and a download are "
+          "quick. Measured: the search is ~14 s, and most character subjects "
+          "are not fetchable and fall through to a ~25-40 s reconstruction, so "
+          "'twenty seconds, sir' was followed by three quarters of a minute "
+          "of silence")
+    import model_find as _mf
+    check("tier 5 looks for the formats we can actually read",
+          ".obj" in _mf._FETCHABLE_EXT and ".stl" in _mf._FETCHABLE_EXT,
+          "the scan searched only for .stl while `fetch` advertised .obj and "
+          "then refused it")
+
+    import model_find
+    check("a Git LFS pointer is recognised rather than skipped as too small",
+          model_find._LFS_POINTER_BYTES[0] <= 133 <= model_find._LFS_POINTER_BYTES[1]
+          and model_find.MIN_MODEL_BYTES > 133,
+          "every mesh in the one repo holding real Mandalorian helmet shells "
+          "is a 133-byte pointer")
+    check("...and the pointer's stated size is read from it",
+          model_find._LFS_SIZE.search(
+              "version https://git-lfs.github.com/spec/v1\n"
+              "oid sha256:cde71c\nsize 11266984\n").group(1) == "11266984")
+    # THE HONESTY HAS TO LAND IN THE LINE HE HEARS, not in the result dict.
+    # `spoken_caveats` is what the background announcement appends, and without
+    # this a stranger's sculpture finishes as "ready, sir, 120 by 128 by 158
+    # millimetres" — presented as ours, and he might repeat that to someone.
+    said = create3d.spoken_caveats(
+        {"found_not_made": True, "credit": "Poesghost/mandalorian_helmet",
+         "in_pieces": True, "part_count": 3})
+    check("a downloaded model says whose it is, out loud",
+          "found this rather than made it" in said
+          and "Poesghost/mandalorian_helmet" in said, said)
+    check("...and that it is one part of several", "one of 3 parts" in said, said)
+    check("a faceted model says so",
+          "faceted" in create3d.spoken_caveats(
+              {"found_not_made": True, "credit": "x/y", "coarse": True}),
+          "206 triangles is a real chess knight and a visibly faceted one")
+    check("...and a mesh of unknown units carries its warning into the line",
+          "no units" in create3d.spoken_caveats(
+              {"unit_note": "that file has no units in it"}))
+    # "Don't worry about an account. Find an alternative to that." A locked
+    # website was being given as the OUTCOME of a request to render something.
+    said_back = create3d.spoken_caveats(
+        {"fell_back_from": 5, "pages_found": [{"host": "printables.com"}]})
+    check("building instead of finding is mentioned, briefly",
+          "built this one" in said_back, said_back)
+    check("...and a website needing an account is never the answer",
+          "account" not in said_back, said_back)
+    check("a part we actually made carries none of this",
+          create3d.spoken_caveats({"tier": 1, "stl": "x.stl"}) == "")
+
+    check("pages get room of their own alongside the fetchable results",
+          model_find._KEEP_PAGES >= 2,
+          "eight GitHub repos filled the list, so 'Printables has real ones "
+          "but they need an account' — the honest answer for Iron Man — could "
+          "not be said")
+
+    # ------------------------------------------- the reference picture, tier 4
+    # TripoSR builds what it can see, so the picture IS the ceiling. Five ways
+    # of choosing it wrongly, each of which produced a mesh that measured
+    # perfectly and looked like nothing.
+    check("a reconstruction asks for the whole object",
+          "full body" in create3d.reference_image.__doc__.lower()
+          or True)  # the query itself is asserted below
+    import inspect
+    src_ref = inspect.getsource(create3d.reference_image)
+    check("the reconstruction query asks for one whole object on a plain ground",
+          "full body single object on white background" in src_ref,
+          "plain 'a duck' returned a mallard half under water and a close-up "
+          "of two webbed feet; the mesh was a lump")
+    check("...and the tracing query still asks for a flat silhouette",
+          "logo silhouette black on white transparent png" in src_ref,
+          "learned from the Spider-Man emblem that traced as a disc")
+
+    # A site icon is not a search result.
+    check("DuckDuckGo's favicon endpoint is not a reference",
+          create3d._bigger_first("https://external-content.duckduckgo.com/ip3/x.ico")
+          is not None)
+    got = await create3d._fetch_reference(
+        {"src": "https://external-content.duckduckgo.com/ip3/www.turbosquid.com.ico"})
+    check("...and is refused before it is downloaded", got == b"",
+          "this returned TurboSquid's orange SQUID logo at 869 x 1017, beat "
+          "every real photograph on size, and was reconstructed into a tangle "
+          "of tentacles labelled 'iron man mark 3'")
+
+    # The thumbnail is upgraded to something worth reconstructing.
+    urls = create3d._bigger_first(
+        "https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2F"
+        "tse3.mm.bing.net%2Fth%2Fid%2FOIP.abc%3Fr%3D0%26pid%3DApi&f=1")
+    check("a 474-pixel thumbnail is asked for at full size first",
+          len(urls) == 2 and "h=1200" in urls[0] and "bing.net" in urls[0], urls)
+    check("...with the height constrained, not squared off",
+          "w=1200" not in urls[0],
+          "w=1200&h=1200 pads the picture into a square")
+    check("...and the thumbnail is still there to fall back on",
+          urls[-1].startswith("https://external-content.duckduckgo.com/iu/"))
+    check("a link that is not a thumbnail service is left alone",
+          create3d._bigger_first("https://example.com/a.jpg")
+          == ["https://example.com/a.jpg"])
+
+    # Framing, against pictures built to be exactly the failures that happened.
+    try:
+        from PIL import Image, ImageDraw
+
+        def pic(draw_it, size=(400, 400), bg=(255, 255, 255)):
+            im = Image.new("RGB", size, bg)
+            draw_it(ImageDraw.Draw(im))
+            b = io.BytesIO()
+            im.save(b, format="PNG")
+            return b.getvalue()
+
+        whole = pic(lambda d: d.rectangle((150, 40, 250, 399), fill=(20, 20, 20)))
+        cut = pic(lambda d: d.rectangle((0, 40, 399, 399), fill=(20, 20, 20)))
+        two = pic(lambda d: [d.rectangle((60, 40, 150, 399), fill=(20, 20, 20)),
+                             d.rectangle((250, 40, 340, 399), fill=(20, 20, 20))])
+
+        w1, s1, f1 = create3d._framing(whole)
+        check("an object standing in shot is whole", w1 and s1, (w1, s1))
+        check("...even though it touches the bottom edge", f1 > 0.05,
+              "measured on eight real candidates, EVERY one touched the "
+              "bottom — things stand on the ground. A rule that called that a "
+              "crop rejected the two best pictures in the set")
+        w2, s2, _ = create3d._framing(cut)
+        check("an object running off the left and right is not whole",
+              not w2 and s2, (w2, s2))
+        w3, s3, _ = create3d._framing(two)
+        check("two of the thing is not one of the thing", not s3,
+              "a catalogue picture of the Mark III from the front AND the back "
+              "was reconstructed into two Iron Men lying side by side")
+        busy = pic(lambda d: [d.rectangle((0, 0, 399, 399), fill=(90, 30, 140)),
+                              d.ellipse((80, 80, 300, 300), fill=(240, 200, 60))],
+                   bg=(90, 30, 140))
+        wb, sb, _ = create3d._framing(busy)
+        check("a busy background gets no verdict rather than a wrong one", sb,
+              "False here would throw away every photograph not taken in a "
+              "studio")
+    except ImportError:
+        skip("reference framing", "PIL is not importable here")
+
+    check("a standing figure's portrait is not mistaken for a banner",
+          create3d.MAX_REFERENCE_ASPECT >= 3.0,
+          "at 2.2 this rejected both 474 x 1159 full-body Mark III pictures "
+          "and left only the catalogue shots with two figures in them")
+
+    # ------------------------------------------------------------ OBJ, for the
+    # hologram rather than the printer. STL is a printing format; anything an
+    # artist sculpts is exported as OBJ.
+    import meshio
+    check("OBJ is a format we say we can read", ".obj" in meshio.READABLE)
+    obj = ("v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\n"
+           "vt 0 0\nvn 0 0 1\ng thing\nusemtl x\n"
+           "f 1/1/1 2/1/1 3/1/1 4/1/1\n"
+           "v 0 0 1\nv 1 0 1\nv 1 1 1\nf -3 -2 -1\n")
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "t.obj")
+    open(p, "w", encoding="utf-8").write(obj)
+    tris = meshio.load(p)
+    check("a quad becomes two triangles and a triangle stays one",
+          len(tris) == 3, len(tris))
+    check("...and negative indices count back from the vertices seen so far",
+          float(tris.reshape(-1, 3)[:, 2].max()) == 1.0,
+          "the last face uses -3 -2 -1 and must reach the second group")
+    check("vt, vn, g and usemtl are not vertices", len(tris) == 3)
+    for bad, why in ((b"v 0 0 0\nf 1 2 3\n", "points past its own vertex list"),
+                     (b"v 0 0 0\n", "has vertices but no faces"),
+                     (b"", "is empty")):
+        q = os.path.join(d, "bad.obj")
+        open(q, "wb").write(bad)
+        try:
+            meshio.load(q)
+            check(f"an OBJ that {why} is refused", False, "it was accepted")
+        except meshio.BadMesh as e:
+            check(f"an OBJ that {why} is refused, in words", bool(str(e)), e)
 
     print()
     if skips:

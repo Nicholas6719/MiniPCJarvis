@@ -31,6 +31,14 @@ import numpy as np
 log = logging.getLogger("jarvis.meshio")
 
 MAX_BYTES = 120_000_000          # a 120 MB STL is a mistake, not a part
+
+# The most triangles worth sending to the stage. Everything we MAKE is well
+# under this — a tier-4 reconstruction is 30-60k — but a model somebody
+# sculpted and published is not: 274,902 for a helmet panel, 632,304 for an
+# anatomical skull. Nine floats a triangle, so 632k is 22 MB of float32 and
+# 30 MB base64, and it used to be uncapped because nothing had ever been that
+# big. The file on disk keeps every triangle; only the projection is thinned.
+MAX_PROJECT_TRIS = 150_000
 FEATURE_ANGLE_DEG = 22.0         # below this the surface is flat enough to ignore
 
 
@@ -107,6 +115,99 @@ def load_stl(path: str) -> np.ndarray:
     except Exception as e:
         raise BadMesh(f"I couldn't make sense of that STL: {e}")
 
+
+
+
+def _parse_obj(text: str) -> np.ndarray:
+    """OBJ -> (n, 3, 3) triangles. Vertices and faces only.
+
+    An OBJ face may be a polygon rather than a triangle and may reference
+    vertices from the end of the file with negative indices, and both are common
+    enough in real exports that ignoring either gives a mesh full of holes.
+    Everything else in the format — normals, texture coordinates, materials,
+    groups, smoothing — is dropped: the stage draws translucent faces and bright
+    edges and has no use for any of it.
+    """
+    verts: list = []
+    faces: list = []
+    for line in text.splitlines():
+        if not line or line[0] not in "vf":
+            continue
+        if line[0] == "v":
+            # `v` is a vertex; `vt`, `vn` and `vp` are not, and they outnumber it.
+            if line[1:2] not in (" ", "\t"):
+                continue
+            p = line.split()
+            if len(p) < 4:
+                continue
+            try:
+                verts.append((float(p[1]), float(p[2]), float(p[3])))
+            except ValueError:
+                continue
+        else:
+            if line[1:2] not in (" ", "\t"):
+                continue
+            idx: list = []
+            for tok in line.split()[1:]:
+                head = tok.split("/", 1)[0]
+                if not head:
+                    continue
+                try:
+                    i = int(head)
+                except ValueError:
+                    continue
+                # 1-based, and negative counts back from the vertices seen SO
+                # FAR — which is why this cannot be done after the fact.
+                idx.append(i - 1 if i > 0 else len(verts) + i)
+            # A fan, so a quad or an n-gon becomes triangles rather than being
+            # dropped. Most sculpted exports are quads.
+            for k in range(1, len(idx) - 1):
+                faces.append((idx[0], idx[k], idx[k + 1]))
+
+    if not verts:
+        raise BadMesh("there are no vertices in that file")
+    if not faces:
+        raise BadMesh("that file has vertices but no faces, so there is "
+                      "nothing to draw")
+    V = np.asarray(verts, dtype=np.float32)
+    F = np.asarray(faces, dtype=np.int64)
+    if F.min() < 0 or F.max() >= len(V):
+        # A file that indexes past its own vertex list is corrupt, and letting
+        # numpy wrap the index would silently draw a different shape.
+        raise BadMesh("that file points at vertices it doesn't contain")
+    return V[F]
+
+
+# What we can actually parse. Kept next to the loader so the download filter and
+# the loader cannot disagree about it — `fetch` advertised OBJ for a while and
+# then refused it, which is the same bug in two places.
+READABLE = (".stl", ".obj")
+
+
+def load(path: str) -> np.ndarray:
+    """-> (n, 3, 3) float32 triangles, from whichever format this is."""
+    if str(path).lower().endswith(".obj"):
+        return load_obj(path)
+    return load_stl(path)
+
+
+def load_obj(path: str) -> np.ndarray:
+    """-> (n, 3, 3) float32 triangles. Raises BadMesh with a speakable reason."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(MAX_BYTES + 1)
+    except OSError as e:
+        raise BadMesh(f"I couldn't read that file: {e}")
+    if len(data) > MAX_BYTES:
+        raise BadMesh("that model is far too large to project")
+    if not data:
+        raise BadMesh("that file is empty")
+    try:
+        return _parse_obj(data.decode("utf-8", errors="replace"))
+    except BadMesh:
+        raise
+    except Exception as e:
+        raise BadMesh(f"I couldn't make sense of that OBJ: {e}")
 
 def feature_edges(tris: np.ndarray, angle_deg: float = FEATURE_ANGLE_DEG,
                   max_edges: int = 60_000) -> np.ndarray:
@@ -224,7 +325,7 @@ def bodies(tris: np.ndarray) -> np.ndarray:
 
 def describe(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     """Everything the hologram and the print checks need, from one parse."""
-    tris = load_stl(path)
+    tris = load(path)
     lo = tris.reshape(-1, 3).min(axis=0)
     hi = tris.reshape(-1, 3).max(axis=0)
     size = (hi - lo)
@@ -267,6 +368,18 @@ def to_payload(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     the renderer never has to know where in space the exporter happened to put it."""
     d = describe(path, angle_deg)
     tris, edges = d.pop("_tris"), d.pop("_edges")
+
+    # THIN A HUGE SCULPTURE FOR THE STAGE, and say that is what happened. A
+    # stride is even across the surface, which is what makes it survive being
+    # drawn translucent with its feature edges over the top — and those edges
+    # are computed from the FULL mesh above, so the silhouette and the creases
+    # stay exactly right however much of the interior is dropped.
+    d["simplified"] = False
+    if len(tris) > MAX_PROJECT_TRIS:
+        d["projected_triangles"] = int(MAX_PROJECT_TRIS)
+        d["simplified"] = True
+        tris = tris[::int(np.ceil(len(tris) / MAX_PROJECT_TRIS))]
+
     centre = (np.asarray(d["min_mm"]) + np.asarray(d["max_mm"])) / 2.0
     d["positions_b64"] = _f32((tris.reshape(-1, 3) - centre).ravel())
     d["edge_positions_b64"] = _f32((edges.reshape(-1, 3) - centre).ravel()) if len(edges) else ""
@@ -278,7 +391,10 @@ def to_payload(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     lab = bodies(tris)
     n_bodies = int(lab.max()) + 1 if len(lab) else 0
     d["body_count"] = n_bodies
-    if n_bodies > 1:
+    # ...and NOT as a third of a million JSON integers. A downloaded sculpture
+    # is one shell: there is nothing to explode, and saying so should not cost
+    # megabytes.
+    if n_bodies > 1 and not d["simplified"]:
         d["bodies"] = lab.astype(int).tolist()
         # Where each body sits relative to the model's middle, so the renderer
         # knows which way to push it. Computed here because it is the same

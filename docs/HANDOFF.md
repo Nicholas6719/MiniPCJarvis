@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-08-30.
+Updated: 2026-09-03.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -1730,6 +1730,202 @@ kind, watertight, sliceable, 0.10 s measured. A picture therefore DEFAULTS to th
 relief rather than to a minutes-long reconstruction he did not ask for; tier 3 is
 reserved for when he says "scan" or "mesh". Dark-is-thick is gated explicitly:
 backwards, it prints a photographic negative.
+
+## "There is no limitation to this" — the render always happens (2026-09-03)
+
+His correction, after being told Iron Man Mark III lived behind an account:
+*"don't worry about an account. Find an alternative to that... If I say 'Render
+Iron Man Mark 3', I expect it to render whatever he has to do: take an image
+from the web and then create that into 3D. If I say 'A duck', I expect it to be
+in 3D. There is no limitation to this."*
+
+And separately: *"Don't worry about printing yet. Right now we're just focused
+on the actual holographic rendering."*
+
+**So a locked website is never an outcome.** Tier 5 tries to download a real
+sculpture; when it cannot, tier 4 reconstructs one from a reference picture, and
+that is now the fallback for EVERYTHING that reaches tier 5 rather than only for
+things `_ORGANIC` recognised. "Iron man mark 3" used to fall to tier 1 and have
+OpenSCAD write code for a suit of armour. Pages that need an account are still
+reported, but as an aside — never as the answer.
+
+### The reference picture IS tier 4's quality ceiling, and choosing it was broken five ways
+
+Every bad mesh this session came back watertight, correctly measured and
+`sliceable: true`. Rendering them was the only check that could see anything.
+Each fix below was found by looking at the picture that produced the lump:
+
+| what it fed TripoSR | what came out |
+|---|---|
+| plain `"a duck"` — a mallard **half under water**, a close-up of duck **feet** | a lump |
+| `"...white background"` — a **cropped bust** of the Mark III, cut at the waist | a lump |
+| biggest-image-wins — TurboSquid's **orange squid logo**, 869x1017, served from DuckDuckGo's `/ip3/` **favicon** endpoint | a tangle of tentacles |
+| a catalogue shot with the **same figure twice**, front and back | two Iron Men side by side |
+| a **474-pixel thumbnail**, every single time | soft everything |
+
+**The query now asks for what the model needs**: `"{desc} full body single object
+on white background 3d render"`, checked side by side across a character, an
+animal and a mug, because a phrasing that only works for figures is not a fix.
+
+**Site icons are refused.** `/ip3/` is DuckDuckGo's favicon endpoint.
+
+**Framing is measured, and the BOTTOM EDGE DOES NOT COUNT.** Border colour ->
+mask -> bounding box. Measured across eight real candidates: every one touched
+the bottom, because things stand on the ground. A rule that called that a crop
+rejected the two best pictures in the set. Left, right and top mean a crop.
+
+**Two subjects is a rejection.** A column of pure background inside the bounding
+box means two objects; a single object never has one — a mug's handle is
+attached, and the gap between a duck's legs still has duck above it.
+
+**But nothing is filtered to nothing.** Rejecting outright returned no picture
+at all and therefore no model. Candidates are ORDERED — one subject, then whole,
+then fill, then size — and the worst picture still beats no picture.
+
+**And the aspect cap was rejecting portraits.** At 2.2 it threw away both
+474 x 1159 full-body Mark III pictures and left only the two-figure catalogue
+shots. A standing figure is tall. It is 3.2 now, and it exists to catch banners.
+
+**Full resolution, not the thumbnail.** The search hands over a DuckDuckGo proxy
+around Bing's thumbnail service, and that service resizes on request: the same
+Mark III at `?h=1200&rs=1&pid=ImgDetMain` came back a clean 490 x 1200 full-body
+cutout. Height only — `w=1200&h=1200` pads it into a square. The thumbnail stays
+as a fallback.
+
+### The reconstruction came out lying down, and nothing knew
+
+TripoSR works in the camera's frame: the input image's vertical becomes mesh
+**X**. Measured on two meshes whose reference pictures I had in front of me — a
+standing Iron Man came out `60 x 25 x 21` lying along X, and a duck came out on
+its back. Every consumer assumes Z is up: the hologram, the bed footprint, and
+the 45-degree overhang check, which is meaningless if it does not know which way
+down is. A cyclic permutation `(x,y,z) -> (y,z,x)` is a proper rotation, so the
+mesh is rotated and not mirrored; a mirrored part is a subtly wrong part that
+passes every check. Iron Man is now `25 x 21 x 60 tall`, the duck `60 long x 31
+x 44 tall`, and both LOOK right.
+
+**This lives in `C:\AI\model3d\photo_to_mesh.py`, outside the repo and outside
+the sidecar build**, exactly like `C:\AI\llama.cpp`. Reinstalling model3d loses
+it. Backup at `photo_to_mesh.py.bak`.
+
+### OBJ, because the hologram is not a printer
+
+Everything read STL and only STL — `fetch` advertised `.obj` and then refused it
+with "I can only read STL today, sir", and the GitHub scan never looked for one.
+STL is a printing format: three vertices and a normal, nothing else. Anything an
+artist sculpts is exported as OBJ. `meshio.load_obj` handles polygons (fan
+triangulated — most sculpted exports are quads) and negative indices (relative
+to the vertices seen SO FAR, which is why it cannot be done afterwards), and
+drops materials, normals and texture coordinates because the stage draws
+translucent faces and bright edges. glTF/GLB is the other format worth having
+and is a bigger job; it is not here and is not pretended to be.
+
+### Verified by looking
+
+`.agent/scripts/render_mesh.py` draws front/side/plan from the STL, shaded by
+face normal. It also learned which way is up the hard way: it assumed Z, TripoSR
+writes Y, and three models in a row got a wrong verdict from what was actually a
+squashed plan view.
+
+Results: **Iron Man Mark 3** — a standing armoured figure, helmet, shoulders,
+gauntlets, boots, 60 mm tall. **A duck** — beak, neck, body, tail, webbed feet.
+Both from "render X" with nothing else said. Shots in `.agent/shots/look-*.png`,
+reference comparisons in `refs-*.png`.
+
+## Tier 5 — found, not made (2026-09-03)
+
+His requirement: *"is there a way where he can 3D render anything? If I say
+'render Iron Man Mark III', is it going to be able to do it? It needs to
+happen."*
+
+**The honest answer is that nothing on this machine can invent it.** Single-image
+reconstruction gives a soft lump; OpenSCAD is a solid modeller and cannot sculpt
+armour. Those are limits of the techniques, not settings. But nobody 3D-prints an
+Iron Man suit by generating one — they download a model somebody spent weeks on.
+So tier 5 finds the existing model. `model_find.py` searches, follows a GitHub
+result to a raw file, downloads it size-bounded, and parses it before trusting
+it. `create3d.from_the_web()` is the tier; `tools/model_tools.py` is the tool.
+
+**Measured, not assumed:** Printables, Cults3D and MyMiniFactory all have the
+models and all put the file behind a JavaScript app and a session. GitHub serves
+raw files with no account. So GitHub is followed to the file and every other host
+is offered as a page to open, with "that site needs an account" said out loud.
+
+**Tier 5 falls back to the tier the request would otherwise have used** — 4 for
+something sculptural, 1 for everything else, and never to a tier that is not
+installed. That is what makes it safe to try the web first for anything that is
+not a template, not dimensioned, not mechanical and not flat: being wrong costs
+one search rather than a worse object. It fell back to tier 4 flatly at first,
+which meant a baseball the web did not have came back a reconstructed lump
+instead of the researched sphere it would have been.
+
+### Eleven subjects run live, and seven wrong answers before it worked
+
+Testing the headline case alone would have shipped every one of these. They did
+not arrive as errors — each came back with a triangle count, a bounding box and
+`sliceable: true`, and looked exactly like success:
+
+| asked for | fetched | |
+|---|---|---|
+| a d20 dice | a webcam calibration card, 512 tris | wrong |
+| a mandalorian helmet | a keyslot bracket | wrong |
+| iron man mark 3 | a flat print plate of a forearm | wrong |
+| an arc reactor | nothing — 8 real files rejected | wrong |
+| a chess knight | nothing from the repo that had one | wrong |
+| a coffee mug / a baseball | a mug / nothing, built one instead | right |
+
+**Drawing them was the only check that could see it** —
+`.agent/scripts/render_mesh.py` renders front/side/top from the STL. Third time
+this session that a metric was correct about the wrong object.
+
+**The root cause was one score answering two questions.** Repo relevance and file
+selection are different. `crashworks3d_arc_reactor` holds six files and none of
+them is named "arc reactor" — the repo IS the object. `D20-IRL-detection` names
+"d20" and is a camera rig whose biggest file is a calibration card. The test that
+separates every case in the sample: **does the repo name carry EVERY word of the
+subject?** If so, any file in it that is not supporting hardware qualifies and
+the biggest is the main piece. If not, the filename itself has to name the
+subject.
+
+**Git LFS.** `Poesghost/mandalorian_helmet` is the one repo on GitHub holding
+real Mandalorian helmet shells, and it looked empty: every mesh in it is a
+133-byte LFS pointer, filtered out as too small. The pointer states the true size
+and `media.githubusercontent.com` serves the content with no account — an 11.3 MB
+shell downloads. Repos worth having were exactly the ones being discarded.
+
+**Print plates are not objects.** "Iron Man Mark 3" fetched a 19 MB,
+395,174-triangle mesh measuring 15 x 30 x 3 — a perforated forearm shell laid
+flat on a bed. Rejected on thinnest-over-longest; measured ratios: plate 0.10,
+arc-reactor grid 0.17, helmet panel 0.76, mug 0.74, d20 0.87. Threshold 0.14, and
+note the arc reactor sits only 0.03 above it. Body count does NOT discriminate —
+the plate has 8 bodies and the arc reactor 11.
+
+**Parts get announced as parts.** Wearable props are published as multi-part
+print plates, so the best-matching STL in a helmet repo is usually one panel.
+Being handed a quarter of a helmet and told it is a helmet is the same failure as
+the emblem that was a disc. `is_piece` and the siblings ride along, and the
+instruction tells the persona to offer the rest. Penalising piece-ness in the
+ranking was tried and was worse: it put a 400 KB `helmet_attachments1.stl` above
+the 13 MB front panel of the actual helmet.
+
+**An STL carries no units.** Everything downstream believes the numbers are
+millimetres: the bed check, the wall-thickness warning, the sliver guard.
+`_unit_doubt` says so when the longest side falls outside 8-600 mm and names
+inches or centimetres.
+
+**Two truncation bugs, mirror images of each other.** GitHub results were
+appended to an already-sorted list and then sliced off the end, so tier 5
+reported "nothing fetchable" while four real repos sat just past the cut. Fixing
+it by putting GitHub first then filled the whole list with GitHub, so the pages —
+"Printables has real ones but they need an account", the honest answer for Iron
+Man — became unsayable. Two lists with their own room, not one list and a slice.
+
+**What works now, verified by looking:** a 3DBenchy at exactly 60 x 31 x 48 mm,
+an anatomical human skull at 632,304 triangles, a numbered d20 at 21 mm, a mug
+with a handle, an arc reactor lower grid at 99 mm reported as 1 of 5 parts, a
+Mandalorian helmet panel reported as 1 of 3. Iron Man Mark 3 honestly reports
+that Printables has real ones needing an account, and builds an approximation
+meanwhile. Screenshots in `.agent/shots/look-*.png`.
 
 **A bug the new tier caused, and the gate caught.** `make_hologram` used
 `tier: int = 0` as its "he didn't say" sentinel — and 0 became a real tier. Every
