@@ -2886,6 +2886,82 @@ nearly edge-on and tells you almost nothing. **For a shape, look at the shape.**
 * The follow-up window is 40 s while a model is on the stage, 5 s otherwise.
   Turning a part, looking at it and thinking takes longer than asking the time.
 
+## 2026-09-03 — the audit, and the join nothing was watching
+
+He asked for an audit before I called the work finished: *"audit the code. To
+ensure performance, productivity. And. Enhancement."* Seven real defects, each
+gated, and every gate made to FAIL before it was trusted.
+
+**The to_thread that wasn't.** `components.py` read as though the mesh join had
+been moved off the event loop:
+
+    await asyncio.to_thread(
+        write_stl, np.concatenate([load(p) for p in placed]), path)
+
+Arguments are evaluated before the call, so every load ran on the loop and only
+the write went across — six components at up to 400,000 triangles each. This is
+the worst shape the bug comes in: it reads as handled. `model_find.describe`
+had the same problem inline in an async fetch over a just-downloaded 120 MB
+mesh. An AST pass over every `async def` in the sidecar found no others.
+
+**Per-part renders were serial.** Independent processes, distinct output files,
+one source nobody writes to, sixteen cores. Now gathered behind a four-lane
+semaphore — bounded, because llama-server holds the GPU and most of a working
+set on this same box. Measured: 5.78s serial, 4.93s at four lanes, and six
+lanes buys nothing. `gather` preserves input order, which is the property that
+could silently rot, so that is what the gate asserts.
+
+**A project called NUL was the null device.** `mkdir` returns no error and
+`is_dir` is then False. Say "start a new project called null" and JARVIS would
+read the name back, confirm it, and pour every model and note into nothing with
+no error at any layer. Measured rather than assumed, which changed the fix: only
+the BARE name breaks here — `nul.suit` and `con.x` are real directories.
+
+**The side view was drawn at twice the scale of the front view.** 7.28 px/mm
+against 14.57 on the same sheet. A front/side/plan set exists to be read
+across, and it is what he judges a physical print from. One scale now, from the
+model's largest dimension rather than each face's.
+
+**Raising the draw cap had only moved the speckle.** 400,000 was still too low:
+a 766,322-triangle sphere strided by two and came back pinholed. There is no
+count at which a stride stops perforating, so the limit went where nothing real
+reaches it — `meshio.MAX_BYTES` caps a binary STL at 2,399,998 triangles
+anyway. The old gate asserted `<= 1_000_000` because "a million through PIL is
+minutes"; a million is 13.9s, so the reasoning was wrong and the bound with it.
+
+**A tight crop made the picture frame the subject.** The tracer picked its
+background by majority over the whole image, and a logo reference is usually a
+tight crop — a subject filling 55% IS the majority. So his own example, a red
+mask with white eyes, traced the four corners of the picture as the "outline"
+and sampled #ffffff, with the real face labelled a hole inside it. The frame
+edge is the reliable witness. Checked against all four polarities the tier
+sees.
+
+**And the one that mattered most.** I ran the whole morning's feature list as a
+checklist instead of trusting it was there. Twenty of twenty-one held. The miss
+was the feature he described most concretely: *"pull up Spider-Man suit Mark
+2"* could not find the Spider-Man suit, because the folder is created from one
+transcription of his voice and recalled from another, and the match was a plain
+substring test that one hyphen defeats. Underneath it, `workspace.note` creates
+the folder when absent — so noting something under "spiderman suit mark 2" made
+a SECOND folder beside "Spider-Man suit Mark 2" and wrote into the empty one.
+His design log would have split in two silently.
+
+Nothing was broken in isolation. Recall worked, notes worked, folder naming
+worked. The JOIN between two working pieces was broken, and no per-module suite
+was ever going to look there. That is why the checklist is now a suite —
+`tests/test_feature_set.py`, 28 checks, deliberately shallow per line and wide
+across features, gated in `build_sidecar.cmd`.
+
+**On the release build.** It failed three suites — `hands_e2e`, `clarify_e2e`,
+`soak_e2e` — and the leading suspect is me: the e2e window was 09:35-10:01,
+exactly when the audit was rendering 766k-2M triangle meshes and running
+concurrent OpenSCAD. An 86-second first token is starvation, not logic, and the
+soak's "+19.4 MB/min leak" ended at 1668 MB, BELOW the 1780 MB it started from
+— a real leak does not give memory back. Re-run on a quiet machine before
+believing either the failure or this explanation. **Never run the suites while
+anything else is using this machine.**
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
