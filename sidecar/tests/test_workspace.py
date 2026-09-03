@@ -196,6 +196,55 @@ async def main() -> int:
         workspace.DEFAULT_ROOT = old_root
 
 
+    print("\n-- speech does not spell consistently --")
+    # "pull up Spider-Man suit Mark 2" answered "I don't have a project called
+    # that" about a project that was right there: the folder was created from
+    # one transcription and recalled from another, and the match was a plain
+    # substring test that a single hyphen defeats. Worse, project_note would
+    # then CREATE the near-miss as a second folder and write the note into the
+    # empty one, splitting his design log with no error anywhere.
+    # This suite monkeypatches workspace.root, so DEFAULT_ROOT is not what
+    # decides where things land — ask the module where it is actually writing.
+    d2 = workspace.root()
+    if True:
+        workspace.create("Spider-Man suit Mark 2", about="our own suit")
+        workspace.note("Spider-Man suit Mark 2", "webs go on last")
+        workspace.create("Iron Man Mark 3")
+
+        for said in ("spiderman suit mark 2", "Spider Man suit Mark 2",
+                     "SPIDERMAN SUIT MARK 2", "the spiderman suit",
+                     "pull up the spider-man suit"):
+            check(f"{said!r} finds it",
+                  workspace.resolve(said)[0] == "Spider-Man suit Mark 2",
+                  repr(workspace.resolve(said)))
+        check("the name he hears back is the project's, not his casing",
+              workspace.resolve("iron man mark 3")[0] == "Iron Man Mark 3",
+              repr(workspace.resolve("iron man mark 3")))
+        check("something genuinely absent is still refused",
+              workspace.resolve("a duck")[0] == "",
+              repr(workspace.resolve("a duck")))
+        got, near = workspace.resolve("mark")
+        check("...and an ambiguous one names the candidates instead of guessing",
+              got == "" and len(near) == 2, f"{got!r} {near}")
+
+        # THE ONE THAT LOST DATA: a note under a different transcription.
+        # Other gates in this suite share this root, so what matters is that
+        # the count does not CHANGE, not what it is.
+        def dirs():
+            return sorted(x for x in os.listdir(d2)
+                          if os.path.isdir(os.path.join(d2, x)))
+
+        before = dirs()
+        workspace.note("spiderman suit mark 2", "second note, same project")
+        check("a note under another transcription does NOT make a second folder",
+              dirs() == before,
+              f"appeared: {[x for x in dirs() if x not in before]}")
+        log = open(os.path.join(d2, "Spider-Man suit Mark 2",
+                                workspace.NOTES), encoding="utf-8").read()
+        check("...and both notes are in the one design log",
+              "webs go on last" in log and "second note" in log)
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

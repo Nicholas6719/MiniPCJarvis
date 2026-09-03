@@ -104,6 +104,82 @@ def path_for(name: str) -> str:
     return os.path.join(root(), folder_name(name))
 
 
+# The words he puts in front of a project's name when he asks for it, which
+# are not part of what it is called. Dropped from BOTH sides, so a project
+# genuinely called "The Mark 2" still matches itself.
+_FILLER = frozenset(("the", "a", "an", "my", "our", "that", "this", "then",
+                     "up", "pull", "open", "please", "sir", "project", "one"))
+
+
+def _key(text: str) -> str:
+    """A name reduced to letters and digits, for comparing two transcriptions.
+
+    Joined rather than compared word by word, because the whole point is that
+    "Spider-Man", "Spiderman" and "Spider Man" are one name — and those do not
+    tokenise alike. The filler words come out first, or "the spiderman suit"
+    keys to "thespidermansuit" and stops being a substring of the project.
+    """
+    words = [w for w in re.split(r"[^a-z0-9]+", (text or "").lower())
+             if w and w not in _FILLER]
+    return "".join(words)
+
+
+def resolve(said: str) -> tuple[str, list[str]]:
+    """The project he means -> (its real name, or "" and the near misses).
+
+    SPEECH DOES NOT SPELL CONSISTENTLY. The folder gets created from one
+    transcription and recalled from another, and a plain substring test on the
+    raw words misses over a single hyphen: "spiderman suit mark 2" is not a
+    substring of "Spider-Man suit Mark 2", so "pull up the Spider-Man suit"
+    answered "I don't have a project called that" about a project that was
+    right there. Compared on letters and digits only, so Spider-Man, Spiderman
+    and Spider Man are one name.
+
+    Both directions, because he is as likely to say less than the folder is
+    called ("the Spider-Man suit") as more ("the Spider-Man suit we started").
+    """
+    said = (said or "").strip()
+    if not said:
+        return "", []
+    if exists(said):
+        # THE NAME ON DISK, not the one he happened to say. Windows paths are
+        # case-insensitive, so "iron man mark 3" finds the folder and would
+        # otherwise be echoed back in his casing rather than the project's.
+        want = folder_name(said)
+        for p in projects():
+            if p["name"].lower() == want.lower():
+                return p["name"], []
+        return want, []
+    k = _key(said)
+    if not k:
+        return "", []
+    names = [p["name"] for p in projects()]
+    near = [n for n in names if k in _key(n)]
+    if len(near) != 1:
+        wider = [n for n in names if _key(n) and _key(n) in k]
+        if len(wider) == 1:
+            return wider[0], []
+        near = near or wider
+    if len(near) == 1:
+        return near[0], []
+    return "", near
+
+
+def _as_existing(name: str) -> str:
+    """The project this name already means, or the name unchanged.
+
+    A NEAR MISS IS THE SAME PROJECT. `note` and `keep_model` create the folder
+    when it is absent, which is right for a genuinely new project and wrong for
+    another transcription of one he already has: "spiderman suit mark 2" would
+    make a second folder beside "Spider-Man suit Mark 2" and put the note in
+    the empty one, splitting his design log in two without an error anywhere.
+    Only resolves when it is unambiguous, so this can never quietly pick
+    between two real candidates.
+    """
+    got, _ = resolve(name)
+    return got or name
+
+
 def exists(name: str) -> bool:
     return os.path.isdir(path_for(name))
 
@@ -155,6 +231,7 @@ def note(name: str, text: str, heading: str = "") -> dict:
     body = (text or "").strip()
     if not body:
         return {"error": "note what, sir?"}
+    name = _as_existing(name)
     if not exists(name):
         create(name)
     line = f"\n## {heading.strip()}\n" if heading.strip() else "\n"
@@ -179,6 +256,7 @@ def keep(name: str, src: str, kind: str = MODELS) -> dict:
         return {"error": "there's no such file, sir"}
     if kind not in (MODELS, REFERENCES):
         kind = MODELS
+    name = _as_existing(name)
     if not exists(name):
         create(name)
     dst_dir = os.path.join(path_for(name), kind)
@@ -253,6 +331,7 @@ def archive(name: str) -> dict:
     destroy a fortnight of work on a mishearing, so there is no code here that
     can.
     """
+    name = _as_existing(name)
     if not exists(name):
         return {"error": f"I don't have a project called {name}, sir"}
     dst_dir = os.path.join(root(), ARCHIVE)

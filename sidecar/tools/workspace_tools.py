@@ -158,17 +158,16 @@ async def recall_project(name: str = "") -> dict:
     said = (name or "").strip() or active()
     if not said:
         return {"error": "which project, sir?"}
-    if not workspace.exists(said):
-        near = [p["name"] for p in workspace.projects()
-                if said.lower() in p["name"].lower()]
-        if len(near) == 1:
-            said = near[0]
-        elif near:
+    # ONE resolver, tolerant of how speech spells things — workspace.resolve.
+    got, near = workspace.resolve(said)
+    if got:
+        said = got
+    else:
+        if near:
             return {"error": f"I have {len(near)} that could be that, sir: "
                              + ", ".join(near[:4]),
                     "candidates": near}
-        else:
-            return {"error": f"I don't have a project called {said}, sir"}
+        return {"error": f"I don't have a project called {said}, sir"}
 
     m = workspace.meta(said)
     set_active(said)
