@@ -2007,6 +2007,25 @@ class Orchestrator:
                            examples=brain.example_count)
         rest = (args.get("rest") or "").strip()
         if rest:
+            # LEARN THE LESSON, not merely forget the mistake. unlearn() above
+            # deletes the wrong association; without this nothing takes its
+            # place, so the same sentence misfires again and he corrects it
+            # again. His words: "if I say flip it upside down and it only turns
+            # it to the right and then I correct him ... let him learn."
+            original = (last or {}).get("query") or ""
+            if original and recent:
+                try:
+                    d = await brain.decide(rest, context=_screen_context())
+                    if d and d[0].name not in ("correction", "teach"):
+                        if await brain.learn(original, d[0].name, source="user"):
+                            await bus.emit("brain_learned",
+                                           text=f"learned: {original}",
+                                           skill=d[0].name,
+                                           examples=brain.example_count)
+                except Exception:
+                    # A lesson that cannot be stored must never cost him the
+                    # correction itself.
+                    log.debug("could not learn from the correction", exc_info=True)
             ack = "Sorry."
             await bus.emit("assistant_delta", text=ack + " ")
             await queue.put(ack)
