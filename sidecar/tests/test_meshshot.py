@@ -98,11 +98,21 @@ def main() -> int:
     got = asyncio.run(meshshot.shot_async(bad))
     check("an unreadable model draws nothing and says nothing", got == "")
 
-    print("\n-- a huge model is thinned rather than taking minutes --")
-    check("there is a ceiling on what gets drawn",
-          meshshot.MAX_DRAW_TRIS <= 60_000,
-          "a 632,304-triangle skull takes minutes through PIL and looks no "
-          "different at this size")
+    print("\n-- dense meshes are drawn, not speckled --")
+    # THIS GATE ASSERTED THE OPPOSITE, and justified a 40,000 ceiling with "it
+    # looks no different at this size". Measured, that was wrong: a stride
+    # through a 399,118-triangle duck keeps one triangle in ten and puts HOLES
+    # in the surface, and the result is a speckled shape he would reasonably
+    # have judged a bad model. 40k draws in 0.7 s and 400k in 4.5 s, on a path
+    # that already took minutes.
+    check("the ceiling is high enough not to perforate a surface",
+          meshshot.MAX_DRAW_TRIS >= 200_000,
+          "a stride does not thin a surface evenly")
+    check("...but there is still a ceiling",
+          meshshot.MAX_DRAW_TRIS <= 1_000_000,
+          "a million triangles through PIL is minutes, and this sits on a "
+          "completion path")
+
 
     print("\n-- the completion message carries it --")
     rq = open(os.path.join(os.path.dirname(os.path.dirname(
