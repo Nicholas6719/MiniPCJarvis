@@ -22,6 +22,7 @@ directory so a generated name cannot walk out of it.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -540,6 +541,50 @@ async def edit_part(change: str, name: str = "") -> dict:
             base = ""
     if not base:
         return {"error": "I don't have a part to change, sir"}
+
+    # A TRACED DESIGN IS EDITED BY ITS FEATURES. Decided by what the model is,
+    # not by how he said it — "make the hole bigger" and "make his eyes smaller"
+    # are one sentence to him.
+    import create3d
+    traced_stl = d / f"{base}.stl"
+    kept = create3d.load_shapes(str(traced_stl)) if traced_stl.exists() else {}
+    if kept.get("shapes"):
+        import features
+        pieces = features.label(kept["shapes"])
+        targets = features.find(pieces, want)
+        if not targets:
+            # A WRONG GUESS CHANGES THE WRONG PART OF HIS DESIGN and he finds
+            # out later, so say what there is instead.
+            return {"error": (f"I can change the {features.describe(pieces)}, "
+                              f"sir — which did you mean?"),
+                    "can_change": sorted({p["name"] for p in pieces}),
+                    "unchanged": True}
+        factor = features.factor_from(want)
+        if factor == 1.0:
+            return {"error": "bigger or smaller, sir?", "unchanged": True}
+        try:
+            (d / f"{base}.prev.shapes.json").write_text(
+                json.dumps(kept), encoding="utf-8")
+        except OSError:
+            log.debug("could not keep the previous design", exc_info=True)
+        r = await create3d.rebuild_shapes(
+            str(traced_stl), features.scaled(kept["shapes"], targets, factor),
+            kept.get("thickness_mm", 3.0), kept.get("width_mm", 60.0))
+        if r.get("error"):
+            return {**r, "unchanged": True}
+        changed = sorted({t["name"] for t in targets})
+        out_d = {"name": base, "stl": str(traced_stl), "scad": r.get("scad", ""),
+                 "changed": True, "feature": changed, "factor": round(factor, 2),
+                 "spoken": (f"{' and '.join(changed)} "
+                            f"{'smaller' if factor < 1 else 'bigger'}, sir.")}
+        try:
+            import meshio
+            info = await asyncio.to_thread(meshio.describe, str(traced_stl))
+            out_d["size_mm"] = info["size_mm"]
+        except Exception:
+            log.debug("could not measure the edited design", exc_info=True)
+        await _reproject(base)
+        return out_d
 
     scad = d / f"{base}.scad"
     if not scad.exists():

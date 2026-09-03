@@ -120,6 +120,74 @@ def main() -> int:
     check("...and says whose left it means", "looking at it" in said, said)
     check("nothing to describe says nothing", F.describe([]) == "")
 
+    print("\n-- how much bigger, from how he said it --")
+    for said, want in (("make his eyes smaller", 0.75),
+                       ("make the lines much bigger", 1.5),
+                       ("make it a bit smaller", 0.88),
+                       ("make the eyes twice as big", 2.0),
+                       ("make it 150 percent", 1.5),
+                       ("half the size", 0.5)):
+        check(f"{said!r}", abs(F.factor_from(said) - want) < 0.01,
+              F.factor_from(said))
+    check("no direction is not a guess", F.factor_from("change the eyes") == 1.0,
+          "guessing which way costs him the design")
+    check("...and neither is both", F.factor_from("bigger and smaller") == 1.0)
+
+    print("\n-- and the whole way through, from a picture --")
+    try:
+        import asyncio
+        from pathlib import Path
+
+        import cv2
+        import numpy as np
+
+        import create3d
+        import tools.fabrication as fab
+
+        img = np.full((400, 400), 255, np.uint8)
+        cv2.circle(img, (200, 200), 150, 0, -1)
+        cv2.ellipse(img, (150, 150), (40, 22), 0, 0, 360, 255, -1)
+        cv2.ellipse(img, (250, 150), (40, 22), 0, 0, 360, 255, -1)
+        cv2.rectangle(img, (90, 260), (310, 270), 255, -1)
+        d = tempfile.mkdtemp()
+        pic = os.path.join(d, "mask.png")
+        cv2.imwrite(pic, img)
+        real_wd = fab.work_dir
+        fab.work_dir = lambda: Path(d)
+        try:
+            r = asyncio.run(create3d.from_image(pic, "mask"))
+            kept = create3d.load_shapes(r.get("stl", ""))
+            check("a traced design keeps its shapes",
+                  bool(kept.get("shapes")),
+                  "the .scad holds the same geometry as loose coordinates with "
+                  "no eye in it")
+            eyes = [p for p in F.label(kept["shapes"]) if "eye" in p["name"]]
+            check("...and its eyes are found in a real trace", len(eyes) == 2)
+            was = eyes[0]["w"]
+
+            e = asyncio.run(fab.edit_part("make his eyes smaller", name="mask"))
+            check("the edit says what it changed",
+                  "eye" in (e.get("spoken") or ""), e)
+            now = [p for p in F.label(create3d.load_shapes(r["stl"])["shapes"])
+                   if "eye" in p["name"]][0]["w"]
+            check("...and the eyes really are smaller",
+                  abs(now / was - 0.75) < 0.02, round(now / was, 2))
+
+            unknown = asyncio.run(fab.edit_part("make the flurb bigger",
+                                                name="mask"))
+            check("an unknown feature lists what it CAN change",
+                  "which did you mean" in (unknown.get("error") or ""),
+                  "a wrong guess changes the wrong part of his design and he "
+                  "finds out later")
+            vague = asyncio.run(fab.edit_part("change the eyes", name="mask"))
+            check("...and no direction asks rather than guesses",
+                  "bigger or smaller" in (vague.get("error") or ""), vague)
+        finally:
+            fab.work_dir = real_wd
+    except ImportError:
+        print("  SKIP  the whole path  (opencv is not importable here)")
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

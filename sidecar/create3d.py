@@ -485,6 +485,69 @@ def trace_shapes(image_path: str, max_points: int = 400) -> list[dict] | None:
     return shapes or None
 
 
+def shapes_path(stl_path: str) -> str:
+    """Where a traced design's shapes live, beside the model."""
+    base = str(stl_path)
+    for ext in (".stl", ".obj"):
+        if base.lower().endswith(ext):
+            base = base[: -len(ext)]
+            break
+    return base + ".shapes.json"
+
+
+def save_shapes(stl_path: str, shapes: list, thickness_mm: float,
+                width_mm: float) -> str:
+    """Record a traced design so a feature of it can be changed later."""
+    import json
+    p = shapes_path(stl_path)
+    try:
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump({"shapes": shapes, "thickness_mm": thickness_mm,
+                       "width_mm": width_mm}, fh)
+        return p
+    except OSError:
+        log.warning("could not keep the traced shapes for %s", stl_path,
+                    exc_info=True)
+        return ""
+
+
+def load_shapes(stl_path: str) -> dict:
+    """A traced design's shapes, or {} for a model that was not traced."""
+    import json
+    import os
+    p = shapes_path(stl_path)
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh) or {}
+    except (OSError, ValueError):
+        log.warning("could not read the traced shapes %s", p, exc_info=True)
+        return {}
+
+
+async def rebuild_shapes(stl_path: str, shapes: list, thickness_mm: float,
+                         width_mm: float) -> dict:
+    """Re-extrude an edited design over the model it came from."""
+    from pathlib import Path
+
+    from tools.fabrication import _run, openscad_path
+
+    exe = openscad_path()
+    if not exe:
+        return {"error": "OpenSCAD is not installed", "unavailable": True}
+    stl = Path(stl_path)
+    scad = stl.with_suffix(".scad")
+    scad.write_text(_shapes_scad(shapes, thickness_mm, width_mm),
+                    encoding="utf-8")
+    rc, out, err = await _run([exe, "-o", str(stl), str(scad)], 180)
+    if rc != 0 or not stl.exists():
+        return {"error": f"that change wouldn't build: "
+                         f"{(err or out or '').strip()[:200]}"}
+    save_shapes(str(stl), shapes, thickness_mm, width_mm)
+    return {"stl": str(stl), "scad": str(scad)}
+
+
 def _shapes_scad(shapes: list[dict], height_mm: float, width_mm: float) -> str:
     """Extrude every traced shape, with its holes cut out of it."""
     body = []
@@ -532,6 +595,10 @@ async def from_image(image_path: str, name: str = "", thickness_mm: float = 3.0,
     d = work_dir()
     scad, stl = d / f"{base}.scad", d / f"{base}.stl"
     scad.write_text(_shapes_scad(shapes, thickness_mm, width_mm), encoding="utf-8")
+    # KEEP THE DESIGN IN THE FORM IT WAS UNDERSTOOD IN. The .scad holds the same
+    # geometry as six hundred loose coordinates with no eye in it; these are the
+    # outlines and holes, which is what "make his eyes smaller" needs to exist.
+    save_shapes(str(stl), shapes, thickness_mm, width_mm)
     rc, out, err = await _run([exe, "-o", str(stl), str(scad)], 180)
     if rc != 0 or not stl.exists():
         return {"error": f"OpenSCAD could not build that: {(err or out or '').strip()[:200]}",

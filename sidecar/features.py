@@ -33,6 +33,7 @@ can see, and `describe` says so out loud when it lists them.
 from __future__ import annotations
 
 import logging
+import re
 
 log = logging.getLogger("jarvis.features")
 
@@ -235,3 +236,41 @@ def describe(pieces: list[dict]) -> str:
     if len(seen) == 1:
         return seen[0] + note
     return ", ".join(seen[:-1]) + " and " + seen[-1] + note
+
+
+# How much bigger, from how he said it. Modest by default: an edit he can see is
+# one he can ask for again, and one that overshoots costs him the design.
+_STRONGER = ("much", "a lot", "far", "way", "significantly", "loads")
+_GENTLER = ("bit", "little", "slightly", "touch", "hair", "shade")
+
+_MULTIPLE = re.compile(
+    r"\b(half|twice|double|three times|four times)\b", re.I)
+_PERCENT = re.compile(r"\b(\d{1,3})\s*(?:%|per ?cent)\b", re.I)
+
+_UP = ("bigger", "larger", "wider", "grow", "thicker", "increase", "expand")
+_DOWN = ("smaller", "shrink", "reduce", "tighter", "thinner", "narrower",
+         "decrease")
+
+
+def factor_from(said: str) -> float:
+    """The scale he asked for. 1.0 when he did not actually ask for one."""
+    want = (said or "").lower()
+
+    m = _MULTIPLE.search(want)
+    if m:
+        return {"half": 0.5, "twice": 2.0, "double": 2.0,
+                "three times": 3.0, "four times": 4.0}[m.group(1).lower()]
+    m = _PERCENT.search(want)
+    if m and 1 <= int(m.group(1)) <= 400:
+        return int(m.group(1)) / 100.0
+
+    up = any(w in want for w in _UP)
+    down = any(w in want for w in _DOWN)
+    if up == down:
+        return 1.0          # neither, or both — ask rather than guess
+    step = 0.25
+    if any(w in want for w in _STRONGER):
+        step = 0.5
+    elif any(w in want for w in _GENTLER):
+        step = 0.12
+    return 1.0 + step if up else 1.0 - step
