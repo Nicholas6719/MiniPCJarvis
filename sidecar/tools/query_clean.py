@@ -45,7 +45,13 @@ _QUESTION = re.compile(r"^(?:how|what|why|when|where|who|which|is|are|do|does|ca
 # was understood and the word was not, so the count was lost AND the phrase
 # "two images of" went to the search engine as part of the subject. He heard it
 # back as "Here are some pictures of two images of iron man."
-_NUM_WORDS = {"a": 1, "an": 1, "some": None, "a few": 3, "several": 4, "a couple": 2,
+# "A" AND "AN" ARE NOT THE NUMBER ONE. They were, and "show me a picture of
+# iron man" therefore asked for exactly one picture — which is never what that
+# sentence means. It is how everybody asks to be shown something. A real count
+# is a numeral or a number-word ("5 images", "three pictures"), and "one" stays
+# below because "show me one picture of it" IS a deliberate singular: the
+# difference is that "one" is a number and "a" is grammar.
+_NUM_WORDS = {"some": None, "a few": 3, "several": 4, "a couple": 2,
               "a couple of": 2,
               "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
               "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,

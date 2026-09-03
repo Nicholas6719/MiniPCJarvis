@@ -45,13 +45,19 @@ function useMachine() {
   useEffect(() => {
     let dead = false;
     const load = async () => {
-      try { const r = await api("/system"); if (!dead) setSys(r); } catch {}
+      // SAY WHY. This used to swallow every failure, so a blank machine panel
+      // looked identical to a healthy one reading zeros — nothing on screen,
+      // nothing in a log, nothing in the console. The backend was verified
+      // healthy (snapshot() returns real numbers in 0.04s) and the failure
+      // still could not be located, because it left no trace.
+      try { const r = await api("/system"); if (!dead) setSys(r); }
+      catch (e) { console.error("machine panel: /system failed", e); }
     };
     (async () => {
       try {
         const c = await api("/config");
         if (!dead) setModel(String(c.config?.llm?.active_model ?? ""));
-      } catch {}
+      } catch (e) { console.error("machine panel: /config failed", e); }
     })();
     load();
     const t = setInterval(() => { if (!document.hidden) load(); }, 5000);

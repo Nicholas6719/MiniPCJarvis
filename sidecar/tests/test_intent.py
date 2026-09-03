@@ -117,6 +117,27 @@ def main() -> int:
           holo_angles.parse_action("close the hologram") == "hide",
           str(holo_angles.parse_action("close the hologram")))
 
+    print("\n-- 'a picture' is not a request for exactly one --")
+    # From his testing: "he also only showed me 1 image of iron man, when I
+    # say show me a picture of ... I expect multiple pictures every time".
+    # _NUM_WORDS mapped "a" and "an" to 1, so the ARTICLE was read as a
+    # QUANTITY and one picture was correct behaviour for what the code
+    # thought it had been asked. Nobody means "and no more than one".
+    from tools.query_clean import clean_image_query
+    for said in ("show me a picture of iron man",
+                 "show me an image of spiderman",
+                 "show me iron man",
+                 "show me some pictures of iron man"):
+        _q, n = clean_image_query(said)
+        check(f"{said!r} does not cap the grid at one", n is None, str(n))
+    # A REAL count still counts - a numeral or a number word, and "one",
+    # which is a deliberate singular rather than grammar.
+    for said, want in (("show me 5 images of spiderman", 5),
+                       ("show me three pictures of a duck", 3),
+                       ("show me one picture of it", 1)):
+        _q, n = clean_image_query(said)
+        check(f"{said!r} still asks for {want}", n == want, str(n))
+
     print("\n-- holding still is not cancelling the render --")
     # 2026-09-03, from his testing: the model drifts by default and there
     # was NO WAY TO SAY STOP, so "make it stop spinning" matched nothing on
