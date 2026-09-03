@@ -213,6 +213,18 @@ async def listen_toggle(x_jarvis_token: str | None = Header(None)):
     return {"ok": True, "state": orchestrator.sm.state.value}
 
 
+@app.post("/standby")
+async def standby(x_jarvis_token: str | None = Header(None)):
+    """Stop listening now, without waiting for the conversation window.
+
+    His request: the window is deliberately short so he is not left with an
+    open microphone, and this is how he closes it early when he is done
+    talking. It does not hide the window — standing down is about the ears.
+    """
+    _auth(x_jarvis_token)
+    return await orchestrator.stand_down()
+
+
 @app.post("/interrupt")
 async def interrupt(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)

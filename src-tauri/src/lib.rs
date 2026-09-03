@@ -191,9 +191,24 @@ pub fn run() {
                     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyJ),
                     // hold to dictate into whatever app has focus (no turn taken)
                     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyD),
+                    // stand down: close the conversation window early, without
+                    // waiting it out. The window is short on purpose; this is
+                    // how he ends it when he is done talking.
+                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS),
                 ])
                 .expect("register hotkeys")
                 .with_handler(move |app, shortcut, event| {
+                    // Stand down. Deliberately does NOT raise or hide the
+                    // window: this is about the microphone, not the view.
+                    if shortcut.key == Code::KeyS {
+                        if event.state == ShortcutState::Pressed {
+                            let sc = sc_for_hotkey.clone();
+                            tauri::async_runtime::spawn(async move {
+                                sidecar_post(&sc, "/standby").await;
+                            });
+                        }
+                        return;
+                    }
                     let dictating = shortcut.key == Code::KeyD;
                     if dictating {
                         // press starts capture, release transcribes and pastes; the

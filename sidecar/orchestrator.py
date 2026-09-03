@@ -494,6 +494,34 @@ class Orchestrator:
                 log.exception("idle watch failed")
                 await asyncio.sleep(30)
 
+    async def stand_down(self) -> dict:
+        """End the conversation window now. He is done talking.
+
+        The window is short on purpose, and he asked for a way to close it
+        early rather than for it to be longer — waiting out an open microphone
+        is the thing he wanted to stop. Anything mid-flight is interrupted
+        first, because "stop listening" while a sentence is still being spoken
+        at him is not standing down.
+
+        The window is left alone. Standing down is about the ears; hiding
+        himself as well would be a second surprise on top of the one he asked
+        to end.
+        """
+        try:
+            if self.sm.state not in (State.IDLE, State.SLEEPING):
+                await self.interrupt()
+        except Exception:
+            log.debug("could not interrupt on stand down", exc_info=True)
+        self._armed_until = 0.0
+        await bus.emit("conversation", armed=False)
+        try:
+            if self.sm.state not in (State.ERROR, State.STARTING, State.SLEEPING):
+                await self.sm.to(State.IDLE, force=True)
+        except Exception:
+            log.debug("could not settle to idle", exc_info=True)
+        log.info("stood down: conversation window closed by hotkey")
+        return {"ok": True, "listening": False, "state": self.sm.state.value}
+
     async def wake_if_sleeping(self, surface: bool = True) -> bool:
         """Any deliberate approach — hotkey, tray, a typed turn — also ends sleep.
 
