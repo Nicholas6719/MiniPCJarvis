@@ -67,7 +67,7 @@ async def _find_model(description: str) -> dict:
         for c in found.get("candidates") or []:
             if "github.com" not in c.get("host", ""):
                 continue
-            meshes = await MF.github_meshes(c["url"])
+            meshes = await MF.github_meshes(c["url"], want=description)
             pick, _others = create3d._pick_mesh(meshes, description)
             if pick:
                 return {"repo": pick["repo"], "file": pick["path"].split("/")[-1],

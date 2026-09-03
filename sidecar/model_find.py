@@ -307,7 +307,38 @@ def description_from(url: str) -> str:
 _GH_REPO = re.compile(r"^https?://(?:www\.)?github\.com/([^/]+)/([^/#?]+)", re.I)
 
 
-async def github_meshes(url: str, limit: int = 8) -> list[dict]:
+# Words that mark a file as a PIECE of the thing rather than the thing. He asked
+# for the arc reactor, not the bracket that holds it to a wall.
+_SUBPART = re.compile(
+    r"(?:^|[_\-/ ])(?:screw|bolt|nut|washer|spacer|bracket|mount|clip|pin|"
+    r"stand|base|foot|feet|holder|jig|support|adapter|insert|cap|lid|"
+    r"lamp|shade|plate|backer|template|test|sample|calib\w*)"
+    r"(?:[_\-/ .]|$)", re.I)
+
+
+def _subject_words(want: str) -> list:
+    """The words worth matching a filename against."""
+    junk = {"the", "a", "an", "of", "for", "and", "my", "me", "3d", "model",
+            "stl", "print", "printable", "render", "please", "sir"}
+    return [w for w in re.split(r"[^a-z0-9]+", (want or "").lower())
+            if len(w) >= 3 and w not in junk]
+
+
+def _file_score(path: str, words: list) -> tuple:
+    """How well this file answers what he asked for. Bigger tuple sorts first.
+
+    Name before size, because size picked a lamp out of an arc reactor repo.
+    """
+    p = (path or "").lower()
+    stem = p.rsplit("/", 1)[-1]
+    in_name = sum(1 for w in words if w in stem)
+    in_path = sum(1 for w in words if w in p)
+    # A part name only counts against a file that did not already answer.
+    part = 1 if (_SUBPART.search(stem) and not in_name) else 0
+    return (in_name, in_path, -part)
+
+
+async def github_meshes(url: str, limit: int = 8, want: str = "") -> list[dict]:
     """The STL files in a public GitHub repo, largest first.
 
     Largest first because in a repo of armour parts the big file is the piece
@@ -370,7 +401,18 @@ async def github_meshes(url: str, limit: int = 8) -> list[dict]:
         out += [p for p in pointers
                 if MIN_MODEL_BYTES <= p["bytes"] <= MAX_MODEL_BYTES]
 
-    out.sort(key=lambda f: -f["bytes"])
+    # NAME FIRST, SIZE SECOND. Sorting by size alone handed him a lamp housing
+    # out of an arc reactor repo: the file was real and the repo was right, and
+    # the biggest STL in an arc-reactor-lamp build is the lamp. Among files that
+    # answer equally well the biggest is still the better guess, because a shell
+    # is bigger than a screw. With no subject, or nothing matching, this is
+    # exactly the old ordering.
+    words = _subject_words(want)
+    if words:
+        out.sort(key=lambda f: (_file_score(f["path"], words), f["bytes"]),
+                 reverse=True)
+    else:
+        out.sort(key=lambda f: -f["bytes"])
     return out[:limit]
 
 

@@ -1179,6 +1179,9 @@ def spoken_caveats(r: dict) -> str:
         bits.append(found)
     if r.get("unit_note"):
         bits.append(str(r["unit_note"]))
+    if r.get("parts_available"):
+        # A fact, not a limitation: there IS a printable one, in parts.
+        bits.append(str(r["parts_available"]))
     if r.get("fell_back_from") == 5:
         # Said, but not led with, and never as a limitation. "Nobody had one to
         # download so I built it" is a fact about provenance; "that site needs
@@ -1523,10 +1526,12 @@ async def from_the_web(description: str, name: str = "", skip: int = 0) -> dict:
     # Counted over usable candidates rather than over search results, so one
     # "another" moves one real model rather than skipping a dead repo.
     passed = 0
+    # The best fragment seen so far, kept in case nothing whole exists.
+    _spare = None
     for c in found.get("candidates") or []:
         if "github.com" not in c.get("host", ""):
             continue
-        meshes = await MF.github_meshes(c["url"])
+        meshes = await MF.github_meshes(c["url"], want=desc)
         pick, others = _pick_mesh(meshes, desc)
         if not pick:
             continue
@@ -1547,9 +1552,21 @@ async def from_the_web(description: str, name: str = "", skip: int = 0) -> dict:
             except OSError:
                 pass
             continue
-        found_as = f"{pick['path'].split('/')[-1]} from {pick['repo']}"
         siblings = [o for o in others if o.get("is_piece")]
         in_pieces = bool(pick.get("is_piece") and siblings)
+        # A FRAGMENT IS A LAST RESORT. He asked for an arc reactor and got
+        # `lower_grid_and_caps.stl` — correctly picked, correctly labelled "one
+        # of 5 parts", and not the object. Six arc reactor repos had been found
+        # and the first one to yield anything won, so a piece from the top
+        # result beat a whole model from the second. Set it aside and keep
+        # looking; it is used only if nothing complete turns up.
+        if in_pieces and _spare is None:
+            _spare = {"got": got, "pick": pick, "c": c,
+                      "siblings": siblings, "in_pieces": True}
+            log.info("candidate %s is one of %d parts; looking for a whole one",
+                     pick.get("repo"), len(siblings) + 1)
+            continue
+        found_as = f"{pick['path'].split('/')[-1]} from {pick['repo']}"
         if in_pieces:
             found_as += f" — one of {len(siblings) + 1} parts"
         return {**got, "tier": 5, "note": TIER_NOTE[5],
@@ -1588,10 +1605,35 @@ async def from_the_web(description: str, name: str = "", skip: int = 0) -> dict:
              for c in (found.get("candidates") or [])
              if c.get("host") and "github" not in c["host"]][:3]
 
+    # NOTHING WHOLE ANYWHERE, SO BUILD ONE. Measured against the real web:
+    # every arc reactor published on GitHub is a set of print parts, and he was
+    # handed `lower_grid_and_caps.stl` — correctly chosen, honestly labelled
+    # "one of 5 parts", and not the object. His verdict: "what was produced was
+    # not an arc reactor."
+    #
+    # His standing rule decides it: "If I say 'a duck', I expect it to be in 3D.
+    # There is no limitation to this." A BUILT arc reactor is an arc reactor; a
+    # genuine piece of somebody else's is not the thing he asked to see. So the
+    # fragment stops being an answer and becomes a fact worth mentioning while
+    # the build runs — the printable version exists, in parts, if he wants it.
+    parts_note = ""
+    if _spare is not None:
+        pk = _spare["pick"]
+        parts_note = (f"{pk['repo']} has one published in "
+                      f"{len(_spare['siblings']) + 1} parts, if you ever want "
+                      f"the printable version")
+        log.info("only fragments exist for %r; building one instead", desc[:40])
+        try:
+            os.remove(_spare["got"]["stl"])
+        except (OSError, KeyError, TypeError):
+            pass
+
     back = _fallback_tier(desc)
     log.info("no fetchable model for %r; falling back to tier %d", desc[:40], back)
     r = await build(back, description=desc, name=name, skip=skip)
     extra = {"fell_back_from": 5, "pages_found": pages}
+    if parts_note:
+        extra["parts_available"] = parts_note
     if pages:
         # AN ASIDE, NOT THE ANSWER. This used to lead with "they need an
         # account", which made a locked website the outcome of a request to

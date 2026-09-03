@@ -69,7 +69,7 @@ async def find_3d_model(description: str = "", confirmed: bool = False) -> dict:
     for c in cands:
         if "github.com" not in c.get("host", ""):
             continue
-        meshes = await MF.github_meshes(c["url"])
+        meshes = await MF.github_meshes(c["url"], want=desc)
         # THE BIGGEST FILE IN THE REPO IS NOT THE ANSWER. It was, and it
         # returned a webcam calibration plate for "a d20" and a keyslot bracket
         # for "a Mandalorian helmet" — both from repos that genuinely matched
