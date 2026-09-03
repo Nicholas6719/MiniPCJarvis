@@ -120,9 +120,16 @@ def main() -> int:
 
     # --- what he hears -------------------------------------------------------
     from brain.skills import say_learn_face
+    # NOT word for word. "I'll know you from now on", said to a face it already
+    # knew, is indistinguishable from having done nothing — which is exactly
+    # what he asked about. What matters is that he is told it worked and given
+    # a number that could only come from actually looking.
+    first = say_learn_face({}, {"ok": True, "samples": 10, "replaced": False})
     check("success is confirmed in his voice",
-          say_learn_face({}, {"ok": True, "samples": 10})
-          == "Done, sir. I'll know you from now on.")
+          first.startswith("Done, sir") and "10" in first, first)
+    again = say_learn_face({}, {"ok": True, "samples": 10, "replaced": True})
+    check("...and re-learning says it REPLACED what it had",
+          "replaced" in again.lower(), again)
     said = say_learn_face({}, {"error": "I couldn't get a clear enough view of your face"})
     check("failure says what to do about it", "try again" in said, said)
 

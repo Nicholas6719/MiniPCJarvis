@@ -50,7 +50,12 @@ CASES = [
     # fell through to the model. With the erasure fixed it lands where the
     # near-identical "play some music" has always landed. NOTE for later: both are
     # a play/pause keypress, which does nothing when nothing is playing.
-    ("put on some music", "media_pause"),
+    # NOT media_pause: that presses the Windows play/pause key, which goes
+    # to whatever app owns the media session. His paused YouTube tab owned
+    # it, so "play some music" started a video. Starting music from
+    # nothing opens Spotify; media_pause keeps the sentences about what is
+    # ALREADY playing.
+    ("put on some music", "music_play"),
     ("switch to a british voice", None),    # was: hunting a window titled "a british voice"
     ("show me pictures from my trip", None),# was: web-searching his personal photos
     ("we're done here", "sleep"),           # dismissals still work
