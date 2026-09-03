@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS brain_examples (
     source TEXT NOT NULL DEFAULT 'seed',   -- seed | learned | user
     embedding BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS brain_rejections (
+    -- "did you mean X?" ... "no". Never offer X for this sentence again.
+    text  TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    ts    REAL NOT NULL,
+    PRIMARY KEY (text, skill)
+);
 CREATE TABLE IF NOT EXISTS brain_commands (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -285,6 +292,8 @@ class Brain:
         # The near-miss from the last decide(): the right idea, scored
         # too low to act on alone, kept so the turn can ASK.
         self.unsure: dict | None = None
+        # (sentence, skill) pairs he has already said no to.
+        self._rejected: set = set()
         # Context deltas are the same for every example until the state
         # changes, so they are computed once per state rather than per turn.
         self._ctx_key: tuple | None = None
@@ -380,6 +389,12 @@ class Brain:
             crows = self.db.execute("SELECT phrase, steps, embedding FROM brain_commands").fetchall()
             self._cmd_phrases = [r[0] for r in crows]
             self._cmd_steps = [json.loads(r[1]) for r in crows]
+            try:
+                self._rejected = {
+                    (r[0], r[1]) for r in
+                    self.db.execute("SELECT text, skill FROM brain_rejections")}
+            except Exception:
+                log.debug("could not read the rejections", exc_info=True)
             self._cmd_matrix = (np.frombuffer(b"".join(r[2] for r in crows), dtype=np.float32)
                                 .reshape(len(crows), -1).copy()) if crows else None
             log.info("brain loaded: %d examples across %d skills, %d custom commands",
@@ -532,6 +547,30 @@ class Brain:
             self.stats["learned"] += 1
             log.info("brain learned: %r -> %s", t, skill)
             return True
+
+    def reject(self, text: str, skill: str) -> None:
+        """He answered no to "did you mean <skill>?" — do not offer it again.
+
+        Persisted, because being asked the same rejected question tomorrow is
+        the same annoyance as being asked it twice in a row. Keyed on sentence
+        AND skill: saying no to one reading leaves the others available.
+        """
+        t = _norm(text)
+        if not t or not skill:
+            return
+        try:
+            self.db.execute(
+                "INSERT OR IGNORE INTO brain_rejections (text, skill, ts) "
+                "VALUES (?,?,?)", (t, skill, time.time()))
+            self.db.commit()
+            self._rejected.add((t, skill))
+            log.info("brain will not offer %s for %r again", skill, t)
+        except Exception:
+            # A rejection that cannot be stored must never cost him the turn.
+            log.debug("could not store the rejection", exc_info=True)
+
+    def was_rejected(self, text: str, skill: str) -> bool:
+        return (_norm(text), skill) in self._rejected
 
     def learned_from_tool(self, tool_name: str) -> str | None:
         return TOOL_TO_SKILL.get(tool_name)

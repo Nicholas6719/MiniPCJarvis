@@ -70,6 +70,15 @@ SEARCH_INTENT = re.compile(
 # approve list stays English-only so a mis-heard word can never green-light a restart.
 YES_WORDS = re.compile(r"^\s*(?:yes|yes please|yeah|yep|yup|sure|ok|okay|do it|go ahead|please do|"
                        r"confirm|confirmed|affirmative|that's right|correct)\s*[.!]?\s*$", re.I)
+# A yes that OPENS a sentence, for confirming a guess. Deliberately separate
+# from YES_WORDS: that one gates risky actions and must stay bare-word strict so
+# a stray word off a video can never approve anything. This one only decides
+# whether to run a skill the brain already nearly chose - the worst case is a
+# rotated view and another "no" - and "yes please go ahead and finish the
+# render" is unmistakably a yes that YES_WORDS threw away.
+GUESS_YES = re.compile(r"^\s*(?:yes|yeah|yep|yup|sure|ok|okay|correct|right|"
+                       r"that'?s (?:right|it)|please do|go ahead|do it|"
+                       r"carry on|keep going|continue)\b", re.I)
 NO_WORDS = re.compile(r"^\s*(?:no|no thanks|no thank you|nope|nah|naw|cancel|stop|don't|do not|"
                       r"never\s*mind|negative|forget it|not now|n[aã]o|nein|non|nyet|nej|no way)"
                       r"\s*[.!,]?\s*$", re.I)
@@ -1136,6 +1145,8 @@ class Orchestrator:
         skill = SKILL_BY_NAME.get(name)
         if skill is None or name in self._NEVER_GUESS:
             return False
+        if brain.was_rejected(text, name):
+            return False        # he has already told me no to exactly this
         from brain.skills import confirm_as
         say = confirm_as(name)
         line = f"Did you mean {say}, sir?"
@@ -1245,11 +1256,19 @@ class Orchestrator:
         # ---- "did you mean X?" is still open: this may be the answer -------
         if self._unsure is not None:
             pend, self._unsure = self._unsure, None
-            if YES_WORDS.match(text or ""):
+            if GUESS_YES.match(text or ""):
                 if await self._run_confirmed_guess(pend, t_start):
                     return
-            # Anything else is not a yes. Fall through and treat it as the
-            # request it is - he asked for something else, not for nothing.
+            elif NO_WORDS.match(text or ""):
+                # NEVER ASK HIM THAT AGAIN. Dropping the guess and remembering
+                # nothing is what made "look at reddit and tell me what's
+                # trending" ask "did you mean news, sir?" twice in a row.
+                try:
+                    brain.reject(pend.get("text") or "", pend.get("skill") or "")
+                except Exception:
+                    log.debug("could not record the rejection", exc_info=True)
+            # Anything else is not an answer to the question. Fall through and
+            # treat it as the request it is - he asked for something else.
         # ---- a question he was asked is still open: this may be the answer ----
         if self._clarify is not None:
             if await self._answer_clarification(text, t_start):
