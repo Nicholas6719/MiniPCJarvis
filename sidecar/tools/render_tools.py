@@ -135,6 +135,36 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                                 "piece to start with. If he names one, make "
                                 "just that piece instead.")}
 
+    # LOOK FIRST, FOR EVERY RENDER. Skipped only when there is nothing to look
+    # up: he supplied the dimensions, he supplied the picture, or it is a
+    # template that IS the answer.
+    if (not confirmed and not image_path and t not in (0, 6)
+            and not create3d._DIMENSIONED.search(desc)):
+        import scout
+        found = await scout.look(desc)
+        if found and not found.get("timed_out"):
+            q = scout.question(desc, found)
+            secs = est.estimate(5 if q["route"] == "fetch" else t)
+            ask = q["question"]
+            # The cost, once, at the end — never instead of what was found.
+            if q["found"] in ("model", "dimensions"):
+                ask = ask.replace("Shall I", f"{est.spoken(secs).capitalize()}. "
+                                             f"Shall I", 1)
+            return {"_ask": {
+                "subject": label,
+                "question": ask,
+                "tool": "make_hologram",
+                # What he was shown is what gets used: looking again could find
+                # something else.
+                "args": {"description": desc, "tier": t, "name": name,
+                         "image_path": (found.get("picture") or {}).get("path", ""),
+                         "confirmed": True},
+            },
+                "found": q["found"], "scouted": found,
+                "instruction": ("Tell him what was actually found — the model, "
+                                "the dimensions, or that there were none — and "
+                                "then ask. Never lead with how long it takes.")}
+
     if not confirmed and seconds > est.ask_threshold():
         return {"_ask": {
             "subject": label,
