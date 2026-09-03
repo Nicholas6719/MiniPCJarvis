@@ -50,9 +50,33 @@ async def main() -> int:
     check("a very long name is trimmed rather than refused",
           len(workspace.folder_name("x" * 400)) <= 80)
 
+    print("\n-- the name is read back before the folder exists --")
+    # His point, and the better half of the argument: "that way if he hears the
+    # name wrong I simply correct him." The sanitiser stops a name escaping the
+    # workspace; it does nothing about the far likelier problem, which is a
+    # fortnight of work landing in a folder called the wrong thing.
+    ask = await WT.start_project("Spider-Man Suit Mark 2")
+    check("it asks before it creates anything",
+          "_ask" in ask
+          and not os.path.isdir(workspace.path_for("Spider-Man Suit Mark 2")),
+          "nothing may exist on disk until he has agreed to the name")
+    check("...reading back the FOLDER name, not what he said",
+          "Spider-Man Suit Mark 2" in ask["_ask"]["question"],
+          "confirming what he said while creating something else confirms "
+          "nothing")
+    check("...and inviting a correction rather than only yes or no",
+          "correction is an answer" in (ask.get("instruction") or ""))
+    adj = await WT.start_project("Mark 3: the good one")
+    check("a name it had to change says so out loud",
+          adj.get("adjusted") is True
+          and "drop a character" in adj["_ask"]["question"],
+          "dropping a character silently is how he finds out weeks later that "
+          "the folder is not called what he thinks it is")
+
     print("\n-- opening a project --")
     r = await WT.start_project("Spider-Man Suit Mark 2",
-                               about="a wearable chest emblem first")
+                               about="a wearable chest emblem first",
+                               confirmed=True)
     check("the folder is made", os.path.isdir(r["path"]))
     check("...with somewhere for models and references",
           os.path.isdir(os.path.join(r["path"], workspace.MODELS))
@@ -65,6 +89,10 @@ async def main() -> int:
     again = await WT.start_project("Spider-Man Suit Mark 2")
     check("opening one that exists reopens it rather than starting over",
           again.get("reopened") is True and "Reopened" in again.get("spoken", ""))
+    check("...and does NOT ask him to approve a name he already approved",
+          "_ask" not in again,
+          "being asked to confirm a folder he has worked in for a week is "
+          "friction pretending to be care")
 
     print("\n-- the notes, which are the part he cannot reconstruct --")
     await WT.project_note("Traced from the 1080p still, not the poster — the "

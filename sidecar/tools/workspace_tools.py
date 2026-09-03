@@ -56,14 +56,42 @@ def set_active(name: str) -> None:
         log.warning("could not record the active project", exc_info=True)
 
 
-async def start_project(name: str = "", about: str = "") -> dict:
-    """Open a project folder and make it the one we are working in."""
+async def start_project(name: str = "", about: str = "",
+                        confirmed: bool = False) -> dict:
+    """Open a project folder, once he has agreed to what it will be called."""
     import workspace
 
     said = (name or "").strip()
     if not said:
         return {"error": "what should I call it, sir?"}
     already = workspace.exists(said)
+    folder = workspace.folder_name(said)
+
+    # THE NAME IS READ BACK BEFORE THE FOLDER EXISTS. Not for safety — the
+    # sanitiser handles that — but because "Spider-Man Suit Mark 2" is easily
+    # heard as something else, and this is the one moment where correcting it
+    # costs nothing. Reopening one he already has does not ask: he approved
+    # that name when it was made.
+    if not confirmed and not already:
+        changed = folder.lower() != said.lower()
+        q = f"I'll call it {folder}"
+        if changed:
+            # Said out loud precisely because it differs from what he said.
+            q += f" — I had to drop a character or two from \"{said}\""
+        q += ", sir. Shall I open it?"
+        return {"_ask": {
+            "subject": folder,
+            "question": q,
+            "tool": "start_project",
+            "args": {"name": said, "about": about, "confirmed": True},
+        },
+            "proposed": folder, "said_as": said, "adjusted": changed,
+            "instruction": ("Read the FOLDER NAME back to him and let him "
+                            "correct it. If he answers with a different name "
+                            "rather than yes or no, call start_project again "
+                            "with that name — a correction is an answer, not a "
+                            "refusal.")}
+
     r = workspace.create(said, about=about)
     if r.get("error"):
         return r
@@ -80,6 +108,17 @@ async def start_project(name: str = "", about: str = "") -> dict:
 
     if about:
         workspace.note(said, about, heading="What we are making")
+
+    # ON SCREEN, not just spoken. His words: "he can show it to me inside of his
+    # OS like he's supposed to" — a folder he has agreed to should be visible
+    # afterwards, the same way the stage opens when a model is ready.
+    try:
+        from events import bus
+        await bus.emit("workspace", action="open", project=r["name"],
+                       path=r["path"], projects=workspace.projects())
+    except Exception:
+        log.debug("could not announce the project to the HUD", exc_info=True)
+
     return {"project": r["name"], "path": r["path"], "reopened": already,
             "spoken": (f"Reopened {r['name']}, sir." if already
                        else f"Project open, sir — {r['name']}. "
@@ -183,11 +222,15 @@ def register_all() -> None:
         description="Open a new project folder for a piece of work he is "
                     "starting — a suit, a reactor, anything with more than one "
                     "session in it. Everything made afterwards is filed there. "
-                    "Ask him first if he has not said it is a project.",
+                    "It reads the folder name back and waits, so he can correct "
+                    "a mishearing before the folder exists; if he answers with "
+                    "a different name, call it again with that name.",
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "what he calls it, e.g. "
                                                       "'Spider-Man Suit Mark 2'"},
-            "about": {"type": "string", "description": "what it is, in a line"}},
+            "about": {"type": "string", "description": "what it is, in a line"},
+            "confirmed": {"type": "boolean", "description": "he has agreed to "
+                                                            "the folder name"}},
             "required": ["name"]},
         # LOW: it makes folders in his Documents and nothing else.
         risk=Risk.LOW, handler=start_project, timeout=30))
