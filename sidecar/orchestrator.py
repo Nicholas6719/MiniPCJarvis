@@ -565,7 +565,7 @@ class Orchestrator:
     def _arm_conversation(self) -> None:
         """Open the follow-up window: speech alone opens a turn, no wake word."""
         mode = config.get("wake", "mode", default="push_to_talk")
-        win = float(config.get("conversation", "window_s", default=8))
+        win = float(config.get("conversation", "window_s", default=15))
         # WORKING ON A MODEL IS A CONVERSATION, NOT A COMMAND.
         #
         # Five seconds is right for "what's the weather" — ask, hear, done. It is

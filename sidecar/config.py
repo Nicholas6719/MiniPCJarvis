@@ -238,7 +238,12 @@ DEFAULTS: dict[str, Any] = {
     # seconds during holographic work. Turning a part, looking at it and
     # thinking takes longer than asking the time, and the stage being up is
     # itself the signal that he is mid-task.
-    "conversation": {"window_s": 5, "holo_window_s": 40},
+    # 15s, his number. Five was long enough to answer "what's the weather" and
+    # too short for anything he had to think about first. The two longer ones
+    # stand: a grid of pictures is something he picks from, a model on the
+    # stage is something he works on for minutes.
+    "conversation": {"window_s": 15, "holo_window_s": 40,
+                     "images_window_s": 20},
     "interrupt": {"mode": "wake_word"},   # wake_word | any_speech
     # MCP plugin servers: {"name": {"command": "...", "args": [...], "risk": "medium"}}
     "mcp": {"servers": {}},
