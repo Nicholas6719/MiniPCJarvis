@@ -407,6 +407,29 @@ def to_payload(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     return d
 
 
+def _part_colours(first_path: str) -> dict:
+    """{part name: "#rrggbb"} from the manifest, for the stage to paint with.
+
+    The cyan hologram stays the default look — it is what makes the stage feel
+    like the films — and this rides alongside it so "show it in colour" has
+    something true to switch to.
+    """
+    import json
+    import os
+
+    import assembly
+    p = assembly.manifest_path(first_path)
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, encoding="utf-8") as fh:
+            got = json.load(fh) or {}
+    except (OSError, ValueError):
+        return {}
+    return {e.get("name"): e.get("colour") for e in (got.get("parts") or [])
+            if e.get("name") and e.get("colour")}
+
+
 def assembly_payload(parts, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     """The wire format for a model made of named parts.
 
@@ -490,6 +513,14 @@ def assembly_payload(parts, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     # rather than whatever happened to be disconnected.
     d["bodies"] = lab.astype(int).tolist()
     d["body_centres"] = [m["centre"] for m in meta]
+    # WHAT COLOUR EACH PART ACTUALLY IS, when anything knows. Sent alongside the
+    # geometry so the stage can paint it on request without asking again.
+    known = _part_colours(str(parts[0][1]) if parts else "")
+    if known:
+        for m in d["parts"]:
+            if known.get(m["name"]):
+                m["colour"] = known[m["name"]]
+        d["has_colour"] = any(m.get("colour") for m in d["parts"])
     return d
 
 

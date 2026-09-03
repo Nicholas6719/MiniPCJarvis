@@ -55,7 +55,7 @@ from config import config
 
 log = logging.getLogger("jarvis.create3d")
 
-TIERS = (0, 1, 2, 3, 4, 5, 6)
+TIERS = (0, 1, 2, 3, 4, 5, 6, 7)
 
 # Below this in its SMALLEST dimension, a generated part is a sliver rather than
 # a part: no printer can lay it down and nobody asked for it. Half a millimetre
@@ -89,6 +89,8 @@ TIER_NOTE = {
     # SAID BEFORE THE WORK RUNS, like tier 5's, so it describes the plan.
     6: "made piece by piece — each part built on its own, so you can take them "
        "one at a time",
+    7: "the object and the design on it, made separately and put together — so "
+       "the design can still be changed",
 }
 
 # Words that say he wants a FLAT emblem out of a picture rather than a 3D
@@ -142,6 +144,13 @@ def choose_tier(description: str = "", image_path: str = "") -> int:
         if _FLAT.search(desc):
             return 2
         return 3 if _RECONSTRUCT.search(desc) else 2
+    # ONE OBJECT WITH ANOTHER RENDER ON IT, before any other rule reads the
+    # words. "A mug with the batman logo" contains "logo" and the flat-emblem
+    # rule claimed the whole sentence — so he got a logo and no mug.
+    import composite
+    if composite.split(desc):
+        return 7
+
     # A shape we can write out exactly needs no model and takes a fifth of a
     # second. Checked first, because it changes both the wait and whether he is
     # asked about it at all.
@@ -347,7 +356,8 @@ async def from_relief(image_path: str, name: str = "") -> dict:
 
 
 # --------------------------------------------------------------------- tier 2
-def _outline_scad(points: list[list[float]], height_mm: float, width_mm: float) -> str:
+def _outline_scad(points: list[list[float]], height_mm: float,
+                  width_mm: float) -> str:
     """An OpenSCAD polygon, extruded. Scaled to the width he asked for."""
     pts = ", ".join(f"[{x:.3f},{y:.3f}]" for x, y in points)
     return (f"$fn = 48;\n"
@@ -485,6 +495,104 @@ def trace_shapes(image_path: str, max_points: int = 400) -> list[dict] | None:
     return shapes or None
 
 
+# Two colours are the same colour when they are this close. Loose on purpose:
+# JPEG artefacts and lighting move a flat red around by more than a little, and
+# splitting a body into three reds is worse than not splitting it at all.
+_COLOUR_SAME = 60
+
+
+def _colour_distance(a: str, b: str) -> float:
+    try:
+        ar, ag, ab = (int(a[i:i + 2], 16) for i in (1, 3, 5))
+        br, bg, bb = (int(b[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, IndexError):
+        return 1e9
+    return ((ar - br) ** 2 + (ag - bg) ** 2 + (ab - bb) ** 2) ** 0.5
+
+
+async def _colour_parts(image_path: str, stl_path: str, shapes: list,
+                        thickness_mm: float, width_mm: float) -> dict:
+    """Split a traced design into one part per colour, when it has more than one.
+
+    A hole with its own colour is extruded as a SOLID filling that hole, so the
+    pieces tile: they share the contour that separates them. That is what turns
+    "the eyes are missing" into "the eyes are white".
+    """
+    import asyncio
+
+    import assembly
+    import colours
+    import features
+    from tools.fabrication import _run, openscad_path
+
+    try:
+        pieces = features.label(shapes)
+        found = await asyncio.to_thread(colours.sample, image_path, shapes, pieces)
+    except Exception:
+        log.debug("could not read the colours out of %s", image_path, exc_info=True)
+        return {}
+    if not found:
+        return {}
+
+    body = next((p for p in pieces if p.get("name") == "outline"), None)
+    if body is None:
+        return {}
+    base_colour = found.get("outline", "")
+
+    # Holes whose colour is genuinely different from the body around them.
+    distinct = [p for p in pieces
+                if p.get("hole") is not None and found.get(p.get("name"))
+                and (not base_colour
+                     or _colour_distance(found[p["name"]], base_colour)
+                     > _COLOUR_SAME)]
+    if not distinct:
+        return {}                        # one colour: one part, as before
+
+    exe = openscad_path()
+    if not exe:
+        return {}
+    from pathlib import Path
+    stl = Path(stl_path)
+    # ONE FRAME FOR ALL OF THEM. Emitted separately, each part would be resized
+    # to fill the width on its own and the eyes would come out as wide as the
+    # mask.
+    frame = _design_frame(shapes)
+    made = []
+
+    # The body, holes and all, exactly as it was.
+    made.append({"name": "body", "stl": str(stl), "colour": base_colour,
+                 "colour_name": colours.label(base_colour)})
+
+    # Each distinct hole, extruded as a solid that fills it.
+    by_name: dict = {}
+    for p in distinct:
+        by_name.setdefault(p["name"], []).append(p)
+    for name, group in by_name.items():
+        part_shapes = [{"outline": g["points"], "holes": []} for g in group]
+        out = stl.with_name(f"{stl.stem}.{name.replace(' ', '_')}.stl")
+        scad = out.with_suffix(".scad")
+        scad.write_text(_shapes_scad(part_shapes, thickness_mm, width_mm,
+                                     frame=frame), encoding="utf-8")
+        try:
+            out.unlink()
+        except OSError:
+            pass
+        rc, o, e = await _run([exe, "-o", str(out), str(scad)], 180)
+        if rc != 0 or not out.exists():
+            log.info("colour part %s did not build: %s", name,
+                     (e or o or "").strip()[:120])
+            continue
+        made.append({"name": name.replace(" ", "_"), "stl": str(out),
+                     "colour": found[name],
+                     "colour_name": colours.label(found[name])})
+
+    if len(made) < 2:
+        return {}
+    assembly.write_manifest(str(stl), made)
+    return {"parts": [m["name"] for m in made],
+            "colours": {m["name"]: m["colour"] for m in made}}
+
+
 def shapes_path(stl_path: str) -> str:
     """Where a traced design's shapes live, beside the model."""
     base = str(stl_path)
@@ -548,26 +656,61 @@ async def rebuild_shapes(stl_path: str, shapes: list, thickness_mm: float,
     return {"stl": str(stl), "scad": str(scad)}
 
 
-def _shapes_scad(shapes: list[dict], height_mm: float, width_mm: float) -> str:
-    """Extrude every traced shape, with its holes cut out of it."""
+def _design_frame(shapes: list) -> tuple:
+    """(min x, min y, max x, max y) over a whole traced design."""
+    xs, ys = [], []
+    for sh in shapes or []:
+        for group in [sh.get("outline") or []] + list(sh.get("holes") or []):
+            for x, y in group:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        return (0.0, 0.0, 1.0, 1.0)
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _shapes_scad(shapes: list[dict], height_mm: float, width_mm: float,
+                 frame: tuple | None = None) -> str:
+    """Extrude every traced shape, with its holes cut out of it.
+
+    `frame` is the bounding box of the WHOLE design, for when this is emitting
+    one coloured part of it. Without it, `resize()` scales whatever it is given
+    to fill `width_mm` — so a body and an eye emitted separately each became
+    60 mm wide, and the eye stopped fitting the hole it was cut from. Given a
+    frame, the scale is computed once from the whole design and applied here,
+    and `resize` is left out because it would undo exactly that.
+    """
+    scale, ox, oy = 1.0, 0.0, 0.0
+    if frame is not None:
+        fx0, fy0, fx1, fy1 = frame
+        span = max(fx1 - fx0, 1e-6)
+        scale = width_mm / span
+        ox, oy = fx0, fy0
+
+    def place(x, y):
+        return ((x - ox) * scale, (y - oy) * scale)
+
     body = []
     for sh in shapes:
         pts = list(sh["outline"])
         paths = [list(range(len(pts)))]
         for hole in sh["holes"]:
-            start = len(pts)
+            start_i = len(pts)
             pts.extend(hole)
-            paths.append(list(range(start, len(pts))))
-        pt_s = ", ".join(f"[{x:.3f},{y:.3f}]" for x, y in pts)
+            paths.append(list(range(start_i, len(pts))))
+        pt_s = ", ".join("[%.3f,%.3f]" % place(x, y) for x, y in pts)
         pa_s = ", ".join("[" + ",".join(str(i) for i in path) + "]"
                          for path in paths)
         body.append(f"    polygon(points = [{pt_s}], paths = [{pa_s}]);")
     joined = "\n".join(body)
+    sizing = ("" if frame is not None
+              else f"  resize([{width_mm:g}, 0, 0], auto = true)\n")
     return ("$fn = 48;\n"
             f"// traced from an image, extruded {height_mm:g} mm\n"
             f"linear_extrude(height = {height_mm:g})\n"
-            f"  resize([{width_mm:g}, 0, 0], auto = true)\n"
+            + sizing +
             "    union() {\n" + joined + "\n    }\n")
+
 
 
 async def from_image(image_path: str, name: str = "", thickness_mm: float = 3.0,
@@ -599,11 +742,18 @@ async def from_image(image_path: str, name: str = "", thickness_mm: float = 3.0,
     # geometry as six hundred loose coordinates with no eye in it; these are the
     # outlines and holes, which is what "make his eyes smaller" needs to exist.
     save_shapes(str(stl), shapes, thickness_mm, width_mm)
+    # ...and, when the picture has more than one colour in it, as coloured parts.
+    await _colour_parts(str(p), str(stl), shapes, thickness_mm, width_mm)
     rc, out, err = await _run([exe, "-o", str(stl), str(scad)], 180)
     if rc != 0 or not stl.exists():
         return {"error": f"OpenSCAD could not build that: {(err or out or '').strip()[:200]}",
                 "tier": 2}
+    # ...and, when the picture has more than one colour in it, as coloured parts.
+    coloured = await _colour_parts(str(p), str(stl), shapes, thickness_mm,
+                                   width_mm)
     return {"tier": 2, "name": base, "scad": str(scad), "stl": str(stl),
+            **({"parts": coloured["parts"], "colours": coloured["colours"],
+                "part_count": len(coloured["parts"])} if coloured else {}),
             "points": len(pts), "shapes": len(shapes),
             "holes": sum(len(sh["holes"]) for sh in shapes),
             "note": TIER_NOTE[2]}
@@ -1529,6 +1679,12 @@ async def build(tier: int, description: str = "", image_path: str = "",
         r = await from_text(description, name, skip=skip)
     elif tier == 5:
         r = await from_the_web(description, name, skip=skip)
+    elif tier == 7:
+        import composite
+        r = await composite.build(description, name)
+        if r.get("not_composite"):
+            r = await build(choose_tier(description, image_path), description,
+                            image_path, name, skip=skip)
     elif tier == 6:
         # TAKE THE REQUEST APART, NOT THE MESH. A suit cannot be reconstructed
         # from one photograph and OpenSCAD cannot sculpt armour — but a helmet
