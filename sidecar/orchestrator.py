@@ -375,6 +375,12 @@ class Orchestrator:
     # 90s tool budget, a research turn ~25s), and short enough that being deaf is
     # a blip rather than the rest of his afternoon.
     STUCK_AFTER_S = 120.0
+    # How long a deaf state may go COMPLETELY SILENT before it is treated as
+    # wedged. A turn that is working emits tokens, tool calls and transcripts
+    # the whole time, so this cannot cut off slow work — only stalled work.
+    # Two minutes of not being able to hear is not a recovery; he had long
+    # since decided it was broken.
+    SILENT_AFTER_S = 35.0
 
     async def _deaf_watch(self) -> None:
         """He must never be unable to hear his own name.
@@ -394,7 +400,9 @@ class Orchestrator:
         since = time.time()
         last = self.sm.state
         while True:
-            await asyncio.sleep(15)
+            # Five seconds, not fifteen: the silence fuse is 35s and a coarse
+            # poll would make that anywhere from 35 to 50.
+            await asyncio.sleep(5)
             try:
                 now_state = self.sm.state
                 if now_state != last:
@@ -404,13 +412,16 @@ class Orchestrator:
                     since = time.time()
                     continue
                 stuck_for = time.time() - since
-                if stuck_for < self.STUCK_AFTER_S:
+                quiet_for = time.time() - getattr(bus, "last_event_at", time.time())
+                # Either it has been silent for a while in a state that cannot
+                # hear, or it has been in one far too long even while noisy.
+                if stuck_for < self.STUCK_AFTER_S and quiet_for < self.SILENT_AFTER_S:
                     continue
                 # Still in the same deaf state, with nothing moving.
                 pending = registry.has_pending
-                log.error("stuck in %s for %.0fs and cannot hear the wake word "
-                          "(pending confirmation: %s) - recovering to IDLE",
-                          now_state.value, stuck_for, pending)
+                log.error("stuck in %s for %.0fs (silent %.0fs) and cannot hear "
+                          "the wake word (pending confirmation: %s) - recovering "
+                          "to IDLE", now_state.value, stuck_for, quiet_for, pending)
                 if pending:
                     # An unanswered question is what usually holds it. Treat
                     # silence as "no" - refusing is always the safe answer.

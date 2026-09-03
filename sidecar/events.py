@@ -13,6 +13,8 @@ log = logging.getLogger("jarvis.events")
 
 class EventBus:
     def __init__(self) -> None:
+        # Set by emit(); read by the stuck-state watchdog.
+        self.last_event_at = time.time()
         self._clients: set[Any] = set()  # fastapi WebSocket objects
         self._lock = asyncio.Lock()
         # in-process listeners (the Telegram bridge): sync callables taking the
@@ -35,6 +37,10 @@ class EventBus:
             self._clients.discard(ws)
 
     async def emit(self, kind: str, **data: Any) -> dict:
+        # WHEN ANYTHING LAST HAPPENED. The stuck-state watchdog needs to tell a
+        # slow turn from a wedged one, and time-in-state cannot: both look
+        # identical. A working turn emits constantly; a wedged one is silent.
+        self.last_event_at = time.time()
         evt = {
             "id": uuid.uuid4().hex[:12],
             "ts": time.time(),
