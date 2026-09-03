@@ -249,6 +249,22 @@ def parse_action(text: str) -> str | None:
         return "flip"
     if parse_scale(t) is not None:
         return "scale"
+    # HOLD STILL. The model drifts on its own and there was no way to ask it to
+    # stop, so "make it stop spinning" reached the skill router and CANCELLED
+    # HIS RENDER. Checked before the rotate rule below, which matches the bare
+    # word "spin" and would read this as a rotation.
+    if re.search(r"\b(?:stop|quit|cease|hold)\b[\w\s]{0,12}?"
+                 r"\b(?:spin\w*|turn\w*|rotat\w*|mov\w*|drift\w*)\b", t) \
+            or re.search(r"\b(?:hold (?:it )?still|keep (?:it )?still|stay still|"
+                         r"stop it moving|freeze it|stand still)\b", t):
+        return "still"
+    # Bare "spin it" is NOT here: "spin it round" is a rotation, and that is
+    # the commoner reading by far. Starting the idle drift has to be asked
+    # for in words that can only mean continuous motion.
+    if re.search(r"\b(?:start (?:it )?spinning|let it spin|"
+                 r"keep (?:it )?spinning|turn it slowly|"
+                 r"spin (?:it )?slowly)\b", t):
+        return "spin"
     # `turn` is last for a reason: "turn it off" is not a rotation, and the hide
     # rule above takes that sentence before this one sees it.
     if re.search(r"\b(?:rotate|spin|turn|tip|tilt|roll|lean|pitch|swing|yaw|bank|"

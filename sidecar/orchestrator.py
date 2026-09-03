@@ -272,6 +272,27 @@ def _screen_context() -> dict:
     return ctx
 
 
+async def _release_camera(why: str) -> None:
+    """Put the webcam down. Never raises, never blocks the caller.
+
+    Sleeping with the camera light on is a promise broken: the hand tracker is
+    careful never to switch it on by itself, and leaving it running when the
+    session ends is the same surprise from the other end.
+    """
+    try:
+        from hand_control import control
+        control.disarm(why)
+    except Exception:
+        log.debug("could not stand the hand tracker down", exc_info=True)
+    try:
+        from camera import camera
+        if camera.is_on:
+            await asyncio.to_thread(camera.stop)
+            log.info("camera released: %s", why)
+    except Exception:
+        log.debug("could not release the camera", exc_info=True)
+
+
 class Orchestrator:
     def __init__(self) -> None:
         self.sm = StateMachine()
@@ -433,6 +454,7 @@ class Orchestrator:
                         await hide_hologram()
                 except Exception:
                     log.debug("could not take the stage down for sleep", exc_info=True)
+                await _release_camera("going to sleep")
                 self._armed_until = 0.0
                 await bus.emit("conversation", armed=False)
                 await bus.emit("sleep", reason="idle", after_minutes=mins)

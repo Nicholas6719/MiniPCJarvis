@@ -34,8 +34,38 @@ async def set_camera(on: bool | None = None) -> dict:
         res = await asyncio.to_thread(camera.stop)
     if not res.get("ok"):
         return {"error": res.get("error") or "the camera would not open"}
-    return {"camera": "on" if res.get("on") else "off",
-            "backend": res.get("backend") or None}
+
+    now_on = bool(res.get("on"))
+    hands = None
+    if now_on:
+        # A MODEL ON THE STAGE IS WHAT THE CAMERA IS FOR. He asked for the
+        # camera with a render up and then had to ask separately for hand
+        # control, which is the only thing the camera does on that screen.
+        # Nothing is armed when the stage is empty: a tracker watching for
+        # gestures that cannot move anything is pure cost.
+        try:
+            from tools.holo_tools import current
+            if (current() or {}).get("name"):
+                from hand_control import control
+                r = control.arm()
+                hands = not r.get("error")
+        except Exception:
+            log.debug("could not arm the hands with the camera", exc_info=True)
+    else:
+        # Off means off. The tracker re-checks every frame, but standing it
+        # down here means the two can never look different for even a frame.
+        try:
+            from hand_control import control
+            control.disarm("the camera went off")
+        except Exception:
+            log.debug("could not stand the hands down", exc_info=True)
+
+    out = {"camera": "on" if now_on else "off",
+           "backend": res.get("backend") or None}
+    if hands:
+        out["hands"] = "armed"
+        out["spoken"] = "Camera's on, sir — watching your hands."
+    return out
 
 
 async def camera_status() -> dict:

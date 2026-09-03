@@ -486,7 +486,23 @@ def enter_sleep_mode() -> dict:
                 n += 1
         except Exception:
             continue
-    return {"sleeping": True, "minimized": n}
+    # AND PUT THE CAMERA DOWN. Told to go to sleep, he minimised himself and
+    # left the webcam running. The ears stay open on purpose - that is what the
+    # wake word needs - but the eyes have no reason to.
+    released = False
+    try:
+        from hand_control import control
+        control.disarm("told to sleep")
+    except Exception:
+        log.debug("could not stand the hand tracker down", exc_info=True)
+    try:
+        from camera import camera
+        if camera.is_on:
+            camera.stop()
+            released = True
+    except Exception:
+        log.debug("could not release the camera for sleep", exc_info=True)
+    return {"sleeping": True, "minimized": n, "camera_released": released}
 
 
 def monitor_blank_after() -> int | None:

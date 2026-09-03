@@ -587,6 +587,11 @@ export function HoloStage() {
           spin = false;              // he is steering it now; stop the idle drift
           break;
         }
+        case "spin":
+          // The idle drift, asked for by name. It was only ever switched off as
+          // a side effect of him steering, and back on by a reset.
+          spin = c.on ?? !spin;
+          break;
         case "scale":
           target.scale = Math.max(0.2, Math.min(6, target.scale * (c.factor ?? 1.5)));
           break;

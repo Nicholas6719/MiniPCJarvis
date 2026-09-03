@@ -248,6 +248,9 @@ _ACTIONS = ("rotate", "flip", "scale", "section", "explode", "colour", "hologram
             # as its own tool, so "remove render" - his own words - was
             # parsed correctly and then refused here.
             "hide",
+            # Holding still, and drifting again. Without these "stop spinning"
+            # reached the skill router and cancelled a render.
+            "still", "spin",
             "layers", "solid", "layer")
 
 
@@ -322,6 +325,12 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
             holo_angles.parse_section(said) or {"axis": "z", "at": 0.5}
         payload.update(sec)
         spoken = "Cutting it open, sir."
+    elif act in ("still", "spin"):
+        on = (act == "spin")
+        await bus.emit("holo_control", action="spin", on=on)
+        return {"ok": True, "action": act,
+                "spoken": "Holding it steady, sir." if not on
+                          else "Turning it slowly, sir."}
     elif act == "hide":
         # Straight to the tool that already does this, so the stage closing and
         # the hand tracker standing down stay in one place.

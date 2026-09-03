@@ -117,6 +117,33 @@ def main() -> int:
           holo_angles.parse_action("close the hologram") == "hide",
           str(holo_angles.parse_action("close the hologram")))
 
+    print("\n-- holding still is not cancelling the render --")
+    # 2026-09-03, from his testing: the model drifts by default and there
+    # was NO WAY TO SAY STOP, so "make it stop spinning" matched nothing on
+    # the stage, fell through to the skill router, and hit render_stop - it
+    # CANCELLED HIS RENDER. Same class as "turn it off" spinning the model:
+    # a sentence whose meaning is in the whole phrase, taken by one word.
+    for said in ("make it stop spinning", "stop spinning", "stop turning",
+                 "hold still", "keep it still", "freeze it",
+                 "stop it moving", "stop the spin"):
+        check(f"{said!r} holds it steady",
+              holo_angles.parse_action(said) == "still",
+              str(holo_angles.parse_action(said)))
+    for said in ("start it spinning", "let it spin", "turn it slowly"):
+        check(f"{said!r} sets it drifting again",
+              holo_angles.parse_action(said) == "spin",
+              str(holo_angles.parse_action(said)))
+    # And the two that must be UNTOUCHED: cancelling a render is a real
+    # thing he asks for, and "spin it round" is a rotation.
+    for said in ("stop the render", "cancel that render"):
+        check(f"{said!r} is still not a stage control",
+              holo_angles.parse_action(said) is None,
+              str(holo_angles.parse_action(said)))
+    for said in ("spin it round", "spin it around", "spin it"):
+        check(f"{said!r} is a rotation, not the idle drift",
+              holo_angles.parse_action(said) == "rotate",
+              str(holo_angles.parse_action(said)))
+
     print("\n-- and the layer words are not the hide word --")
     # Adding `hide` and checking it FIRST claimed "hide the layers", which
     # means stop drawing the sliced toolpath - not close the hologram. The
