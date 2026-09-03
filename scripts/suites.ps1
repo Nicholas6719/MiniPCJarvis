@@ -85,7 +85,18 @@ foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py
     Write-Host "== $t"
     # keep enough of the tail to show WHY, not just that it failed: the last 3 lines
     # once hid the one diagnostic line that explained a suite-only failure
-    $out = & .\.venv\Scripts\python.exe "tests\$t" $port $tok 2>&1
+    # soak_e2e gets a REAL window. At its 100 s default only 80 seconds are left
+    # after warm-up, and 2026-09-03 proved that is too short to tell a leak from
+    # allocator churn: it failed a release at "34.2 MB/min", and the same build
+    # measured for seven minutes came back at MINUS 139.9. The suite now skips
+    # its leak check below three minutes rather than guess, so without this it
+    # would never run at all. Costs ~3.3 min a release; a leak check that cries
+    # wolf costs more than that the first time it is believed.
+    # NOT $args — that is an automatic variable, and writing to it inside a
+    # loop body is the kind of thing that works until it does not.
+    $suiteArgs = @($port, $tok)
+    if ($t -eq "soak_e2e.py") { $suiteArgs += "300" }
+    $out = & .\.venv\Scripts\python.exe "tests\$t" @suiteArgs 2>&1
     $code = $LASTEXITCODE
     # ALWAYS keep the whole thing. An intermittent failure that only shows its
     # tail is a failure you get to diagnose once, if you are lucky and watching.
