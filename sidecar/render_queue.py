@@ -249,7 +249,16 @@ class RenderQueue:
                 extra = f"Though {r['mesh_warning']}." if r.get("mesh_warning") else ""
             if extra:
                 line += " " + extra
-            await self._say(line, key=f"render-done:{job.id}")
+            # A PICTURE OF WHAT WAS MADE, for the case where he is not here to
+            # look at the stage. Drawn only when there is a model to draw.
+            shot = ""
+            if r.get("stl"):
+                try:
+                    import meshshot
+                    shot = await meshshot.shot_async(r["stl"])
+                except Exception:
+                    log.debug("could not draw the finished model", exc_info=True)
+            await self._say(line, key=f"render-done:{job.id}", image=shot)
         elif what == "failed":
             why = (job.result or {}).get("error") or "it didn't come out"
             await self._say(f"I couldn't make the {job.label}, sir — {why}.",
@@ -257,13 +266,13 @@ class RenderQueue:
         # A cancellation is NOT announced: he is the one who cancelled it, and
         # the skill that took the instruction has already answered him.
 
-    async def _say(self, line: str, key: str) -> None:
+    async def _say(self, line: str, key: str, image: str = "") -> None:
         """Through delivery, so it is spoken if he is here and sent if he is not
         — and so it is subject to the dedup and the hourly ceiling like
         everything else JARVIS says on its own initiative."""
         try:
             from delivery import ALERT, delivery
-            await delivery.deliver(line, ALERT, key=key)
+            await delivery.deliver(line, ALERT, key=key, image=image)
         except Exception:
             log.exception("could not announce a render")
 

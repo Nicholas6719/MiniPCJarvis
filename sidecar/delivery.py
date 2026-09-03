@@ -234,8 +234,14 @@ class Delivery:
         return True
 
     async def deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
-                      subject: str = "", written: str = "") -> dict:
+                      subject: str = "", written: str = "",
+                      image: str = "") -> dict:
         """Say it, send it, or hold it. Returns what was actually done.
+
+        `image` is a picture to send WITH the message when it goes to his phone —
+        a render he cannot otherwise see. It is ignored when the message is
+        spoken, because he is at the machine and the stage is already in front
+        of him.
 
         `written` is the same message shaped for a screen. Speech wants flowing
         sentences; a phone wants short lines you can scan. He was sent a 300-word
@@ -278,12 +284,24 @@ class Delivery:
             # audio gone) — the phone is better than losing it
         if telegram_available():
             from remote_telegram import telegram
-            await telegram.send_proactive(written or text, tier=tier, subject=subject)
+            sent_photo = False
+            if image:
+                # The picture IS the message for a finished render. Sent first
+                # so the caption arrives with it rather than after it.
+                try:
+                    sent_photo = await telegram._upload(
+                        image, kind="photo", caption=(written or text)[:900])
+                except Exception:
+                    log.warning("could not send the render photo", exc_info=True)
+            if not sent_photo:
+                await telegram.send_proactive(written or text, tier=tier,
+                                              subject=subject)
             self._sent.append(time.time())
             _remember_proactive(text)
             await bus.emit("proactive", text=text, tier=tier, channel="telegram",
                            subject=subject)
             return {"delivered": "telegram", "tier": tier,
+                    "photo": bool(image and sent_photo),
                     "why": "he is not at the machine" if not present else "could not speak"}
 
         # nowhere to send it: keep it for the next time he is here
