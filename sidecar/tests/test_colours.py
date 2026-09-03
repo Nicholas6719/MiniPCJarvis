@@ -180,6 +180,71 @@ async def main() -> int:
           "the hologram is the look he asked to keep")
 
 
+    print("\n-- which side of a tight crop is the background --")
+    # A logo reference is usually a TIGHT CROP. Deciding background by majority
+    # over the whole frame made a subject filling 55% of the picture the
+    # majority, so the mask was left the wrong way round: the traced "outline"
+    # came back as the four corners of the image and sampled #ffffff, with the
+    # real subject labelled a hole inside it. His example is exactly this
+    # picture — a red mask with white eyes.
+    try:
+        from PIL import Image, ImageDraw
+        import create3d, features, colours as C
+    except Exception as e:
+        # cv2 and PIL are both bundled, so this is not a skip — a tracer that
+        # cannot import is a broken build, not an absent optional feature.
+        check("the tracer and the palette import at all", False, str(e))
+    else:
+        d = tempfile.mkdtemp()
+
+        def mask_png(name, fill_frame):
+            p = os.path.join(d, name)
+            im = Image.new("RGB", (520, 640), (255, 255, 255))
+            dr = ImageDraw.Draw(im)
+            m = 1.0 if fill_frame else 0.5
+            dr.ellipse([260 - 220 * m, 320 - 290 * m,
+                        260 + 220 * m, 320 + 290 * m], fill=(196, 26, 32))
+            dr.polygon([(120, 230), (240, 200), (230, 300), (120, 300)],
+                       fill=(245, 245, 245))
+            dr.polygon([(400, 230), (280, 200), (290, 300), (400, 300)],
+                       fill=(245, 245, 245))
+            im.save(p)
+            return p
+
+        p = mask_png("tight.png", True)
+        shapes = create3d.trace_shapes(p)
+        pieces = features.label(shapes)
+        got = C.sample(p, shapes, pieces)
+        check("a mask filling the frame traces the FACE, not the frame",
+              C.label(got.get("outline", "")) == "red",
+              f"outline came back {got.get('outline')!r} "
+              f"({C.label(got.get('outline', ''))})")
+        eyes = [v for k, v in got.items() if "eye" in k]
+        check("...and its eyes are white",
+              len(eyes) >= 2 and all(C.label(v) == "white" for v in eyes),
+              str({k: v for k, v in got.items() if "eye" in k}))
+        body = next((q for q in pieces if q.get("name") == "outline"), None)
+        check("...and the outline is a real contour, not four corners",
+              bool(body) and len(body.get("points") or []) > 8,
+              f"the image border is a rectangle and a face is not; "
+              f"outline has {len((body or {}).get('points') or [])} points")
+
+        # Both polarities of the input the tier is actually built for.
+        for nm, bg, fg in (("black on white", (255, 255, 255), (0, 0, 0)),
+                           ("white on black", (0, 0, 0), (255, 255, 255))):
+            q = os.path.join(d, nm.replace(" ", "_") + ".png")
+            im = Image.new("RGB", (400, 400), bg)
+            dr = ImageDraw.Draw(im)
+            dr.ellipse([90, 90, 310, 310], fill=fg)
+            dr.ellipse([170, 150, 230, 210], fill=bg)
+            im.save(q)
+            sh = create3d.trace_shapes(q)
+            check(f"{nm} still traces one figure with one hole",
+                  bool(sh) and len(sh) == 1
+                  and len(sh[0].get("holes") or []) == 1,
+                  f"{len(sh or [])} shape(s)")
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

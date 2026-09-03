@@ -434,6 +434,7 @@ def trace_shapes(image_path: str, max_points: int = 400) -> list[dict] | None:
     """
     try:
         import cv2
+        import numpy as np
     except Exception:
         return None
     img = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
@@ -447,7 +448,18 @@ def trace_shapes(image_path: str, max_points: int = 400) -> list[dict] | None:
                 if img.ndim == 3 else img)
         _, mask = cv2.threshold(grey, 0, 255,
                                 cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        if mask.mean() > 127:
+        # WHICH SIDE IS THE BACKGROUND — and the frame is a better witness than
+        # the area. Deciding by majority over the whole picture
+        # (`mask.mean() > 127`) breaks on a tight crop, which is what a logo
+        # reference usually is: a subject filling 55% of the frame IS the
+        # majority, the mask is left the wrong way round, and the traced
+        # "outline" comes back as the four corners of the image with the real
+        # subject as a hole inside it. Measured on a red mask with white eyes
+        # on white: the outline sampled #ffffff and the face was labelled a
+        # hole. Whatever touches the edge is the background in every reference
+        # picture worth tracing, however much of the frame the subject fills.
+        edge = np.concatenate([mask[0], mask[-1], mask[:, 0], mask[:, -1]])
+        if edge.mean() > 127:
             mask = 255 - mask
 
     # RETR_CCOMP gives two levels: outer boundaries and the holes inside them,
