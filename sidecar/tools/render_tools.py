@@ -73,6 +73,23 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                         name: str = "", confirmed: bool = False,
                         skip: int = 0, pieces: list | None = None) -> dict:
     """Make a 3D model and put it up, in the background, with an estimate."""
+    # A RENDER NEEDS THE WEB. Tier 5 searches for a published model and tier 4
+    # downloads a reference picture, so with no connection this cannot work at
+    # all — and failing slowly is the worst way to say so. His duck took three
+    # minutes and told him it was almost done the whole way; spending that to
+    # arrive at "I couldn't" would be the same lesson unlearned.
+    #
+    # Only when nothing is on disk to work from: an image he handed over, or a
+    # shape simple enough to write out as code, still works perfectly offline.
+    if not image_path:
+        import netcheck
+        if not netcheck.online():
+            return {"error": "I can't reach the internet at the moment, sir",
+                    "offline": True,
+                    "spoken": ("I can't reach the internet at the moment, sir — "
+                               "I'd need it to find or build that. Give me a "
+                               "picture to work from and I can still do it.")}
+
     desc = (description or "").strip()
     if not desc and not image_path:
         return {"error": "what should I make, sir?"}

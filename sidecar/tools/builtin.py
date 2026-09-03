@@ -610,6 +610,20 @@ async def web_search(query: str, count: int = 5) -> dict:
     from tools.query_clean import clean_search_query
     query = clean_search_query(query)
     out = _note_search(await _web_search(query, count))
+    # NOTHING FOUND AND COULD NOT LOOK ARE DIFFERENT ANSWERS. Empty results
+    # normally mean the web had nothing; with no connection they mean the
+    # search never happened, and the model has no way to tell those apart
+    # unless it is told. Checked only when there is nothing to show, so a
+    # working search never waits on a probe.
+    if not out.get("results"):
+        import netcheck
+        if not netcheck.online():
+            return {"query": query, "results": [], "offline": True,
+                    "error": "I can't reach the internet at the moment, sir",
+                    "note": ("THERE IS NO NETWORK. This search did not happen — "
+                             "this is NOT 'nothing was found'. Say plainly that "
+                             "you cannot reach the internet right now, and do "
+                             "NOT answer from memory as though you had looked.")}
     if out.get("results"):
         from brain.facts import record_evidence
         record_evidence(query, [{"url": r.get("url", ""), "title": r.get("title", "")}
