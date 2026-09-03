@@ -193,9 +193,12 @@ def with_dispatcher(source: str, parts: list[dict]) -> str:
     lines = ['\n// -- rendered one part at a time; "all" builds the assembly',
              f'{PART_VAR} = "all";']
     for p in parts:
-        body = " ".join(p["text"].split())
+        # BRACES, AND THE STATEMENT UNTOUCHED. Collapsing it onto one line let a
+        # `// comment` above the call swallow the call, and an `if` with an
+        # empty body then captured the NEXT part's line as its own. Two parts
+        # lost, no error anywhere.
         lines.append(f'if ({PART_VAR} == "all" || {PART_VAR} == "{p["name"]}") '
-                     f'{body}')
+                     f'{{\n{p["text"]}\n}}')
     return "".join(keep) + tail.rstrip() + "\n" + "\n".join(lines) + "\n"
 
 
@@ -243,3 +246,49 @@ def read_manifest(stl_path: str) -> list[tuple[str, str]]:
         if name and path and os.path.exists(path):
             out.append((str(name), str(path)))
     return out
+
+# Where `with_dispatcher` starts writing. Everything from here down is ours.
+_MARK = "// -- rendered one part at a time"
+_GUARD = re.compile(
+    r'^if \(' + PART_VAR + r' == "all" \|\| ' + PART_VAR
+    + r' == "[^"]+"\) \{\n(.*?)\n\}$',
+    re.M | re.S)
+
+
+def strip_dispatcher(source: str) -> str:
+    """The source as the model wrote it, with our scaffolding taken back off.
+
+    Handing the dispatcher to a language model for editing asks it to reproduce
+    a machine-generated guard per part, verbatim, on every change — tokens spent
+    on boilerplate it did not write, and a guard it mangles still renders,
+    because the conditions fall back to "all". It should only ever see its own
+    code.
+    """
+    src = source or ""
+    if _MARK not in src:
+        return src
+    head, tail = src.split(_MARK, 1)
+    # Put the guarded statements back as plain top-level calls, in order.
+    calls = [m.group(1).strip() for m in _GUARD.finditer(tail)]
+    body = "\n".join(calls)
+    return (head.rstrip() + "\n\n" + body + "\n") if body else head
+
+
+def clear_manifest(stl_path: str) -> None:
+    """Forget a model's parts, and delete the files that described them.
+
+    Called when a rebuild produced no assembly. Leaving them would let
+    `read_manifest` keep serving pieces of a model that no longer exists.
+    """
+    p = manifest_path(stl_path)
+    stale = []
+    try:
+        with open(p, encoding="utf-8") as fh:
+            stale = [e.get("stl") for e in (json.load(fh) or {}).get("parts") or []]
+    except (OSError, ValueError):
+        pass
+    for f in [p] + [x for x in stale if x]:
+        try:
+            os.remove(f)
+        except OSError:
+            pass

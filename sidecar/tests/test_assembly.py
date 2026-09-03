@@ -105,6 +105,86 @@ def main() -> int:
     check("the helper module is left where it belongs",
           "module coil()" in out and '== "coil"' not in out)
 
+    # THE BUG THAT COST TWO PARTS OUT OF THREE, on the first real assembly the
+    # model ever produced. It wrote:
+    #
+    #     // Assemble
+    #     base();
+    #     translate([0, 0, base_size[2]]) ring();
+    #
+    # and the dispatcher collapsed each statement onto one line, so the `//` ate
+    # `base();`. An `if` with an empty body then took the NEXT statement as its
+    # body, so `ring` rendered only when you asked for `base`. Everything
+    # compiled. The whole-assembly render still looked right.
+    COMMENTED = """
+module base() { cube([10,10,2]); }
+module ring() { cylinder(d=8, h=5); }
+module core() { cylinder(d=3, h=6); }
+
+// Assemble
+base();
+translate([0, 0, 2]) ring();
+translate([0, 0, 7]) core();
+"""
+    cp = assembly.parts_in(COMMENTED)
+    cd = assembly.with_dispatcher(COMMENTED, cp)
+    def live_call(text: str, module: str) -> bool:
+        """Is `module()` actually called here, on a line that is not a comment?"""
+        for line in text.splitlines():
+            bare = line.strip()
+            if bare.startswith("//"):
+                continue
+            code = bare.split("//", 1)[0]
+            if f"{module}(" in code:
+                return True
+        return False
+
+    check("a comment above a call cannot swallow the call",
+          all(live_call(cd.split(f'== "{p["name"]}") {{', 1)[1].split("}", 1)[0],
+                        p["name"]) for p in cp),
+          "the call ended up behind the `//` and the part rendered nothing")
+    check("...because every part is braced",
+          all(f'== "{p["name"]}") {{' in cd for p in cp),
+          "braces also stop an empty body capturing the next part's line")
+    check("...and the statement is left exactly as written",
+          "translate([0, 0, 2]) ring();" in cd)
+
+    print("\n-- an edit must not leave the old parts behind --")
+    dispatched = assembly.with_dispatcher(ASSEMBLY, assembly.parts_in(ASSEMBLY))
+    clean = assembly.strip_dispatcher(dispatched)
+    check("the model is given its own source back, not our scaffolding",
+          assembly.PART_VAR not in clean,
+          "it was being asked to reproduce a machine-generated guard per part, "
+          "verbatim, on every edit — and a mangled guard still renders, because "
+          "the conditions fall back to \"all\"")
+    check("...and stripping it finds the same parts again",
+          [p["name"] for p in assembly.parts_in(clean)]
+          == [p["name"] for p in assembly.parts_in(ASSEMBLY)])
+    check("stripping a source that was never dispatched changes nothing",
+          assembly.strip_dispatcher(ASSEMBLY) == ASSEMBLY)
+
+    fab_src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "tools", "fabrication.py"),
+        encoding="utf-8").read()
+    check("an edit rebuilds the parts",
+          "_split_into_parts(exe, scad, stl, code, out_d)" in fab_src,
+          "without this, asking for a bigger ring and then zooming in on the "
+          "ring shows the ring from before the edit, with its old dimensions "
+          "read out as fact")
+    check("...and forgets them when the new source has none",
+          "clear_manifest" in fab_src)
+
+    print("\n-- an operation that fails while reporting success --")
+    check("a part file is removed before it is rendered",
+          "out_stl.unlink()" in fab_src,
+          "OpenSCAD exits 0 and writes NOTHING when the object is empty, "
+          "leaving the previous file intact — so last run's part is accepted "
+          "as this one's")
+    check("a component that renders nothing refuses the whole assembly",
+          "parts_incomplete" in fab_src,
+          "shipping the rest hands him a model with a piece missing and no "
+          "indication; this is how base and ring both vanished")
+
     print("\n-- the manifest --")
     d = tempfile.mkdtemp()
     stl = os.path.join(d, "arc.stl")
@@ -212,6 +292,24 @@ def main() -> int:
         check("-D really does override a top-level variable",
               sizes["ring"] != sizes["all"],
               "if this fails, every part is the whole model wearing a name")
+
+        # AND THE COMMENTED SOURCE, RENDERED. This is the case that cost two
+        # parts out of three on real model output, and no structural check is
+        # worth as much as asking OpenSCAD whether a part came out.
+        cs = os.path.join(d, "commented.scad")
+        open(cs, "w", encoding="utf-8").write(cd)
+        built = {}
+        for target in ("base", "ring", "core"):
+            o = os.path.join(d, f"commented.{target}.stl")
+            if os.path.exists(o):
+                os.remove(o)          # a stale file would pass for a fresh one
+            subprocess.run([exe, "-D", f'{assembly.PART_VAR}="{target}"',
+                            "-o", o, cs], capture_output=True, text=True,
+                           timeout=120)
+            built[target] = os.path.exists(o) and os.path.getsize(o) > 84
+        check("every part of a commented assembly really renders", all(built.values()),
+              f"{built} — base and ring both vanished here, and the whole "
+              f"render still looked correct")
 
     print()
     if skips:

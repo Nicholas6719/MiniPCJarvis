@@ -450,18 +450,44 @@ async def _split_into_parts(exe, scad, stl, code: str, r: dict) -> dict:
         await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
         return r
 
-    made = []
+    made, empty = [], []
     for p in parts:
         out_stl = stl.with_suffix("")
         out_stl = out_stl.with_name(f"{out_stl.name}.{p['name']}.stl")
+        # A STALE FILE WOULD PASS THE CHECK BELOW. OpenSCAD exits 0 and writes
+        # nothing at all when the top-level object is empty, leaving whatever
+        # was there before untouched — so last run's part gets accepted as this
+        # one's. Removing it first makes "it exists" mean "this render made it".
+        try:
+            out_stl.unlink()
+        except OSError:
+            pass
         rc, out, err = await _run(
             [exe, "-D", f'{assembly.PART_VAR}="{p["name"]}"',
              "-o", str(out_stl), str(scad)], GEN_TIMEOUT_S)
         if rc != 0 or not out_stl.exists():
+            # "Current top level object is empty" comes back with exit 0, so
+            # this is the ONLY signal that a named component built nothing.
             log.warning("part %s did not build: %s", p["name"],
                         (err or out or "").strip()[:160])
+            empty.append(p["name"])
             continue
         made.append({"name": p["name"], "stl": str(out_stl)})
+
+    # A COMPONENT THAT RENDERED NOTHING MEANS THE SOURCE IS WRONG ABOUT ITSELF,
+    # and shipping the rest as an assembly hands him a model with a piece
+    # missing and nothing to indicate it. This is how `base` and `ring` both
+    # vanished while the whole render still looked correct.
+    if empty:
+        log.warning("%s built nothing; keeping %s whole",
+                    ", ".join(empty), stl.name)
+        for m in made:
+            try:
+                os.remove(m["stl"])
+            except OSError:
+                pass
+        r["parts_incomplete"] = empty
+        return r
 
     # One part that built is not an assembly; it is the whole thing with a
     # label, and calling it an assembly would put a "1 of 1" in front of him.
@@ -493,6 +519,8 @@ async def edit_part(change: str, name: str = "") -> dict:
     THE PREVIOUS VERSION IS KEPT (`<name>.prev.scad`) so "no, put it back" is a
     file copy rather than an apology.
     """
+    import assembly
+
     want = (change or "").strip()
     if not want:
         return {"error": "what should I change, sir?"}
@@ -593,6 +621,13 @@ async def edit_part(change: str, name: str = "") -> dict:
         out_d["spoken_size"] = f"{round(w)} by {round(h)} by {round(dp)} millimetres"
     except Exception:
         log.debug("could not measure the edited part", exc_info=True)
+
+    # THE PARTS HAVE TO BE REBUILT, or the old ones keep being served. They are
+    # still on disk and still named correctly, so nothing downstream can tell
+    # that the ring he just enlarged is the ring from before the edit.
+    out_d = await _split_into_parts(exe, scad, stl, code, out_d)
+    if not out_d.get("parts"):
+        assembly.clear_manifest(str(stl))
 
     await _reproject(base)
     return out_d
