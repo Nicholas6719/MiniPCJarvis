@@ -3004,6 +3004,107 @@ repair is to give it a receipt that is true of the current Notepad, and the
 sidecar has no tool that reads a control's VALUE (only its name), so that is a
 small new capability rather than a test edit. Left open on purpose.
 
+## 2026-09-03 evening — he watches the model resolve
+
+His words: *"I actually wanted to see the 3D model being built"*, and then, after
+seeing the reference-scan preview: *"What if we did both? What if we used the
+first renderability where it, like, scans the picture, and that's how it's
+working, and then it goes into watching the model build?"*
+
+**The measurement decided the design, and it was not what I assumed.** A TripoSR
+reconstruction is two steps: `codes = model([img])` — the transformer — then
+`model.extract_mesh(codes, resolution=N)` — marching cubes. I assumed the
+transformer dominated, which would have meant a progressive build showed him
+five stages in the last few seconds of a three-minute wait and the reference
+picture was doing all the real work. Measured on his machine:
+
+    grid  64   think 17s + carve   0.3s
+    grid 192   think 15s + carve   7.9s
+    grid 384   think 15s + carve  54.0s
+    grid 512   think 15s + carve 113.7s
+
+The transformer is FLAT at ~15 s and carving is CUBIC. At 384 the carving is 78%
+of the wait — so most of the wait is a phase where real geometry exists and can
+be shown. **If I had built to the assumption I would have built the wrong thing.**
+
+The scene code is computed once and a mesh can be pulled from it at any
+resolution, so `96 -> 192 -> 384` is three genuine meshes of the same
+reconstruction, not interpolations. Measured end to end:
+
+    rung  96   on screen at 17.5s    10,204 triangles   58.5 x 58.5 x 60.0 mm
+    rung 192   on screen at 23.9s    42,750 triangles   59.7 x 59.6 x 60.0 mm
+    final      on screen at 75.3s   172,560 triangles   59.5 x 59.3 x 60.0 mm
+
+against a 73.2 s baseline with no ladder — about two seconds, inside the
+run-to-run noise, and he sees the object 58 seconds sooner. 288 was rejected:
+another 23 s for one more step.
+
+**The bounding box is the check, not "the file appeared."** `finish` stands the
+mesh upright, fixes inside-out winding and scales to millimetres. Factoring it
+out for the rungs left it referencing the argparse namespace (`a.size_mm`), so
+every rung raised NameError inside a `try` and was logged as a failed preview —
+silently, because a preview must never cost him a render. And the first live
+check reported *"final at 79.4s"* for a render that had died, because anything
+that was not a stage was taken for the answer. Each rung is now measured against
+the finished part: 1.7% and 0.5%, which is a coarser silhouette of the same
+object rather than one that skipped being stood upright.
+
+**Streaming a subprocess needs both pipes drained.** `_run` used
+`communicate()`; reading only stdout leaves stderr to fill its 64 KB buffer and
+the child blocks forever holding 1.7 GB of weights — TripoSR and rembg both
+write progress bars there. It reads chunks rather than lines for the same
+reason: a progress bar is carriage returns with no newline, and `readline` on
+one raises at the stream limit. The kill-on-cancel and `CREATE_NO_WINDOW`
+behaviour was carried over deliberately.
+
+**"Show me that again" with no name means the newest thing you made** — and a
+rung is newer than the part it previews. Excluded from `_pick` AND cleaned up
+after every render. Two guards, because a preview passing for his part is not
+worth risking once.
+
+Progressive is on only for a render he asked for **as a whole**
+(`render_tools` passes `progressive=True`); the per-part builds inside a
+composite would otherwise take turns on the stage. The panel shows
+`resolving · 96` while rungs are landing.
+
+### Finding 24 — the machine panel was never blank, it was zero
+
+`/system` and `snapshot()` were both checked and healthy (real numbers in
+0.04 s), so it was written down as HUD-side and left there. `useMachine` lives
+in `RunStrip`, which is part of `ProseStage`, **which mounts and unmounts with
+every answer**. With `[]` deps the reading started from nothing each time: first
+paint had `sys === null` and the panel rendered that as `CPU 0%`, `MEMORY — / —
+GB`, `DISK 0.0 TB FREE`. A short answer drained before the fetch landed. The
+backend was healthy throughout, which is exactly why checking the backend never
+found it.
+
+The reading now lives outside React — one shared poll, last value kept between
+stages — and the panel says `NO READING` with the reason rather than `?? 0`.
+**Diagnosed by reading, not reproduced**: a cause that fully explains the
+symptom, not a confirmed one. It will now say what is wrong if it recurs.
+
+### Two traps that cost time today, both already in memory
+
+  * **Heredoc backslash mangling.** `\\n` and `\\S` collapse inside a bash
+    heredoc even with a quoted delimiter. It bit four times. Use the Write/Edit
+    tools for anything containing regex or escapes — no exceptions.
+  * **`.cmd` files need CRLF.** Rewriting `build_sidecar.cmd` through `awk`
+    converted it to LF and the build died with `'M' is not recognized as an
+    internal or external command`. The repo stores LF and autocrlf supplies the
+    CRLF; a tool that rewrites every line takes it away.
+
+And one new one: **`tests/` is `sidecar/tests/`.** `build_sidecar.cmd` does
+`cd /d "%~dp0..\sidecar"` first, so a gate written to the repo-root `tests/`
+is never run by the build even though it passes when invoked by hand.
+
+### Still open
+  * **#25 raise the window on a finished render** — his open question, not a
+    bug. A render finishing already puts the model on the stage, which is
+    surfacing it; raising the window above other apps is more intrusive and is
+    his call.
+  * **Spotify playlists** — needs an OAuth app registered under his account.
+  * **"Nvidia" → "bye"** — an STT limit; wants a finance-domain hint.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
