@@ -948,7 +948,7 @@ async def main() -> int:
         os.path.abspath(__file__))), "tools", "model_tools.py"),
         encoding="utf-8").read()
     check("'that site needs an account' is never said about GitHub",
-          "len(gh) == len(cands)" in mt and "robot kit" in mt,
+          "locked = [c for c in cands" in mt and "robot kit" in mt,
           "he told me to stop treating a locked website as the answer; saying "
           "it about a site that is not locked is worse")
     check("...and the honest alternative is offered instead",

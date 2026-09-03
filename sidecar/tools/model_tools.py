@@ -98,9 +98,14 @@ async def find_3d_model(description: str = "", confirmed: bool = False) -> dict:
     # Printables and Cults3D and flatly wrong about GitHub, which hands over any
     # file it has; asked for "a duck" it hit nine GitHub repos, none of which
     # contains a duck, and announced that GitHub needed an account.
-    top = cands[0]
-    gh = [c for c in cands if "github.com" in c.get("host", "")]
-    if gh and len(gh) == len(cands):
+    # THE ACCOUNT LINE MAY ONLY EVER DESCRIBE A SITE THAT ACTUALLY WANTS ONE.
+    # Keyed on `len(gh) == len(cands)` it still fired for "a duck", because the
+    # candidate list carries non-GitHub pages too — so it named a GitHub repo as
+    # the best result and said GitHub wanted an account. What decides is whether
+    # there is a locked page to talk about at all.
+    locked = [c for c in cands if "github.com" not in c.get("host", "")]
+    top = locked[0] if locked else cands[0]
+    if not locked:
         why = (f"I found {len(cands)} repositories, sir, but nothing in them is "
                f"actually {desc} — I'd be handing you somebody's robot kit. "
                f"I can build you one instead.")
