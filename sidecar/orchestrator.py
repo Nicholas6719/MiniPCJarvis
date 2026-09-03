@@ -253,7 +253,8 @@ def _screen_context() -> dict:
     Never raises and never blocks: a failure here has to mean "no context",
     which is precisely how the brain behaved before it could see anything.
     """
-    ctx = {"stage": False, "project": False, "render": False}
+    ctx = {"stage": False, "project": False, "render": False,
+           "last_skill": None}
     try:
         from tools.holo_tools import current
         ctx["stage"] = bool((current() or {}).get("name"))
@@ -269,6 +270,23 @@ def _screen_context() -> dict:
         ctx["render"] = bool((queue.status() or {}).get("busy"))
     except Exception:
         log.debug("no render context", exc_info=True)
+    return ctx
+
+
+def _with_last_skill(orch, ctx: dict) -> dict:
+    """Add what he was just talking about, while it is still fresh.
+
+    Only useful to a sentence that points backwards - see _FOLLOW_UP in the
+    router - so it is passed always and consulted rarely.
+    """
+    try:
+        from brain.router import FOLLOW_UP_WINDOW_S
+        last = getattr(orch, "_last_reflex", None) or {}
+        when = getattr(orch, "_last_reflex_at", 0)
+        if last.get("skill") and (time.time() - when) < FOLLOW_UP_WINDOW_S:
+            ctx["last_skill"] = last["skill"]
+    except Exception:
+        log.debug("no follow-up context", exc_info=True)
     return ctx
 
 
@@ -1307,7 +1325,8 @@ class Orchestrator:
                 if steps:
                     await self._routine_turn(text, steps, t_start)
                     return
-                reflex = await brain.decide(text, context=_screen_context())
+                reflex = await brain.decide(
+                    text, context=_with_last_skill(self, _screen_context()))
             except Exception:
                 log.exception("brain decide failed - falling back to the LLM")
         if reflex and (not reflex[0].llm_after

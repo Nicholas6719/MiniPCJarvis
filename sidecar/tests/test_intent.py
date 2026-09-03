@@ -227,6 +227,36 @@ def main() -> int:
               bool(near) and near[0].name == "holo_make",
               f"{near and near[0].name}")
 
+        print("\n-- and he remembers what was just being talked about --")
+        # From his testing: "how many fingers am I holding up" -> five,
+        # correct. "What about now?" two seconds later -> "did you mean the
+        # TIME, sir?". _last_reflex already knew, and nothing consulted it.
+        #
+        # Measured: "what about now" gives time@0.85 sleep@0.81 look_at@0.80
+        # date@0.79 — four skills inside 0.06, which is noise rather than a
+        # match. So the pull is decided by CONTENT: strip the reference, and
+        # if nothing is left the previous subject is the only one on offer.
+        warm = {**empty, "last_skill": "fingers"}
+        for said in ("what about now", "how about now", "and now",
+                     "again", "the second one"):
+            r = await brain.decide(said, context=warm)
+            check(f"{said!r} stays on the last subject",
+                  bool(r) and r[0].name == "fingers",
+                  str(r and r[0].name))
+        # ...and a sentence WITH a subject of its own is never dragged.
+        # The requirement is that it is NOT dragged onto the last subject.
+        # Whether it fires or asks is a separate question - asking is fine.
+        for said in ("what about the weather tomorrow", "what about my calendar",
+                     "how about some music"):
+            r = await brain.decide(said, context=warm)
+            landed = r[0].name if r else (brain.unsure or {}).get("skill")
+            check(f"{said!r} keeps its own subject",
+                  landed != "fingers", str(landed))
+        check("a cold start has nothing to follow up",
+              (await brain.decide("what about now", context=empty)) is not None
+              or brain.unsure is not None,
+              "no last skill means it decides on the words alone")
+
         print("\n-- the screen decides what an ambiguous sentence means --")
         a = await brain.decide("make it bigger", context=stage)
         b = await brain.decide("make it bigger", context=empty)

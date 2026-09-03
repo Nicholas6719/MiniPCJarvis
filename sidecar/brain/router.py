@@ -243,6 +243,49 @@ CONTEXT_BONUS = 0.15
 CONTEXT_PENALTY = 0.20
 
 
+# A SENTENCE THAT POINTS BACKWARDS. These carry no subject of their own: they
+# only mean anything next to what came before. "What about now" embedded alone
+# is nearest whatever seeds mention "now", which is why it reached `time`
+# two seconds after a question about fingers.
+_FOLLOW_UP = re.compile(
+    r"^\s*(?:and |so |ok(?:ay)?,? |well |but )?"
+    r"(?:what about|how about|and now|what if|and you|"
+    r"(?:do|try) (?:it|that) again|again|once more|same again|"
+    r"the (?:second|third|fourth|first|last|other|next) one|"
+    r"that one|this one|those|the rest)\b", re.I)
+
+# How long a subject stays live. Long enough for him to look at the screen and
+# ask the obvious next thing; short enough that it can never reach across a
+# break in the conversation.
+FOLLOW_UP_WINDOW_S = 90.0
+
+# Words that add nothing after the reference. "What about NOW" is still a bare
+# reference; "what about the WEATHER" is not.
+_FOLLOW_TAIL = frozenset((
+    "now", "then", "please", "sir", "too", "as", "well", "instead",
+    "one", "it", "that", "this", "though", "again", "here", "there",
+))
+
+# Purely referential: nothing but the reference, so the last subject is the
+# ONLY subject on offer. Sized against the measured noise floor - the top four
+# skills for "what about now" sit within 0.06 of each other and 0.23 above the
+# right answer, so this has to clear a gap that means nothing in the first place.
+FOLLOW_UP_BONUS_BARE = 0.35
+# Partly referential: it opens backwards but carries its own subject. A nudge,
+# and the sentence still wins or loses on what it actually says.
+FOLLOW_UP_BONUS = 0.12
+
+
+def _follow_up_pull(text: str) -> float:
+    """How strongly this sentence points at whatever came before."""
+    m = _FOLLOW_UP.match(text or "")
+    if not m:
+        return 0.0
+    rest = re.sub(r"[^a-z0-9\s]", " ", (text or "")[m.end():].lower())
+    left = [w for w in rest.split() if w not in _FOLLOW_TAIL]
+    return FOLLOW_UP_BONUS_BARE if not left else FOLLOW_UP_BONUS
+
+
 # A NAMED FEATURE IS AN EDIT. Enough to win a near tie against the view, and
 # no more - "eyes" appearing in a sentence should tip a close call, not drag
 # holo_edit in from nowhere.
@@ -458,6 +501,14 @@ class Brain:
         if lex:
             sims = sims + np.array(
                 [lex if sk == "holo_edit" else 0.0 for sk in self._skills],
+                dtype=np.float32)
+        # STILL TALKING ABOUT THE SAME THING. "What about now" means nothing on
+        # its own; next to a question about fingers it plainly means fingers.
+        last = (context or {}).get("last_skill")
+        pull = _follow_up_pull(text) if last else 0.0
+        if pull:
+            sims = sims + np.array(
+                [pull if sk == last else 0.0 for sk in self._skills],
                 dtype=np.float32)
         order = np.argsort(-sims)
         if exclude:
