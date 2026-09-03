@@ -61,10 +61,71 @@ def _count_of(word: str | None) -> int | None:
     return _NUM_WORDS.get(w)
 
 
+# HE STARTS SENTENCES TWICE. Dictation captures it verbatim:
+#
+#   "Show me th show me three images of Tom Hall and Spider Man"
+#
+# ...and DuckDuckGo was duly asked for "th show me three images of tom hall and
+# spider man". People restart mid-phrase constantly and the recogniser has no
+# idea it happened; only the repetition gives it away.
+#
+# Deliberately narrow. It fires ONLY when a command lead-in appears twice near
+# the start with almost nothing between the two — the shape of a false start.
+# "Show me the show me your work sign" is not that, and neither is any sentence
+# where the repeat is further in.
+_RESTART_LEAD = (r"(?:show|tell|give|find|get|make|create|bring|pull)\s+me"
+                 r"|can\s+you|could\s+you|i\s+want|i\s+need|search\s+for"
+                 r"|look\s+up|hey\s+jarvis|jarvis")
+_RESTART = re.compile(rf"^\s*(?:{_RESTART_LEAD})\b[\s,]*"
+                      rf"(?P<gap>(?:[\w']+[\s,]+){{0,2}})"
+                      rf"(?=(?:{_RESTART_LEAD})\b)", re.I)
+
+# What may sit between the false start and the restart. A DROPPED FRAGMENT
+# ("th"), or an audible hesitation — nothing that carries meaning.
+#
+# Checked rather than left to a length rule, because a short word is not the
+# same as a fragment: "search for how to show me the money" has "how to" in that
+# position and lost it, which is a real query mangled to fix an imagined one.
+_RESTART_FILLER = {"uh", "um", "er", "erm", "ah", "eh", "hmm", "mm", "like",
+                   "sorry", "wait", "no", "actually", "i", "mean"}
+
+
+def _is_false_start(gap: str) -> bool:
+    """Is what sits between the two lead-ins junk rather than words?"""
+    for w in re.findall(r"[\w']+", gap.lower()):
+        if w in _RESTART_FILLER:
+            continue
+        # A fragment: too short to be a word he meant, and not one of the short
+        # words that genuinely carry meaning.
+        if len(w) <= 3 and w not in {"the", "a", "an", "to", "of", "in", "on",
+                                     "at", "it", "is", "my", "us", "you", "how",
+                                     "why", "who", "and", "for", "but", "not",
+                                     "all", "any", "new", "top", "one", "two",
+                                     "six", "ten", "up", "me", "we", "so"}:
+            continue
+        return False
+    return True
+
+
+def strip_restart(text: str) -> str:
+    """Drop a false start, keeping the sentence he actually finished."""
+    out = (text or "").strip()
+    for _ in range(2):            # "show me, uh, show me..." — twice, no more
+        m = _RESTART.match(out)
+        if not m or not _is_false_start(m.group("gap")):
+            break
+        new = out[m.end():].strip()
+        if len(new) < 3:
+            break
+        out = new
+    return out or (text or "").strip()
+
+
 def clean_image_query(text: str) -> tuple[str, int | None]:
     """"show me 5 images of spiderman" -> ("spiderman", 5). Returns the original
     text when nothing command-like leads it."""
-    q = _TRAIL.sub("", text.strip().strip(" .?!"))
+    q = strip_restart(text)
+    q = _TRAIL.sub("", q.strip().strip(" .?!"))
     q = _HEY.sub("", q)
     if _QUESTION.match(q):
         return q, None
@@ -111,7 +172,8 @@ def more_request(cleaned: str) -> tuple[bool, int | None]:
 def clean_search_query(text: str) -> str:
     """"search the web for the best mini pc" -> "the best mini pc"; questions and
     already-clean keyword queries pass through untouched."""
-    q = _TRAIL.sub("", text.strip().strip(" .?!"))
+    q = strip_restart(text)
+    q = _TRAIL.sub("", q.strip().strip(" .?!"))
     q = _HEY.sub("", q)
     if _QUESTION.match(q):
         return q

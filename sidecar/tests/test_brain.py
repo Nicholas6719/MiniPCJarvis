@@ -212,6 +212,11 @@ CASES = [
     # extractor then declined, so the whole thing fell to the model — which HAD
     # make_hologram and did not call it.
     ("create me a 3d image of the spider emblem", "holo_make"),
+    # Dictation writes "3d" as a WORD at least as often as a digit.
+    ("create me a three d image of the spider emblem", "holo_make"),
+    # ...and spoken numbers must be as strong as typed ones: this was 0.81
+    # against 1.00 for the digit, close enough to the threshold to be a coin toss
+    ("image number four", "ui"),
     ("make me a 3d model of the spider-man emblem", "holo_make"),
     ("make me a 3d print of the apple logo", "holo_make"),
     # ...and a picture search is still a picture search

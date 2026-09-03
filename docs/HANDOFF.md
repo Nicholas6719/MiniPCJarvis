@@ -2541,6 +2541,38 @@ hourly ceiling that the cases above it had already used, so it measured the
 ceiling rather than the deaf-speaker fallback. It resets and restores the budget
 now.
 
+## 2026-09-02 — he starts sentences twice, and spoken numbers are weaker
+
+Two loose ends from the same session.
+
+**A FALSE START WENT STRAIGHT TO THE SEARCH ENGINE.** "Show me th show me three
+images of Tom Hall and Spider Man" was sent to DuckDuckGo as *"th show me three
+images of tom hall and spider man"*. People restart mid-phrase constantly, the
+recogniser has no idea it happened, and only the repetition gives it away.
+`strip_restart()` now drops the abandoned opening; that query is
+`("Tom Hall and Spider Man", 3)`.
+
+**Narrow on purpose, and the first attempt was not narrow enough** — it turned
+"search for how to show me the money" into "show me the money", mangling a real
+query to fix an imagined one. The rule is now that whatever sits between the two
+lead-ins must be a FRAGMENT or a hesitation ("th", "sp", "uh"), never words. A
+length rule is not enough: "how" and "to" are three letters and mean something.
+Both directions are gated, negatives included.
+
+**SPOKEN NUMBERS WERE WEAKER THAN TYPED ONES.** "Image number four" scored 0.81
+where "image number 4" scored 1.00, because `_CANON` collapses digits to `N` and
+never touched number words — and 0.81 is close enough to the threshold to be a
+coin toss on the phrasing he actually SAYS. Same for "three D" against "3d",
+which is what dictation produced for the emblem request. Both 1.00 now.
+
+Collapsing only happens after the word "number", so "another one" and "the
+second one" are untouched — checked against `seed_collisions` and
+`test_canon_erasure`, which are the two gates that catch a canon change going
+wrong.
+
+**Not fixable here:** "Tom Hall" is a mis-hear of "Tom Holland". The query is
+clean now; the name is what the recogniser heard.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

@@ -135,6 +135,18 @@ _CANON = [
     # any other kind of image, and "Nd" is not a word anything can route on.
     # Normalised first so "3-D" and "3 d" reach the same token.
     (r"\b3\s*-?\s*d\b", "3d"),
+    # ...and dictation writes it as a WORD at least as often. "Create me a three
+    # D image of Spider-Man's spider emblem" is what came out of the recogniser;
+    # without this it is a different sentence from "create me a 3d image" as far
+    # as the index is concerned.
+    (r"\bthree\s*-?\s*d\b", "3d"),
+    # "IMAGE NUMBER FOUR" IS "IMAGE NUMBER 4". Digits collapse to N below and
+    # number words did not, so the same request scored 1.00 spoken with a digit
+    # and 0.81 spoken aloud — and 0.81 is close enough to the threshold to be a
+    # coin toss. Only after "number", so ordinary counting words elsewhere
+    # ("another one", "the second one") are untouched.
+    (r"\bnumber\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|"
+     r"eleven|twelve)\b", "number N"),
     (r"\d+(?!\s*-?\s*d\b)", "N"),
 ]
 

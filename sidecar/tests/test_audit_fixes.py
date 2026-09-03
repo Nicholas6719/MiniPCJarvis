@@ -101,6 +101,32 @@ for said in ("show me more cats", "show me another dragon",
           more_request(clean_image_query(said)[0])[0] is False,
           clean_image_query(said))
 
+# --- he starts sentences twice, and the recogniser writes both (2026-09-02) ---
+# "Show me th show me three images of Tom Hall and Spider Man" was sent to the
+# engine as "th show me three images of tom hall and spider man".
+from tools.query_clean import strip_restart  # noqa: E402
+
+for said, want in (
+        ("Show me th show me three images of Tom Hall and Spider Man",
+         "show me three images of Tom Hall and Spider Man"),
+        ("show me uh show me pictures of a nebula", "show me pictures of a nebula"),
+        ("show me sp show me spider-man", "show me spider-man")):
+    check(f"the false start is dropped: {said[:34]!r}",
+          strip_restart(said) == want, strip_restart(said))
+# ...and a sentence that merely REPEATS a lead-in later is not a false start.
+# The gap between the two has to be a fragment, not words: "search for how to
+# show me the money" lost its "how to" on the first attempt at this.
+for said in ("search for how to show me the money",
+             "show me the show me your work sign",
+             "tell me about the tell tale heart",
+             "find me a video of how you show me the way",
+             "show me images of iron man"):
+    check(f"left alone: {said[:38]!r}", strip_restart(said) == said,
+          strip_restart(said))
+check("a false start is stripped before the query is built",
+      clean_image_query("Show me th show me three images of Tom Hall")[1] == 3,
+      clean_image_query("Show me th show me three images of Tom Hall"))
+
 # And the sentence he hears must name what he was actually shown, not the slot.
 from brain.skills import say_images  # noqa: E402
 check("the reply names the resolved subject, not 'three more'",
