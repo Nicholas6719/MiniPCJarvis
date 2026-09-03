@@ -86,6 +86,92 @@ def main() -> int:
     check("once the cooldown lapses, the speakers are tried again", ok)
     check("...and the device really was reopened", reached == [rate], reached)
 
+    # --- a SLEEPING device gets one more chance before the lockout -----------
+    # His monitor blanks after sixty seconds and its speakers are on
+    # DisplayPort, so they are asleep most of the time he is not typing. A
+    # sleeping endpoint refuses the first write and then wakes when a new stream
+    # is opened against it — and on 2026-09-02 the sixty-second lockout after
+    # that first refusal covered his entire test. He asked for a part and heard
+    # nothing at all.
+    import time as _t
+
+    class SleepyStream:
+        """Refuses the first write by hanging; takes the second."""
+        closed = False
+        opens = 0
+
+        def write(self, _data):
+            if SleepyStream.opens <= 1:
+                _t.sleep(30)          # the driver never returns — a stuck writer
+            return None
+
+        def abort(self):
+            pass
+
+        def close(self):
+            pass
+
+    def sleepy_open(r):
+        SleepyStream.opens += 1
+        # the REAL _ensure assigns this; without it abort() has nothing to abort
+        # and _release never runs, so the stuck writer's lock is never replaced
+        speaker._stream = SleepyStream()
+        return speaker._stream
+
+    SleepyStream.opens = 0
+    speaker._deaf_output_until = 0.0
+    speaker._ensure = sleepy_open
+    t0 = _t.time()
+    try:
+        asyncio.run(speaker.play_chunk(chunk, rate))
+        woke = True
+    except SpeakerStalled:
+        woke = False
+    took = _t.time() - t0
+    check("a device that was merely asleep is heard on the retry", woke,
+          f"gave up after {took:.1f}s instead of reopening")
+    check("...having opened a second, fresh stream", SleepyStream.opens == 2,
+          SleepyStream.opens)
+    check("...and it did NOT go deaf for a minute",
+          speaker._deaf_output_until <= _t.time(),
+          "a sleeping speaker must not cost him the next sixty seconds")
+
+    # --- but a genuinely dead device still gives up, and stays given up ------
+    class DeadStream:
+        closed = False
+
+        def write(self, _data):
+            _t.sleep(30)
+
+        def abort(self):
+            pass
+
+        def close(self):
+            pass
+
+    dead_opens = []
+
+    def dead_open(r):
+        dead_opens.append(r)
+        speaker._stream = DeadStream()
+        return speaker._stream
+
+    speaker._deaf_output_until = 0.0
+    speaker._ensure = dead_open
+    t0 = _t.time()
+    try:
+        asyncio.run(speaker.play_chunk(chunk, rate))
+        gave_up = False
+    except SpeakerStalled:
+        gave_up = True
+    took = _t.time() - t0
+    check("a device that is really gone still gives up", gave_up)
+    check("...after exactly two tries, never a loop", len(dead_opens) == 2, dead_opens)
+    check("...and then goes quiet for the full cooldown",
+          speaker._deaf_output_until > _t.time() + 30,
+          "the retry must not defeat the lockout that prevents a hang")
+    check("...without taking much longer than before", took < 20.0, f"{took:.1f}s")
+
     # --- the boot chime is not played into a dark screen ---------------------
     import orchestrator as orc
     real = orc._display_off

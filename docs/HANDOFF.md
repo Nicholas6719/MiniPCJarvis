@@ -2392,6 +2392,50 @@ speaker raises, so the render announcement did reach him. Now gated, because the
 code was only ever asking "is he present?" and never "can he be spoken to?",
 which are two different questions.
 
+## 2026-09-02 — the deaf window, and a lock that outlived its stream
+
+He asked what the "deaf window" was. Worth writing down plainly, because the
+name misleads: **it is a SPEAKING timeout, not a listening one.** When a write to
+the speakers hangs, `_DEAF_OUTPUT_S = 60` stops JARVIS attempting to speak for a
+minute. The microphone and wake word are a separate stream and are untouched
+throughout — he can still be heard, and the message falls through to his phone
+because the attempt fails instantly instead of hanging.
+
+It exists because PortAudio's write is blocking: when the device vanishes
+mid-sentence the call never returns, and without the lockout every sentence pays
+~12 seconds rediscovering the same dead device with the turn stuck behind it.
+
+**The case it was mishandling is his NORMAL state.** His monitor blanks after
+sixty seconds and its speakers are on DisplayPort, so they are asleep most of the
+time he is not typing — and a sleeping endpoint refuses the first write and then
+WAKES when a new stream is opened against it. That is recoverable, and it was
+being treated as a dead device: one refusal bought sixty seconds of silence.
+
+So: **one retry, on a fresh stream, with a three-second budget, strictly once.**
+A sleeping device is now heard; a genuinely dead one still gives up and still
+goes quiet for the full minute.
+
+**AND THE RETRY DID NOT WORK AT FIRST, which found the real bug.** The stuck
+writer thread holds `self._wlock`, and that lock guarded ALL streams — so the
+fresh stream queued behind the dead one and timed out too. The invariant is
+per-stream ("do not close stream X while a thread is writing to stream X"), so a
+lock held forever by an abandoned writer must not gate every future stream on a
+device that may be perfectly healthy. `_release` now installs a fresh lock at the
+moment it abandons a stream; the orphan keeps the old one and is never released
+again.
+
+Care taken, because this file froze him for forty minutes once (a lock taken from
+the event loop thread) and killed the process another time (closing a stream out
+from under a blocked writer): nothing waits on a lock from the loop, the retry is
+bounded by `wait_for` and cannot loop, and both pre-existing audio gates pass
+unchanged.
+
+**A note on testing this file.** The first version of the new gate failed for two
+rounds and both were the STUB, not the code: the fake stream had no `abort()`,
+and `_ensure` was stubbed without assigning `self._stream`, so `abort()` found
+nothing to abort and `_release` never ran. If a fake device does not do what the
+real `_ensure` does, the test is measuring the fake.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

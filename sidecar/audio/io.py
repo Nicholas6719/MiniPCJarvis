@@ -294,35 +294,70 @@ class Speaker:
         # can fall back to the phone while the speakers are unavailable.
         if time.time() < self._deaf_output_until:
             raise SpeakerStalled("the audio output device is not accepting data")
-        stream = self._ensure(rate)
-
-        def _write() -> None:
-            with self._wlock:
-                if stream.closed:
-                    return
-                try:
-                    self.last_write_at = time.time()
-                    stream.write(chunk.reshape(-1, 1))
-                    self.last_write_at = time.time()
-                except Exception as e:
-                    log.debug("write after abort: %s", e)
-
         secs = len(chunk) / float(rate)
-        budget = max(5.0, secs * 4 + 3.0)   # generous: only a dead device exceeds this
-        try:
-            loop = asyncio.get_running_loop()
-            await asyncio.wait_for(
-                loop.run_in_executor(_writer_executor(), _write), timeout=budget)
-        except asyncio.TimeoutError:
-            _writer_lost()      # that thread is not coming back
-            self._deaf_output_until = time.time() + self._DEAF_OUTPUT_S
-            log.error("audio write hung (%.1fs of audio, %.0fs budget) — output device "
-                      "is not accepting data; aborting, and not trying again for %.0fs",
-                      secs, budget, self._DEAF_OUTPUT_S)
-            self.abort()          # unblocks the stuck writer thread, closes the stream
-            self._stream = None   # next chunk reopens against the CURRENT default device
-            self._rate = None
-            raise SpeakerStalled("the audio output device stopped responding")
+
+        async def _attempt(budget: float) -> bool:
+            """One bounded write. False means the device did not take it in time.
+
+            NOTHING here may wait on the writer lock from this thread: that is
+            the deadlock that froze him for forty minutes on 2026-08-30. The
+            executor call is bounded by wait_for and the stuck thread is
+            abandoned, never joined.
+            """
+            stream = self._ensure(rate)
+
+            def _write() -> None:
+                with self._wlock:
+                    if stream.closed:
+                        return
+                    try:
+                        self.last_write_at = time.time()
+                        stream.write(chunk.reshape(-1, 1))
+                        self.last_write_at = time.time()
+                    except Exception as e:
+                        log.debug("write after abort: %s", e)
+
+            try:
+                loop = asyncio.get_running_loop()
+                await asyncio.wait_for(
+                    loop.run_in_executor(_writer_executor(), _write), timeout=budget)
+                return True
+            except asyncio.TimeoutError:
+                _writer_lost()        # that thread is not coming back
+                self.abort()          # unblocks it, closes the stream
+                self._stream = None   # reopen against the CURRENT default device
+                self._rate = None
+                return False
+
+        # generous: only a dead device exceeds this
+        if await _attempt(max(5.0, secs * 4 + 3.0)):
+            return
+
+        # ONE RETRY, ON A FRESH STREAM, BEFORE GIVING UP FOR A MINUTE.
+        #
+        # His monitor blanks after sixty seconds and its speakers are on
+        # DisplayPort, so they are asleep most of the time he is not typing —
+        # and a sleeping endpoint refuses the first write and then wakes when a
+        # new stream is opened against it. The attempt above has just closed the
+        # old stream and cleared it, so this one opens a new one.
+        #
+        # On 2026-09-02 he asked for a part, heard nothing at all, and the
+        # sixty-second lockout covered his entire test. One retry turns the
+        # common case — speakers merely asleep — into a delay instead of silence.
+        #
+        # Deliberately a SHORT budget: if the device is really gone this costs
+        # three seconds, not another full one. And strictly once — a retry loop
+        # against a dead device is the hang this whole file exists to prevent.
+        log.info("audio: the output device refused a write; reopening once")
+        if await _attempt(3.0):
+            log.info("audio: the device took it on a fresh stream — it was asleep")
+            return
+
+        self._deaf_output_until = time.time() + self._DEAF_OUTPUT_S
+        log.error("audio write hung twice (%.1fs of audio) — output device is not "
+                  "accepting data even on a fresh stream; not trying again for %.0fs",
+                  secs, self._DEAF_OUTPUT_S)
+        raise SpeakerStalled("the audio output device stopped responding")
 
     # How long either of these will wait for the writer thread before deciding
     # it is never coming back. Short on purpose: this runs on the event loop.
@@ -370,6 +405,22 @@ class Speaker:
                             "the stream (%d orphaned so far) rather than blocking "
                             "the loop or closing it underneath the writer",
                             how, len(_ORPHANS))
+                # THE LOCK GOES WITH THE STREAM IT WAS GUARDING.
+                #
+                # That thread is stuck inside write() and is never coming back,
+                # so it holds this lock forever. Keeping it as THE lock means
+                # every future stream — on a device that may be perfectly
+                # healthy — queues behind a dead one and times out. The retry
+                # added on 2026-09-02 for sleeping DisplayPort speakers failed
+                # for exactly this reason: it opened a fresh stream and then
+                # blocked on the old stream's lock.
+                #
+                # The invariant is per-stream — do not close stream X while a
+                # thread is writing to stream X — so a new stream deserves a new
+                # lock. The orphan keeps the old one; it is never released again
+                # (orphans are kept alive deliberately, never closed).
+                import threading as _th
+                self._wlock = _th.Lock()
             if self._stream is stream:
                 self._stream = None
                 self._rate = None
