@@ -2962,6 +2962,48 @@ soak's "+19.4 MB/min leak" ended at 1668 MB, BELOW the 1780 MB it started from
 believing either the failure or this explanation. **Never run the suites while
 anything else is using this machine.**
 
+## 2026-09-03 — OPEN: hands_e2e's receipt, and what it is not
+
+Re-run on a quiet machine, `hands_e2e` fails the SAME way, so unlike soak and
+clarify this one is not contention. It is also not a broken capability, and the
+difference matters:
+
+    PASS  dictation transcribed what was said
+    PASS  and pasted it into the focused window
+    FAIL  Windows itself reports the dictated words are in the document
+    PASS  clicking 'Add New Tab' by name succeeds
+    PASS  and a new tab really appeared — the click did something
+
+Dictation works. Click-by-name works and has a visible consequence. What fails
+is the RECEIPT: the test reads the control tree back and looks for the dictated
+words in a control's name, on the premise that "Windows names the tab after
+what is IN it".
+
+That premise looks stale. Notepad on this machine is now the rich-text version
+— the tree carries Bold, Italic, Strikethrough, Table, Clear formatting,
+Writing tools, What's new and User avatar — and on a clean launch its tab reads
+`Untitled. Unmodified.` rather than anything about the content.
+
+Two things I got wrong on the way, both worth knowing:
+
+  * The six `PopupHost` entries in the failure detail are NOT the whole tree.
+    The check prints `tabs[:6]`, so they are only the first six names of a
+    longer list. A direct `list_controls` on Notepad returns 22 healthy
+    controls including the tab item. The popups are incidental: `_collect` in
+    `tools/uia.py` deliberately adds same-PID on-screen popup windows as extra
+    roots (capped `roots[:6]`) so that an open menu's "Save as" is reachable,
+    and XAML Notepad keeps several flyout hosts around.
+  * I tried to confirm the premise by typing into Notepad and watching the tab
+    name. `type_text` came back `{}` through `/debug/tool`, so nothing was
+    proven either way. NOT concluded — do not repeat the claim without
+    finishing this step.
+
+So: probably a stale test receipt caused by a Windows app update, not a JARVIS
+regression. Deliberately NOT "fixed" by weakening the assertion — the honest
+repair is to give it a receipt that is true of the current Notepad, and the
+sidecar has no tool that reads a control's VALUE (only its name), so that is a
+small new capability rather than a test edit. Left open on purpose.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
