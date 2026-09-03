@@ -687,7 +687,12 @@ async def from_photo(image_path: str, name: str = "") -> dict:
         return {"error": "I can't find that picture, sir", "tier": 3}
     base = safe_name(name or p.stem)
     stl = work_dir() / f"{base}.stl"
-    r = await _run_model3d("photo_to_mesh.py", [str(p), str(stl)], 900)
+    # OURS, NOT THE WORKER'S DEFAULT. 192 was chosen for speed when a render had
+    # to feel quick; measured here, 512 costs 141 s against 25 and gives seven
+    # times the triangles. His budget is quarter-hours, so the detail is free.
+    res = int(config.get("fabrication", "reconstruct_resolution", default=512))
+    r = await _run_model3d("photo_to_mesh.py",
+                           [str(p), str(stl), "--resolution", str(res)], 900)
     if r.get("error"):
         return {**r, "tier": 3}
     return {"tier": 3, "name": base, "stl": str(stl), "note": TIER_NOTE[3],

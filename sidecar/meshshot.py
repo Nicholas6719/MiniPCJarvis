@@ -33,10 +33,13 @@ import os
 
 log = logging.getLogger("jarvis.meshshot")
 
-# Enough triangles to be recognisable, few enough to draw in about a second.
-# A 600,000-triangle skull takes minutes through PIL and looks no different at
-# this size; the stride is even, so the silhouette is unchanged.
-MAX_DRAW_TRIS = 40_000
+# THE STRIDE WAS THE PROBLEM, not the count. Dropping nine triangles in ten does
+# not thin a surface evenly — it puts HOLES in it, and a 399,118-triangle duck
+# came out as a speckled shape he would reasonably have judged a bad model.
+# Measured on this machine: 40k draws in 0.7 s, 400k in 4.5 s. On a completion
+# path that already took minutes, four seconds buys a picture that looks like
+# the thing.
+MAX_DRAW_TRIS = 400_000
 
 WIDTH = 460
 BG = (10, 14, 20)
