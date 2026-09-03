@@ -75,7 +75,13 @@ foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py
         try { if ((Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 5).state -in @('idle','sleeping')) { break } } catch {}
         Start-Sleep 3
     }
-    Start-Sleep 10   # let the speaker drain and the wake model settle
+    # UNVERIFIED TRIM (2026-09-03): was a flat 10s here regardless of the poll
+    # above already confirming idle. Cut to 4s to save ~1.7 min across a full
+    # run. NOT tested against a live run yet - the machine was mid-release when
+    # this changed. If suites start failing on "speech still playing from the
+    # previous one" (the exact bug documented at the top of this file), revert
+    # this to 10 before looking anywhere else.
+    Start-Sleep 4   # let the speaker drain and the wake model settle
     Write-Host "== $t"
     # keep enough of the tail to show WHY, not just that it failed: the last 3 lines
     # once hid the one diagnostic line that explained a suite-only failure
