@@ -233,6 +233,36 @@ def _teachable(text: str) -> bool:
     return True
 
 
+def _screen_context() -> dict:
+    """What is on screen, for the brain to break ambiguous sentences with.
+
+    "Make it bigger" is the interface with an empty stage and the model with
+    something on it; "turn it around" is the volume if he is listening to music
+    and the model if he is looking at one. The words are genuinely ambiguous and
+    only this can settle them.
+
+    Never raises and never blocks: a failure here has to mean "no context",
+    which is precisely how the brain behaved before it could see anything.
+    """
+    ctx = {"stage": False, "project": False, "render": False}
+    try:
+        from tools.holo_tools import current
+        ctx["stage"] = bool((current() or {}).get("name"))
+    except Exception:
+        log.debug("no stage context", exc_info=True)
+    try:
+        from tools.workspace_tools import active
+        ctx["project"] = bool(active())
+    except Exception:
+        log.debug("no project context", exc_info=True)
+    try:
+        from render_queue import queue
+        ctx["render"] = bool((queue.status() or {}).get("busy"))
+    except Exception:
+        log.debug("no render context", exc_info=True)
+    return ctx
+
+
 class Orchestrator:
     def __init__(self) -> None:
         self.sm = StateMachine()
@@ -1176,7 +1206,7 @@ class Orchestrator:
                 if steps:
                     await self._routine_turn(text, steps, t_start)
                     return
-                reflex = await brain.decide(text)
+                reflex = await brain.decide(text, context=_screen_context())
             except Exception:
                 log.exception("brain decide failed - falling back to the LLM")
         if reflex and (not reflex[0].llm_after

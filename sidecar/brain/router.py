@@ -218,6 +218,54 @@ def _norm(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+# ---------------------------------------------------------------- context
+# WHAT IS ON SCREEN DECIDES WHAT THE WORDS MEAN. These are the skills whose
+# sentences are ambiguous without it - see this module's history for the
+# measured scores that put each one here.
+_STAGE_SKILLS = frozenset({
+    "holo_move", "holo_edit", "holo_check", "holo_hide", "holo_revert",
+    "holo_again", "holo_show",
+})
+_PROJECT_SKILLS = frozenset({"project_note", "project_recall"})
+_RENDER_SKILLS = frozenset({"render_stop", "render_how"})
+
+# Sized from the real gaps: the widest one a bonus has to close is 0.122
+# ("make it bigger": ui@1.00 against holo_move@0.88). Big enough to win a
+# genuine tie, small enough that it cannot invent a match out of nothing.
+CONTEXT_BONUS = 0.15
+CONTEXT_PENALTY = 0.20
+
+
+# A NAMED FEATURE IS AN EDIT. Enough to win a near tie against the view, and
+# no more - "eyes" appearing in a sentence should tip a close call, not drag
+# holo_edit in from nowhere.
+EDIT_TARGET_BONUS = 0.10
+
+
+def _lexical_delta(skill: str, text: str) -> float:
+    """Word-level evidence, as opposed to the state of the screen."""
+    if skill != "holo_edit":
+        return 0.0
+    try:
+        from brain.skills import _EDIT_MEASURE, _EDIT_TARGET
+    except Exception:
+        return 0.0
+    return EDIT_TARGET_BONUS if (_EDIT_TARGET.search(text)
+                                 or _EDIT_MEASURE.search(text)) else 0.0
+
+
+def _skill_context_delta(skill: str, ctx: dict) -> float:
+    """How much the current state argues for or against this skill."""
+    d = 0.0
+    if skill in _STAGE_SKILLS:
+        d += CONTEXT_BONUS if ctx.get("stage") else -CONTEXT_PENALTY
+    if skill in _RENDER_SKILLS:
+        d += CONTEXT_BONUS if ctx.get("render") else -CONTEXT_PENALTY
+    if skill in _PROJECT_SKILLS:
+        d += CONTEXT_BONUS if ctx.get("project") else -CONTEXT_PENALTY
+    return d
+
+
 class Brain:
     def __init__(self) -> None:
         self.db = open_db()
@@ -234,6 +282,13 @@ class Brain:
         self._cmd_steps: list[list[dict]] = []
         self._cmd_matrix: np.ndarray | None = None
         self.last_match: dict | None = None   # what the last decide() matched (for corrections)
+        # The near-miss from the last decide(): the right idea, scored
+        # too low to act on alone, kept so the turn can ASK.
+        self.unsure: dict | None = None
+        # Context deltas are the same for every example until the state
+        # changes, so they are computed once per state rather than per turn.
+        self._ctx_key: tuple | None = None
+        self._ctx_vec = None
 
     # ---------- embeddings ----------
 
@@ -353,16 +408,42 @@ class Brain:
 
     # ---------- classification ----------
 
+    def _context_vector(self, ctx: dict):
+        """Per-example score deltas for the current state, cached by state."""
+        key = tuple(sorted(ctx.items()))
+        if (self._ctx_key == key and self._ctx_vec is not None
+                and len(self._ctx_vec) == len(self._skills)):
+            return self._ctx_vec
+        per_skill = {sk: _skill_context_delta(sk, ctx) for sk in set(self._skills)}
+        vec = np.array([per_skill[sk] for sk in self._skills], dtype=np.float32)
+        self._ctx_key, self._ctx_vec = key, vec
+        return vec
+
     async def classify(self, text: str, k: int = 5,
-                       exclude: set | None = None) -> tuple[str | None, float]:
+                       exclude: set | None = None,
+                       context: dict | None = None) -> tuple[str | None, float]:
         """Return (skill, confidence).
 
         Top-match wins; confidence is the top similarity, penalized when the best
-        example of a *different* skill is nearly as close (ambiguity)."""
+        example of a *different* skill is nearly as close (ambiguity).
+
+        `context` is what is on screen — a model on the stage, a project open, a
+        render running. It NUDGES rather than filters: nothing is ever removed
+        for want of context, so he can still ask about a project with none open
+        and be told so."""
         if self._matrix is None or not text.strip():
             return None, 0.0
         q = (await asyncio.to_thread(self._embed, [_norm(text)]))[0]
         sims = self._matrix @ q
+        if context:
+            sims = sims + self._context_vector(context)
+        # Cheap enough to do per turn: one regex over one sentence, and only
+        # the examples of a single skill move.
+        lex = _lexical_delta("holo_edit", text)
+        if lex:
+            sims = sims + np.array(
+                [lex if sk == "holo_edit" else 0.0 for sk in self._skills],
+                dtype=np.float32)
         order = np.argsort(-sims)
         if exclude:
             # decide() asks again without a skill whose slot extractor refused the
@@ -381,11 +462,22 @@ class Brain:
                 break
         margin = top - rival
         confidence = top if margin >= 0.06 else top - (0.06 - margin) * 3.0
+        # THE RUNNER-UP IS THE QUESTION. When two readings are this close the
+        # honest answer is "which of these did you mean", and that cannot be
+        # asked unless the second one is kept. It used to be computed, used to
+        # shrink the confidence, and thrown away — so a near-tie became silence.
+        rival_skill = None
+        for i in order[1:k * 4]:
+            if self._skills[i] != best:
+                rival_skill = self._skills[i]
+                break
         src = self.db.execute("SELECT source FROM brain_examples WHERE text=?",
                               (self._texts[order[0]],)).fetchone()
         self.last_match = {"text": self._texts[order[0]], "skill": best,
                            "source": src[0] if src else "seed", "query": text,
-                           "confidence": round(max(0.0, confidence), 3)}
+                           "confidence": round(max(0.0, confidence), 3),
+                           "rival": rival_skill, "margin": round(margin, 3),
+                           "top": round(top, 3)}
         self._last = (best, round(max(0.0, confidence), 3))
         if best == "general":
             return None, round(max(0.0, confidence), 3)
@@ -514,19 +606,43 @@ class Brain:
 
     # ---------- decision ----------
 
-    async def decide(self, text: str) -> tuple[Skill, dict, float] | None:
+    async def decide(self, text: str,
+                     context: dict | None = None) -> tuple[Skill, dict, float] | None:
         """If confident and the slots extract cleanly, return (skill, args, confidence).
 
         A skill whose extractor REFUSES the phrasing steps aside and the next-best
         skill gets a turn (bounded, so a chain of refusals still ends at the LLM).
         Guards exist to say "this is not mine" — before this, saying so threw the
-        whole utterance to the model even when the right skill was ranked second."""
+        whole utterance to the model even when the right skill was ranked second.
+
+        `context` is what is on screen. It reaches classify, which is where the
+        genuinely ambiguous sentences get settled: "make it bigger" is the
+        interface with an empty stage and the model with something on it."""
         threshold = float(config.get("brain", "threshold", default=0.82))
         refused: set = set()
         light = _light(text)
+        self.unsure = None
         for _ in range(3):
-            name, conf = await self.classify(text, exclude=refused or None)
+            name, conf = await self.classify(text, exclude=refused or None,
+                                             context=context)
             if not name or conf < threshold:
+                # NEARLY KNEW IS NOT THE SAME AS NO IDEA, and returning None for
+                # both is what makes him look stupid: "make me a duck" ranked
+                # holo_make top and was binned for scoring 0.68. Keep the
+                # near-misses so the turn above can ask instead of guessing.
+                m = self.last_match or {}
+                top = float(m.get("top") or 0.0)
+                if name and top >= float(config.get(
+                        "brain", "ask_threshold", default=0.66)):
+                    sk = SKILL_BY_NAME.get(name)
+                    slots = sk.slots(light) if sk else None
+                    if sk is not None and slots is not None:
+                        self.unsure = {
+                            "skill": name, "rival": m.get("rival"),
+                            "confidence": conf, "top": top,
+                            "margin": m.get("margin"),
+                            "args": {**sk.fixed_args, **slots},
+                        }
                 return None
             skill = SKILL_BY_NAME[name]
             slots = skill.slots(light)

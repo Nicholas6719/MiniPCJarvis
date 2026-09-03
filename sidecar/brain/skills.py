@@ -1279,9 +1279,38 @@ def say_render_how(slots: dict, res: dict) -> str:
     return res.get("spoken") or "Nothing's rendering, sir."
 
 
-def slots_holo_edit(t: str) -> dict:
-    """The change, in his own words — the model doing the edit reads English."""
-    return {"change": (t or "").strip()}
+# WHAT AN EDIT HAS TO NAME. A part, a feature, or a measurement - anything
+# that says which bit of the object is meant.
+_EDIT_TARGET = re.compile(
+    r"\b(?:hole|holes|wall|walls|base|corner|corners|edge|edges|rim|lip|slot|"
+    r"eye|eyes|lens|lenses|line|lines|mask|helmet|gauntlet|boot|plate|"
+    r"thickness|diameter|radius|width|height|depth|"
+    r"fillet|chamfer|part|model)\b", re.I)
+_EDIT_MEASURE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:mm|millimet\w*|cm|centimet\w*|inch|inches|\")", re.I)
+# Shape words cannot describe a view: a view has no height or thickness of its
+# own, so these are edits even when he says "it".
+_EDIT_SHAPE = re.compile(
+    r"\b(?:taller|shorter|thicker|thinner|wider|narrower|deeper|shallower|"
+    r"rounder|flatter|chamfer\w*|fillet\w*)\b", re.I)
+
+
+def slots_holo_edit(t: str) -> dict | None:
+    """The change, in his own words — the model doing the edit reads English.
+
+    None when the sentence names nothing to edit, which makes this skill STEP
+    ASIDE rather than act. "Make it bigger" said at a screen means the screen:
+    it is a view change, it costs nothing and looking away undoes it. An edit
+    rewrites the source and re-renders a part he may be about to print, so when
+    the two readings are this close the harmless one has to win.
+    """
+    s = (t or "").strip()
+    if not s:
+        return None
+    if (_EDIT_TARGET.search(s) or _EDIT_MEASURE.search(s)
+            or _EDIT_SHAPE.search(s)):
+        return {"change": s}
+    return None
 
 
 def say_holo_edit(slots: dict, res: dict) -> str:
@@ -2049,6 +2078,13 @@ SKILLS: list[Skill] = [
         "change the hole to 5 millimetres", "make the base wider",
         "give it a chamfer"],
         slots=slots_holo_edit, speak=say_holo_edit),
+    # "Return home" was reaching holo_revert@0.87 - undoing an EDIT rather than
+    # resetting the VIEW. His own words, so they belong here.
+    Skill("holo_home", "holo_control", [
+        "return home", "go home", "back to the start",
+        "back to how it was at the beginning", "original position",
+        "default view", "straighten it back up"],
+        fixed_args={"action": "reset"}, speak=None),
     Skill("holo_revert", "revert_part", [
         "put the old version back", "undo that change", "revert the part",
         "go back to the previous version", "undo the edit",
