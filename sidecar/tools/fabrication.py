@@ -321,6 +321,22 @@ async def generate_part(description: str, name: str = "",
         "subtract 2*r from the cube first to keep the finished size correct. "
         "For a chamfer, subtract a rotated cube with difference(), or hull() two "
         "stacked shapes. "
+        # 4. It wraps the whole object in ONE module. "Iron man's arc reactor"
+        #    came back as a single `module arc_reactor()` holding the rim, the
+        #    coils and the core — correct, printable, and impossible to work
+        #    with, because there is no rim in it to point at. He wants to zoom
+        #    in on the helmet and read the helmet's dimensions, and nothing
+        #    downstream can invent a component the source does not contain.
+        "If the object has PARTS a person would name separately — a rim, a core, "
+        "a housing, a lid, a handle, a base — give each one its own module and "
+        "call them one after another at the top level, so each can be shown and "
+        "measured on its own: `module rim() {...} module core() {...} rim(); "
+        "translate([0,0,2]) core();`. Name them for what they ARE. "
+        # ...and the counter-instruction, which matters as much. A cube wrapped
+        # in a module and announced as an assembly is a worse answer than a cube.
+        "But do NOT invent divisions: if it is one simple shape — a cube, a "
+        "washer, a plate — write it directly with no modules at all. Only split "
+        "it where the pieces are really distinct. "
         f"Part: {desc}")
     async def write_source(extra: str = "") -> tuple[str, str]:
         """One call to the model. Returns (source, why_not)."""
@@ -395,8 +411,66 @@ async def generate_part(description: str, name: str = "",
     else:
         return {"error": f"OpenSCAD could not build that: {last[:200]}",
                 "scad": str(scad)}
-    return {"scad": str(scad), "stl": str(stl), "from": "model",
-            "size_kb": round(stl.stat().st_size / 1024, 1), "source": code}
+    r = {"scad": str(scad), "stl": str(stl), "from": "model",
+         "size_kb": round(stl.stat().st_size / 1024, 1), "source": code}
+    return await _split_into_parts(exe, scad, stl, code, r)
+
+
+async def _split_into_parts(exe, scad, stl, code: str, r: dict) -> dict:
+    """Render each named component on its own, when the source has any.
+
+    A part is a module CALLED AT THE TOP LEVEL of the file — see `assembly` for
+    why that is parsed rather than asked for. Fewer than two means there is
+    nothing to take apart, and the part behaves exactly as it always has.
+    """
+    import assembly
+
+    parts = assembly.parts_in(code)
+    if len(parts) < 2:
+        return r
+    if len(parts) > assembly.MAX_PARTS:
+        log.info("%d parts is more than anyone can work with by voice; "
+                 "keeping it whole", len(parts))
+        return r
+
+    dispatched = assembly.with_dispatcher(code, parts)
+    scad.write_text(dispatched, encoding="utf-8")
+    # Re-render the WHOLE thing from the file that is now on disk, so what he
+    # sees and what `holo_edit` reads back cannot drift apart.
+    rc, out, err = await _run(
+        [exe, "-D", f'{assembly.PART_VAR}="all"', "-o", str(stl), str(scad)],
+        GEN_TIMEOUT_S)
+    if rc != 0 or not stl.exists():
+        # The dispatcher did not build, so put the original back rather than
+        # leaving him with a source that does not compile. He still gets his
+        # part — just without pieces.
+        log.warning("the part dispatcher would not build for %s: %s",
+                    stl.name, (err or out or "").strip()[:200])
+        scad.write_text(code, encoding="utf-8")
+        await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
+        return r
+
+    made = []
+    for p in parts:
+        out_stl = stl.with_suffix("")
+        out_stl = out_stl.with_name(f"{out_stl.name}.{p['name']}.stl")
+        rc, out, err = await _run(
+            [exe, "-D", f'{assembly.PART_VAR}="{p["name"]}"',
+             "-o", str(out_stl), str(scad)], GEN_TIMEOUT_S)
+        if rc != 0 or not out_stl.exists():
+            log.warning("part %s did not build: %s", p["name"],
+                        (err or out or "").strip()[:160])
+            continue
+        made.append({"name": p["name"], "stl": str(out_stl)})
+
+    # One part that built is not an assembly; it is the whole thing with a
+    # label, and calling it an assembly would put a "1 of 1" in front of him.
+    if len(made) < 2:
+        return r
+    assembly.write_manifest(str(stl), made)
+    r["parts"] = [m["name"] for m in made]
+    r["part_count"] = len(made)
+    return r
 
 
 async def edit_part(change: str, name: str = "") -> dict:

@@ -405,3 +405,89 @@ def to_payload(path: str, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
             cent.append([round(float(v), 3) for v in mids[lab == i].mean(axis=0)])
         d["body_centres"] = cent
     return d
+
+
+def assembly_payload(parts, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
+    """The wire format for a model made of named parts.
+
+    `parts` is [(name, path), ...] in assembly order. Returns the same shape
+    `to_payload` returns, plus `parts`: each name with its own triangle count,
+    its own size in millimetres and where its middle sits relative to the
+    model's — so "how big is the gauntlet" is answerable without re-reading
+    anything, and the exploded view pushes along real seams.
+
+    A part that will not load is REPORTED, not skipped. Half an assembly drawn
+    as though it were whole is the same lie as a quarter of a helmet called a
+    helmet.
+    """
+    loaded, missing = [], []
+    for name, path in parts:
+        try:
+            loaded.append((str(name), load(str(path))))
+        except Exception as e:
+            missing.append({"name": str(name), "why": str(e)[:120]})
+            log.warning("assembly part %s would not load: %s", name, e)
+    if not loaded:
+        raise BadMesh("none of that model's parts would load")
+
+    tris = np.concatenate([t for _, t in loaded], axis=0)
+    lab = np.concatenate([np.full(len(t), i, dtype=np.int32)
+                          for i, (_, t) in enumerate(loaded)])
+
+    flat = tris.reshape(-1, 3)
+    lo, hi = flat.min(axis=0), flat.max(axis=0)
+    centre = (lo + hi) / 2.0
+
+    # Per part, before any thinning, so the numbers he is told are the part's
+    # real numbers rather than the numbers of whatever survived the stride.
+    meta = []
+    for i, (name, t) in enumerate(loaded):
+        f = t.reshape(-1, 3)
+        plo, phi = f.min(axis=0), f.max(axis=0)
+        meta.append({
+            "name": name,
+            "triangles": int(len(t)),
+            "size_mm": [round(float(v), 2) for v in (phi - plo)],
+            "centre": [round(float(v), 3) for v in ((plo + phi) / 2.0 - centre)],
+        })
+
+    # Edges per part: the seam where two parts meet is a line he needs to see.
+    edge_chunks = [feature_edges(t, angle_deg,
+                                 max_edges=max(2000, 60_000 // len(loaded)))
+                   for _, t in loaded]
+    edges = (np.concatenate([e for e in edge_chunks if len(e)], axis=0)
+             if any(len(e) for e in edge_chunks) else np.empty((0, 2, 3), np.float32))
+
+    d = {
+        "path": str(parts[0][1]) if parts else "",
+        "triangles": int(len(tris)),
+        "edges": int(len(edges)),
+        "size_mm": [round(float(v), 2) for v in (hi - lo)],
+        "min_mm": [round(float(v), 2) for v in lo],
+        "max_mm": [round(float(v), 2) for v in hi],
+        "centre_mm": [round(float(v), 2) for v in centre],
+        "assembly": True,
+        "parts": meta,
+        "part_count": len(meta),
+        "body_count": len(meta),
+        "simplified": False,
+    }
+    if missing:
+        d["parts_missing"] = missing
+
+    # The same ceiling the single-mesh path uses, and the labels are thinned
+    # WITH the triangles so a part never loses its own geometry to another's.
+    if len(tris) > MAX_PROJECT_TRIS:
+        step = int(np.ceil(len(tris) / MAX_PROJECT_TRIS))
+        tris, lab = tris[::step], lab[::step]
+        d["simplified"] = True
+        d["projected_triangles"] = int(len(tris))
+
+    d["positions_b64"] = _f32((tris.reshape(-1, 3) - centre).ravel())
+    d["edge_positions_b64"] = (_f32((edges.reshape(-1, 3) - centre).ravel())
+                               if len(edges) else "")
+    # The fields the stage already knows how to explode by — now meaning parts
+    # rather than whatever happened to be disconnected.
+    d["bodies"] = lab.astype(int).tolist()
+    d["body_centres"] = [m["centre"] for m in meta]
+    return d

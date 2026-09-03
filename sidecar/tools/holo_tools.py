@@ -141,10 +141,29 @@ async def show_hologram(path: str = "", name: str = "") -> dict:
     await bus.emit("hologram", action="show", name=target.stem,
                    triangles=info["triangles"], size_mm=info["size_mm"])
     w, h, d = info["size_mm"]
-    return {"name": target.stem, "triangles": info["triangles"],
-            "size_mm": info["size_mm"],
-            "spoken_size": f"{round(w)} by {round(h)} by {round(d)} millimetres",
-            "on_stage": True}
+    out = {"name": target.stem, "triangles": info["triangles"],
+           "size_mm": info["size_mm"],
+           "spoken_size": f"{round(w)} by {round(h)} by {round(d)} millimetres",
+           "on_stage": True}
+    # WHAT IT IS MADE OF, if it is made of anything. This is the answer to "zoom
+    # in on the helmet to see the helmet specs" — the names have to come back
+    # with the model or there is nothing for him to name.
+    import assembly
+    named = assembly.read_manifest(str(target))
+    if len(named) >= 2:
+        out["parts"] = [n for n, _ in named]
+        out["part_count"] = len(named)
+        out["spoken_parts"] = _spoken_list([n.replace("_", " ") for n, _ in named])
+    return out
+
+
+def _spoken_list(names: list) -> str:
+    """"a, b and c" — said, not printed."""
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 async def inspect_part(path: str = "", name: str = "") -> dict:

@@ -1018,6 +1018,14 @@ async def holo_geometry(x_jarvis_token: str | None = Header(None)):
         # inline. Harmless while the only models were 150-triangle brackets;
         # half a second of dead loop the moment a reconstructed mesh went up, in
         # the middle of whatever else he was saying.
+        # A MODEL WITH NAMED PARTS GOES OVER AS NAMED PARTS. The manifest is
+        # written beside the STL by whatever produced it — the generator
+        # splitting its modules, or a fetch that pulled a whole part set — so
+        # the stage does not need to know or care which one it was.
+        import assembly
+        named = assembly.read_manifest(cur["path"])
+        if len(named) >= 2:
+            return await asyncio.to_thread(meshio.assembly_payload, named)
         return await asyncio.to_thread(meshio.to_payload, cur["path"])
     except meshio.BadMesh as e:
         return {"error": str(e)}
