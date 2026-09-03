@@ -1942,6 +1942,56 @@ SKILLS: list[Skill] = [
         "make it again from a different picture", "try another reference",
         "give me a different take on that", "another design please"],
         speak=say_holo_again),
+    # THE WORKSPACE. His folder, his projects, and the notes that outlive the
+    # conversation they were taken in.
+    # NOT "open a new project": `_CANON` turns that into the same shape as
+    # "open THING", and it took every "open X" in the suite at 1.00 — spotify,
+    # notepad, the calculator. Every seed here names a PROJECT explicitly, so
+    # canonicalisation has something distinctive left to hold on to.
+    # NOT ONE OF THESE MAY BEGIN "start a" OR "open a". `_CANON` rewrites that
+    # whole shape to `open APP`, which makes "start a new project" BYTE
+    # IDENTICAL to "open spotify" — and it duly took every launch sentence in
+    # the suite at 1.00 confidence: spotify, notepad, the calculator. Nine
+    # regressions from one verb.
+    #
+    # Every seed below was checked through `_norm` and survives it unchanged.
+    Skill("project_start", "start_project", [
+        "we're starting a new project",
+        "this is a new project",
+        "this should be its own project",
+        "make a new project folder for this",
+        "set this up as a new project",
+        "create a new project folder for the arc reactor",
+        "i want a new project for the spider-man suit",
+        "file this under a new project"],
+        speak=None),
+    # "PULL UP X" IS THE SENTENCE THAT HAS TO WORK, and it sits next to "show me
+    # X", which must keep reaching the images panel. What separates them is that
+    # a project is being NAMED, so these are all shaped around that.
+    Skill("project_recall", "recall_project", [
+        "pull up the spider-man suit",
+        "pull up the arc reactor project",
+        "where were we on the spider-man suit",
+        "where were we on the arc reactor",
+        "where did we get to on the suit",
+        "what were we doing on the mark two",
+        "bring back the arc reactor project",
+        "what do we have on the spider-man suit",
+        "remind me where we got to on that project"],
+        speak=None),
+    # ...and NOT "note that down" or "remember that for this build", which
+    # canonicalise onto "remember that FACT" and took the `remember` skill's own
+    # sentences. Both of these say "project" out loud.
+    Skill("project_note", "project_note", [
+        "write that down for the project",
+        "add that to the project notes",
+        "put that in the project log"],
+        speak=None),
+    Skill("project_list", "list_workspace", [
+        "what projects do we have",
+        "list my projects",
+        "what's in the workspace"],
+        speak=None),
     Skill("render_stop", "cancel_render", [
         "stop the render", "cancel the model", "stop making that",
         "cancel that render", "don't bother making it",

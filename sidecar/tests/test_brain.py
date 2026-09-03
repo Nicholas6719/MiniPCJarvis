@@ -221,6 +221,17 @@ CASES = [
     # NOTHING at 0.802 and "render me iron man mark 3" was nearest `images`. A
     # proper noun with a number on the end looks like neither a format request
     # nor a generic object.
+    # THE WORKSPACE. "Pull up the Spider-Man suit" is a project; "show me
+    # Spider-Man" is the images panel. Both directions are gated, because the
+    # first seeds I wrote for this took every "open X" in this file at 1.00 —
+    # `_CANON` turns "start a new project" into `open APP`, which is byte
+    # identical to "open spotify".
+    ("we're starting a new project", "project_start"),
+    ("this should be its own project", "project_start"),
+    ("pull up the spider-man suit", "project_recall"),
+    ("where were we on the arc reactor", "project_recall"),
+    ("what projects do we have", "project_list"),
+    ("write that down for the project", "project_note"),
     ("render iron man mark 3", "holo_make"),
     ("render me iron man mark 3", "holo_make"),
     ("create iron man mark 3 in 3d", "holo_make"),

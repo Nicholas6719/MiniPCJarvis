@@ -57,12 +57,14 @@ def main() -> int:
                        file_tools, handoff, health, holo_tools, input_tools, location,
                        market_tools, memory_tools, news_tools, projects, render_tools, model_tools,
                        task_tools, uia, vision_analyze, vision_tools, weather,
+                       workspace_tools,
                        web_tools, windows_tools)
     mods = (builtin, memory_tools, windows_tools, web_tools, task_tools,
             vision_tools, browser_tools, handoff, file_tools, weather,
             camera_tools, market_tools, news_tools, input_tools, uia,
             projects, location, health, vision_analyze, biometric, fabrication,
-            holo_tools, render_tools, model_tools)
+            holo_tools, render_tools, model_tools,
+            workspace_tools)
     for m in mods:
         m.register_all()
 

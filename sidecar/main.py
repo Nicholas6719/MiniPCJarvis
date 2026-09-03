@@ -60,9 +60,11 @@ async def lifespan(app: FastAPI):
     # wiring is proved by the gated build BEFORE any of them has behaviour, so an
     # integration mistake surfaces on its own rather than buried under a feature.
     from tools import (biometric, fabrication, health, holo_tools, location,
-                       model_tools, projects, render_tools, vision_analyze)
+                       model_tools, projects, render_tools, vision_analyze,
+                       workspace_tools)
     holo_tools.register_all()     # the holographic stage
     render_tools.register_all()   # ...and the queue that fills it
+    workspace_tools.register_all()   # the folder he gave JARVIS to work in
     model_tools.register_all()    # find a model somebody already made
     projects.register_all()       # phase 1
     location.register_all()       # phase 2 — rides the existing Telegram poller

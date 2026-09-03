@@ -118,6 +118,21 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                 await show_hologram(path=r["stl"])
             except Exception:
                 log.debug("could not project the finished model", exc_info=True)
+            # ...and into the project, if one is open. Filing by hand is filing
+            # that does not happen: he opens a project, asks for six things, and
+            # a week later the folder has notes and no models.
+            try:
+                from tools.workspace_tools import active, file_in_project
+                if active():
+                    got = await file_in_project(stl_path=r["stl"])
+                    if got.get("count"):
+                        r["filed_under"] = got.get("project")
+                        r["filed_count"] = got["count"]
+            except Exception:
+                # A workspace that is full, read-only or missing must not turn a
+                # finished model into a failed one.
+                log.warning("could not file the model into the project",
+                            exc_info=True)
         return r
 
     sub = queue.submit(t, label, job)

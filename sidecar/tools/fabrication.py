@@ -629,6 +629,23 @@ async def edit_part(change: str, name: str = "") -> dict:
     if not out_d.get("parts"):
         assembly.clear_manifest(str(stl))
 
+    # WHAT CHANGED, WRITTEN DOWN. "Made the outer ring 90 mm" is the half of
+    # this he cannot reconstruct a week later, and it is gone the moment the
+    # conversation ends unless it is recorded as it happens.
+    try:
+        from tools.workspace_tools import active, file_in_project, project_note
+        if active():
+            was = out_d.get("was_size_mm")
+            now = out_d.get("size_mm")
+            said = f"{base}: {want}"
+            if was and now and was != now:
+                said += (f" (was {was[0]:.0f}x{was[1]:.0f}x{was[2]:.0f}, "
+                         f"now {now[0]:.0f}x{now[1]:.0f}x{now[2]:.0f} mm)")
+            await project_note(text=said, heading="")
+            await file_in_project(stl_path=str(stl))
+    except Exception:
+        log.warning("could not record the edit in the project", exc_info=True)
+
     await _reproject(base)
     return out_d
 
