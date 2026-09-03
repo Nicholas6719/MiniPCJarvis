@@ -70,23 +70,36 @@ def _shade(tris, base):
     return [(int(base[0] * v), int(base[1] * v), int(base[2] * v)) for v in lam]
 
 
-def _draw(tris, labels, colours, ax, ay, az, width):
-    """One orthographic view, drawn back to front."""
+def _draw(tris, labels, colours, ax, ay, az, width, sc=None):
+    """One orthographic view, drawn back to front.
+
+    `sc` is millimetres-to-pixels and is passed IN, shared by all three views.
+    Left to scale itself, each view filled its own panel — so a 40 x 28 x 30
+    model came out with the front view at 10.9 px/mm and the side at 14.5, and
+    the same sphere was visibly a different size in two views standing next to
+    each other. That is exactly the comparison a front/side/plan sheet exists
+    to support, and it is the sheet he judges a physical print from.
+    """
     import numpy as np
     from PIL import Image, ImageDraw
 
     pts = tris[:, :, [ax, ay]]
     flat = pts.reshape(-1, 2)
     lo, hi = flat.min(axis=0), flat.max(axis=0)
-    span = float(max(hi[0] - lo[0], hi[1] - lo[1])) or 1.0
-    sc = (width - 24) / span
+    if sc is None:
+        span = float(max(hi[0] - lo[0], hi[1] - lo[1])) or 1.0
+        sc = (width - 24) / span
     h = int((hi[1] - lo[1]) * sc) + 24
+    # Centred rather than left-aligned: now that the scale is shared, a view of
+    # a narrower face genuinely IS narrower, and pinning it left would read as
+    # the model being off to one side.
+    x0 = (width - (hi[0] - lo[0]) * sc) / 2.0
 
     img = Image.new("RGB", (width, max(h, 48)), BG)
     d = ImageDraw.Draw(img)
     order = np.argsort(tris[:, :, az].mean(axis=1))
     for i in order:
-        xy = [((p[0] - lo[0]) * sc + 12, h - ((p[1] - lo[1]) * sc + 12))
+        xy = [((p[0] - lo[0]) * sc + x0, h - ((p[1] - lo[1]) * sc + 12))
               for p in pts[i]]
         d.polygon(xy, fill=colours[labels[i]][i])
     return img
@@ -135,14 +148,20 @@ def shot(stl_path: str, out_path: str = "", width: int = WIDTH) -> str:
 
     flat = tris.reshape(-1, 3)
     dims = flat.max(axis=0) - flat.min(axis=0)
-    imgs = [_draw(tris, labels, colours, ax, ay, az, width)
+    # ONE SCALE FOR ALL THREE VIEWS, taken from the largest dimension of the
+    # model rather than of each face. This is what makes the sheet readable as
+    # a drawing instead of three unrelated pictures.
+    sc = (width - 24) / (float(max(dims)) or 1.0)
+    imgs = [_draw(tris, labels, colours, ax, ay, az, width, sc)
             for _, ax, ay, az in VIEWS]
 
     top = 26
     h = max(i.height for i in imgs)
     sheet = Image.new("RGB", (width * len(imgs), h + top), BG)
     for k, im in enumerate(imgs):
-        sheet.paste(im, (width * k, top))
+        # Vertically centred, so a shorter view sits level with the others
+        # rather than hanging from the caption.
+        sheet.paste(im, (width * k, top + (h - im.height) // 2))
     label = os.path.basename(stl_path)
     label = label[:-4] if label.lower().endswith((".stl", ".obj")) else label
     caption = (f"{label}   {dims[0]:.0f} x {dims[1]:.0f} x {dims[2]:.0f} mm"

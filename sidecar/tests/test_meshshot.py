@@ -128,6 +128,59 @@ def main() -> int:
           "if not sent_photo:" in dl,
           "a failed upload must not swallow the announcement")
 
+    print("\n-- one scale across front, side and plan --")
+    # Left to scale itself, each view filled its own panel: a 40 x 28 x 30
+    # model came out at 10.9 px/mm in front and 14.5 in side, and the same
+    # sphere was visibly a different size in two views side by side. A
+    # front/side/plan sheet exists to be compared across, and it is the sheet
+    # he judges a physical print from.
+    import numpy as np
+    from PIL import Image
+    import meshio, meshshot
+
+    # A 60 x 30 x 15 box: every view has a different aspect, so an unshared
+    # scale shows up as one edge measuring two lengths.
+    X, Y, Z = 60.0, 30.0, 15.0
+    c = np.array([
+        [[0,0,0],[X,0,0],[X,Y,0]], [[0,0,0],[X,Y,0],[0,Y,0]],
+        [[0,0,Z],[X,0,Z],[X,Y,Z]], [[0,0,Z],[X,Y,Z],[0,Y,Z]],
+        [[0,0,0],[X,0,0],[X,0,Z]], [[0,0,0],[X,0,Z],[0,0,Z]],
+        [[0,Y,0],[X,Y,0],[X,Y,Z]], [[0,Y,0],[X,Y,Z],[0,Y,Z]],
+        [[0,0,0],[0,Y,0],[0,Y,Z]], [[0,0,0],[0,Y,Z],[0,0,Z]],
+        [[X,0,0],[X,Y,0],[X,Y,Z]], [[X,0,0],[X,Y,Z],[X,0,Z]],
+    ], dtype=np.float32)
+    d = tempfile.mkdtemp()
+    stl = os.path.join(d, "box.stl")
+    meshio.write_stl(c, stl)
+    png = meshshot.shot(stl, os.path.join(d, "box.png"))
+
+    im = np.array(Image.open(png).convert("RGB")).astype(int)
+    W = im.shape[1] // 3
+    bg = np.array(Image.new("RGB", (1, 1), meshshot.BG)).astype(int)[0, 0]
+    drawn = []
+    for k in range(3):
+        p = im[26:, k * W:(k + 1) * W]
+        ys, xs = np.where(np.abs(p - bg).sum(axis=2) > 24)
+        drawn.append((xs.max() - xs.min() + 1, ys.max() - ys.min() + 1)
+                     if len(xs) else (0, 0))
+
+    # front is X by Z, side is Y by Z, plan is X by Y.
+    want = ((X, Z), (Y, Z), (X, Y))
+    scales = []
+    for (w, h), (mw, mh) in zip(drawn, want):
+        scales += [w / mw, h / mh]
+    lo, hi = min(scales), max(scales)
+    check("every view is drawn at the same millimetres-per-pixel",
+          hi - lo < 0.15,
+          f"{[round(s, 2) for s in scales]} px/mm across front/side/plan")
+    check("...and the box really is twice as wide as it is deep",
+          abs(drawn[2][0] / max(drawn[2][1], 1) - X / Y) < 0.1,
+          f"plan drawn {drawn[2]}")
+    check("...and nothing is clipped at a panel edge",
+          all(w <= W - 20 for w, _ in drawn),
+          f"widths {[w for w, _ in drawn]} in panels of {W}")
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 
