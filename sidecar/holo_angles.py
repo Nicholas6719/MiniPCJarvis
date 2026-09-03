@@ -183,20 +183,6 @@ def parse_action(text: str) -> str | None:
     layers of the cut" contains both; the more specific intent is tested first.
     """
     t = (text or "").lower()
-    # GETTING RID OF IT, AND CHECKED FIRST. The sentences people use for this
-    # are full of words the other rules claim: "close the hologram" ends in
-    # "hologram" and became a colour switch, and "turn it off" contains "turn"
-    # so it SPUN THE MODEL. There was also no hide action here at all, though
-    # the stage has always been able to do it - which is why "remove render"
-    # matched nothing. `close` excludes "close up"/"closer", which mean zoom.
-    if (re.search(r"\b(?:hide|dismiss|remove)\b", t)
-            or re.search(r"\bclose\b(?!\s*-?\s*up\b)", t)
-            or re.search(r"\b(?:get rid of|take (?:it|that) away|put (?:it|that) away|"
-                         r"clear the (?:stage|screen)|off (?:my|the) screen|"
-                         r"turn (?:it |that |this )?off|"
-                         r"done with (?:it|that|this)|"
-                         r"stop showing (?:it|that|this))\b", t)):
-        return "hide"
     # BACK TO WHERE IT STARTED. "return home" and "go home" are his own words
     # for this and matched nothing.
     if re.search(r"\b(?:reset|start over|back to normal|as it was|the way it was|"
@@ -216,6 +202,26 @@ def parse_action(text: str) -> str | None:
     if re.search(r"\b(?:layers?|toolpath|tool path|how it'?s printed|"
                  r"the print path|slicing preview)\b", t):
         return "layers"
+    # GETTING RID OF IT. The sentences for this are full of words the other
+    # rules claim: "close the hologram" ends in "hologram" and became a colour
+    # switch; "turn it off" contains "turn" and SPUN THE MODEL. There was also
+    # no hide action here at all, which is why "remove render" - his own
+    # example - matched nothing, though the stage has always been able to close.
+    #
+    # BELOW THE LAYER RULES, NOT ABOVE THEM. Checked first, this claimed "hide
+    # the layers", which means stop drawing the sliced toolpath and not close
+    # the hologram - `solid` already handles that sentence and never got the
+    # chance. Specificity first, as the docstring above says.
+    #
+    # `close` excludes "close up" and "closer", which mean zoom.
+    if (re.search(r"\b(?:hide|dismiss|remove)\b", t)
+            or re.search(r"\bclose\b(?!\s*-?\s*up\b)", t)
+            or re.search(r"\b(?:get rid of|take (?:it|that) away|put (?:it|that) away|"
+                         r"clear the (?:stage|screen)|off (?:my|the) screen|"
+                         r"turn (?:it |that |this )?off|"
+                         r"done with (?:it|that|this)|"
+                         r"stop showing (?:it|that|this))\b", t)):
+        return "hide"
     if re.search(r"\b(?:explode|exploded|apart|separate(?: the parts| it)?|"
                  r"pull it apart|blow it apart|show me the (?:pieces|parts)|"
                  r"the (?:pieces|parts) on their own)\b", t):

@@ -25,8 +25,16 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tempfile
-os.environ.setdefault("JARVIS_DB",
-                      os.path.join(tempfile.mkdtemp(), "intent.db"))
+
+# A BRAIN OF ITS OWN, and not the one the build shares. This suite calls
+# brain.learn - proving that confirming a phrase teaches it - and a
+# learned example is written to disk and stays there. Pointed at the
+# gate database (build_sidecar.cmd sets JARVIS_DB for the whole run) the
+# first pass taught "make me a duck" and every pass after it found the
+# phrase already known, fired instead of asking, and failed. Forced
+# rather than setdefault, because ignoring what the build set is the
+# entire point.
+os.environ["JARVIS_DB"] = os.path.join(tempfile.mkdtemp(), "intent.db")
 
 fails: list[str] = []
 
@@ -108,6 +116,19 @@ def main() -> int:
     check("'close the hologram' closes it rather than switching colour",
           holo_angles.parse_action("close the hologram") == "hide",
           str(holo_angles.parse_action("close the hologram")))
+
+    print("\n-- and the layer words are not the hide word --")
+    # Adding `hide` and checking it FIRST claimed "hide the layers", which
+    # means stop drawing the sliced toolpath - not close the hologram. The
+    # build gate caught it. Specificity first: layer rules sit above hide.
+    for said, want in (("hide the layers", "solid"),
+                       ("stop the layers", "solid"),
+                       ("back to the model", "solid"),
+                       ("show me the layers", "layers"),
+                       ("layer 50", "layer")):
+        check(f"{said!r} is {want}, not hide",
+              holo_angles.parse_action(said) == want,
+              str(holo_angles.parse_action(said)))
 
     print("\n-- and 'too small' is a complaint, not a direction --")
     # Reading it as "smaller" gives him the exact opposite of what he asked for,
