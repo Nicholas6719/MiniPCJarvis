@@ -39,7 +39,25 @@ log = logging.getLogger("jarvis.meshshot")
 # Measured on this machine: 40k draws in 0.7 s, 400k in 4.5 s. On a completion
 # path that already took minutes, four seconds buys a picture that looks like
 # the thing.
-MAX_DRAW_TRIS = 400_000
+#
+# 400,000 was still not high enough, and raising the cap only moved the
+# speckle rather than removing it: a 766,322-triangle sphere — well inside what
+# tier 5 downloads — strided by two and came back visibly pinholed in all three
+# views. There is no count at which a stride stops perforating, so the honest
+# thing is to put the limit where nothing real can reach it and let the guard
+# be a guard. Measured on this machine, unstrided:
+#
+#      766,322 tris    9.0 s
+#    1,213,682 tris   13.9 s
+#    1,996,002 tris   22.7 s        ~11.4 us/triangle
+#
+# on the completion path of a render that already took minutes. The real
+# ceiling is upstream anyway: meshio.MAX_BYTES is 120 MB and a binary STL is
+# 50 bytes a triangle, so nothing that loads at all can exceed 2,399,998. This
+# sits just above that, which makes the stride effectively unreachable — and
+# that is the point. It says so if it ever does fire, because a cap that
+# quietly degrades the picture reads afterwards as a bad model.
+MAX_DRAW_TRIS = 2_400_000
 
 WIDTH = 460
 BG = (10, 14, 20)
@@ -140,7 +158,12 @@ def shot(stl_path: str, out_path: str = "", width: int = WIDTH) -> str:
     if len(tris) == 0:
         raise meshio.BadMesh("there is nothing in that model to draw")
     if len(tris) > MAX_DRAW_TRIS:
+        # NOT a quality trade — a stride perforates, and this only exists so a
+        # pathological file cannot draw forever. It says so, because a cap that
+        # quietly degrades the picture reads afterwards as a bad model.
         step = int(np.ceil(len(tris) / MAX_DRAW_TRIS))
+        log.warning("%d triangles is past the draw guard; taking every %d and "
+                    "the picture WILL be speckled", len(tris), step)
         tris, labels = tris[::step], labels[::step]
 
     palette = [PART_HUES[i % len(PART_HUES)] for i in range(max(1, len(names)))]

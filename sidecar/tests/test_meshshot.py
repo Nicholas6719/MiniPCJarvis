@@ -108,10 +108,19 @@ def main() -> int:
     check("the ceiling is high enough not to perforate a surface",
           meshshot.MAX_DRAW_TRIS >= 200_000,
           "a stride does not thin a surface evenly")
+    # This gate used to assert <= 1,000,000 on the grounds that "a million
+    # triangles through PIL is minutes". Measured: a million is 13.9 s. The
+    # reasoning was wrong, so the bound was wrong with it.
     check("...but there is still a ceiling",
-          meshshot.MAX_DRAW_TRIS <= 1_000_000,
-          "a million triangles through PIL is minutes, and this sits on a "
-          "completion path")
+          meshshot.MAX_DRAW_TRIS <= 2_500_000,
+          "1.99M draws in 22.7 s at ~11.4 us/triangle; and nothing above "
+          "2,399,998 can load at all, since meshio.MAX_BYTES is 120 MB and a "
+          "binary STL is 50 bytes a triangle")
+    import meshio as _mio
+    check("...set where a loadable model cannot reach it",
+          meshshot.MAX_DRAW_TRIS >= (_mio.MAX_BYTES - 84) // 50,
+          "a stride perforates at every count, so the guard should never fire "
+          "on a file that loads")
 
 
     print("\n-- the completion message carries it --")
@@ -179,6 +188,66 @@ def main() -> int:
     check("...and nothing is clipped at a panel edge",
           all(w <= W - 20 for w, _ in drawn),
           f"widths {[w for w, _ in drawn]} in panels of {W}")
+
+
+    print("\n-- a dense model comes back solid, not speckled --")
+    # Raising the cap only MOVED the speckle. At 400,000 a 766,322-triangle
+    # sphere — well inside what tier 5 downloads — strided by two and came
+    # back pinholed in all three views. There is no count at which a stride
+    # stops perforating, so the guard now sits where nothing real reaches it.
+    import numpy as np
+    from PIL import Image
+    import meshio, meshshot
+
+    n = 620
+    u = np.linspace(0, np.pi, n)
+    v = np.linspace(0, 2 * np.pi, n)
+    U, V = np.meshgrid(u, v)
+    Pt = np.stack([np.sin(U) * np.cos(V), np.sin(U) * np.sin(V),
+                   np.cos(U)], axis=-1) * 20.0
+    t = []
+    for a in range(n - 1):
+        for b in range(n - 1):
+            t.append([Pt[a, b], Pt[a + 1, b], Pt[a, b + 1]])
+            t.append([Pt[a + 1, b], Pt[a + 1, b + 1], Pt[a, b + 1]])
+    dense = np.array(t, dtype=np.float32)
+    check("the test model really is past the old 400k cap",
+          len(dense) > 400_000, f"{len(dense)} triangles")
+    check("...and inside the guard that replaced it",
+          len(dense) <= meshshot.MAX_DRAW_TRIS,
+          f"guard is {meshshot.MAX_DRAW_TRIS}")
+
+    dd = tempfile.mkdtemp()
+    ds = os.path.join(dd, "dense.stl")
+    meshio.write_stl(dense, ds)
+    dp = meshshot.shot(ds, os.path.join(dd, "dense.png"))
+
+    im = np.array(Image.open(dp).convert("RGB")).astype(int)
+    bg = np.array(Image.new("RGB", (1, 1), meshshot.BG)).astype(int)[0, 0]
+    W = im.shape[1] // 3
+    worst = 0.0
+    for k in range(3):
+        p = im[26:, k * W:(k + 1) * W]
+        solid = np.abs(p - bg).sum(axis=2) > 24
+        ys, xs = np.where(solid)
+        if not len(xs):
+            continue
+        # Well inside the silhouette, where a sphere has no business showing
+        # the background through it.
+        cy, cx = (ys.min() + ys.max()) // 2, (xs.min() + xs.max()) // 2
+        r = int(min(ys.max() - ys.min(), xs.max() - xs.min()) * 0.30)
+        core = solid[cy - r:cy + r, cx - r:cx + r]
+        holes = float((~core).mean()) if core.size else 1.0
+        worst = max(worst, holes)
+    # CALIBRATED, not guessed. Measured on this same sphere: unstrided gives
+    # exactly 0.000% background inside the core in all three views, and
+    # strided gives 0.391% in the side view. The first threshold tried here
+    # was 0.5%, which sat just ABOVE the bug and passed with it — the same
+    # can-never-fail shape as the other gates caught this session.
+    check("no background shows through the middle of a solid sphere",
+          worst < 0.0005,
+          f"{worst * 100:.3f}% of the core was background; unstrided "
+          f"measures 0.000% and a stride by two measures 0.391%")
 
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
