@@ -1389,7 +1389,15 @@ def say_fingers(slots: dict, res: dict) -> str:
 def say_learn_face(slots: dict, res: dict) -> str:
     if res.get("error"):
         return f"I couldn't learn your face, sir — {res['error']}. Face the camera and try again."
-    return "Done, sir. I'll know you from now on."
+    # SAY WHICH HAPPENED. Told "I'll know you from now on" for the second time,
+    # he could not tell the difference between it working and it doing nothing,
+    # and asked whether the feature worked at all. The sample count is the
+    # evidence: it is a number that could only come from actually looking.
+    n = res.get("samples") or 0
+    if res.get("replaced"):
+        return (f"Done, sir — I've replaced what I had with {n} fresh "
+                f"readings of your face.")
+    return f"Done, sir. {n} readings taken; I'll know you from now on."
 
 
 def say_forget_face(slots: dict, res: dict) -> str:

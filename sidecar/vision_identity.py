@@ -218,15 +218,22 @@ class Identity:
     # ---------- enrollment ----------
 
     def enroll_from(self, samples: list) -> dict:
-        """Store embeddings gathered by the enrollment tool. Replaces the profile."""
+        """Store embeddings gathered by the enrollment tool. Replaces the profile.
+
+        Reports whether it REPLACED one, because "I'll know you from now on"
+        said to a face it already knew is indistinguishable from having done
+        nothing — which is exactly what he asked about.
+        """
         good = [s for s in samples if s is not None]
         if len(good) < 3:
             return {"error": "I couldn't get a clear enough view of your face"}
+        had = len(self._load_profile() or [])
         stored = [s.flatten().tolist() for s in good]
         if not self._save_profile(stored):
             return {"error": "the profile could not be saved"}
         self._who = "him"                       # he is the one in front of it
-        return {"ok": True, "samples": len(stored)}
+        return {"ok": True, "samples": len(stored),
+                "replaced": bool(had), "previous_samples": had}
 
 
 identity = Identity()
