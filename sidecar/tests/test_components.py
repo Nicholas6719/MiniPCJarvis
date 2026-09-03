@@ -30,6 +30,17 @@ os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "comp.db"))
 fails = []
 
 
+# ITS OWN TIMINGS, NOT THE MACHINE'S. render_estimates calibrates from real
+# runs in %APPDATA%/JARVIS/render_times.json, so a day of small test renders
+# pulls the medians down and a sentence quoting "about a minute" starts saying
+# "about 30 seconds". The estimate is right; the assertion was resting on state
+# this suite does not own.
+import pathlib as _pl
+import tempfile as _tf
+
+import render_estimates as _est
+_est._PATH = _pl.Path(_tf.mkdtemp()) / "render_times.json"
+
 def check(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'}  {name}  {detail if not cond else ''}")
     if not cond:
