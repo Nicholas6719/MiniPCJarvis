@@ -161,6 +161,41 @@ async def main() -> int:
     check("archiving something that is not there is refused, not invented",
           bool(workspace.archive("nothing at all").get("error")))
 
+    print("\n-- the Windows device names --")
+    # `mkdir NUL` reports success and then is_dir is False: the name resolves
+    # to the null device, not a folder. A project called that would look
+    # opened and silently swallow every model filed into it.
+    probe = tempfile.mkdtemp()
+    was = workspace.DEFAULT_ROOT
+    try:
+        workspace.DEFAULT_ROOT = probe
+        for said in ("CON", "NUL", "com1", "aux", "LPT9", "nul.suit", "PRN"):
+            workspace.create(said, about="device name")
+            check(f"a project he calls {said!r} is REALLY on disk",
+                  os.path.isdir(workspace.path_for(said)),
+                  "mkdir NUL reports success and then is_dir is False, "
+                  "because the name is the null device and not a folder")
+    finally:
+        workspace.DEFAULT_ROOT = was
+    for said in ("Nulls", "CONtainer", "Auxiliary", "Mark 2", "Comet"):
+        check(f"{said!r} is left alone",
+              workspace.folder_name(said) == said, workspace.folder_name(said))
+
+    d = tempfile.mkdtemp()
+    old_root = workspace.DEFAULT_ROOT
+    try:
+        workspace.DEFAULT_ROOT = d
+        workspace.create("NUL", about="device name")
+        p = workspace.path_for("NUL")
+        check("a project he calls NUL is a REAL folder on disk",
+              os.path.isdir(p),
+              "mkdir succeeding is not the same as the folder existing")
+        check("...and a note written into it survives",
+              not (workspace.note("NUL", "a line") or {}).get("error"))
+    finally:
+        workspace.DEFAULT_ROOT = old_root
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

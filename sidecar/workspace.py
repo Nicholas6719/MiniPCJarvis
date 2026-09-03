@@ -69,6 +69,12 @@ def root() -> str:
     return p
 
 
+_RESERVED = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{i}" for i in range(1, 10)]
+    + [f"LPT{i}" for i in range(1, 10)])
+
+
 def folder_name(name: str) -> str:
     """A folder he would recognise, from something he said.
 
@@ -79,7 +85,18 @@ def folder_name(name: str) -> str:
     """
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", (name or "").strip())
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
-    return cleaned[:80] or "Untitled project"
+    cleaned = cleaned[:80]
+
+    # THE DEVICE NAMES. Windows still reserves these, and NUL is the one that
+    # matters: `mkdir NUL` reports success and then `is_dir` is False, because
+    # the name resolves to the null device rather than to a folder. A project
+    # called that would look opened and then swallow every model filed into it
+    # without an error anywhere — which is the exact failure the open-project
+    # label on the stage exists to prevent, arriving by a different door.
+    # Checked against the stem, since CON.suit is reserved too.
+    if cleaned and cleaned.split(".")[0].upper() in _RESERVED:
+        cleaned += " project"
+    return cleaned or "Untitled project"
 
 
 def path_for(name: str) -> str:
