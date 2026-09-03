@@ -1731,6 +1731,72 @@ relief rather than to a minutes-long reconstruction he did not ask for; tier 3 i
 reserved for when he says "scan" or "mesh". Dark-is-thick is gated explicitly:
 backwards, it prints a photographic negative.
 
+## His database was corrupt, and the repair refused every time (2026-09-03)
+
+Found at 02:00 while checking something unrelated. `%APPDATA%\JARVIS\jarvis.db`
+fails `PRAGMA quick_check` **on an isolated copy with no WAL in play** —
+`transcript`, `tasks`, `turn_stats`, `night_meta` and `audit_log` all raise
+"database disk image is malformed". `facts`, `memories` and `brain_examples`
+still read. Ten `.corrupt-*.bak` files sit next to it going back to 31 August,
+so this has been recurring.
+
+`check_and_repair` runs on every boot from `config.py:372`, so the salvage had
+been trying the whole time. It refused every time, for three reasons, and every
+one of them was a number that did not mean what it said.
+
+**`tasks:1500` was not 1500 rows.** A table with no usable rowid goes down the
+LIMIT/OFFSET path, which did `lost += 500` on each failed read attempt. Three
+attempts, 1500 "lost" — from a table whose `sqlite_sequence` high-water mark is
+229. `turn_stats` reported 6000 the same way and `night_meta` 10000 (twenty
+attempts, the miss cap). A failed read is now one failed read, counted as
+`unreadable`, and never as a row: a rowid that will not read cannot be told
+apart from one deleted years ago.
+
+**`INSERT OR IGNORE` counted rows it threw away as saved.** `brain_examples`
+reported "kept 38" for a table that ended up holding 17. It is plain `INSERT`
+now, and what landed is counted where it landed.
+
+**Then deduplication looked like data loss.** Those 21 were the same 17 examples
+handed back through different rowids by a damaged b-tree. `IntegrityError` is a
+duplicate and is fine; any other `DatabaseError` is a row we read and dropped,
+and only that still refuses the swap.
+
+**And the refusal itself was the wrong shape** — the same "a guard is not an
+outcome" failure as the rest of this project. Refusing to swap because a
+precious table is unreadable preserves a database in which that table is exactly
+as unreadable, and loses everything else with it. An unreadable precious table is
+now reported loudly (`precious_unreadable`) and does not block the repair. A row
+we READ and then dropped still does, because that one is our own bug.
+
+Measured on a copy of his real database: swapped, clean, `quick_check ok`, every
+readable row carried over — 3 facts, 3 memories, 17 learned examples, 270
+transcript rows — and **reported-kept now equals what is actually in the file for
+every table**, which it did not before.
+
+**What he has lost, and should be told:** `tasks` is genuinely unreadable, so any
+scheduled reminders in it are already gone — they stopped working when the
+corruption happened, not when the repair ran. `turn_stats` and `night_meta` too.
+The repair keeps the damaged file as `jarvis.db.corrupt-<stamp>.bak`.
+
+**Still open, and this is the important part: nothing here explains WHY it keeps
+corrupting.** Ten backups since 31 August is a pattern, not an accident, and the
+repair only cleans up after it. Ruled out on 2026-09-03:
+
+- `synchronous=NORMAL` in WAL (`config.py:381`) — SQLite documents this as
+  unable to corrupt the file; it can only lose the last commits on power loss.
+- **OneDrive** — it IS running, but `%APPDATA%\Roaming` sits outside
+  `C:\Users\nicho\OneDrive` and Known Folder Move does not cover AppData. A
+  file-sync product writing under a live SQLite file is the classic cause of
+  exactly this shape of damage, so it was the first thing checked.
+- **The disks** — both SSDs report Healthy/OK, and there are no `disk`, `Ntfs`
+  or `volmgr` errors in the System log for the past seven days.
+
+Left to look at: the hotswap's `taskkill /F` landing mid-checkpoint (WAL is
+designed to survive that, so it would be a real finding); two sidecars briefly
+alive at once after a hotswap; Windows Defender holding the file. And worth
+adding a `quick_check` to the nightly job, so the next occurrence is dated
+precisely instead of being discovered by accident, which is how this one was.
+
 ## "There is no limitation to this" — the render always happens (2026-09-03)
 
 His correction, after being told Iron Man Mark III lived behind an account:

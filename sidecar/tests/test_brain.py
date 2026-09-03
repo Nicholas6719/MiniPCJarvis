@@ -215,6 +215,17 @@ CASES = [
     # "3d RENDER of X" had no reflex at all — image/model/print were stripped and
     # render was not, so his phrasing fell to the model.
     ("create a 3d render of iron man's arc reactor", "holo_make"),
+    # "RENDER <NAME>" — his own words, twice, as the thing that must work.
+    # Measured on the installed build before these seeds existed: "render a
+    # duck" reached holo_make at 0.842 while "render iron man mark 3" reached
+    # NOTHING at 0.802 and "render me iron man mark 3" was nearest `images`. A
+    # proper noun with a number on the end looks like neither a format request
+    # nor a generic object.
+    ("render iron man mark 3", "holo_make"),
+    ("render me iron man mark 3", "holo_make"),
+    ("create iron man mark 3 in 3d", "holo_make"),
+    ("render a duck", "holo_make"),
+    ("render me a mandalorian helmet", "holo_make"),
     ("make me a 3d rendering of the batman logo", "holo_make"),
     # ANOTHER DESIGN of the same thing. The design comes from the reference
     # PICTURE, so this is the next usable picture, not a new search — and

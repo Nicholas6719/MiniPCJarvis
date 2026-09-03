@@ -1895,7 +1895,22 @@ SKILLS: list[Skill] = [
         "make me a tube 30 mm long",
         "print me a plate 40 by 40 by 3 millimetres",
         "i need a disc 25 mm across",
-        "make me a block 20 by 20 by 10 millimetres"],
+        "make me a block 20 by 20 by 10 millimetres",
+        # "RENDER <NAME>" — the plainest way he asks, and it reached no skill.
+        # "render a duck" scored 0.842 and worked; "render iron man mark 3"
+        # scored 0.802 and fell through, because a proper noun with a number on
+        # the end looks like neither a format request nor a generic object.
+        # These are the shape of the sentence, across several kinds of subject,
+        # so it is the PHRASING that carries rather than any one name.
+        "render iron man mark 3",
+        "render me iron man mark 3",
+        "create iron man mark 3 in 3d",
+        "render the arc reactor",
+        "render me a mandalorian helmet",
+        "render a chess knight",
+        "render me a nintendo 2ds xl",
+        "render a t rex skull",
+        "render me a baseball in 3d"],
         slots=slots_holo_make, speak=say_holo_make),
     # ANOTHER DESIGN OF THE SAME THING. The design comes from the reference
     # PICTURE — a web image search — so "find another one" means the next usable
