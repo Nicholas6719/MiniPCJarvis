@@ -123,7 +123,11 @@ _CANON = [
     # ...and "in my browser" is excluded for the same reason: it is the one
     # phrase that decides WHERE the answer appears, and folding it into the
     # search canon deleted it before anything could act on it.
-    (r"(?!.*\b(?:youtube|you\s?tube|video|videos|clip|trailer|gameplay|netflix|spotify)\b)(?!.*\bin\s+(?:my\s+|the\s+)?(?:browser|brave|chrome|firefox|edge)\b)\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
+    # ...and a NAMED SITE is excluded for that same reason. "On Amazon" is
+    # not decoration on a search, it is the instruction: it says where to
+    # look, and folding it in made "find me the best mini pc for ai work on
+    # amazon" byte-identical to "find me reviews of the logitech c920".
+    (r"(?!.*\b(?:youtube|you\s?tube|video|videos|clip|trailer|gameplay|netflix|spotify)\b)(?!.*\b(?:amazon|reddit|ebay|wikipedia|github|stack\s?overflow|newegg|etsy|thingiverse|printables)\b)(?!.*\bin\s+(?:my\s+|the\s+)?(?:browser|brave|chrome|firefox|edge)\b)\b(?:search(?:\s+the\s+web|\s+online|\s+google)?\s+for|search(?:\s+the\s+web)?|look\s+up|google|find(?:\s+me)?(?:\s+online)?|web\s+search(?:\s+for)?|research)\s+.+", "search the web for THING"),
     (r"\b(?:volume|turn it|turn the volume|set the volume|set volume|make the volume|change the volume|lower the volume|raise the volume|put the volume)\b.*\d+.*", "set the volume to N percent"),
     (r"\b(?:open|go to|pull up|take me to|load|bring up|open up)\b.*\b[a-z0-9-]+\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b.*", "open the website SITE"),
     # The launch verbs are ordinary English words, so the exclusions matter: "run along"

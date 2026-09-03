@@ -1032,6 +1032,70 @@ _SERVICE_FOR = re.compile(
     r"\b(?:youtube|netflix|spotify)\b(?:\s+(?:for|search))?\s+(.+)$", re.I)
 
 
+# WHERE HE NAMED. Turned into that site's own search, because "on Amazon" is an
+# instruction about where to look and was being answered with a web search
+# ABOUT Amazon. The pattern is the site's real search URL, so the page that
+# comes back is the one he would have got himself.
+_SITE_SEARCH = {
+    "amazon":     "https://www.amazon.com/s?k={q}",
+    "reddit":     "https://www.reddit.com/search/?q={q}",
+    "youtube":    "https://www.youtube.com/results?search_query={q}",
+    "ebay":       "https://www.ebay.com/sch/i.html?_nkw={q}",
+    "wikipedia":  "https://en.wikipedia.org/w/index.php?search={q}",
+    "github":     "https://github.com/search?q={q}",
+    "stackoverflow": "https://stackoverflow.com/search?q={q}",
+    "newegg":     "https://www.newegg.com/p/pl?d={q}",
+    "etsy":       "https://www.etsy.com/search?q={q}",
+    "thingiverse": "https://www.thingiverse.com/search?q={q}",
+    "printables": "https://www.printables.com/search/models?q={q}",
+}
+# Sites whose front page IS the answer when he names no subject: "look at
+# reddit and tell me what's trending" wants r/all, not a search for "trending".
+_SITE_FRONT = {
+    "reddit":    "https://www.reddit.com/r/all/",
+    "youtube":   "https://www.youtube.com/feed/trending",
+    "amazon":    "https://www.amazon.com/gp/bestsellers",
+    "github":    "https://github.com/trending",
+}
+_ON_SITE = re.compile(
+    r"\b(?:on|from|at|in|over on|check|look at|browse|go to|search)\s+"
+    r"(?:the\s+)?(" + "|".join(_SITE_SEARCH) + r")\b", re.I)
+# What he wants, with the site words and the asking words taken out.
+_SITE_STRIP = re.compile(
+    r"\b(?:please|sir|can you|could you|would you|for me|i want|i need|"
+    r"find me|find|show me|show|get me|get|look up|look for|look at|search|"
+    r"browse|go to|check|tell me|tell|what'?s|whats|what|the best|best|top|"
+    r"some|any|me|us|and|for|is|are|about|right now|now|"
+    r"on|from|at|in|over|the|a|an)\b", re.I)
+
+# What is HAPPENING there, rather than a thing to look for. "Tell me what's
+# trending on reddit" is r/all; searching reddit for the word "trending" is
+# a real search for the wrong thing.
+_SITE_HAPPENING = re.compile(
+    r"^(?:trending|popular|hot|new|happening|going on|news|headlines|"
+    r"bestsellers?|best sellers?|top posts?)$", re.I)
+
+
+def slots_site_browse(t: str) -> dict | None:
+    """Which site, and what to look for on it. None when no site is named."""
+    m = _ON_SITE.search(t or "")
+    if not m:
+        return None
+    site = m.group(1).lower()
+    # Everything except the site name and the asking words is the subject.
+    rest = (t or "").lower().replace(site, " ")
+    rest = _SITE_STRIP.sub(" ", rest)
+    rest = re.sub(r"[^a-z0-9 .+-]", " ", rest)
+    subject = " ".join(w for w in rest.split() if len(w) > 1).strip()
+    if len(subject) < 3 or _SITE_HAPPENING.match(subject):
+        # No subject, or he asked what is HAPPENING there rather than for a
+        # thing. "Look at reddit and tell me what's trending" is r/all.
+        front = _SITE_FRONT.get(site)
+        return {"url": front} if front else None
+    import urllib.parse
+    return {"url": _SITE_SEARCH[site].format(q=urllib.parse.quote(subject))}
+
+
 def slots_video(t: str) -> dict | None:
     """What he wants to watch, and where.
 
@@ -2302,6 +2366,21 @@ SKILLS: list[Skill] = [
         "take me to github.com", "open up netflix.com", "go to the website espn.com", "load bbc.com",
         "bring up espn.com", "open twitch.tv for me"],
         slots=slots_site, speak=say_site, speak_first=True),
+    # NAMING A PLACE IS AN INSTRUCTION ABOUT WHERE. Ahead of `search` and of
+    # `news`, both of which were claiming these: "look at reddit and tell me
+    # what's trending" was answered "did you mean news, sir?" twice.
+    Skill("site_browse", "browser_open", [
+        "find me the best mini pc for ai work on amazon",
+        "look at reddit and tell me what's trending",
+        "check amazon for a usb microphone",
+        "search amazon for a 3d printer",
+        "what's trending on reddit",
+        "look for a mandalorian helmet on thingiverse",
+        "find that on github",
+        "look it up on wikipedia",
+        "check ebay for a graphics card",
+        "browse printables for an arc reactor"],
+        slots=slots_site_browse, llm_after=True),
     Skill("read_site", "browser_open", [
         "open example.com and tell me what the page says", "read me what's on wikipedia.org",
         "go to bbc.com and summarize the headlines", "what does example.com say",
