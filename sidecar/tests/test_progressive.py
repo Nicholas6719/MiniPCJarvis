@@ -122,6 +122,37 @@ def main() -> int:
           picked.name if picked else "nothing")
     rung.unlink(missing_ok=True)
 
+    print("\nA ROUGH CARVE ACTUALLY REACHES THE STAGE")
+    # `show_stage` catches everything, so that a failed preview can never cost
+    # him the render — which also means one that never worked at all would look
+    # exactly like one that did. So it is driven here on a real mesh, and the
+    # three things the HUD depends on are checked: the event says `rough`, and
+    # `_current` points at the rung, because that is the path `/holo/geometry`
+    # re-parses when the panel asks for the mesh.
+    import trimesh
+    from events import bus
+    rung = fab / "duck.stage96.stl"
+    trimesh.creation.icosphere(subdivisions=2, radius=20.0).export(str(rung))
+    seen: list[dict] = []
+    real_emit = bus.emit
+
+    async def spy(kind, **kw):
+        seen.append({"kind": kind, **kw})
+        return await real_emit(kind, **kw)
+
+    bus.emit = spy                                       # type: ignore
+    asyncio.run(holo_tools.show_stage(str(rung), "duck", 96))
+    bus.emit = real_emit                                 # type: ignore
+    cur = holo_tools.current()
+    check("the event says it is rough",
+          any(e.get("kind") == "hologram" and e.get("rough") == 96 for e in seen),
+          str(seen)[:140])
+    check("the stage points at the rung",
+          Path(cur.get("path", "")).name == rung.name, cur.get("path"))
+    check("with real triangles on it", int(cur.get("triangles") or 0) > 100,
+          cur.get("triangles"))
+    rung.unlink(missing_ok=True)
+
     print("\nthe ladder is the measured one")
     check("96 then 192, and nothing more expensive",
           create3d.PROGRESSIVE_STAGES == "96,192", create3d.PROGRESSIVE_STAGES)
