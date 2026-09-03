@@ -65,6 +65,8 @@ type Geometry = {
   // sidecar leaves them out otherwise rather than sending kilobytes to say
   // "there is nothing to explode".
   body_count?: number;
+  has_colour?: boolean;
+  parts?: { name: string; colour?: string }[];
   bodies?: number[];
   body_centres?: number[][];
   error?: string;
@@ -205,6 +207,29 @@ export function HoloStage() {
     let bodyDir: number[][] = [];
     let explode = 0;
     let explodeTarget = 0;
+    let hasColour = false;
+    let trueColour = false;
+    let shellMat: MeshBasicMaterial | null = null;
+
+    /** "#rrggbb" -> linear 0..1, or null. */
+    const hexToRgb = (hex?: string): [number, number, number] | null => {
+      if (!hex || hex.length !== 7 || hex[0] !== "#") return null;
+      const n = Number.parseInt(hex.slice(1), 16);
+      if (Number.isNaN(n)) return null;
+      return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+    };
+
+    /** Swap between the hologram and the thing itself. */
+    const paintTrue = (on: boolean) => {
+      trueColour = on;
+      if (!shellMat) return;
+      shellMat.vertexColors = on;
+      // The hologram is a ghost on purpose; the object is not. Opacity moves
+      // with the mode or the colours are there and invisible.
+      shellMat.opacity = on ? 0.92 : 0.075;
+      shellMat.depthWrite = on;
+      shellMat.needsUpdate = true;
+    };
     let faceGeom: BufferGeometry | null = null;
     let lastSize: number[] | null = null;   // millimetres, for the cut plane
     // The sliced toolpath, and how far up it he is looking. Layers are laid into
@@ -257,6 +282,22 @@ export function HoloStage() {
       bodyDir = geo.body_centres ?? [];
       explode = 0;
       explodeTarget = 0;
+      // THE REAL COLOURS, when the model has any. One attribute over the buffer
+      // that is already there — the per-vertex part label exists for the
+      // exploded view — so this costs no extra draw call and nothing at all on
+      // a model with no colours in it.
+      hasColour = false;
+      if (geo.has_colour && vertBody && geo.parts?.length) {
+        const rgb = geo.parts.map((p) =>
+          hexToRgb(p.colour) ?? [1, 1, 1] as [number, number, number]);
+        const col = new Float32Array(positions.length);
+        for (let i = 0, v = 0; v < vertBody.length; v++, i += 3) {
+          const c = rgb[vertBody[v]] ?? [1, 1, 1];
+          col[i] = c[0]; col[i + 1] = c[1]; col[i + 2] = c[2];
+        }
+        faces.setAttribute("color", new Float32BufferAttribute(col, 3));
+        hasColour = true;
+      }
       const faceMat = new MeshBasicMaterial({
         color: CYAN, transparent: true, opacity: 0.075,
         side: DoubleSide, depthWrite: false,
@@ -264,6 +305,8 @@ export function HoloStage() {
       shell.add(new Mesh(faces, faceMat));
       clipped.length = 0;
       clipped.push(faceMat);
+      shellMat = faceMat;
+      if (trueColour && hasColour) paintTrue(true);
 
       const edgePositions = f32(geo.edge_positions_b64);
       if (edgePositions.length) {
@@ -551,6 +594,11 @@ export function HoloStage() {
           break;
         case "explode":
           explodeTarget = explodeTarget > 0 ? 0 : 1;
+          break;
+        case "colour":
+          // Nothing to switch to on a model with no colours: the cyan IS the
+          // answer there, and flickering to a white blob would be worse.
+          if (hasColour) paintTrue(c.on ?? !trueColour);
           break;
         case "fit":
           target.scale = 1;

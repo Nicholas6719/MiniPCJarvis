@@ -192,6 +192,15 @@ def parse_action(text: str) -> str | None:
     if re.search(r"\b(?:explode|exploded|apart|separate the parts|pull it apart|"
                  r"blow it apart)\b", t):
         return "explode"
+    # THE REAL COLOURS, and back to the hologram. Both directions, because the
+    # cyan is the look he asked to keep and this only borrows the stage.
+    if re.search(r"\b(?:in colou?r|real colou?rs?|true colou?rs?|actual colou?rs?|"
+                 r"paint(?: it)?|coloured|colored|what (?:it|that|this)(?: really)? looks? like|what does it (?:really )?look like|"
+                 r"as it (?:would )?looks?)\b", t):
+        return "colour"
+    if re.search(r"\b(?:hologram|holographic|wireframe|back to (?:the )?(?:blue|cyan|"
+                 r"hologram)|no colou?r|without colou?r)\b", t):
+        return "hologram"
     if re.search(r"\b(?:fit it|fit to (?:the )?(?:screen|view|frame)|frame it|"
                  r"centre it|center it|show all of it)\b", t):
         return "fit"

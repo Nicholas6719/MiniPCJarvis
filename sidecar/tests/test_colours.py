@@ -141,6 +141,45 @@ async def main() -> int:
           "'logo' made the flat-emblem rule claim the whole sentence, and he "
           "got a logo and no mug")
 
+    print("\n-- and it can be asked for, and asked to stop --")
+    import holo_angles
+    for said, want in (("show it in colour", "colour"),
+                       ("show me the real colours", "colour"),
+                       ("what does it really look like", "colour"),
+                       ("back to the hologram", "hologram"),
+                       ("no colour please", "hologram"),
+                       # The cyan is the look he asked to keep, so these have to
+                       # go on meaning what they meant.
+                       ("put it back the way it was", "reset"),
+                       ("explode it", "explode"),
+                       ("show me the layers", "layers")):
+        check(f"{said!r} -> {want}",
+              holo_angles.parse_action(said) == want,
+              holo_angles.parse_action(said))
+
+    import tools.holo_tools as ht
+    check("the stage is told which way to switch",
+          "act == " + chr(34) + "colour" + chr(34) in
+          open(ht.__file__, encoding="utf-8").read(),
+          "one action, two directions")
+
+    stage_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))),
+        "src", "components", "HoloStage.tsx")
+    stage = open(stage_path, encoding="utf-8").read()
+    check("the stage paints with vertex colours, not extra meshes",
+          "vertexColors" in stage and "setAttribute(" in stage,
+          "one attribute over a buffer that already exists, so no extra draw "
+          "call on a GPU llama-server is already using")
+    check("...and does nothing on a model that has no colours",
+          "if (hasColour) paintTrue" in stage,
+          "flickering to a white blob is worse than staying cyan")
+    check("...and cyan is what it starts as",
+          "let trueColour = false;" in stage,
+          "the hologram is the look he asked to keep")
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

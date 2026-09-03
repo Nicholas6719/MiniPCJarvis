@@ -242,7 +242,8 @@ async def inspect_part(path: str = "", name: str = "") -> dict:
     return out
 
 
-_ACTIONS = ("rotate", "flip", "scale", "section", "explode", "reset", "fit",
+_ACTIONS = ("rotate", "flip", "scale", "section", "explode", "colour", "hologram",
+            "reset", "fit",
             "layers", "solid", "layer")
 
 
@@ -317,6 +318,19 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
             holo_angles.parse_section(said) or {"axis": "z", "at": 0.5}
         payload.update(sec)
         spoken = "Cutting it open, sir."
+    elif act in ("colour", "hologram"):
+        # One action, two directions. The stage ignores it on a model that has
+        # no colours: cyan IS the answer there, and flickering to a white blob
+        # would be worse than doing nothing.
+        await bus.emit("holo_control", action="colour", on=(act == "colour"))
+        got = current()
+        if act == "colour" and not got.get("has_colour"):
+            return {"ok": True, "no_colour": True,
+                    "spoken": "I don't have colours for that one, sir — "
+                              "it came without any."}
+        return {"ok": True, "action": act,
+                "spoken": ("In colour, sir." if act == "colour"
+                           else "Back to the hologram, sir.")}
     elif act == "explode":
         # An exploded view of one solid body is one solid body, moved. Saying
         # "separating it" and then showing him nothing move is worse than saying
