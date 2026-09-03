@@ -129,6 +129,13 @@ def parse_scale(text: str) -> float | None:
     m = re.search(r"\b(?:to\s+)?(\d{2,3})\s*(?:%|percent\b)", t)
     if m:
         return float(m.group(1)) / 100.0
+    # "too small" is a COMPLAINT, and the answer to it is bigger. Checked before
+    # the plain words, or "too small" reads as "smaller" and he gets the
+    # opposite of what he asked for - the worst possible answer to a complaint.
+    if re.search(r"\b(?:too small|too far(?: away)?|can'?t see it|hard to see)\b", t):
+        return 1.5
+    if re.search(r"\b(?:too big|too large|too close|filling the screen)\b", t):
+        return 1 / 1.5
     if re.search(r"\b(?:zoom in|closer|bigger|larger|enlarge|magnify|blow it up)\b", t):
         return 1.5
     if re.search(r"\b(?:zoom out|further away|smaller|shrink|back off|wider)\b", t):
@@ -176,8 +183,28 @@ def parse_action(text: str) -> str | None:
     layers of the cut" contains both; the more specific intent is tested first.
     """
     t = (text or "").lower()
+    # GETTING RID OF IT, AND CHECKED FIRST. The sentences people use for this
+    # are full of words the other rules claim: "close the hologram" ends in
+    # "hologram" and became a colour switch, and "turn it off" contains "turn"
+    # so it SPUN THE MODEL. There was also no hide action here at all, though
+    # the stage has always been able to do it - which is why "remove render"
+    # matched nothing. `close` excludes "close up"/"closer", which mean zoom.
+    if (re.search(r"\b(?:hide|dismiss|remove)\b", t)
+            or re.search(r"\bclose\b(?!\s*-?\s*up\b)", t)
+            or re.search(r"\b(?:get rid of|take (?:it|that) away|put (?:it|that) away|"
+                         r"clear the (?:stage|screen)|off (?:my|the) screen|"
+                         r"turn (?:it |that |this )?off|"
+                         r"done with (?:it|that|this)|"
+                         r"stop showing (?:it|that|this))\b", t)):
+        return "hide"
+    # BACK TO WHERE IT STARTED. "return home" and "go home" are his own words
+    # for this and matched nothing.
     if re.search(r"\b(?:reset|start over|back to normal|as it was|the way it was|"
-                 r"undo (?:that|it)|straighten it (?:up|out)|put it back)\b", t):
+                 r"undo (?:that|it)|straighten it (?:up|out)|put it back|"
+                 r"(?:return|go|back) home|back to the (?:start|beginning)|"
+                 r"how it was(?: at the (?:start|beginning))?|"
+                 r"original (?:view|position|angle)|"
+                 r"default (?:view|position|angle))\b", t) or t.strip() == "home":
         return "reset"
     if re.search(r"\b(?:solid|the model again|hide the layers|back to the model|"
                  r"stop the layers)\b", t):
@@ -189,20 +216,26 @@ def parse_action(text: str) -> str | None:
     if re.search(r"\b(?:layers?|toolpath|tool path|how it'?s printed|"
                  r"the print path|slicing preview)\b", t):
         return "layers"
-    if re.search(r"\b(?:explode|exploded|apart|separate the parts|pull it apart|"
-                 r"blow it apart)\b", t):
+    if re.search(r"\b(?:explode|exploded|apart|separate(?: the parts| it)?|"
+                 r"pull it apart|blow it apart|show me the (?:pieces|parts)|"
+                 r"the (?:pieces|parts) on their own)\b", t):
         return "explode"
     # THE REAL COLOURS, and back to the hologram. Both directions, because the
     # cyan is the look he asked to keep and this only borrows the stage.
     if re.search(r"\b(?:in colou?r|real colou?rs?|true colou?rs?|actual colou?rs?|"
-                 r"paint(?: it)?|coloured|colored|what (?:it|that|this)(?: really)? looks? like|what does it (?:really )?look like|"
+                 r"what colou?r|paint(?: it)?|coloured|colored|"
+                 r"what (?:it|that|this)(?: really)? looks? like|"
+                 r"what does it (?:really )?look like|"
+                 r"(?:make it )?look (?:real|realistic|lifelike)|"
                  r"as it (?:would )?looks?)\b", t):
         return "colour"
     if re.search(r"\b(?:hologram|holographic|wireframe|back to (?:the )?(?:blue|cyan|"
                  r"hologram)|no colou?r|without colou?r)\b", t):
         return "hologram"
-    if re.search(r"\b(?:fit it|fit to (?:the )?(?:screen|view|frame)|frame it|"
-                 r"centre it|center it|show all of it)\b", t):
+    if re.search(r"\b(?:fit it|fit (?:it )?(?:on|to) (?:the )?(?:screen|view|frame)|"
+                 r"frame it|centre it|center it|show all of it|"
+                 r"can'?t see (?:all|the whole)|see all of it|"
+                 r"it'?s off (?:the )?screen)\b", t):
         return "fit"
     if parse_section(t):
         return "section"
@@ -210,7 +243,12 @@ def parse_action(text: str) -> str | None:
         return "flip"
     if parse_scale(t) is not None:
         return "scale"
-    if re.search(r"\b(?:rotate|spin|turn|tip|tilt|roll|lean|pitch|swing|yaw|bank)\b", t):
+    # `turn` is last for a reason: "turn it off" is not a rotation, and the hide
+    # rule above takes that sentence before this one sees it.
+    if re.search(r"\b(?:rotate|spin|turn|tip|tilt|roll|lean|pitch|swing|yaw|bank|"
+                 r"show me the (?:back|rear|other side)|"
+                 r"(?:the )?other side|round the back|"
+                 r"let me see the (?:back|other side))\b", t):
         return "rotate"
     return None
 
@@ -222,7 +260,14 @@ def parse_section(text: str) -> dict | None:
     tell "cut it in half" from "rotate it".
     """
     t = (text or "").lower()
-    if not re.search(r"\b(?:section|cross[- ]?section|cut|halve|split|open it up|inside)\b", t):
+    # BARE "slice it" IS DELIBERATELY NOT HERE. It is the one genuinely
+    # ambiguous word on this stage - a cross-section, or the G-code slicer
+    # that prepares a real print - and it is meant to reach the clarify flow
+    # and be asked about rather than guessed. But "slice it down the middle"
+    # is not ambiguous; nobody means a toolpath by that. Only the qualified
+    # forms are claimed here.
+    if not (re.search(r"\b(?:section|cross[- ]?section|cut|halve|split|open it up|inside)\b", t)
+            or re.search(r"\bslic\w*\b.{0,24}\b(?:down the middle|in half|through the middle|in two)\b", t)):
         return None
     axis = "z"
     if re.search(r"\b(?:side to side|across|left to right)\b", t):

@@ -244,6 +244,10 @@ async def inspect_part(path: str = "", name: str = "") -> dict:
 
 _ACTIONS = ("rotate", "flip", "scale", "section", "explode", "colour", "hologram",
             "reset", "fit",
+            # PUTTING IT AWAY IS A CONTROL LIKE ANY OTHER. It lived only
+            # as its own tool, so "remove render" - his own words - was
+            # parsed correctly and then refused here.
+            "hide",
             "layers", "solid", "layer")
 
 
@@ -318,6 +322,11 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
             holo_angles.parse_section(said) or {"axis": "z", "at": 0.5}
         payload.update(sec)
         spoken = "Cutting it open, sir."
+    elif act == "hide":
+        # Straight to the tool that already does this, so the stage closing and
+        # the hand tracker standing down stay in one place.
+        r = await hide_hologram()
+        return {**r, "action": "hide", "spoken": "Taken it down, sir."}
     elif act in ("colour", "hologram"):
         # One action, two directions. The stage ignores it on a model that has
         # no colours: cyan IS the answer there, and flickering to a white blob
