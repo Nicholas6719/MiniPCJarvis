@@ -120,6 +120,45 @@ def prepare(path: str, no_bg: bool = False):
     return Image.fromarray((arr * 255.0).astype(np.uint8))
 
 
+def finish(m, size_mm):
+    """Winding, orientation and scale — applied to EVERY rung.
+
+    Factored out because the rough previews need exactly the same
+    treatment: without it they arrive lying on their side and about two
+    millimetres across, which would look like a broken render rather
+    than an early one.
+    """
+    # INSIDE OUT is watertight, consistent, and negative-volume — and a
+    # slicer will print the complement of what he asked for.
+    if m.is_watertight and m.volume < 0:
+        m.invert()
+        log("normals were inside out; flipped")
+
+    # STAND IT UP. TripoSR works in the camera's frame: the input image's
+    # vertical comes out as mesh X. Measured on two reconstructions whose
+    # reference pictures were in front of me — a standing Iron Man came out
+    # 60 x 25 x 21 lying along X, and a duck came out on its back. Every
+    # consumer of this file assumes Z is up: the hologram, the bed-fit
+    # footprint, and the 45-degree overhang check, which is meaningless if
+    # it does not know which way down is.
+    #
+    # A cyclic permutation is a proper rotation, so the mesh is rotated and
+    # not mirrored — which matters, because a mirrored part is a subtly
+    # wrong part that still passes every check.
+    m.apply_transform(np.array([[0.0, 1.0, 0.0, 0.0],
+                                [0.0, 0.0, 1.0, 0.0],
+                                [1.0, 0.0, 0.0, 0.0],
+                                [0.0, 0.0, 0.0, 1.0]]))
+    log(f"stood upright: {[round(float(v), 1) for v in m.extents]}")
+
+    # Into millimetres. Unscaled this is about two units across and every
+    # print check downstream correctly calls it a sliver.
+    extent = float(np.max(m.extents)) or 1.0
+    m.apply_scale(size_mm / extent)     # the argument, not the parsed namespace
+    m.apply_translation(-m.bounds[0])          # sit it on the bed at the origin
+    return m
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("image")
@@ -130,6 +169,10 @@ def main() -> int:
     ap.add_argument("--size-mm", type=float, default=60.0)
     ap.add_argument("--chunk", type=int, default=8192)
     ap.add_argument("--no-bg-removal", action="store_true")
+    ap.add_argument("--stages", default="",
+                    help="comma-separated rough resolutions to emit before the "
+                         "real one, e.g. 96,192 — each lands as its own JSON "
+                         "line so the caller can show it immediately")
     a = ap.parse_args()
 
     t0 = time.time()
@@ -142,6 +185,37 @@ def main() -> int:
             codes = model([img], device="cpu")
         log(f"scene code at {time.time() - t0:.1f}s")
 
+        # ROUGH FIRST, SO HE CAN WATCH IT RESOLVE. The scene code is computed
+        # once and a mesh can be pulled out of it at any resolution, so each
+        # rung is a genuine mesh of the same reconstruction rather than an
+        # interpolation. Carving is cubic, so the ladder is deliberately short:
+        # 96 and 192 together cost about nine seconds against carving 384
+        # alone, and buy a first look some forty-five seconds earlier.
+        stages = [int(x) for x in (a.stages or "").split(",") if x.strip()]
+        for res in sorted(set(stages)):
+            if res >= a.resolution:
+                continue                      # never carve past the real one
+            try:
+                st0 = time.time()
+                rough = model.extract_mesh(codes, has_vertex_color=False,
+                                           resolution=res)[0]
+                rm = trimesh.Trimesh(vertices=np.asarray(rough.vertices),
+                                     faces=np.asarray(rough.faces), process=True)
+                rm.remove_unreferenced_vertices()
+                finish(rm, a.size_mm)
+                path = a.out.replace(".stl", f".stage{res}.stl")
+                rm.export(path)
+                # Its own JSON line, so the parent can put it on the stage the
+                # moment it lands. The LAST json line is still the real result.
+                print(json.dumps({"stage": res, "stl": path,
+                                  "triangles": int(len(rm.faces)),
+                                  "seconds": round(time.time() - st0, 1)}),
+                      flush=True)
+                log(f"stage {res} at {time.time() - t0:.1f}s: {len(rm.faces)} faces")
+            except Exception as e:
+                # A preview that fails must never cost him the render.
+                log(f"stage {res} failed: {type(e).__name__}: {e}")
+
         meshes = model.extract_mesh(codes, has_vertex_color=False,
                                     resolution=a.resolution)
         mesh = meshes[0]
@@ -150,17 +224,7 @@ def main() -> int:
         m = trimesh.Trimesh(vertices=np.asarray(mesh.vertices),
                             faces=np.asarray(mesh.faces), process=True)
         m.remove_unreferenced_vertices()
-        # INSIDE OUT is watertight, consistent, and negative-volume — and a
-        # slicer will print the complement of what he asked for.
-        if m.is_watertight and m.volume < 0:
-            m.invert()
-            log("normals were inside out; flipped")
-
-        # Into millimetres. Unscaled this is about two units across and every
-        # print check downstream correctly calls it a sliver.
-        extent = float(np.max(m.extents)) or 1.0
-        m.apply_scale(a.size_mm / extent)
-        m.apply_translation(-m.bounds[0])          # sit it on the bed at the origin
+        finish(m, a.size_mm)
 
         m.export(a.out)
         took = time.time() - t0

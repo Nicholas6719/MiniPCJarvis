@@ -119,6 +119,10 @@ DEFAULTS: dict[str, Any] = {
         "openscad_binary": r"C:\AI\OpenSCAD\openscad.exe",
         "prusaslicer_binary": r"C:\AI\PrusaSlicer\prusa-slicer-console.exe",
         "work_dir": "",            # "" = %APPDATA%\JARVIS\fabrication
+        # The marching-cubes grid a photo is rebuilt on. Cost is CUBIC:
+        # 384 carves in 54s, 512 in 114s, for detail he could not pick
+        # out when shown both. Raise it for a part that needs it.
+        "reconstruct_resolution": 384,
         "slicer_profile": "",      # "" = the bundled generic 0.4 mm FDM profile
         # Above this many seconds, JARVIS reports the estimate and ASKS before
         # starting a render. His words: "maybe I don't want to do it if it's

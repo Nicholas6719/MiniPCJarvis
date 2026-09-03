@@ -205,9 +205,16 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
             r = await components.build_each(desc, list(pieces),
                                             safe_name(name or desc))
             if r.get("error") and not r.get("stl"):
-                r = await create3d.build(t, desc, image_path, name, skip=skip)
+                r = await create3d.build(t, desc, image_path, name, skip=skip,
+                                         progressive=True)
         else:
-            r = await create3d.build(t, desc, image_path, name, skip=skip)
+            # PROGRESSIVE ONLY HERE. This is the one render he asked for as a
+            # whole, so it is the one he should watch resolve. The per-part
+            # builds inside a composite never set it, or five half-built objects
+            # would take turns on the stage and none of them would be the thing
+            # he asked for.
+            r = await create3d.build(t, desc, image_path, name, skip=skip,
+                                     progressive=True)
         if r.get("stl") and not r.get("error"):
             # Put it up the moment it exists. "Anything becomes a hologram" is
             # the phase; a finished mesh he has to ask to see is half of it.

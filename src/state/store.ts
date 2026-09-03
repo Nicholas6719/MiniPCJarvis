@@ -104,6 +104,9 @@ export interface HoloState {
   // right now. A camera reading continuously must be VISIBLE — the indicator is
   // the honest half of that feature.
   hands?: "off" | "watching" | "holding";
+  // The grid this mesh was carved on while a render is still running, or null
+  // once the real one lands. It is what stops a preview reading as the part.
+  rough?: number | null;
   // The last control, with a sequence number. `seq` is what the renderer watches:
   // "turn it ninety degrees" said twice must turn it twice, and identical
   // payloads would otherwise be indistinguishable from no new command at all.
@@ -617,12 +620,21 @@ export const useStore = create<Store>((set, get) => ({
                                              layers: evt.layers ?? null, ts: evt.ts } } }
             : {}));
         } else {
+          // A ROUGH RUNG KEEPS EVERYTHING ELSE. `rough` means this is a
+          // preview carve on the way to the real mesh: same object, same name,
+          // so the hand state, the check and the layer view all survive it and
+          // only the geometry is re-read. Losing `hands` here would drop the
+          // model mid-turn, which is the one moment he would be holding it.
           set((st) => ({
-            holo: { name: evt.name, triangles: evt.triangles, size_mm: evt.size_mm, ts: evt.ts },
+            holo: { ...(evt.rough && st.holo?.name === evt.name ? st.holo : {}),
+                    name: evt.name, triangles: evt.triangles,
+                    size_mm: evt.size_mm, ts: evt.ts,
+                    rough: evt.rough ?? null },
             stage: { kind: "holo" as StageKind, openedTs: Date.now(), holdUntil: 0,
                      pinned: true, pinUntil: st.stage?.pinUntil },
           }));
-          push({ id: evt.id, ts: evt.ts, kind: "web", summary: `hologram: ${evt.name}` });
+          if (!evt.rough)      // rungs are not events; the finished part is
+            push({ id: evt.id, ts: evt.ts, kind: "web", summary: `hologram: ${evt.name}` });
         }
         break;
       // WHICH PROJECT THE WORK BELONGS TO. Everything made while one is open is

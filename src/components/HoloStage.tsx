@@ -142,6 +142,12 @@ export function HoloStage() {
   // Same reasoning as applyCheck: a control must reach the live scene without
   // rebuilding it, or every "turn it" would restart the spin and flash the panel.
   const applyCmd = useRef<((c: NonNullable<HoloState["cmd"]>) => void) | null>(null);
+  const applyReload = useRef<(() => Promise<void>) | null>(null);
+  // Which mesh the scene is currently showing. Without it, opening a hologram
+  // fetches the geometry twice — once when the scene is built and again from
+  // the reload effect firing on the same event — and that is a few hundred
+  // kilobytes and half a second of numpy for nothing.
+  const loadedTs = useRef<number | null>(null);
   const holo = useStore((s) => s.holo);
   const project = useStore((s) => s.project);
   const checkTs = holo?.check?.ts ?? 0;
@@ -687,6 +693,8 @@ export function HoloStage() {
     };
 
     size();
+    applyReload.current = load;
+    loadedTs.current = useStore.getState().holo?.ts ?? null;
     void load();
     raf = requestAnimationFrame(tick);
     const ro = new ResizeObserver(size);
@@ -698,6 +706,7 @@ export function HoloStage() {
       applyHands.current = null;
       applyCheck.current = null;
       applyCmd.current = null;
+      applyReload.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
       clear();
@@ -705,6 +714,19 @@ export function HoloStage() {
       if (renderer.domElement.parentNode === el) el.removeChild(renderer.domElement);
     };
   }, [holo?.name]);
+
+  // EACH ROUGH RUNG RE-READS THE MESH AND NOTHING ELSE. The scene effect is
+  // keyed on the name, and a progressive carve keeps its name from the first
+  // rung to the finished part because it is the same object throughout — so
+  // without this a preview would arrive and change nothing. Rebuilding the
+  // scene instead would throw away the renderer for a mesh swap and would do it
+  // while he might have his hands on the thing; `load` already re-applies the
+  // state it needs to, which is why it is safe to call again.
+  useEffect(() => {
+    if (!holo?.ts || holo.ts === loadedTs.current) return;
+    loadedTs.current = holo.ts;
+    void applyReload.current?.();
+  }, [holo?.ts]);
 
   // A check arrives after the scene is built, and toggling the layer view must
   // not rebuild it either.
@@ -727,6 +749,13 @@ export function HoloStage() {
       <div className="holo" style={{position:"relative"}}>
         <div className="holo__head mono-sub">
           <span className="holo__name">{holo?.name ?? "hologram"}</span>
+          {holo?.rough ? (
+            // Say it plainly. This is a real mesh of the real reconstruction,
+            // just carved on a coarser grid — but it is not the part yet, and a
+            // preview that does not admit to being one is a lie he would only
+            // catch by waiting.
+            <span className="holo__rough">resolving · {holo.rough}</span>
+          ) : null}
           {project && <span className="holo__project">{project}</span>}
           <span ref={label} className="holo__dims" />
         </div>

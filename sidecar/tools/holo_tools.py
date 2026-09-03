@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 from events import bus
@@ -42,6 +43,10 @@ def current() -> dict:
 
 def check_for(name: str) -> dict:
     return _checks.get(name) or {}
+
+
+# `<part>.stage192.stl` — a rung of a progressive carve, not a part of his.
+_ROUGH = re.compile(r"\.stage\d+\.[A-Za-z0-9]+$")
 
 
 def _resolve(path: str) -> Path | None:
@@ -81,12 +86,51 @@ def _pick(path: str = "", name: str = "") -> Path | None:
     # Nothing named: the newest thing he made, which is almost always what
     # "show me the bracket" means right after making one.
     try:
+        # NOT THE ROUGH RUNGS. A progressive render writes `<part>.stage96.stl`
+        # and friends on the way to the real file, and each one is NEWER than
+        # the part it previews — so "show me that again" a minute later would
+        # correctly, by this rule, project a 96-grid blob. They are cleaned up
+        # when the render ends; this is the second guard, because a preview
+        # being mistaken for his part is not a failure worth risking once.
         found = [f for ext in meshio.READABLE
-                 for f in work_dir().glob(f"*{ext}")]
+                 for f in work_dir().glob(f"*{ext}")
+                 if not _ROUGH.search(f.name)]
         found.sort(key=lambda f: f.stat().st_mtime)
         return _resolve(str(found[-1])) if found else None
     except OSError:
         return None
+
+
+async def show_stage(path: str, name: str, res: int) -> None:
+    """One rung of a progressive carve, on the stage the moment it lands.
+
+    His idea, and the measurement agreed with it: at grid 384 a reconstruction
+    is fifteen seconds of thinking and fifty-four of carving, so most of the
+    wait is a phase where real geometry exists. The reference picture covers the
+    thinking; this covers the rest, and what he watches resolve IS the model
+    rather than an animation standing in for one.
+
+    It deliberately mirrors `show_hologram` rather than inventing a second path:
+    same `_current`, same event, so the HUD reloads geometry the way it already
+    knows how. `rough` is what distinguishes them, and it is there so the panel
+    can say "resolving" instead of quietly implying this is the finished part.
+
+    Never raises. A preview that fails must cost him nothing.
+    """
+    try:
+        info = await asyncio.to_thread(meshio.describe, str(path))
+    except Exception:
+        log.debug("a rough stage could not be read", exc_info=True)
+        return
+    info.pop("_tris", None)
+    info.pop("_edges", None)
+    _current.clear()
+    _current.update(info)
+    _current["name"] = name
+    _current["rough"] = int(res)
+    await bus.emit("hologram", action="show", name=name,
+                   triangles=info["triangles"], size_mm=info["size_mm"],
+                   rough=int(res))
 
 
 async def show_hologram(path: str = "", name: str = "") -> dict:
@@ -132,7 +176,7 @@ async def show_hologram(path: str = "", name: str = "") -> dict:
     info.pop("_tris", None)
     info.pop("_edges", None)
 
-    _current.clear()
+    _current.clear()          # `rough` goes with it: this one is the real part
     _current.update(info)
     _current["name"] = target.stem
 

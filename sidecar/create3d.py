@@ -49,6 +49,8 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+from collections import deque
 from pathlib import Path
 
 from config import config
@@ -818,29 +820,199 @@ def _missing(tier: int) -> dict:
             "unavailable": True, "tier": tier}
 
 
-async def _run_model3d(script: str, args: list[str], timeout: float) -> dict:
-    """Run one of the heavy scripts as a subprocess and read back its JSON."""
-    from tools.fabrication import _run
+# Which rough carves he sees on the way to the real one.
+#
+# The scene code is computed once and a mesh can be pulled out of it at any
+# resolution, so these are genuine meshes of the same reconstruction rather than
+# interpolations of the last one. Marching cubes is CUBIC in the grid, which is
+# why the ladder is two rungs and not five: 96 costs about a second, 192 about
+# eight, 384 fifty-four, and 288 would be another twenty-three for one more step.
+#
+# MEASURED END TO END on his machine, rebuilding the baseball reference at 384:
+#
+#     rung  96   on screen at 17.5s    10,204 triangles   58.5 x 58.5 x 60.0 mm
+#     rung 192   on screen at 23.9s    42,750 triangles   59.7 x 59.6 x 60.0 mm
+#     final      on screen at 75.3s   172,560 triangles   59.5 x 59.3 x 60.0 mm
+#
+# Against a 73.2 s baseline for the same render with no ladder, so the whole
+# thing costs about two seconds — inside the run-to-run noise — and he sees the
+# object 58 seconds sooner. The millimetres are the real check: each rung is
+# within 1.7% of the finished part, which is a coarser silhouette of the SAME
+# object rather than one that skipped being stood upright and scaled.
+PROGRESSIVE_STAGES = "96,192"
+
+
+async def _run_model3d(script: str, args: list[str], timeout: float,
+                       on_stage=None) -> dict:
+    """Run one of the heavy scripts as a subprocess and read back its JSON.
+
+    Reads stdout AS IT ARRIVES rather than after the process exits, because the
+    reconstructor now reports rough carves on the way to the final one and a
+    preview that shows up once the render is already finished is not a preview.
+    The last non-stage JSON line is still the real answer.
+
+    STDERR IS DRAINED ALONGSIDE IT. `_run` used `communicate()`, which reads
+    both pipes; a loop that reads only stdout leaves stderr to fill its 64 KB
+    buffer, and the child then blocks forever holding 1.7 GB of model weights.
+    TripoSR and rembg both write progress bars there, so this would happen every
+    time rather than rarely.
+
+    AND IT READS CHUNKS, NOT LINES, for the same reason: a progress bar is
+    carriage returns with no newline, and `readline` on one accumulates until it
+    hits the stream limit and raises.
+    """
     py = model3d_python()
     if not py:
         return {"error": "the 3D model environment isn't installed"}
-    rc, out, err = await _run([py, str(model3d_dir() / script), *args], timeout)
-    if rc != 0:
-        return {"error": (err or out or "it didn't come back").strip()[:200]}
-    # The script's LAST line of stdout is its JSON; anything before it is a
-    # progress log from the model, which is noise here but useful in the log.
-    for line in reversed((out or "").strip().splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
+    cmd = [py, str(model3d_dir() / script), *args]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            # CREATE_NO_WINDOW, as everywhere else that launches a console
+            # program here: without it Windows gives this python.exe its own
+            # conhost, and a command prompt appeared on his screen in the middle
+            # of a render.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except FileNotFoundError:
+        return {"error": "the 3D model environment isn't installed"}
+    except Exception as e:
+        return {"error": str(e)}
+
+    def stop() -> None:
+        # "STOP THAT" MUST ACTUALLY STOP IT. Cancelling the awaiting task does
+        # not touch the child, so a cancelled render would keep a core and the
+        # weights busy long after he had been told it had stopped.
+        try:
+            if proc.returncode is None:
+                proc.kill()
+        except Exception:
+            log.debug("could not kill the reconstructor", exc_info=True)
+        for stream in (proc.stdout, proc.stderr):
             try:
-                return json.loads(line)
-            except ValueError:
-                continue
-    return {"error": "the model produced no result"}
+                if stream is not None:
+                    stream.feed_eof()
+            except Exception:
+                pass
+
+    result: dict = {}
+    tail: deque = deque(maxlen=200)
+
+    async def handle(line: str) -> None:
+        nonlocal result
+        line = line.strip()
+        if not line.startswith("{"):
+            # THE RECONSTRUCTOR LOGS TO STDOUT, not stderr, so this is where its
+            # progress and its crash traces both come out. Keeping the tail is
+            # the difference between "it didn't come back" and a message saying
+            # what went wrong — the old runner had that, because it captured all
+            # of stdout and handed it back whenever the exit code was non-zero.
+            if line:
+                tail.append(line)
+            return
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            return
+        if obj.get("stage"):
+            if on_stage is not None:
+                try:
+                    await on_stage(obj)
+                except Exception:
+                    # A preview that fails must never cost him the render.
+                    log.debug("a rough stage could not be shown", exc_info=True)
+        else:
+            result = obj
+
+    async def pump(stream, sink) -> None:
+        buf = ""
+        while True:
+            chunk = await stream.read(8192)
+            if not chunk:
+                break
+            buf += chunk.decode(errors="replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                await sink(line)
+            if len(buf) > 1_000_000:      # a "line" that is never going to end
+                buf = buf[-8192:]
+        if buf.strip():
+            await sink(buf)
+
+    async def note(line: str) -> None:
+        if line.strip():
+            tail.append(line.strip())
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(pump(proc.stdout, handle), pump(proc.stderr, note)),
+            timeout=timeout)
+        await asyncio.wait_for(proc.wait(), timeout=30)
+    except asyncio.TimeoutError:
+        stop()
+        return {"error": f"timed out after {int(timeout)}s"}
+    except asyncio.CancelledError:
+        stop()
+        raise
+    if tail:
+        log.debug("%s said: %s", script, " | ".join(list(tail)[-6:])[:400])
+    if proc.returncode:
+        # Its own error JSON, when it managed to print one, says more than a
+        # traceback tail — and a child that died before it could print anything
+        # is exactly why the tail is kept.
+        if result.get("error"):
+            return result
+        return {"error": ("\n".join(tail) or "it didn't come back").strip()[-200:]}
+    return result or {"error": "the model produced no result"}
 
 
-async def from_photo(image_path: str, name: str = "") -> dict:
-    """TIER 3: a photo to a mesh. A likeness, and labelled as one."""
+def _stage_shower(base: str):
+    """A callback that projects each rough carve the moment it arrives.
+
+    It also tidies the rung behind it. These files are scaffolding and his work
+    folder is for parts — and `show_hologram` with no name means "the newest
+    thing you made", which a leftover 96-grid blob would answer for.
+    """
+    shown: list[str] = []
+
+    async def show(obj: dict) -> None:
+        path = str(obj.get("stl") or "")
+        if not path or not os.path.exists(path):
+            return
+        from tools import holo_tools
+        await holo_tools.show_stage(path, base, int(obj.get("stage") or 0))
+        shown.append(path)
+        for old in shown[:-1]:
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+        del shown[:-1]
+
+    return show
+
+
+def _clear_stages(base: str) -> None:
+    """Whatever rungs are left when the render ends, however it ended."""
+    from tools.fabrication import work_dir
+    try:
+        for f in work_dir().glob(f"{base}.stage*.stl"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+async def from_photo(image_path: str, name: str = "",
+                     progressive: bool = False) -> dict:
+    """TIER 3: a photo to a mesh. A likeness, and labelled as one.
+
+    `progressive` shows him the model resolving instead of a progress bar. It is
+    off by default and turned on only for a render he asked for as a whole: a
+    five-part composite would otherwise flicker five separate half-built objects
+    onto the stage, which is worse than showing him nothing.
+    """
     from tools.fabrication import safe_name, work_dir
     if not available()[3]:
         return _missing(3)
@@ -849,12 +1021,38 @@ async def from_photo(image_path: str, name: str = "") -> dict:
         return {"error": "I can't find that picture, sir", "tier": 3}
     base = safe_name(name or p.stem)
     stl = work_dir() / f"{base}.stl"
-    # OURS, NOT THE WORKER'S DEFAULT. 192 was chosen for speed when a render had
-    # to feel quick; measured here, 512 costs 141 s against 25 and gives seven
-    # times the triangles. His budget is quarter-hours, so the detail is free.
-    res = int(config.get("fabrication", "reconstruct_resolution", default=512))
-    r = await _run_model3d("photo_to_mesh.py",
-                           [str(p), str(stl), "--resolution", str(res)], 900)
+    # OURS, NOT THE WORKER'S DEFAULT — and 384 rather than 512, which is where
+    # this sat until he actually used it.
+    #
+    # The reasoning for 512 was "his budget is quarter-hours, so the detail is
+    # free". The measurement behind that was right; the conclusion was not.
+    # Being willing to wait for something worth waiting for is not a licence to
+    # spend two minutes on detail he cannot see, and the number was what made
+    # his duck take three minutes.
+    #
+    # Measured today, same photo, on this machine:
+    #
+    #     grid 384   think 15s + carve  54s =  73s   172,560 triangles
+    #     grid 512   think 15s + carve 114s = 133s   308,138 triangles
+    #
+    # Cost is CUBIC in the grid — 512 is a third larger and nearly two and a
+    # half times the work. He compared both renders and chose 384. Full detail
+    # is still one config value away, and belongs to a phrase he says when he
+    # wants it, not to every render he asks for.
+    res = int(config.get("fabrication", "reconstruct_resolution", default=384))
+    # HE WATCHES IT RESOLVE. Measured at 384: fifteen seconds of thinking, then
+    # fifty-four of carving — so nearly eighty percent of the wait is a phase
+    # where real geometry exists and there is something to look at. The rough
+    # rungs are pulled from the same scene code, so what he sees becoming the
+    # model IS the model.
+    extra = ["--stages", PROGRESSIVE_STAGES] if progressive else []
+    try:
+        r = await _run_model3d(
+            "photo_to_mesh.py",
+            [str(p), str(stl), "--resolution", str(res), *extra], 900,
+            _stage_shower(base) if progressive else None)
+    finally:
+        _clear_stages(base)
     if r.get("error"):
         return {**r, "tier": 3}
     return {"tier": 3, "name": base, "stl": str(stl), "note": TIER_NOTE[3],
@@ -1138,7 +1336,7 @@ async def _download_reference(img: dict, description: str, d) -> str:
 
 
 async def from_text(description: str, name: str = "",
-                    skip: int = 0) -> dict:
+                    skip: int = 0, progressive: bool = False) -> dict:
     """TIER 4: a description to a mesh, by way of a reference picture."""
     from tools.fabrication import safe_name
     if not available()[4]:
@@ -1157,7 +1355,7 @@ async def from_text(description: str, name: str = "",
     # three minutes — his arc reactor came back as a lamp part and he found out
     # at the end.
     await _show_reference(ref, desc)
-    r = await from_photo(ref, name or desc)
+    r = await from_photo(ref, name or desc, progressive=progressive)
     # Tidy the reference away: it was scaffolding, and his work folder is for
     # parts. Only after the mesh is made, so a failure leaves it to look at.
     try:
@@ -1658,7 +1856,8 @@ async def from_the_web(description: str, name: str = "", skip: int = 0) -> dict:
 
     back = _fallback_tier(desc)
     log.info("no fetchable model for %r; falling back to tier %d", desc[:40], back)
-    r = await build(back, description=desc, name=name, skip=skip)
+    r = await build(back, description=desc, name=name, skip=skip,
+                    progressive=progressive)
     extra = {"fell_back_from": 5, "pages_found": pages}
     if parts_note:
         extra["parts_available"] = parts_note
@@ -1680,7 +1879,7 @@ async def from_the_web(description: str, name: str = "", skip: int = 0) -> dict:
 
 
 async def build(tier: int, description: str = "", image_path: str = "",
-                name: str = "", skip: int = 0) -> dict:
+                name: str = "", skip: int = 0, progressive: bool = False) -> dict:
     """Run one tier and return its result, tier included.
 
     Every generated mesh is checked before it is handed on. Non-manifold
@@ -1756,9 +1955,10 @@ async def build(tier: int, description: str = "", image_path: str = "",
             except OSError:
                 pass
     elif tier == 3:
-        r = await from_photo(image_path, name)
+        r = await from_photo(image_path, name, progressive=progressive)
     elif tier == 4:
-        r = await from_text(description, name, skip=skip)
+        r = await from_text(description, name, skip=skip,
+                            progressive=progressive)
     elif tier == 5:
         r = await from_the_web(description, name, skip=skip)
     elif tier == 7:
@@ -1766,7 +1966,8 @@ async def build(tier: int, description: str = "", image_path: str = "",
         r = await composite.build(description, name)
         if r.get("not_composite"):
             r = await build(choose_tier(description, image_path), description,
-                            image_path, name, skip=skip)
+                            image_path, name, skip=skip,
+                            progressive=progressive)
     elif tier == 6:
         # TAKE THE REQUEST APART, NOT THE MESH. A suit cannot be reconstructed
         # from one photograph and OpenSCAD cannot sculpt armour — but a helmet
@@ -1779,7 +1980,8 @@ async def build(tier: int, description: str = "", image_path: str = "",
             # rather than refusing him over a decomposition he never asked for.
             log.info("%r did not come apart; building it whole", description[:40])
             r = await build(choose_tier(description, image_path), description,
-                            image_path, name, skip=skip)
+                            image_path, name, skip=skip,
+                            progressive=progressive)
     else:
         return {"error": f"I don't have a way to make that (tier {tier})"}
 
