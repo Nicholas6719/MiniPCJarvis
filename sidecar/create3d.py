@@ -1103,6 +1103,28 @@ def _reference_size(blob: bytes):
         return None
 
 
+async def _show_reference(path: str, label: str) -> None:
+    """Send the reference picture to the stage. Never breaks the render.
+
+    One message at the start of a job that runs for minutes, not a stream: a
+    reference is 60-130 KB, which is nothing beside three minutes of silence.
+    """
+    try:
+        import base64
+        import mimetypes
+
+        from events import bus
+        data = await asyncio.to_thread(lambda: open(path, "rb").read())
+        if len(data) > 4_000_000:          # a guard, not a limit anything hits
+            return
+        kind = mimetypes.guess_type(path)[0] or "image/jpeg"
+        uri = f"data:{kind};base64," + base64.b64encode(data).decode("ascii")
+        await bus.emit("render_preview", image=uri, label=label)
+    except Exception:
+        # A picture that cannot be shown must never cost him the render.
+        log.debug("could not show the reference picture", exc_info=True)
+
+
 async def _download_reference(img: dict, description: str, d) -> str:
     """Save one candidate if it is a picture at all. Tier 2's path."""
     from tools.fabrication import safe_name
@@ -1129,6 +1151,12 @@ async def from_text(description: str, name: str = "",
     if not ref:
         return {"error": "I couldn't find a picture to build that from, sir",
                 "tier": 4}
+    # PUT IT ON SCREEN NOW. What follows is minutes of a reconstructor working
+    # with nothing to look at, and the picture it is working FROM exists
+    # already. It also lets him see a wrong reference in one second rather than
+    # three minutes — his arc reactor came back as a lamp part and he found out
+    # at the end.
+    await _show_reference(ref, desc)
     r = await from_photo(ref, name or desc)
     # Tidy the reference away: it was scaffolding, and his work folder is for
     # parts. Only after the mesh is made, so a failure leaves it to look at.

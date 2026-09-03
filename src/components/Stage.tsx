@@ -284,6 +284,40 @@ function BrowserStage() {
 
 // ---------------------------------------------------------------- images (§6.5)
 
+// ------------------------------------------------- building it (his "real time")
+// A tier-4 render is minutes of a reconstructor working with nothing on
+// screen. The mesh does not exist until it finishes, so it cannot be shown —
+// but the reference picture does, within seconds, and it is the thing being
+// copied. It also means a WRONG reference is visible in one second rather than
+// at the end: his arc reactor came back as a lamp part after three minutes.
+function RenderStage() {
+  const prev = useStore((s) => s.renderPreview);
+  if (!prev) return null;
+  return (
+    <>
+      <StageHeader
+        eyebrow={`BUILDING ${(prev.label || "").toUpperCase()}`}
+        word={prev.label || "building"}
+        meta="FROM A REFERENCE"
+        live
+      />
+      <div className="renderprev">
+        {/* Dimmed and behind the sweep on purpose: this is what the model is
+            being built FROM, not the model. Showing it at full strength would
+            invite exactly the confusion between a likeness and the thing that
+            the piece/whole distinction exists to prevent. */}
+        <img className="renderprev__img" src={prev.image} alt={prev.label} />
+        <div className="renderprev__scan" />
+      </div>
+      <div className="images__note">
+        <span>working from this — the model replaces it when it's ready</span>
+        <span className="mono-sub">SAY "STOP THE RENDER" TO DROP IT</span>
+      </div>
+      <HoldBar />
+    </>
+  );
+}
+
 function ImagesStage() {
   const images = useStore((s) => s.images);
   const imgs = images?.images ?? [];
@@ -727,6 +761,7 @@ export function Stage() {
     case "folder": return <FolderStage />;
     case "camera": return <CameraStage />;
     case "holo": return <HoloStage />;
+    case "render": return <RenderStage />;
     case "settings": return <SettingsStage />;
     default: return null;
   }

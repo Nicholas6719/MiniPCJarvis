@@ -18,6 +18,7 @@ export type StageKind =
   | "folder"     // a folder listing (no designed surface; kept minimal)
   | "camera"     // the live webcam view: "toggle camera view mode"
   | "holo"       // a 3D model, projected — only ever on an explicit request
+  | "render"     // the reference a model is being built FROM, while it builds
   | "settings";  // settings rail incl. History
 
 export type SettingsSection =
@@ -125,6 +126,15 @@ export interface ImagesState {
   ts: number;
 }
 
+// The reference picture a render is copying, shown while it works. A tier-4
+// render is minutes of a reconstructor with nothing on screen; this exists
+// within seconds and is the thing being copied.
+export interface RenderPreview {
+  image: string;          // data URI, sent once at the start of the job
+  label: string;
+  ts?: number;
+}
+
 export interface FileEntry { name: string; path: string; kind: string; type?: string; size: number; modified?: number }
 export interface FilesState {
   path: string | null;
@@ -165,6 +175,7 @@ interface Store {
   stage: StageState | null;
   web: WebState | null;
   images: ImagesState | null;
+  renderPreview: RenderPreview | null;
   holo: HoloState | null;
   project: string | null;
   files: FilesState | null;
@@ -245,6 +256,7 @@ export const useStore = create<Store>((set, get) => ({
   stage: null,
   web: null,
   images: null,
+  renderPreview: null,
   holo: null,
   project: null,
   files: null,
@@ -592,6 +604,8 @@ export const useStore = create<Store>((set, get) => ({
       // the panel appearing IS the feature. It is PINNED because a model he is
       // working on must not evaporate on the panel-hold timer mid-sentence.
       case "hologram":
+        // The model is here; the picture it was built from has done its job.
+        if (evt.action === "show") set({ renderPreview: null });
         if (evt.action === "hide") {
           set((st) => (st.stage?.kind === "holo" ? { stage: null, holo: null } : { holo: null }));
         } else if (evt.action === "inspect") {
@@ -627,7 +641,29 @@ export const useStore = create<Store>((set, get) => ({
       // scroll back to rather than a status that vanishes. Only the moments that
       // matter — started, finished, failed — never the progress ticks, which
       // would bury everything else in the history.
+      // WHAT IT IS BUILDING FROM, while it builds. A tier-4 render is minutes
+      // of a reconstructor working with nothing on screen; the reference
+      // picture exists within seconds and is the thing being copied. It also
+      // means a WRONG reference is visible in one second rather than at the
+      // end — his arc reactor came back as a lamp part.
+      case "render_preview":
+        set((st) => ({
+          renderPreview: { image: String(evt.image ?? ""),
+                           label: String(evt.label ?? ""), ts: evt.ts },
+          stage: { kind: "render" as StageKind, openedTs: Date.now(),
+                   holdUntil: 0, pinned: st.stage?.pinned ?? false },
+        }));
+        push({ id: evt.id, ts: evt.ts, kind: "web",
+               summary: `building ${evt.label} from a reference` });
+        break;
       case "render":
+        // The preview belongs to one job. Anything that ends the job takes it
+        // down, or he is left looking at a picture of something he is no
+        // longer making. The hologram arriving does the same, below.
+        if (evt.action === "done" || evt.action === "failed"
+            || evt.action === "cancelled") {
+          set({ renderPreview: null });
+        }
         if (evt.action === "started") {
           push({ id: evt.id, ts: evt.ts, kind: "web",
                  summary: `making ${evt.label} — tier ${evt.tier}` });
