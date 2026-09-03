@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess          # for CREATE_NO_WINDOW only; the running is async
 from pathlib import Path
 
 from config import APP_DIR, config
@@ -147,10 +148,22 @@ def safe_name(name: str, fallback: str = "part") -> str:
 
 
 async def _run(args: list[str], timeout: int) -> tuple[int, str, str]:
-    """A binary, off the event loop, with a deadline. Never raises."""
+    """A binary, off the event loop, with a deadline. Never raises.
+
+    CREATE_NO_WINDOW, because every one of these is a CONSOLE program and this
+    is the only launcher in the sidecar that was missing it. A render put a
+    command prompt on his screen: the tier-4 reconstructor is a python.exe, so
+    Windows gave it its own conhost and a window to go with it — on 2026-09-03,
+    in the middle of him testing, while a duck rebuilt for three minutes. The
+    per-part renders make it worse rather than better, since four OpenSCADs at
+    once are four windows. Everything else here already passes this flag
+    (llama_server, vision_server, search_brave_web, builtin, system_panel);
+    this one just never did.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except FileNotFoundError:
         return 127, "", "binary not found"
     except Exception as e:

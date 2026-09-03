@@ -1124,6 +1124,22 @@ async def main() -> int:
           grace["remaining_spoken"][:60])
 
 
+    print("\n-- a render does not put a command prompt on his screen --")
+    # 2026-09-03, while he was testing: a duck render opened a console window.
+    # The tier-4 reconstructor is a python.exe, so without CREATE_NO_WINDOW
+    # Windows gives it its own conhost and a visible window. Every other
+    # launcher in the sidecar already passed the flag; fabrication._run, which
+    # runs OpenSCAD, PrusaSlicer AND the reconstruction scripts, never did.
+    fab_src = open(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "tools", "fabrication.py"), encoding="utf-8").read()
+    run_body = fab_src[fab_src.index("async def _run("):]
+    run_body = run_body[:run_body.index("# ---")] if "# ---" in run_body else run_body[:3000]
+    check("_run launches its children with no console window",
+          "CREATE_NO_WINDOW" in run_body,
+          "openscad, prusaslicer and the reconstructor all go through here")
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}"
           f"{f' ({len(skips)} skipped)' if skips else ''}")
     return 1 if fails else 0
