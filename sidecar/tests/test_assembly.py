@@ -93,6 +93,68 @@ def main() -> int:
           "is worse than saying nothing")
     check("a file with no modules has no parts", assembly.parts_in("cube([1,1,1]);") == [])
 
+    # WHAT THE MODEL ACTUALLY WROTE when it was given the research brief: six
+    # modules, all of them wrapped inside one master module, and only the master
+    # called. One top-level call means one part — and the components he wants to
+    # zoom into were sitting one level down the whole time. Plus a block of
+    # commented-out example calls, which is a hand-written copy of the very
+    # dispatcher we generate.
+    MASTER = """
+module core() { cylinder(d=20, h=30); }
+module outer_shell() { cylinder(d=40, h=30); }
+module power_core(off) { translate([off,0,0]) cylinder(d=5, h=10); }
+module mounting_bracket() { cube([5,5,5]); }
+
+module arc_reactor() {
+    // Place core at origin
+    core();
+    // Outer shell around core
+    outer_shell();
+    // Power cores on either side
+    power_core(-15);
+    power_core(15);
+}
+
+// Render parts individually
+// Uncomment the desired part to view
+// core();
+// outer_shell();
+// mounting_bracket();
+arc_reactor();
+"""
+    mp = [p["name"] for p in assembly.parts_in(MASTER)]
+    check("a master module that just assembles the others is read through",
+          mp == ["core", "outer_shell", "power_core", "power_core_2"], mp)
+    check("...and a module defined but never called is not a part",
+          "mounting_bracket" not in mp,
+          "the model defines helpers it does not use")
+    check("...and the same module called twice is numbered, not dropped",
+          "power_core_2" in mp)
+    check("a commented-out call is not a call",
+          assembly.parts_in(MASTER)[0]["name"] == "core"
+          and "// core();" not in assembly._decomment(MASTER),
+          "the model writes a hand-made dispatcher as documentation, and "
+          "reading it as code made a statement claim to build a module it "
+          "only mentioned")
+
+    md = assembly.with_dispatcher(MASTER, assembly.parts_in(MASTER))
+    # The DEFINITION stays — the next check asserts it — so the property is
+    # that the name appears once and not as a top-level call.
+    check("the master's own call is dropped from the dispatcher",
+          assembly._decomment(md).count("arc_reactor()") == 1
+          and not any(p["name"] == "arc_reactor"
+                      for p in assembly.parts_in(md)),
+          "left in, it calls every component a second time")
+    check("...while the master module itself is left defined",
+          "module arc_reactor()" in md)
+
+    # A master call that PLACES the assembly must not be unwrapped: dropping
+    # that transform would move every part.
+    PLACED = MASTER.replace("arc_reactor();", "translate([0,0,5]) arc_reactor();")
+    check("a master call carrying a transform stays one part",
+          [p["name"] for p in assembly.parts_in(PLACED)] == ["arc_reactor"],
+          "unwrapping it would silently drop the placement from every piece")
+
     print("\n-- rendering one part at a time --")
     parts = assembly.parts_in(ASSEMBLY)
     out = assembly.with_dispatcher(ASSEMBLY, parts)

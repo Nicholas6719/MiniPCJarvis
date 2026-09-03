@@ -106,6 +106,34 @@ def _top_level_statements(source: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _decomment(text: str) -> str:
+    """`text` with every comment removed, so code can be asked what it calls.
+
+    The model writes commented-out example calls — a hand-written version of
+    the dispatcher we generate — and reading those as real calls made a
+    statement claim to build a module it only mentioned.
+    """
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find(chr(10), i)
+            i = n if j < 0 else j
+        elif c == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i)
+            i = n if j < 0 else j + 2
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:min(j + 1, n)])
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def _code_head(text: str) -> str:
     """`text` with any leading comments and blank lines removed.
 
@@ -156,8 +184,8 @@ def parts_in(source: str) -> list[dict]:
         if not stripped or _code_head(stripped).startswith("module"):
             continue
         # The module this statement builds: the first known name it calls.
-        called = [m for m in re.findall(r"\b([A-Za-z_]\w*)\s*\(", text)
-                  if m in known]
+        called = [m for m in re.findall(r"\b([A-Za-z_]\w*)\s*\(",
+                                        _decomment(text)) if m in known]
         if not called:
             continue                      # an assignment, or a bare primitive
         name = called[0]
@@ -171,7 +199,70 @@ def parts_in(source: str) -> list[dict]:
             name = f"{name}_{k}"
         seen.add(name)
         out.append({"name": name, "start": a, "end": b, "text": stripped})
-    return out
+    return _unwrap_master(src, out, known)
+
+
+def _module_body(source: str, name: str) -> tuple[int, int] | None:
+    """(start, end) of the braces belonging to `module name(...)`."""
+    m = re.search(r"\bmodule\s+" + re.escape(name) + r"\s*\([^)]*\)\s*\{", source)
+    if not m:
+        return None
+    depth, i, n = 1, m.end(), len(source)
+    while i < n and depth:
+        c = source[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        i += 1
+    return (m.end(), i - 1) if depth == 0 else None
+
+
+def _unwrap_master(source: str, parts: list[dict], known: set) -> list[dict]:
+    """Read through a single module that just assembles the others.
+
+    The model's habit, and the shape most OpenSCAD in the world has: define the
+    pieces, define one module that calls them all, call that. One top-level
+    call means one part, and the components he asked to zoom into are sitting
+    one level down.
+
+    Only a BARE master call is unwrapped. `translate([0,0,5]) arc_reactor();`
+    places the whole assembly, and dropping that transform would move every
+    part.
+    """
+    if len(parts) != 1:
+        return parts
+    only = parts[0]
+    bare = _decomment(only["text"]).strip().rstrip(";").strip()
+    if bare != f"{only['name']}()":
+        return parts                       # not a bare call; it carries a transform
+    span = _module_body(source, only["name"])
+    if not span:
+        return parts
+    body = source[span[0]:span[1]]
+    inner: list[dict] = []
+    seen: set = set()
+    for a, b in _top_level_statements(body):
+        text = body[a:b].strip()
+        if not text or _code_head(text).startswith("module"):
+            continue
+        called = [m for m in re.findall(r"\b([A-Za-z_]\w*)\s*\(",
+                                        _decomment(text))
+                  if m in known and m != only["name"]]
+        if not called:
+            continue
+        name = called[0]
+        if name in seen:
+            k = 2
+            while f"{name}_{k}" in seen:
+                k += 1
+            name = f"{name}_{k}"
+        seen.add(name)
+        inner.append({"name": name, "start": span[0] + a, "end": span[0] + b,
+                      "text": text, "nested": True})
+    # Two or more real components, or it was a wrapper around one shape and
+    # there is nothing to take apart.
+    return inner if len(inner) >= 2 else parts
 
 
 def with_dispatcher(source: str, parts: list[dict]) -> str:
@@ -183,12 +274,25 @@ def with_dispatcher(source: str, parts: list[dict]) -> str:
     """
     if not parts:
         return source
-    keep = []
-    last = 0
-    for p in parts:
-        keep.append(source[last:p["start"]])
-        last = p["end"]
-    tail = source[last:]
+    # When the parts came from INSIDE a master module, the spans point into that
+    # module's body — cutting them out would gut the module while its own
+    # top-level call still stood. Keep the file whole and drop the master call
+    # instead, or every component renders twice.
+    #
+    # ASKED, NOT INFERRED. This was `any(p["start"] < last_top_level_start)`,
+    # which is true of an ordinary assembly as well — every part but the last
+    # begins before the last statement does — so it took the nested path for
+    # every file and each part rendered the whole model.
+    inside = bool(parts and parts[0].get("nested"))
+    if inside:
+        keep, tail = [_without_master_call(source, parts)], ""
+    else:
+        keep = []
+        last = 0
+        for p in parts:
+            keep.append(source[last:p["start"]])
+            last = p["end"]
+        tail = source[last:]
 
     lines = ['\n// -- rendered one part at a time; "all" builds the assembly',
              f'{PART_VAR} = "all";']
@@ -200,6 +304,28 @@ def with_dispatcher(source: str, parts: list[dict]) -> str:
         lines.append(f'if ({PART_VAR} == "all" || {PART_VAR} == "{p["name"]}") '
                      f'{{\n{p["text"]}\n}}')
     return "".join(keep) + tail.rstrip() + "\n" + "\n".join(lines) + "\n"
+
+
+def _last_top_level_start(source: str) -> int:
+    """Where the final top-level statement begins."""
+    spans = _top_level_statements(source)
+    return spans[-1][0] if spans else len(source)
+
+
+def _without_master_call(source: str, parts: list[dict]) -> str:
+    """The file with the wrapper's own top-level call removed."""
+    known = set(module_names(source))
+    inner = {p["name"].rsplit("_", 1)[0] for p in parts}
+    out = source
+    for a, b in reversed(_top_level_statements(source)):
+        text = source[a:b].strip()
+        if not text or _code_head(text).startswith("module"):
+            continue
+        called = [m for m in re.findall(r"\b([A-Za-z_]\w*)\s*\(",
+                                        _decomment(text)) if m in known]
+        if called and called[0] not in inner:
+            out = out[:a] + out[b:]
+    return out.rstrip()
 
 
 def manifest_path(stl_path: str) -> str:
