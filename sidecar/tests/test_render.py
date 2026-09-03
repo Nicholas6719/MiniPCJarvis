@@ -941,6 +941,19 @@ async def main() -> int:
     check("a part we actually made carries none of this",
           create3d.spoken_caveats({"tier": 1, "stl": "x.stl"}) == "")
 
+    # AND THE REASON HAS TO BE THE TRUE ONE. Live, "a duck" hit nine GitHub
+    # repos, none of which contains a duck, and JARVIS announced that GitHub
+    # needed an account. It does not; it hands over anything it has.
+    mt = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "tools", "model_tools.py"),
+        encoding="utf-8").read()
+    check("'that site needs an account' is never said about GitHub",
+          "len(gh) == len(cands)" in mt and "robot kit" in mt,
+          "he told me to stop treating a locked website as the answer; saying "
+          "it about a site that is not locked is worse")
+    check("...and the honest alternative is offered instead",
+          "I can build you one instead" in mt)
+
     check("pages get room of their own alongside the fetchable results",
           model_find._KEEP_PAGES >= 2,
           "eight GitHub repos filled the list, so 'Printables has real ones "

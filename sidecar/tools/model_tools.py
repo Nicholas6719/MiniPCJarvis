@@ -93,15 +93,29 @@ async def find_3d_model(description: str = "", confirmed: bool = False) -> dict:
             "args": {"description": desc, "confirmed": True},
         }}
 
-    # Nothing directly fetchable. Say what was found and where, rather than
-    # inventing something worse.
+    # Nothing fetchable. Say WHY, and say the true why — there are two of them
+    # and they are different. "That site needs an account" is right for
+    # Printables and Cults3D and flatly wrong about GitHub, which hands over any
+    # file it has; asked for "a duck" it hit nine GitHub repos, none of which
+    # contains a duck, and announced that GitHub needed an account.
     top = cands[0]
+    gh = [c for c in cands if "github.com" in c.get("host", "")]
+    if gh and len(gh) == len(cands):
+        why = (f"I found {len(cands)} repositories, sir, but nothing in them is "
+               f"actually {desc} — I'd be handing you somebody's robot kit. "
+               f"I can build you one instead.")
+        note = ("NOTHING matched. Do not claim a site needs an account — these "
+                "were GitHub and it hands over anything it has. Offer to BUILD "
+                "one, which is what make_hologram does when tier 5 finds "
+                "nothing.")
+    else:
+        why = (f"I found {len(cands)} of them, sir — the best looks like "
+               f"{top['title'][:70]} on {top['host']}, and that site wants an "
+               f"account before it will hand the file over. I can open it for "
+               f"you, or build you one instead.")
+        note = ("Offer the page OR to build one. Do NOT claim to have the file.")
     return {"candidates": cands[:4], "fetchable": False,
-            "spoken": f"I found {len(cands)} of them, sir — the best looks like "
-                      f"{top['title'][:70]} on {top['host']}. "
-                      f"That site needs an account to download, so I can open it "
-                      f"for you.",
-            "instruction": "Offer to open the page. Do NOT claim to have the file."}
+            "spoken": why, "instruction": note}
 
 
 def register_all() -> None:
