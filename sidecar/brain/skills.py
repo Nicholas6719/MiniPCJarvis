@@ -2548,6 +2548,33 @@ SKILLS.append(Skill("general", None, [
     "how do you spell necessary", "what is 15 percent of 80", "how many ounces in a pound",
     "what does carpe diem mean", "why do cats purr", "how long do elephants live"]))
 
+# ---------------------------------------------------------------- confirming
+# What a skill is called when he has to HEAR it. Used for "did you mean ...,
+# sir?" when the brain nearly knew - see Orchestrator._ask_if_unsure.
+CONFIRM_AS = {
+    "holo_make": "render that in 3D",
+    "holo_show": "put that on the stage",
+    "holo_hide": "put it away",
+    "holo_move": "move it on the stage",
+    "holo_home": "put it back how it was",
+    "holo_check": "check it over",
+    "holo_again": "find a different design",
+    "project_start": "start a project for that",
+    "project_recall": "pull that project up",
+    "project_note": "note that down",
+    "project_list": "list the projects",
+    "render_stop": "stop the render",
+    "render_how": "check how the render is going",
+    "images": "show you pictures of that",
+    "model_find": "look for a model of that",
+}
+
+
+def confirm_as(name: str) -> str:
+    """The spoken name of a skill, for a confirmation question."""
+    return CONFIRM_AS.get(name) or (name or "").replace("_", " ")
+
+
 SKILL_BY_NAME = {s.name: s for s in SKILLS}
 # tools that map to exactly one skill are safe to learn from (set_mute is mute/unmute)
 _owners: dict[str, set[str]] = {}

@@ -24,6 +24,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tempfile
+os.environ.setdefault("JARVIS_DB",
+                      os.path.join(tempfile.mkdtemp(), "intent.db"))
 
 fails: list[str] = []
 
@@ -135,6 +138,69 @@ def main() -> int:
     unreachable = sorted(a for a in produced if a not in ht._ACTIONS)
     check("every action the parser can produce is one the stage accepts",
           not unreachable, f"unreachable: {unreachable}")
+
+    # ---------------------------------------------------------------- brain
+    # These need the embedding matrix, so they are last and cost a few seconds.
+    print("\n-- it asks when it nearly knows, instead of going quiet --")
+    import asyncio
+
+    async def brain_checks():
+        from brain.router import brain
+        from brain.skills import CONFIRM_AS, confirm_as
+        from config import config
+        await brain.load()
+        hard = float(config.get("brain", "threshold", default=0.82))
+        empty = {"stage": False, "project": False, "render": False}
+        stage = {"stage": True, "project": False, "render": False}
+
+        # "Make me a duck" ranked holo_make top at 0.68 and was BINNED, because
+        # decide() answered None for "nearly knew" and "no idea" alike.
+        got = await brain.decide("make me a duck", context=empty)
+        u = brain.unsure
+        check("a near miss is kept rather than dropped on the LLM",
+              got is None and bool(u) and u["skill"] == "holo_make",
+              f"decide={got and got[0].name} unsure={u and u.get('skill')}")
+        check("...and it can be said out loud as English",
+              confirm_as("holo_make") == "render that in 3D",
+              confirm_as("holo_make"))
+
+        # His confirmation is the lesson. The second time must not ask again.
+        if u:
+            await brain.learn("make me a duck", u["skill"], source="user")
+        again = await brain.decide("make me a duck", context=empty)
+        check("saying yes teaches it: the second time it just acts",
+              bool(again) and again[0].name == "holo_make"
+              and again[2] >= hard,
+              f"{again and again[0].name}@{again and round(again[2], 2)}")
+
+        # And it GENERALISES - the point of teaching a brain rather than a list.
+        near = await brain.decide("make me a dragon", context=empty)
+        check("...and a phrasing he never taught benefits too",
+              bool(near) and near[0].name == "holo_make",
+              f"{near and near[0].name}")
+
+        print("\n-- the screen decides what an ambiguous sentence means --")
+        a = await brain.decide("make it bigger", context=stage)
+        b = await brain.decide("make it bigger", context=empty)
+        check("'make it bigger' moves the MODEL when one is on the stage",
+              bool(a) and a[0].name == "holo_move", f"{a and a[0].name}")
+        check("...and the INTERFACE when the stage is empty",
+              bool(b) and b[0].name == "ui", f"{b and b[0].name}")
+
+        # The one that must never be guessed at: an edit rewrites the source and
+        # re-renders a part he may be about to print.
+        c = await brain.decide("make his eyes smaller", context=stage)
+        check("naming a feature is an edit, not a view change",
+              bool(c) and c[0].name == "holo_edit", f"{c and c[0].name}")
+        check("...but a bare 'make it bigger' never becomes one",
+              not (a and a[0].name == "holo_edit"),
+              "an edit is not undone by looking away")
+
+        check("every skill it can offer to guess has a spoken name",
+              all(confirm_as(k) != k.replace("_", " ") for k in CONFIRM_AS),
+              "'did you mean holo make, sir?' is not English")
+
+    asyncio.run(brain_checks())
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

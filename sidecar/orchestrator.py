@@ -288,6 +288,10 @@ class Orchestrator:
         self._heard_text: str | None = None         # transcript the endpoint check already produced
         self._last_active: float = time.time()      # when he was last needed, for auto-sleep
         self._clarify: clarify.Pending | None = None  # a question asked, answers already fetching
+        # A near-miss we asked him to confirm: {skill, args, text}. One
+        # question, one turn - it is dropped the moment anything else
+        # arrives, so it can never pile up or answer a later sentence.
+        self._unsure: dict | None = None
         self._end_silence: tuple[float, float] = (0.0, 0.0)   # (waited, budget) of the last turn
         self._armed_until: float = 0.0               # conversation window (no wake word needed)
         self._sounds = {k: f() for k, f in PALETTE.items()}  # built once, replayed
@@ -1117,6 +1121,54 @@ class Orchestrator:
             await bus.emit("error", summary=f"turn failed: {e}")
             await self.sm.to(State.IDLE, force=True)
 
+    # Skills whose confirmation is not worth the risk of a mis-heard yes.
+    # edit_part rewrites the source and re-renders a part he may be about to
+    # print; a wrong view is free and a wrong edit is not.
+    _NEVER_GUESS = frozenset({"holo_edit", "holo_revert"})
+
+    async def _ask_if_unsure(self, text: str, t_start: float) -> bool:
+        """One short question when the brain nearly knew. True if it was asked."""
+        from brain.skills import SKILL_BY_NAME
+        u = getattr(brain, "unsure", None)
+        if not u or not config.get("brain", "ask_when_unsure", default=True):
+            return False
+        name = u.get("skill")
+        skill = SKILL_BY_NAME.get(name)
+        if skill is None or name in self._NEVER_GUESS:
+            return False
+        from brain.skills import confirm_as
+        say = confirm_as(name)
+        line = f"Did you mean {say}, sir?"
+        self._unsure = {"skill": name, "args": u.get("args") or {},
+                        "text": text}
+        memory.log_turn("assistant", line)
+        await bus.emit("assistant_delta", text=line)
+        try:
+            await self.speak_line(line)
+        except Exception:
+            log.warning("could not speak the confirmation aloud", exc_info=True)
+        await bus.emit("turn_done",
+                       latency_ms=int((time.time() - t_start) * 1000), breakdown={})
+        if self.sm.state not in (State.ERROR, State.STARTING):
+            await self.sm.to(State.IDLE, force=True)
+        return True
+
+    async def _run_confirmed_guess(self, pend: dict, t_start: float) -> bool:
+        """He said yes: do it, and LEARN the wording so it never asks again."""
+        from brain.skills import SKILL_BY_NAME
+        skill = SKILL_BY_NAME.get(pend.get("skill") or "")
+        if skill is None:
+            return False
+        try:
+            # source="user" - his own confirmation is the best label there is,
+            # and it skips the checks meant for guesses made from tool use.
+            await brain.learn(pend["text"], skill.name, source="user")
+        except Exception:
+            log.debug("could not learn the confirmed phrasing", exc_info=True)
+        await self._reflex_turn(pend["text"],
+                                (skill, pend.get("args") or {}, 1.0), t_start)
+        return True
+
     async def _run_turn(self, audio: np.ndarray) -> None:
         if registry.has_pending:          # answering a question, not starting a turn
             pre, self._heard_text = self._heard_text, None
@@ -1190,6 +1242,14 @@ class Orchestrator:
             return
         memory.log_turn("user", text)
         facts.reset_evidence()
+        # ---- "did you mean X?" is still open: this may be the answer -------
+        if self._unsure is not None:
+            pend, self._unsure = self._unsure, None
+            if YES_WORDS.match(text or ""):
+                if await self._run_confirmed_guess(pend, t_start):
+                    return
+            # Anything else is not a yes. Fall through and treat it as the
+            # request it is - he asked for something else, not for nothing.
         # ---- a question he was asked is still open: this may be the answer ----
         if self._clarify is not None:
             if await self._answer_clarification(text, t_start):
@@ -1212,6 +1272,9 @@ class Orchestrator:
         if reflex and (not reflex[0].llm_after
                        or (reflex[0].direct_if is not None and reflex[0].direct_if(text))):
             await self._reflex_turn(text, reflex, t_start)
+            return
+        # ---- it nearly knew: one short question rather than a wrong guess ----
+        if reflex is None and await self._ask_if_unsure(text, t_start):
             return
         # ---- realm 1: a stored, web-verified, timeless fact answers instantly ----
         if reflex is None:
