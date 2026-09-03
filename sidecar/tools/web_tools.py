@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import httpx
 
@@ -131,6 +132,11 @@ _last_subject: dict = {"q": ""}
 _last_images: list = []
 
 
+# When a set of pictures was last put on screen. Read by the
+# orchestrator to keep the conversation window open while he looks.
+last_images_at = 0.0
+
+
 async def show_images(query: str, count: int = 8) -> dict:
     """Find pictures and display them in the JARVIS interface."""
     from search_brave_web import brave_web
@@ -171,6 +177,11 @@ async def show_images(query: str, count: int = 8) -> dict:
     _last_subject["q"] = query
     _last_images.clear()
     _last_images.extend(imgs)
+    # WHEN THEY WENT UP, so the conversation window can stay open while he is
+    # reading them. Eight seconds is not long enough to look at eight pictures
+    # and say which one you meant.
+    global last_images_at
+    last_images_at = time.time()
     await bus.emit("images", query=query, images=imgs)
     return {"shown": len(imgs), "query": query,
             "instruction": "The pictures are now displayed on screen. Say so briefly."}

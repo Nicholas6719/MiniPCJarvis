@@ -582,6 +582,19 @@ class Orchestrator:
         except Exception:
             log.debug("could not check the stage for the window length",
                       exc_info=True)
+        # PICTURES ARE A STAGE TOO. He asked for eight of them, and eight
+        # seconds is gone before he has looked at the third — so saying "the
+        # second one" needed the wake word again, which is the friction this
+        # window exists to remove. Shorter than the hologram's: a model is
+        # something he works on for minutes, a grid is something he picks from.
+        try:
+            from tools import web_tools
+            fresh = time.time() - getattr(web_tools, "last_images_at", 0.0)
+            if fresh < 30.0:
+                win = max(win, float(config.get(
+                    "conversation", "images_window_s", default=20)))
+        except Exception:
+            log.debug("could not check the picture panel", exc_info=True)
         if mode in ("wake_word", "both") and win > 0:
             self._armed_until = time.time() + win
             asyncio.create_task(bus.emit("conversation", armed=True,
