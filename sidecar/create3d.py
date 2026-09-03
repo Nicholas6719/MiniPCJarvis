@@ -55,7 +55,7 @@ from config import config
 
 log = logging.getLogger("jarvis.create3d")
 
-TIERS = (0, 1, 2, 3, 4, 5)
+TIERS = (0, 1, 2, 3, 4, 5, 6)
 
 # Below this in its SMALLEST dimension, a generated part is a sliver rather than
 # a part: no printer can lay it down and nobody asked for it. Half a millimetre
@@ -86,6 +86,9 @@ TIER_NOTE = {
     # known.
     5: "I'll look for one somebody has already made, and build it from a "
        "reference picture if nobody has",
+    # SAID BEFORE THE WORK RUNS, like tier 5's, so it describes the plan.
+    6: "made piece by piece — each part built on its own, so you can take them "
+       "one at a time",
 }
 
 # Words that say he wants a FLAT emblem out of a picture rather than a 3D
@@ -169,6 +172,14 @@ def choose_tier(description: str = "", image_path: str = "") -> int:
     # shapes nobody writes as code, and a reconstruction of a photograph is
     # genuinely the better answer for them even though it is soft and
     # unmeasured. Being honest about which is which is the whole point of tiers.
+    # A THING WITH NAMED PIECES IS BUILT AS PIECES. "Iron Man Mark 3 SUIT" is
+    # the case he described: a whole suit cannot be reconstructed from one
+    # photograph, but a helmet can be found and a gauntlet can be rebuilt from a
+    # picture of a gauntlet — and then he can zoom into each. Tier 6 falls back
+    # to building the thing whole when it turns out not to come apart.
+    import components
+    if components.worth_splitting(desc):
+        return 6
     if _ORGANIC.search(desc):
         # SOMEBODY HAS ALREADY MADE THIS ONE, AND MADE IT PROPERLY.
         #
@@ -1446,6 +1457,19 @@ async def build(tier: int, description: str = "", image_path: str = "",
         r = await from_text(description, name, skip=skip)
     elif tier == 5:
         r = await from_the_web(description, name, skip=skip)
+    elif tier == 6:
+        # TAKE THE REQUEST APART, NOT THE MESH. A suit cannot be reconstructed
+        # from one photograph and OpenSCAD cannot sculpt armour — but a helmet
+        # can be found, and a gauntlet can be reconstructed from a picture of a
+        # gauntlet. See `components` for why the placement is arithmetic.
+        import components
+        r = await components.from_components(description, name)
+        if r.get("no_components") or (r.get("error") and not r.get("stl")):
+            # Not made of anything nameable after all, so make the thing itself
+            # rather than refusing him over a decomposition he never asked for.
+            log.info("%r did not come apart; building it whole", description[:40])
+            r = await build(choose_tier(description, image_path), description,
+                            image_path, name, skip=skip)
     else:
         return {"error": f"I don't have a way to make that (tier {tier})"}
 

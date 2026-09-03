@@ -59,7 +59,7 @@ log = logging.getLogger("jarvis.render.estimates")
 # at 0.12-0.30 s on this machine; seeded at 2 s so a cold OpenSCAD start is still
 # inside it, and comfortably under the ask threshold — nobody wants to be asked
 # permission to spend a fifth of a second.
-SEED = {0: 2.0, 1: 25.0, 2: 6.0, 3: 35.0, 4: 55.0, 5: 45.0}
+SEED = {0: 2.0, 1: 25.0, 2: 6.0, 3: 35.0, 4: 55.0, 5: 45.0, 6: 300.0}
 
 KEEP = 9                       # how many measured runs count toward the median
 _PATH = APP_DIR / "render_times.json"

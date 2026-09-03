@@ -491,3 +491,30 @@ def assembly_payload(parts, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     d["bodies"] = lab.astype(int).tolist()
     d["body_centres"] = [m["centre"] for m in meta]
     return d
+
+
+def write_stl(tris, path: str) -> str:
+    """Write triangles as a binary STL. Returns the path.
+
+    Normals are written as zero, which is legal and universally accepted:
+    every consumer recomputes them from the winding, and a normal we compute
+    here is one more thing that can disagree with the geometry it describes.
+    """
+    import numpy as np
+    t = np.asarray(tris, dtype="<f4").reshape(-1, 3, 3)
+    n = len(t)
+    # One buffer, one write. Fifty bytes a triangle appended in a loop is
+    # minutes on a mesh of any size.
+    buf = np.zeros((n, 50), dtype=np.uint8)
+    buf[:, 12:48] = t.reshape(n, 9).view(np.uint8).reshape(n, 36)
+    with open(path, "wb") as fh:
+        fh.write(b"jarvis" + b"\0" * 74)
+        fh.write(int(n).to_bytes(4, "little"))
+        fh.write(buf.tobytes())
+    return path
+
+
+def translated(tris, offset) -> "np.ndarray":
+    """The same triangles moved. Used to lay separate parts out side by side."""
+    import numpy as np
+    return np.asarray(tris, dtype=np.float32) + np.asarray(offset, dtype=np.float32)
