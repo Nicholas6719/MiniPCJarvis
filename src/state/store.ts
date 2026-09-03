@@ -118,6 +118,9 @@ export interface HoloState {
 export interface ImagesState {
   query: string;
   images: { src: string; alt: string; w: number; h: number; page?: string }[];
+  // The FULL set, kept when "just give me one to four" narrows `images`, so
+  // "show me all of them" has something to come back to.
+  all?: { src: string; alt: string; w: number; h: number; page?: string }[];
   focus?: number | null;   // "bigger" / "the second one" — featured image index
   ts: number;
 }
@@ -154,6 +157,11 @@ export interface TurnState {
 interface Store {
   state: JarvisState;
   wakeMode: string;
+  // Whether the webcam is actually on. The camera panel no longer takes the
+  // stage away from a hologram, so the hologram needs its own way to know —
+  // it shows the feed small, in the corner, so he can see what the hand
+  // tracker sees while he is reaching for the model.
+  cameraOn: boolean;
   stage: StageState | null;
   web: WebState | null;
   images: ImagesState | null;
@@ -232,6 +240,7 @@ function patchStep(turn: TurnState | null, i: number, patch: Partial<RunStep>): 
 export const useStore = create<Store>((set, get) => ({
   state: "offline",
   wakeMode: "push_to_talk",
+  cameraOn: false,
   stage: null,
   web: null,
   images: null,
@@ -434,6 +443,7 @@ export const useStore = create<Store>((set, get) => ({
           // the gestures worked perfectly on a hologram nobody could see.
           // The "WATCHING YOUR HANDS" badge is what keeps the live camera
           // honest here — the panel is not the only way he is told.
+          set({ cameraOn: on });
           if (on) {
             if (get().stage?.kind !== "holo") {
               get().openStage("camera", { holdUntil: 0, pinned: true });
@@ -568,7 +578,10 @@ export const useStore = create<Store>((set, get) => ({
         break;
       case "images":
         set((st) => ({
-          images: { query: evt.query, images: evt.images ?? [], ts: evt.ts },
+          // `all` is the unfiltered set; `images` is what is on screen. A new
+          // search resets both, so a narrowed grid never outlives its query.
+          images: { query: evt.query, images: evt.images ?? [],
+                    all: evt.images ?? [], ts: evt.ts },
           stage: { kind: "images" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
@@ -724,6 +737,26 @@ export const useStore = create<Store>((set, get) => ({
           else if (action === "pin") get().pinStage(true, evt.minutes ?? undefined);
           else if (action === "unpin") get().pinStage(false);
           else if (action === "restore") { /* restored above; nothing more to do */ }
+        }
+        if (action === "range") {
+          // "just give me one to four" — narrow the grid rather than featuring
+          // one picture. The numbers he says are 1-based; the list is 0-based.
+          set((st) => {
+            if (!st.images) return {};
+            const all = st.images.all ?? st.images.images;
+            const lo = Math.max(0, Number(evt.from ?? 0));
+            const hi = Math.min(all.length - 1, Number(evt.to ?? all.length - 1));
+            if (hi < lo) return {};
+            return {
+              images: { ...st.images, all, images: all.slice(lo, hi + 1), focus: null },
+              stage: {
+                kind: "images" as StageKind,
+                openedTs: st.stage?.kind === "images" ? st.stage.openedTs : Date.now(),
+                holdUntil: Date.now() + ASKED_FOR_HOLD_MS,
+                pinned: st.stage?.pinned ?? false,
+              },
+            };
+          });
         }
         if (action === "focus") {
           // "bigger" / "the second one" — feature one image; null returns to the grid

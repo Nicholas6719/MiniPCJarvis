@@ -124,6 +124,11 @@ async def research(query: str, num_sources: int = 4) -> dict:
 # window decides whether he needs the wake word, this decides what JARVIS
 # remembers, and they are different questions.
 _last_subject: dict = {"q": ""}
+# The pictures currently on screen, in the order they are laid out — which is the
+# order he counts them in: four across the top, then back to the left and down.
+# Kept so "focus on number six" and "3D print number three" have something to
+# point AT; the grid lives in the HUD and the sidecar could not see it.
+_last_images: list = []
 
 
 async def show_images(query: str, count: int = 8) -> dict:
@@ -164,12 +169,60 @@ async def show_images(query: str, count: int = 8) -> dict:
     if not imgs:
         return {"error": "no images found"}
     _last_subject["q"] = query
+    _last_images.clear()
+    _last_images.extend(imgs)
     await bus.emit("images", query=query, images=imgs)
     return {"shown": len(imgs), "query": query,
             "instruction": "The pictures are now displayed on screen. Say so briefly."}
 
 
+async def focus_image(number: int = 0, first: int = 0, last: int = 0) -> dict:
+    """Enlarge one of the pictures on screen, or narrow the grid to a range.
+
+    HIS NUMBERING, which is simply how the grid is laid out: four across the
+    top, then back to the left and down — so picture five sits under picture
+    one. He counts from ONE; the HUD indexes from zero.
+
+    This exists as a TOOL as well as a reflex because the reflex cannot cover
+    every phrasing, and without it the model had no way to do this at all: the
+    `ui` skill carries no tool, it only emits an event. "Focus on number 6" fell
+    through to the model, and the model had nothing to reach for.
+
+    It also returns the picture's URL, so "focus on number three and give me a
+    3D printout of that" can be two calls instead of a dead end.
+    """
+    total = len(_last_images)
+    if not total:
+        return {"error": "there are no pictures on screen, sir"}
+    if first and last:
+        lo, hi = max(1, min(first, last)), min(total, max(first, last))
+        await bus.emit("ui", action="range", **{"from": lo - 1, "to": hi - 1})
+        return {"showing": f"{lo} to {hi}", "of": total}
+    n = int(number or 0)
+    if not 1 <= n <= total:
+        return {"error": f"there are only {total} pictures, sir"}
+    img = _last_images[n - 1] or {}
+    await bus.emit("ui", action="focus", index=n - 1)
+    return {"focused": n, "of": total, "url": img.get("src", ""),
+            "page": img.get("page", ""),
+            "instruction": "It is now shown large. If he asked for anything to be "
+                           "made FROM it, pass this url as image_path."}
+
+
 def register_all() -> None:
+    registry.register(Tool(
+        name="focus_image",
+        description="Enlarge one of the pictures currently on screen by its "
+                    "number (he counts from 1, left to right then down), or "
+                    "narrow the grid to a range with first/last. Returns the "
+                    "picture's url so it can be used to make something.",
+        parameters={"type": "object", "properties": {
+            "number": {"type": "integer", "minimum": 1,
+                       "description": "which picture, counting from 1"},
+            "first": {"type": "integer", "minimum": 1},
+            "last": {"type": "integer", "minimum": 1}},
+            "required": []},
+        risk=Risk.SAFE, handler=focus_image, timeout=15))
     registry.register(Tool(
         name="show_images",
         description="Find pictures of something and display them on the JARVIS "

@@ -203,6 +203,19 @@ CASES = [
     ("does it fit on the bed", "holo_check"),
     ("will it need supports", "holo_check"),
     # Editing the REAL part, which is a different thing from moving the view.
+    # PICKING A PICTURE BY NUMBER, which is how he refers to them. "focus on
+    # number 6" went to the WINDOW switcher at 1.00 and sent JARVIS looking for
+    # a window called "number 6"; "image number 6" had no reflex at all.
+    ("image number 6", "ui"),
+    ("show me image 4", "ui"),
+    ("number 3", "ui"),
+    ("just give me 1 through 4", "ui"),
+    ("give me 1-4", "ui"),
+    # ...and switching windows must be untouched by that
+    ("focus on spotify", "switch"),
+    ("switch to chrome", "switch"),
+    # ...and a COUNT of images is still a search, not a pick
+    ("show me 5 images of spiderman", "images"),
     ("make the hole bigger", "holo_edit"),
     ("make it taller", "holo_edit"),
     ("round off the corners", "holo_edit"),

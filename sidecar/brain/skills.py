@@ -543,6 +543,14 @@ def slots_switch(t: str) -> dict | None:
     # "switch to a british voice" is about HIS voice, not a window title
     if re.search(r"\b(?:voice|accent|language|tone)\b", name):
         return None
+    # NOR IS A NUMBER A WINDOW. "focus on number 6" means the sixth picture on
+    # screen; it came here at 1.00 confidence and sent JARVIS looking for a
+    # window called "number 6". Nobody names a window after a bare number, so
+    # declining lets the picture-picking skill have it instead.
+    if re.fullmatch(r"(?:the\s+)?(?:image|picture|photo|pic|number|no\.?|#)?\s*"
+                    r"(?:number\s*)?\d{1,2}\s*(?:one|image|picture|photo|pic)?",
+                    name, re.I):
+        return None
     return {"title": name} if 1 < len(name) <= 40 else None
 
 
@@ -636,6 +644,37 @@ _ORDINALS = {"first": 0, "second": 1, "third": 2, "fourth": 3, "fifth": 4, "sixt
              "seventh": 6, "eighth": 7, "1st": 0, "2nd": 1, "3rd": 2, "4th": 3,
              "one": 0, "two": 1, "three": 2, "four": 3}
 
+# PICKING A PICTURE BY NUMBER, which is how he actually refers to them. The
+# grid is four across and two down, so the number IS the layout order: 1-4 along
+# the top, then back to the left for 5. Nothing here needs to know that — the
+# index is the position in the list — but it is the thing he is reading off the
+# screen, so it is written down.
+_CARD = (r"(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|"
+         r"eleven|twelve)")
+_CARD_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+               "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+               "twelve": 12}
+
+
+def _num_word(w: str) -> int | None:
+    w = (w or "").strip().lower()
+    if w.isdigit():
+        return int(w)
+    return _CARD_WORDS.get(w)
+
+
+# "image number 6", "image 4", "focus on number 3", "picture six", "number 6".
+# A bare number needs "number"/"image"/"picture" in front of it: "show me 5
+# images of spiderman" must stay a search, not a demand for image five.
+_IMAGE_INDEX = re.compile(
+    r"\b(?:image|picture|photo|pic|number|no\.?|#)\s*"
+    rf"(?:number\s*)?(?P<n>{_CARD})\b"
+    r"|\bfocus\s+(?:on\s+)?(?:the\s+)?(?:image|picture|photo|pic|number|#)?\s*"
+    rf"(?P<n2>{_CARD})\b", re.I)
+# "just give me 1 through 4", "only 2 to 5", "show 1-4"
+_IMAGE_RANGE = re.compile(
+    rf"\b({_CARD})\s*(?:-|–|to|through|thru|until)\s*({_CARD})\b", re.I)
+
 _KEEP_FOR = re.compile(r"\b(?:keep|pin|hold)\b.*?\bfor\s+(?:the next\s+)?(an?\s+|\d+\s*|one\s+|two\s+|five\s+|ten\s+|fifteen\s+|twenty\s+|thirty\s+)?(hour|hours|minutes?|min)\b")
 # Named for its one job. This used to be a second `_NUM_WORDS`, silently
 # shadowing the fuller dict at the top of the file for every runtime caller —
@@ -661,6 +700,29 @@ def slots_ui(t: str) -> dict | None:
         return {"action": "pin"}
     if re.search(r"\bunpin\b|\bstop pinning\b|\blet it (?:go|fade)\b", t):
         return {"action": "unpin"}
+    # A RANGE: "just give me one to four", "only show 2-5".
+    # Checked before the single-index rules, or "1 to 4" is read as "1".
+    mr = _IMAGE_RANGE.search(t)
+    if mr:
+        lo = _num_word(mr.group(1))
+        hi = _num_word(mr.group(2))
+        if lo and hi and 1 <= lo <= hi <= 24:
+            return {"action": "range", "from": lo - 1, "to": hi - 1}
+
+    # ONE OF THE PICTURES, BY NUMBER. His numbering, and it is what the grid
+    # already does: four across the top, then back to the left and down — so the
+    # index is simply the order they were laid out in.
+    #
+    # This used to accept ORDINALS only ("the third one"), and cardinals are how
+    # he actually talks: "image number 6" got no reflex at all, and "focus on
+    # number 6" went to the WINDOW switcher, which went looking for a window
+    # called "number 6". The word "focus" was owned by switching windows.
+    mi = _IMAGE_INDEX.search(t)
+    if mi:
+        n = _num_word(mi.group("n") or mi.group("n2") or "")
+        if n and 1 <= n <= 24:
+            return {"action": "focus", "index": n - 1}
+
     # image focus: "bigger", "zoom in on the third one", "show me the second one"
     if re.search(r"\b(?:bigger|enlarge|zoom in|blow (?:it|that) up|full ?size)\b", t) or \
        re.search(r"\b(?:show|focus|zoom)\b.*\bthe\s+(?:first|second|third|fourth|fifth|sixth|seventh|eighth|1st|2nd|3rd|4th)\s+(?:one|image|picture|photo|pic)\b", t):
@@ -2157,7 +2219,18 @@ SKILLS: list[Skill] = [
         "settings history", "show diagnostics", "bring that back", "bring the pictures back",
         "keep it", "keep it for ten minutes", "keep that up for an hour",
         "make it bigger", "bigger", "zoom in on the third one", "show me the second one bigger",
-        "back to the grid"],
+        "back to the grid",
+        # PICKING A PICTURE BY NUMBER. "focus on number 6" went to the WINDOW
+        # switcher at 1.00 and went looking for a window called "number 6" —
+        # "focus" belonged to switching windows and nothing here claimed it.
+        # NOT "focus on number 6" as a seed: _CANON erases the digit, so it
+        # canonicalises onto switch's "focus on spotify" and the collision gate
+        # rightly refuses it. slots_switch declines a bare number instead, which
+        # is the more honest fix — nobody names a window after one.
+        "image number 6", "show me image 4", "number 3",
+        "picture six", "the sixth one",
+        # ...and a range of them
+        "just give me 1 through 4", "only show 2 to 5", "give me 1-4"],
         slots=slots_ui, speak=say_ui),
     Skill("wakeack", None, [
         # "wake up" embeds near the sleep cluster — without its own skill the guard in

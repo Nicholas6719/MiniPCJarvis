@@ -2436,6 +2436,62 @@ and `_ensure` was stubbed without assigning `self._stream`, so `abort()` found
 nothing to abort and `_release` never ran. If a fake device does not do what the
 real `_ensure` does, the test is measuring the fake.
 
+## 2026-09-02 — barge-in, the camera he could not see, and picking a picture
+
+Three things from a good test session, and each had a cause worth writing down.
+
+**BARGE-IN WAS FIRING AND THEN BEING UNDONE.** He cut in, JARVIS stopped talking,
+and then nothing: he had to wait about five seconds and say the wake word again.
+Barge-in works — it cancels the speech, moves to LISTENING and arms the capture —
+and then the turn it interrupted carried on unwinding and reached
+`to(IDLE, force=True)`, wiping that a few milliseconds later.
+
+**A finished turn may not put the state back when a newer one has already taken
+it.** `_NEXT_TURN_STATES` (LISTENING, PROCESSING) is now checked at both places a
+turn ends. This is a general shape, not a barge-in special case: anything that
+starts a new turn from inside an old one hits it.
+
+**THE CAMERA HE COULD NOT SEE WAS MY DOING.** Earlier the same day I stopped the
+camera panel taking the stage away from a hologram, because it hid the model he
+was reaching for. Correct — and it left him with no way to see the camera AT ALL
+in hand mode. His transcript shows him fighting it: "Toggle camera view?" ->
+"Camera off, sir." A small feed now sits in the hologram's bottom-right whenever
+the camera is on, MIRRORED, so his hand moving right moves the picture right —
+matching `grip_point(mirrored=True)`, so what he sees and what the tracker reads
+agree.
+
+**PICKING A PICTURE BY NUMBER — three faults.**
+
+1. "focus on number 6" routed to the WINDOW SWITCHER at 1.00 and went looking for
+   a window called "number 6". The word "focus" belonged to switching windows and
+   nothing else claimed it. `slots_switch` now declines a bare number: nobody
+   names a window after one. NOT fixed with seeds — "focus on number 6"
+   canonicalises onto switch's "focus on spotify" (`_CANON` erases the digit) and
+   the collision gate rightly refused it.
+2. "image number 6" had no reflex at all. The parser understood ORDINALS ("the
+   third one") and never the cardinals he actually says. Numbers and ranges now
+   parse: "image number 6", "show me image 4", "number 3", "picture six",
+   "just give me 1 through 4", "give me 1-4". "show me 5 images of spiderman"
+   stays a SEARCH, which is the trap in that neighbourhood.
+3. The `ui` skill carries no tool — it only emits an event — so the MODEL could
+   not do this at all for phrasings the reflex misses. `focus_image` is that
+   tool, and it returns the picture's URL so "focus on number three and give me a
+   3D printout of that" has something to chain with.
+
+**AND THE NUMBERS WERE INVISIBLE, which nearly shipped.** The tiles now carry
+their number — and on the first deploy nothing appeared. Not a rendering bug:
+every tile overlay (`imtile__n`, `imtile__best`, `imtile__src`) is `.mono-sub`,
+and `body.compact .mono-sub { display: none }`. Compact turns on below 1600px and
+**his window is about 1000px, so compact is ALWAYS on for him** — those overlays
+have never been visible. Restored for the number, which is the label he reads the
+command off.
+
+**How that was caught is the lesson.** The full-screen screenshot looked fine;
+the badge is 16px in a 2560px shot scaled to fit. Cropping to the grid and
+doubling it made it obvious in one glance. **"I cannot see it" and "it is not
+there" are indistinguishable in a downscaled screenshot** — crop before
+believing either.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

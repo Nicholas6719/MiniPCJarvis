@@ -56,6 +56,13 @@ body.compact .holo__head .mono-sub,
 body.compact .holo__dims,
 body.compact .holo__check { display: block; }
 body.compact .holo__head { display: flex; }
+/* ...and the picture numbers, for the same reason. He refers to them by number
+   — "image number 6" — so the number is not a caption, it is the label he is
+   reading the command off. His window is about 1000px, so `compact` is ALWAYS
+   on for him: a badge hidden in compact is a badge he never sees. That is why
+   the numbers were invisible on the first try, along with BEST MATCH and the
+   source host, all of which are .mono-sub. */
+body.compact .imtile__n { display: block; }
 
 /* ---------------------------------------------------------------- keyframes */
 @keyframes arcSpin { to { transform: rotate(360deg); } }
@@ -871,3 +878,39 @@ body.compact .holo__layers { display: block; }
    the model across the whole frame there are no columns to divide, and it was
    left standing in the middle of the bed like a post through the part. */
 .frame--holo .column { opacity: 0; }
+
+/* The camera, small, in the corner of the hologram. He asked for it because he
+   cannot tell how the tracker sees his hands otherwise — and the full camera
+   panel deliberately no longer takes the stage away from a model he is reaching
+   for, so this is the only view left. */
+.holo__cam {
+  position: absolute; right: calc(14px * var(--s)); bottom: calc(14px * var(--s));
+  width: calc(200px * var(--s));
+  border: 1px solid color-mix(in srgb, var(--rim) 26%, transparent);
+  background: color-mix(in srgb, #000 55%, transparent);
+  overflow: hidden; pointer-events: none; z-index: 5;
+}
+.holo__cam-img {
+  display: block; width: 100%; height: auto; opacity: .82;
+  /* MIRRORED: he is looking at himself, so his hand moving right must move the
+     picture right. The tracker flips the same way (grip_point mirrored=true),
+     so what he sees and what it reads agree. */
+  transform: scaleX(-1);
+}
+.holo__cam-tag {
+  position: absolute; left: calc(6px * var(--s)); bottom: calc(4px * var(--s));
+  color: var(--rim); letter-spacing: .14em;
+  text-shadow: 0 0 calc(6px * var(--s)) #000;
+}
+body.compact .holo__cam { display: block; }
+
+/* The number on each picture. He asks for them by position — "image number 6" —
+   and had to count the tiles to know which was which. */
+.imtile__n {
+  position: absolute; left: calc(6px * var(--s)); top: calc(5px * var(--s));
+  min-width: calc(16px * var(--s)); text-align: center;
+  padding: calc(1px * var(--s)) calc(4px * var(--s));
+  color: var(--rim); background: color-mix(in srgb, #000 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rim) 30%, transparent);
+  font-variant-numeric: tabular-nums; letter-spacing: .06em;
+}

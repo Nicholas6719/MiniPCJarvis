@@ -177,6 +177,19 @@ _NO_SUBJECT_WORDS = {
 }
 
 
+# A TURN MAY NOT PUT THE STATE BACK WHEN A NEWER ONE HAS ALREADY TAKEN IT.
+#
+# Barge-in moves straight to LISTENING and arms the capture, and then the turn
+# that was interrupted carries on unwinding and reached `to(IDLE, force=True)` —
+# wiping the listening state a few milliseconds after it was set. What he saw:
+# he cut in, JARVIS stopped talking, and then nothing happened; he had to wait
+# and say the wake word all over again.
+#
+# These are the states that mean "something newer is in progress". Ending a turn
+# must leave them alone.
+_NEXT_TURN_STATES = frozenset({State.LISTENING, State.PROCESSING})
+
+
 def _teachable(text: str) -> bool:
     """Does this look like an instruction, or like a person talking?
 
@@ -1546,7 +1559,8 @@ class Orchestrator:
             log.exception("could not ask the clarifying question")
         await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
                        breakdown={}, reflex="clarify", text=amb.question)
-        if self.sm.state not in (State.ERROR, State.SLEEPING):
+        if self.sm.state not in (State.ERROR, State.SLEEPING,
+                                 *_NEXT_TURN_STATES):
             await self.sm.to(State.IDLE, force=True)
         # Answer it without saying his name again — but only if he is IN the room.
         # A question asked over Telegram must not open the microphone here, or
@@ -1674,7 +1688,7 @@ class Orchestrator:
                 self._drop_clarification("he went to sleep")
                 await self.sm.to(State.SLEEPING, force=True)
                 await bus.emit("conversation", armed=False)
-            else:
+            elif self.sm.state not in _NEXT_TURN_STATES:
                 await self.sm.to(State.IDLE, force=True)
 
     async def ask_confirmation(self, tool: str, args: dict) -> None:

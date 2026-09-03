@@ -26,7 +26,7 @@
 // a face flagged as facing "down" would have pointed sideways on screen. So an
 // inner `orient` group rotates the model -90° about X once, and everything
 // downstream — bed, overhangs, toolpath — lives in that group and agrees.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 // Named imports, not `import * as THREE`. The namespace form pulls the whole
 // library past the bundler's tree-shaker; this build only needs a scene, a
 // camera, a renderer and three material types.
@@ -37,7 +37,7 @@ import {
 } from "three";
 import { useStore } from "../state/store";
 import type { HoloState } from "../state/store";
-import { api } from "../lib/sidecar";
+import { api, sidecarInfo } from "../lib/sidecar";
 
 const CYAN = 0x27c7ff;
 const AMBER = 0xffb454;       // overhangs: the one thing allowed to alarm
@@ -84,6 +84,47 @@ type Check = {
   error?: string;
 };
 
+/** The camera, small, in the corner of the hologram.
+ *
+ * His ask: "I want to be able to see the camera view when I'm using the hand
+ * mode... I should be able to see my camera on the bottom right or something.
+ * I can see how it sees my hands, so I can work with it like that."
+ *
+ * He is right, and it is partly my doing that he could not: the camera panel
+ * used to take the whole stage, which hid the model he was reaching for, so I
+ * stopped it doing that — and left him with no way to see the camera at all
+ * while a hologram was up. This is the other half of that change.
+ *
+ * MIRRORED, because he is looking at himself: moving his hand right must move
+ * the picture right. The tracker already flips the same way (`grip_point`
+ * mirrored=true), so the two agree.
+ */
+function HandCam() {
+  const [src, setSrc] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      const { port, token } = await sidecarInfo();
+      if (dead) return;
+      // cache-buster, same reason as the full camera stage: without it a re-open
+      // reuses the finished stream and shows one frozen frame.
+      setSrc(`http://127.0.0.1:${port}/camera/stream`
+        + `?token=${encodeURIComponent(token)}&t=${Date.now()}`);
+    })();
+    return () => { dead = true; setSrc(""); };
+  }, []);
+  if (failed) return null;
+  return (
+    <div className="holo__cam">
+      {src && <img className="holo__cam-img" src={src} alt=""
+                   onError={() => setFailed(true)} />}
+      <div className="holo__cam-tag mono-sub">HANDS</div>
+    </div>
+  );
+}
+
+
 export function HoloStage() {
   const host = useRef<HTMLDivElement>(null);
   const label = useRef<HTMLDivElement>(null);
@@ -103,6 +144,9 @@ export function HoloStage() {
   const checkTs = holo?.check?.ts ?? 0;
   const showLayers = holo?.showLayers ?? false;
   const cmd = holo?.cmd;
+  // The camera panel no longer takes the stage from a hologram, so this
+  // corner view is the only way he can see what the tracker sees.
+  const cameraOn = useStore((s) => s.cameraOn);
 
   useEffect(() => {
     const el = host.current;
@@ -636,6 +680,7 @@ export function HoloStage() {
         <div ref={scale} className="holo__layers mono-sub">
           <span className="holo__layers-n" />
         </div>
+        {cameraOn && <HandCam />}
         {holo?.hands && holo.hands !== "off" && (
           <div className="holo__hands mono-sub" data-holding={holo.hands === "holding"}>
             {holo.hands === "holding" ? "HOLDING" : "WATCHING YOUR HANDS"}

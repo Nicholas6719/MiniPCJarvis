@@ -210,6 +210,25 @@ def main() -> int:
                  "what is the cpu at"):
         check(f"still learns {good!r}", _teachable(good))
 
+    # --- a barge-in must survive the turn it interrupted --------------------
+    # He cut in, JARVIS stopped talking, and then nothing happened: he had to
+    # wait about five seconds and say the wake word again. Barge-in moves
+    # straight to LISTENING and arms the capture — and then the interrupted turn
+    # carried on unwinding and called `to(IDLE, force=True)`, wiping it
+    # milliseconds later. A finished turn may not put the state back when a
+    # newer one has already taken it.
+    from orchestrator import _NEXT_TURN_STATES
+    check("listening counts as a newer turn in progress",
+          State.LISTENING in _NEXT_TURN_STATES)
+    check("...and so does processing", State.PROCESSING in _NEXT_TURN_STATES)
+    check("...but idle does not, or a turn could never end",
+          State.IDLE not in _NEXT_TURN_STATES)
+    for meth in ("_finish_reflex", "_ask_clarification"):
+        src_m = inspect.getsource(getattr(orch_mod.Orchestrator, meth))
+        check(f"{meth} checks before forcing idle",
+              "_NEXT_TURN_STATES" in src_m,
+              "the interrupted turn stomps the barge-in that replaced it")
+
     check("going to sleep takes the hologram down",
           "hide_hologram" in inspect.getsource(orch_mod),
           "a part left projected through sleep is just stuck")

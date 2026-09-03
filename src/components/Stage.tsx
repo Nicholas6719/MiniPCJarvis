@@ -304,13 +304,22 @@ function ImagesStage() {
       ) : (
         <>
           <div className="images__note">
-            <span>{imgs.length} images — say <span style={{ color: "var(--rim)" }}>"bigger"</span> or <span style={{ color: "var(--rim)" }}>"the second one"</span></span>
+            {/* Teach the numbering that is now printed on the tiles. The old
+                hint offered "the second one", which was the only phrasing that
+                worked; he asks for "image number 6". */}
+            <span>{imgs.length} images — say <span style={{ color: "var(--rim)" }}>"image number 6"</span> or <span style={{ color: "var(--rim)" }}>"give me 1 to 4"</span></span>
             <span className="mono-sub">DUCKDUCKGO IMAGES · KEYLESS</span>
           </div>
           <div className="images__grid">
             {imgs.slice(0, 8).map((im, i) => (
               <div key={i} className={`imtile ${i === 0 ? "imtile--best" : ""}`}>
                 <img src={im.src} alt={im.alt} loading="lazy" />
+                {/* The number he says out loud. He refers to these by position —
+                    "image number 6" — and until now nothing on screen told him
+                    which one that was; he had to count the tiles himself. Four
+                    across, then back to the left and down, which is exactly the
+                    order they are laid out in. */}
+                <div className="imtile__n mono-sub">{i + 1}</div>
                 {i === 0 && <div className="imtile__best mono-sub">BEST MATCH</div>}
                 <div className="imtile__src mono-sub">{im.page ? hostOf(im.page) : ""}</div>
               </div>
