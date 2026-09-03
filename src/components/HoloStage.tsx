@@ -143,6 +143,7 @@ export function HoloStage() {
   // rebuilding it, or every "turn it" would restart the spin and flash the panel.
   const applyCmd = useRef<((c: NonNullable<HoloState["cmd"]>) => void) | null>(null);
   const holo = useStore((s) => s.holo);
+  const project = useStore((s) => s.project);
   const checkTs = holo?.check?.ts ?? 0;
   const showLayers = holo?.showLayers ?? false;
   const cmd = holo?.cmd;
@@ -721,6 +722,7 @@ export function HoloStage() {
       <div className="holo" style={{position:"relative"}}>
         <div className="holo__head mono-sub">
           <span className="holo__name">{holo?.name ?? "hologram"}</span>
+          {project && <span className="holo__project">{project}</span>}
           <span ref={label} className="holo__dims" />
         </div>
         <div ref={host} className="holo__canvas" />

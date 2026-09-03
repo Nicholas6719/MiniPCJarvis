@@ -166,6 +166,7 @@ interface Store {
   web: WebState | null;
   images: ImagesState | null;
   holo: HoloState | null;
+  project: string | null;
   files: FilesState | null;
   filePreview: FilePreview | null;
   turn: TurnState | null;
@@ -245,6 +246,7 @@ export const useStore = create<Store>((set, get) => ({
   web: null,
   images: null,
   holo: null,
+  project: null,
   files: null,
   filePreview: null,
   turn: null,
@@ -608,6 +610,14 @@ export const useStore = create<Store>((set, get) => ({
           }));
           push({ id: evt.id, ts: evt.ts, kind: "web", summary: `hologram: ${evt.name}` });
         }
+        break;
+      // WHICH PROJECT THE WORK BELONGS TO. Everything made while one is open is
+      // filed into it, and filing he cannot see is how a model ends up
+      // somewhere he did not expect.
+      case "workspace":
+        set(() => ({ project: evt.project ?? null }));
+        push({ id: evt.id, ts: evt.ts, kind: "web",
+               summary: `project: ${evt.project}` });
         break;
       // A control is a COMMAND, not a state: "turn it ninety degrees" twice
       // should turn it twice. So each one lands with its own sequence number and
