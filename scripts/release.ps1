@@ -8,9 +8,19 @@
 # interrupted: "I don't want to hear anything, I don't want any Telegram
 # messages and I don't want to see anything". It mutes the speaker for the whole
 # run through /debug/silence — turns still run end to end, they just make no
-# sound — and leaves JARVIS_TELEGRAM_E2E unset, which makes telegram_e2e skip
-# itself rather than message his phone. Everything else is a normal release, so
-# a silent run is still a real gate and not a weaker one.
+# sound — leaves JARVIS_TELEGRAM_E2E unset, so telegram_e2e skips itself rather
+# than message his phone, and sets JARVIS_QUIET_SCREEN so the two suites that
+# take the screen skip too.
+#
+# THAT LAST PART WAS MISSING and it mattered. The first -Silent run muted the
+# speaker and then let hands_e2e open Notepad and dictate into it, and sleep_e2e
+# minimise his window and raise it again, while he was working — the exact thing
+# the switch exists to prevent. "Silent" is about being left alone, not about
+# audio.
+#
+# A quiet run is therefore a slightly SMALLER gate than a normal one, and it
+# names what it skipped rather than reporting green as though it had run
+# everything. The full set still runs on a normal release.
 param([switch]$SkipBuild, [switch]$SkipTests, [switch]$Silent)
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -115,11 +125,14 @@ $env:PYTHONIOENCODING = 'utf-8'
 # phone, which is right for a release and wrong every ten minutes.
 [IO.File]::WriteAllText("$root\.agent\session.txt", "$port $tok")
 if (-not $Silent) { $env:JARVIS_TELEGRAM_E2E = "1" }
+# ...and the two suites that take over his screen. See suites.ps1.
+if ($Silent) { $env:JARVIS_QUIET_SCREEN = "1" }
 try {
     & "$root\scripts\suites.ps1"
     $failed = $LASTEXITCODE
 } finally {
     Remove-Item Env:\JARVIS_TELEGRAM_E2E -ErrorAction SilentlyContinue
+    Remove-Item Env:\JARVIS_QUIET_SCREEN -ErrorAction SilentlyContinue
 }
 & $log ("RELEASE " + $(if ($failed -eq 0) { "OK" } else { "FAILED ($failed suites)" }))
 exit $failed

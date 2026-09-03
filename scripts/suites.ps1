@@ -92,6 +92,19 @@ foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py
     # its leak check below three minutes rather than guess, so without this it
     # would never run at all. Costs ~3.3 min a release; a leak check that cries
     # wolf costs more than that the first time it is believed.
+    # SILENCE INCLUDES THE SCREEN. Two of these take it over: hands_e2e opens
+    # Notepad and dictates into it, and sleep_e2e minimises his window and
+    # raises it again. Muting the speaker does nothing about either, and the
+    # first -Silent run put a Notepad on his screen while he was working —
+    # exactly what he had asked not to happen, from the switch built to stop it.
+    #
+    # Named as SKIPPED rather than dropped, so a green quiet run cannot be
+    # mistaken for a full one. They still run in a normal release.
+    if ($env:JARVIS_QUIET_SCREEN -eq "1" -and $t -in @("hands_e2e.py", "sleep_e2e.py")) {
+        Write-Host "== $t"
+        Write-Host "  SKIPPED - it takes over the screen, and this is a quiet run."
+        continue
+    }
     # NOT $args — that is an automatic variable, and writing to it inside a
     # loop body is the kind of thing that works until it does not.
     $suiteArgs = @($port, $tok)
