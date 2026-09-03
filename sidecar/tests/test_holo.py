@@ -148,6 +148,22 @@ async def main() -> int:
             except OSError:
                 pass
 
+    # THE STAGE MUST READ EVERYTHING THE PARSER READS. `meshio` learned OBJ and
+    # tier 5 started fetching OBJ, and this still tested `suffix == ".stl"` in
+    # three places — so the chain was search, find, download, parse, measure,
+    # succeed, and then "I don't have a model to project, sir". A guard firing
+    # on something the rest of the system already accepted, reported as though
+    # nothing existed.
+    import meshio as _mi
+    import tools.holo_tools as _ht
+    _src = open(_ht.__file__, encoding="utf-8").read()
+    check("the stage accepts every format the parser does",
+          '.suffix.lower() != ".stl"' not in _src
+          and "meshio.READABLE" in _src)
+    check("...and looks for a downloaded model by every one of them",
+          _src.count("for ext in meshio.READABLE") >= 1
+          and ".obj" in _mi.READABLE)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 
 from events import bus
+import meshio
 from tools.registry import Risk, Tool, registry
 
 log = logging.getLogger("jarvis.tools.holo")
@@ -53,7 +54,7 @@ def _resolve(path: str) -> Path | None:
 
 
 def _pick(path: str = "", name: str = "") -> Path | None:
-    """Which STL he means: one he named, one from the work folder, or the newest.
+    """Which model he means: one he named, one from the work folder, or the newest.
 
     Shared by projecting and inspecting, so "show me the bracket" and "will the
     bracket print" can never disagree about which file they are talking about.
@@ -67,12 +68,23 @@ def _pick(path: str = "", name: str = "") -> Path | None:
         # with, so "bracket v2" is on disk as bracket-v2.stl. Using the raw stem
         # here made the routing slot (which does use safe_name to check the file
         # exists) and this lookup disagree about the same part.
-        return _resolve(str(work_dir() / f"{safe_name(Path(name).stem)}.stl"))
+        #
+        # ...and EVERY readable extension, not just .stl. Tier 5 fetches
+        # whatever the repo published, so looking only for `<name>.stl` would
+        # miss a model we had just downloaded and saved ourselves.
+        stem = safe_name(Path(name).stem)
+        for ext in meshio.READABLE:
+            cand = _resolve(str(work_dir() / f"{stem}{ext}"))
+            if cand is not None:
+                return cand
+        return None
     # Nothing named: the newest thing he made, which is almost always what
     # "show me the bracket" means right after making one.
     try:
-        stls = sorted(work_dir().glob("*.stl"), key=lambda f: f.stat().st_mtime)
-        return _resolve(str(stls[-1])) if stls else None
+        found = [f for ext in meshio.READABLE
+                 for f in work_dir().glob(f"*{ext}")]
+        found.sort(key=lambda f: f.stat().st_mtime)
+        return _resolve(str(found[-1])) if found else None
     except OSError:
         return None
 
@@ -80,7 +92,7 @@ def _pick(path: str = "", name: str = "") -> Path | None:
 async def show_hologram(path: str = "", name: str = "") -> dict:
     """Project a model. `path` is an STL; `name` picks one from the work folder."""
     target = _pick(path, name)
-    if target is None or target.suffix.lower() != ".stl":
+    if target is None or target.suffix.lower() not in meshio.READABLE:
         # He NAMED something and it isn't here. "I don't have a model to project"
         # is true and useless: the obvious next thing is to make one, and the
         # machinery to say how long that takes and ask already exists. Offered
@@ -105,7 +117,6 @@ async def show_hologram(path: str = "", name: str = "") -> dict:
 
     import asyncio
 
-    import meshio
     try:
         # OFF THE EVENT LOOP. Parsing an STL, welding its vertices and finding its
         # separate bodies is hundreds of milliseconds on a real part and seconds
@@ -147,10 +158,9 @@ async def inspect_part(path: str = "", name: str = "") -> dict:
     import asyncio
 
     target = _pick(path, name)
-    if target is None or target.suffix.lower() != ".stl":
+    if target is None or target.suffix.lower() not in meshio.READABLE:
         return {"error": "I don't have a model to check, sir"}
 
-    import meshio
     import printcheck
 
     def work() -> dict:

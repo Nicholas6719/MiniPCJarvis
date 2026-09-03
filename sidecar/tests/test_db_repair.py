@@ -139,6 +139,53 @@ def main() -> int:
               rep2.get("swapped") is not False)
 
     shutil.rmtree(work, ignore_errors=True)
+    # ---------------------------------------------------------------------
+    # WHY THIS REPAIR NEVER RAN. Found on his live database at 02:00 on
+    # 2026-09-03: main file malformed with no WAL involved, `transcript`,
+    # `tasks`, `turn_stats`, `night_meta` and `audit_log` all unreadable — and
+    # every salvage attempt refusing to swap. Three separate reasons.
+
+    # 1. A TABLE WITH NO USABLE ROWID COUNTED 500 LOST ROWS PER FAILED READ.
+    # `tasks` reported "1500 lost" from a table whose high-water mark in
+    # sqlite_sequence is 229. That fiction was what triggered the refusal.
+    import inspect
+
+    from tools import db_repair
+    body = inspect.getsource(db_repair._copy_table)
+    check("a failed read is one failed read, not five hundred lost rows",
+          "lost += 500" not in body and "unreadable += 1" in body,
+          "tasks:1500 refused the repair; the table never held 229")
+    check("...and an unreadable probe is never called a lost row",
+          "unreadable" in inspect.getsource(db_repair.repair),
+          "a rowid that will not read is indistinguishable from one that was "
+          "deleted years ago")
+
+    # 2. `INSERT OR IGNORE` COUNTED SILENTLY DROPPED ROWS AS SAVED.
+    # brain_examples reported "kept 38" for a table that ended up with 17 rows.
+    check("rows are counted where they land, not where they were sent",
+          "INSERT OR IGNORE" not in body,
+          "OR IGNORE reports success for a row it threw away")
+
+    # 3. ...AND THEN COUNTED DEDUPLICATION AS DATA LOSS. Those 21 were the same
+    # 17 examples handed back through different rowids by a damaged b-tree.
+    check("a duplicate key is not a lost row",
+          "IntegrityError" in body and "duplicate" in body.lower(),
+          "a corrupt b-tree returns the same logical row through more than "
+          "one rowid; collapsing those is the repair working, not failing")
+
+    # And the whole point: a precious table that cannot be read AT ALL must not
+    # block the repair. Refusing there preserves a database in which those rows
+    # are exactly as unreadable, and loses everything else with it.
+    rbody = inspect.getsource(db_repair.repair)
+    check("an unreadable precious table is reported, not used to refuse",
+          "precious_unreadable" in rbody,
+          "this is the guard-is-not-an-outcome shape: it fired, it protected "
+          "nothing, and it left him corrupt")
+    check("...while a row we READ and dropped still refuses the swap",
+          'report["precious_lost"] and not force_precious' in rbody,
+          "that one is a real loss and our own bug")
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 
