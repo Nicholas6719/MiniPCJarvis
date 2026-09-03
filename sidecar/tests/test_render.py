@@ -1109,8 +1109,14 @@ async def main() -> int:
     check("...and it says how long it has actually been",
           "longer than i said" in s["remaining_spoken"].lower(),
           s["remaining_spoken"][:90])
-    check("...and it offers him the choice to stop",
-          "?" in s["remaining_spoken"], s["remaining_spoken"][:90])
+    # NOT a question mark. It used to ask "Shall I keep going?" with nothing
+    # listening for the reply - he answered "yes please go ahead and finish the
+    # render" and got a web search. It is a notice now, and what it has to
+    # carry is the way OUT.
+    check("...and it tells him how to stop it",
+          "stop" in s["remaining_spoken"].lower(), s["remaining_spoken"][:90])
+    check("...and does not ask a question nothing is listening for",
+          "?" not in s["remaining_spoken"], s["remaining_spoken"][:90])
     check("...and the overdue amount is real",
           40 <= s.get("overdue_s", 0) <= 50, str(s.get("overdue_s")))
 

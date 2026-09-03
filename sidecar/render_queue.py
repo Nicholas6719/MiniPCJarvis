@@ -116,9 +116,13 @@ class RenderQueue:
         elif left > -15:
             spoken = "any moment now"
         else:
+            # NOT A QUESTION. Nothing is listening for the answer, and when
+            # this asked one he replied "yes please go ahead and finish the
+            # render" and got a web search. He can stop it whenever he likes,
+            # so the useful thing is to say so.
             spoken = (f"longer than I said, sir — it's been "
                       f"{est.spoken(elapsed)} and I don't have a good estimate "
-                      f"left. Shall I keep going?")
+                      f"left. I'll keep going unless you tell me to stop it.")
         return {"busy": True, "label": cur.label, "tier": cur.tier,
                 "elapsed_s": round(elapsed, 1),
                 "remaining_s": round(max(0.0, left), 1),
@@ -240,9 +244,13 @@ class RenderQueue:
             return
         self._warned = True
         over = time.time() - job.started
+        # SAME REASON: this asked "Shall I carry on?" into a room with nobody
+        # listening for the reply. It is a notice, not a question, and it names
+        # the words that actually stop the job.
         await self._say(
             f"That {job.label} is running longer than I said, sir — "
-            f"it's been {est.spoken(over)}. Shall I carry on?",
+            f"it's been {est.spoken(over)}. I'll carry on; say stop the render "
+            f"if you'd rather I didn't.",
             key=f"render-overrun:{job.id}")
 
     # ---- what he hears ---------------------------------------------------

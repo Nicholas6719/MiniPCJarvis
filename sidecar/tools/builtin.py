@@ -297,7 +297,19 @@ def close_application(name: str) -> dict:
     # only match on real name words; drop stopwords so "close all windows"/"close the tab"
     # can never fan out to every window on the desktop
     _STOP = {"the", "all", "this", "that", "app", "window", "windows", "tab", "down", "up", "my", "a"}
-    words = [w for w in stem.replace("-", " ").split() if len(w) >= 3 and w not in _STOP]
+
+    def _words(src: str) -> list:
+        return [w for w in src.replace("-", " ").split()
+                if len(w) >= 3 and w not in _STOP]
+
+    # SEARCH UNDER WHAT HE SAID AS WELL AS THE ALIAS. "calculator" resolves to
+    # calc.exe, which is right for the legacy binary and wrong for the one
+    # Windows actually ships (CalculatorApp.exe). Worse, it left "calc" as the
+    # only search word - four characters - which silently disqualified the
+    # title fallback below, and that fallback exists for exactly this: a UWP
+    # window belongs to ApplicationFrameHost and cannot be matched by process.
+    # So he was told Calculator was not running, seconds after it was opened.
+    words = list(dict.fromkeys(_words(stem) + _words(key)))
     if not words:
         return {"error": f"'{name}' isn't a specific app I can close"}
 
@@ -760,7 +772,11 @@ def register_all() -> None:
             "required": ["name"]},
         # Closing someone's window can lose their work and cannot be undone.
         # It asks first, like every other irreversible thing.
-        risk=Risk.MEDIUM, handler=close_application))
+        # LOW, not MEDIUM. This posts WM_CLOSE - what clicking the X does, so
+        # the app still prompts about unsaved work - and never hard-kills
+        # anything holding a window. Nothing is lost that cannot be reopened,
+        # and being asked "shall I close Calculator?" is friction, not safety.
+        risk=Risk.LOW, handler=close_application))
     registry.register(Tool(
         name="web_search",
         description="Search the web for current information. Returns titles, URLs and snippets.",
