@@ -2492,6 +2492,55 @@ doubling it made it obvious in one glance. **"I cannot see it" and "it is not
 there" are indistinguishable in a downscaled screenshot** — crop before
 believing either.
 
+## 2026-09-02 — "Sure." and nothing happened
+
+He asked for a 3D image of the Spider-Man emblem. JARVIS thought for fourteen
+seconds, said "Sure.", and went back to idle. It IS one of the tiers — tier 4,
+text to reference picture to mesh — so this was a routing failure, not a
+capability one.
+
+**IT WENT TO THE IMAGES SKILL.** "Create me a three D image of Spider-Man's
+spider emblem" scored **0.84 for `images`**: "image of X" looks exactly like a
+picture search and "3d" is one small word against a long object phrase. The image
+extractor then looked at it, decided it was not a search, and returned None — so
+the whole sentence fell to the model, which **had `make_hologram` in its
+shortlist** (checked, not assumed) and answered "Sure." without calling it.
+
+Three fixes, and the first is the general one:
+
+* **`slots_images` steps aside explicitly** on any "make/create a 3d..." request.
+  The router already gives the next-best skill a turn when an extractor refuses
+  (`decide` retries three times with the loser excluded) — so declining on
+  purpose is worth more than losing on score, because losing on score with a
+  refusing extractor means the MODEL gets it.
+* **Seeds for how he actually asks**: "create me a 3d image of...", "make me a
+  3d print of the apple logo". 0.97-1.00 now.
+* **"three D" and "3 d"**, which is what dictation produces at least as often as
+  "3d", plus `image`/`picture`/`print` in the noun list. The description had been
+  reaching the tier chooser as "three d image of the spider emblem" — and that
+  string is then SEARCHED FOR as the reference picture. Now: "the spider emblem".
+
+**Also in that same exchange, unasked:** "Make that image bigger" answered *"I
+can't locate that image window, sir"* — the WINDOW controls took it. `slots_ui`
+had always handled those words; nothing claimed the phrasing, so the embedding
+sent it elsewhere. Seeded.
+
+**Two process notes, both mine.**
+
+The seeds I "added" the first time were never added: the script that wrote them
+died on a SyntaxError before writing the file, and I read the surrounding output
+as success. The symptom was a seed scoring 0.68 as an exact match, which is
+impossible — that impossibility is what exposed it. **When a number cannot be
+true, stop and find out why rather than adding more of the same.**
+
+And the build after that FAILED on the delivery gate and **I deployed anyway
+without reading the exit code.** No harm: the script aborts at the failing gate,
+before packaging, so `dist/` still held the last good build. That was luck. The
+gate was right — my delivery check was order-dependent, spending the shared
+hourly ceiling that the cases above it had already used, so it measured the
+ceiling rather than the deaf-speaker fallback. It resets and restores the budget
+now.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

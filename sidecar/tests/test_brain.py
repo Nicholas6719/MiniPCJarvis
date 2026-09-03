@@ -206,6 +206,19 @@ CASES = [
     # PICKING A PICTURE BY NUMBER, which is how he refers to them. "focus on
     # number 6" went to the WINDOW switcher at 1.00 and sent JARVIS looking for
     # a window called "number 6"; "image number 6" had no reflex at all.
+    # "Create me a 3D image of X" — he asked for the Spider-Man emblem, JARVIS
+    # thought for fourteen seconds and said "Sure." without doing anything. It
+    # scored 0.84 for IMAGES ("image of X" looks like a picture search), whose
+    # extractor then declined, so the whole thing fell to the model — which HAD
+    # make_hologram and did not call it.
+    ("create me a 3d image of the spider emblem", "holo_make"),
+    ("make me a 3d model of the spider-man emblem", "holo_make"),
+    ("make me a 3d print of the apple logo", "holo_make"),
+    # ...and a picture search is still a picture search
+    ("show me images of iron man", "images"),
+    ("show me spider-man", "images"),
+    # "make that image bigger" answered "I can't locate that image window, sir"
+    ("make that image bigger", "ui"),
     ("image number 6", "ui"),
     ("show me image 4", "ui"),
     ("number 3", "ui"),

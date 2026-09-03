@@ -209,6 +209,13 @@ def main() -> int:
     real_present, real_avail = _D.is_present, _D.telegram_available
     import remote_telegram as _rt
     real_tg = _rt.telegram
+    # START FROM AN UNSPENT BUDGET. The cases above this one send messages, and
+    # the hourly ceiling from the 2,600-message night is global — so this check
+    # was measuring the ceiling ("hourly message budget spent") rather than the
+    # thing it asks about, and failed for a reason that had nothing to do with
+    # speakers. An order-dependent test is a test that will fail on someone else.
+    real_sent = list(_D.delivery._sent)
+    _D.delivery._sent.clear()
     try:
         _D.delivery.orchestrator = _DeafOrch()
         _D.is_present = lambda: True          # he IS at the machine...
@@ -225,6 +232,7 @@ def main() -> int:
         _D.delivery.orchestrator = real_orch
         _D.is_present, _D.telegram_available = real_present, real_avail
         _rt.telegram = real_tg
+        _D.delivery._sent[:] = real_sent
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1

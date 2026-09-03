@@ -864,6 +864,18 @@ def slots_images(t: str) -> dict | None:
     # "pictures FROM my trip" are the user's own photos, not a web search
     if re.search(r"\bfrom\s+(?:my|our|the)\b", t):
         return None
+    # A 3D IMAGE IS NOT AN IMAGE SEARCH. "Create me a three D image of
+    # Spider-Man's spider emblem" scored 0.84 for THIS skill — "image of X"
+    # looks exactly like a picture search and the "3d" is one small word — and
+    # then `clean_image_query` left the sentence unchanged, so it returned None
+    # and the whole thing fell to the model, which said "Sure." and did nothing.
+    #
+    # Stepping aside explicitly is better than losing on score: the router gives
+    # the next-best skill a turn when an extractor refuses, and the next-best
+    # here is holo_make, which is what he meant.
+    if re.search(r"\b(?:3d|3\s*d|three\s*d|hologram|holographic)\b", t) and \
+       re.search(r"\b(?:make|create|build|generate|design|model|print|turn)\b", t):
+        return None
     # "...in my browser" is the one case that leaves the HUD. Step aside so it
     # reaches browser_search; without the guard this skill takes it at 1.00 and
     # renders into the media panel he explicitly asked to bypass.
@@ -1146,7 +1158,16 @@ _MAKE_STRIP = re.compile(
     r"^(?:please\s+)?(?:can you\s+|could you\s+)?"
     r"(?:make|create|build|generate|design|model|print)\s+"
     r"(?:me\s+)?(?:a|an|the)?\s*"
-    r"(?:3d\s+)?(?:hologram|holographic|model|version|mesh|part|object)?\s*"
+    # "3d" comes out of dictation as "3 d" and "three d" at least as often as
+    # "3d" — he said "create me a three D image of Spider-Man's spider emblem"
+    # and the description reached the tier chooser as "three d image of the
+    # spider emblem", which is then what gets SEARCHED FOR as a reference
+    # picture. IMAGE belongs in the noun list for the same reason: "a 3d image
+    # of X" is the commonest way he asks, and "image of" was surviving into the
+    # description.
+    r"(?:3d|3\s*d|three\s*d)?\s*"
+    r"(?:hologram|holographic|model|version|mesh|part|object|image|picture|"
+    r"render|printout|print\s*out|print)?\s*"
     r"(?:of\s+)?", re.I)
 
 
@@ -1791,6 +1812,18 @@ SKILLS: list[Skill] = [
         #
         # The signal that separates them is "a"/"me a" — a NEW thing — against
         # "the" — the thing already on the stage.
+        # "CREATE ME A 3D IMAGE OF <thing>" — how he actually asks, and it had
+        # NO reflex. It scored 0.84 for the IMAGES skill, because "image of X"
+        # looks exactly like a picture search and "3d" is one small word; the
+        # image extractor then declined the sentence, and the whole thing fell
+        # to the model, which HAD make_hologram, thought for fourteen seconds
+        # and answered "Sure." without calling it.
+        "create me a 3d image of spider-man's spider emblem",
+        "create me a three d image of the spider emblem on his suit",
+        "make me a 3d image of the batman logo",
+        "make me a 3d model of the spider-man emblem",
+        "create a 3d model of a rubber duck",
+        "make me a 3d print of the apple logo",
         "make me a plate 40 by 30 by 6 millimetres with a 5 millimetre hole",
         "make me a plate 50 by 50 by 4 mm",
         "make me a 20 millimetre cube",
@@ -2219,6 +2252,10 @@ SKILLS: list[Skill] = [
         "settings history", "show diagnostics", "bring that back", "bring the pictures back",
         "keep it", "keep it for ten minutes", "keep that up for an hour",
         "make it bigger", "bigger", "zoom in on the third one", "show me the second one bigger",
+        # "make that image bigger" answered "I can't locate that image window,
+        # sir" — the WINDOW controls took it. slots_ui always handled the words;
+        # nothing here claimed them, so the embedding sent it elsewhere.
+        "make that image bigger", "make that picture bigger", "enlarge that image",
         "back to the grid",
         # PICKING A PICTURE BY NUMBER. "focus on number 6" went to the WINDOW
         # switcher at 1.00 and went looking for a window called "number 6" —
