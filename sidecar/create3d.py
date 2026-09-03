@@ -1732,7 +1732,8 @@ def _unit_doubt(size) -> dict:
                              f"{mult:g} times" if guess else ""))}
 
 
-async def from_the_web(description: str, name: str = "", skip: int = 0) -> dict:
+async def from_the_web(description: str, name: str = "", skip: int = 0,
+                       progressive: bool = False) -> dict:
     """TIER 5: fetch a model somebody already sculpted, and say whose it is.
 
     Falls back to the tier this request would otherwise have used, so it never
@@ -1960,7 +1961,8 @@ async def build(tier: int, description: str = "", image_path: str = "",
         r = await from_text(description, name, skip=skip,
                             progressive=progressive)
     elif tier == 5:
-        r = await from_the_web(description, name, skip=skip)
+        r = await from_the_web(description, name, skip=skip,
+                               progressive=progressive)
     elif tier == 7:
         import composite
         r = await composite.build(description, name)

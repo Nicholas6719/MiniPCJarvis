@@ -1,7 +1,7 @@
 // The stage (§6): one box, always in the same place, whose content type changes
 // with the task. There is no Files view, no Browser view, no Research view to
 // navigate to — the utterance selects the renderer.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useStore, STAGE_HOLD_MS, SettingsSection } from "../state/store";
 import { api, sidecarInfo } from "../lib/sidecar";
 import { SettingsView } from "./SettingsView";
@@ -39,31 +39,69 @@ function StageHeader({ eyebrow, word, meta, live }: { eyebrow: string; word: str
 }
 
 // Machine panel data: real numbers, polled while visible.
+// THE READING OUTLIVES THE STAGE, and this is why the panel looked blank.
+//
+// `useMachine` is used by `RunStrip`, which is part of `ProseStage` — so it
+// mounts and unmounts with every answer. With the state inside the hook and
+// `[]` deps, each answer started from nothing: the first paint had no reading
+// at all, and the panel rendered that as CPU 0% and MEMORY — / — GB. A short
+// answer drained before the fetch landed, and those placeholders were the whole
+// of what he saw. The backend was healthy the entire time, which is exactly why
+// checking the backend never found it.
+//
+// So the reading lives out here instead. One poll shared by whoever is mounted,
+// the last value kept between stages, and a stage that opens paints real
+// numbers immediately and refreshes behind them.
+let machineSys: any = null;
+let machineModel = "";
+let machineErr = "";
+let machineTimer: ReturnType<typeof setInterval> | null = null;
+const machineListeners = new Set<() => void>();
+
+async function readMachine() {
+  // SAY WHY. This used to swallow every failure, so a blank machine panel
+  // looked identical to a healthy one reading zeros — nothing on screen,
+  // nothing in a log, nothing in the console.
+  try {
+    machineSys = await api("/system");
+    machineErr = "";
+  } catch (e) {
+    machineErr = String((e as Error)?.message ?? e);
+    console.error("machine panel: /system failed", e);
+  }
+  machineListeners.forEach((fn) => fn());
+}
+
 function useMachine() {
-  const [sys, setSys] = useState<any>(null);
-  const [model, setModel] = useState("");
+  const [, bump] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
-    let dead = false;
-    const load = async () => {
-      // SAY WHY. This used to swallow every failure, so a blank machine panel
-      // looked identical to a healthy one reading zeros — nothing on screen,
-      // nothing in a log, nothing in the console. The backend was verified
-      // healthy (snapshot() returns real numbers in 0.04s) and the failure
-      // still could not be located, because it left no trace.
-      try { const r = await api("/system"); if (!dead) setSys(r); }
-      catch (e) { console.error("machine panel: /system failed", e); }
+    machineListeners.add(bump);
+    void readMachine();                    // fresh numbers behind the kept ones
+    if (machineModel === "") {
+      (async () => {
+        try {
+          const c = await api("/config");
+          machineModel = String(c.config?.llm?.active_model ?? "");
+          machineListeners.forEach((fn) => fn());
+        } catch (e) { console.error("machine panel: /config failed", e); }
+      })();
+    }
+    if (machineTimer === null) {
+      machineTimer = setInterval(() => {
+        if (!document.hidden) void readMachine();
+      }, 5000);
+    }
+    return () => {
+      machineListeners.delete(bump);
+      // Nothing is looking: stop polling rather than reading the machine every
+      // five seconds forever. The last value stays, which is the point.
+      if (machineListeners.size === 0 && machineTimer !== null) {
+        clearInterval(machineTimer);
+        machineTimer = null;
+      }
     };
-    (async () => {
-      try {
-        const c = await api("/config");
-        if (!dead) setModel(String(c.config?.llm?.active_model ?? ""));
-      } catch (e) { console.error("machine panel: /config failed", e); }
-    })();
-    load();
-    const t = setInterval(() => { if (!document.hidden) load(); }, 5000);
-    return () => { dead = true; clearInterval(t); };
   }, []);
-  return { sys, model };
+  return { sys: machineSys, model: machineModel, err: machineErr };
 }
 
 function Metric({ label, value, pct, color }: { label: string; value: string; pct: number; color?: string }) {
@@ -78,7 +116,7 @@ function Metric({ label, value, pct, color }: { label: string; value: string; pc
 function RunStrip() {
   const turn = useStore((s) => s.turn);
   const elapsed = useElapsed(turn?.startedTs, turn?.elapsedMs);
-  const { sys, model } = useMachine();
+  const { sys, model, err } = useMachine();
   const steps = turn?.steps ?? [];
   return (
     <div className="stage__foot">
@@ -101,9 +139,19 @@ function RunStrip() {
       </div>
       <div className="stage__machine">
         <div className="stage__eyebrow" style={{ color: "var(--rim)" }}>MACHINE</div>
+        {sys ? (<>
         <Metric label="CPU" value={`${Math.round(sys?.stats?.cpu_percent ?? 0)}%`} pct={sys?.stats?.cpu_percent ?? 0} />
         <Metric label="MEMORY" value={`${sys?.stats?.ram_used_gb ?? "—"} / ${sys?.stats?.ram_total_gb ?? "—"} GB`} pct={sys?.stats?.ram_percent ?? 0} />
         <Metric label="DISK C:" value={`${((sys?.stats?.disk_c_free_gb ?? 0) / 1000).toFixed(1)} TB FREE`} pct={sys?.stats?.disk_c_percent ?? 0} color="#45ffc8" />
+        </>) : (
+          // NOT ZERO. `?? 0` rendered every failure as a confident CPU 0% and
+          // 0.0 TB free — the same mistake as the `catch {}` that hid this, and
+          // harder to spot, because a wrong number does not look wrong. If
+          // there has never been a reading, the panel says so and names why.
+          <div className="machine__none mono-sub">
+            {err ? `NO READING · ${err.toUpperCase()}` : "READING…"}
+          </div>
+        )}
         <div className="machine__mono mono-sub">{model ? model.toUpperCase() : ""}{sys?.network?.ssid ? ` · ${sys.network.ssid.toUpperCase()}` : ""}</div>
       </div>
     </div>

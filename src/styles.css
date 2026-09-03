@@ -352,6 +352,13 @@ body.compact .imtile__n { display: block; }
   border-left: 1px solid color-mix(in srgb, var(--rim) 14%, transparent);
   padding-left: calc(36px * var(--s));
 }
+/* A panel with nothing to report. Amber rather than the rim colour, because
+   this is a fault and not a reading — and legible, because it is the only
+   clue he will get about why the numbers are missing. */
+.machine__none {
+  color: #ffc94d; opacity: .8; padding: calc(6px * var(--s)) 0;
+  line-height: 1.5; word-break: break-word;
+}
 .machine__mono { line-height: 1.7; letter-spacing: normal; padding-top: calc(4px * var(--s)); }
 body.compact .stage__machine { display: none; }
 

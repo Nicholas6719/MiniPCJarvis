@@ -22,8 +22,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "sidecar"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # the sidecar
 
 FAILURES: list[str] = []
 
