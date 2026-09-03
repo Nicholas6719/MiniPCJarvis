@@ -187,10 +187,18 @@ async def build_each(description: str, names: list[str], base_name: str) -> dict
 
     whole = d / f"{base_name}.stl"
     import numpy as np
-    await asyncio.to_thread(
-        meshio.write_stl,
-        np.concatenate([meshio.load(p["stl"]) for p in placed], axis=0),
-        str(whole))
+
+    # ARGUMENTS ARE EVALUATED BEFORE THE CALL. Written as
+    # `to_thread(write_stl, np.concatenate([load(p) for p in placed]), ...)`
+    # every one of those loads ran on the event loop and only the write went to
+    # the thread — six components at up to 400,000 triangles each. The whole
+    # job goes across, not just the last step of it.
+    def join_and_write() -> None:
+        meshio.write_stl(
+            np.concatenate([meshio.load(p["stl"]) for p in placed], axis=0),
+            str(whole))
+
+    await asyncio.to_thread(join_and_write)
 
     import assembly
     assembly.write_manifest(str(whole), placed)

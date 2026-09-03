@@ -262,8 +262,14 @@ async def fetch(url: str, name: str = "") -> dict:
     path.write_bytes(blob)
 
     try:
+        import asyncio
+
         import meshio
-        info = meshio.describe(str(path))
+        # OFF THE LOOP. This has just downloaded up to 120 MB, and parsing it,
+        # welding it, finding its feature edges and labelling its bodies is the
+        # better part of a second on the sculptures this tier actually fetches —
+        # a second in which nothing else gets answered.
+        info = await asyncio.to_thread(meshio.describe, str(path))
     except Exception as e:
         try:
             path.unlink()

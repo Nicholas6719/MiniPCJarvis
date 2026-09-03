@@ -451,8 +451,20 @@ async def _split_into_parts(exe, scad, stl, code: str, r: dict) -> dict:
         await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
         return r
 
-    made, empty = [], []
-    for p in parts:
+    # THESE ARE INDEPENDENT PROCESSES: a distinct output file each, from one
+    # source nobody writes to while they run. In serial that was up to
+    # twenty-four half-second renders back to back — twelve seconds of him
+    # waiting for work the machine can do several at a time on sixteen cores.
+    #
+    # Bounded rather than unbounded, and that is the whole judgement here:
+    # llama-server is on this same box holding the GPU and most of a working
+    # set, and turning twenty-four OpenSCADs loose would take the machine away
+    # from the thing that answers him. Four lanes is the compromise, and it is
+    # config so it can be turned down without a build.
+    lanes = asyncio.Semaphore(max(1, int(
+        config.get("fabrication", "part_render_lanes", default=4) or 4)))
+
+    async def render_one(p: dict) -> dict | None:
         out_stl = stl.with_suffix("")
         out_stl = out_stl.with_name(f"{out_stl.name}.{p['name']}.stl")
         # A STALE FILE WOULD PASS THE CHECK BELOW. OpenSCAD exits 0 and writes
@@ -463,17 +475,29 @@ async def _split_into_parts(exe, scad, stl, code: str, r: dict) -> dict:
             out_stl.unlink()
         except OSError:
             pass
-        rc, out, err = await _run(
-            [exe, "-D", f'{assembly.PART_VAR}="{p["name"]}"',
-             "-o", str(out_stl), str(scad)], GEN_TIMEOUT_S)
+        async with lanes:
+            rc, out, err = await _run(
+                [exe, "-D", f'{assembly.PART_VAR}="{p["name"]}"',
+                 "-o", str(out_stl), str(scad)], GEN_TIMEOUT_S)
         if rc != 0 or not out_stl.exists():
             # "Current top level object is empty" comes back with exit 0, so
             # this is the ONLY signal that a named component built nothing.
             log.warning("part %s did not build: %s", p["name"],
                         (err or out or "").strip()[:160])
+            return None
+        return {"name": p["name"], "stl": str(out_stl)}
+
+    # gather PRESERVES INPUT ORDER regardless of what finishes first, so the
+    # parts stay in the order the source declares them — which is the order he
+    # hears them read back.
+    rendered = await asyncio.gather(*(render_one(p) for p in parts))
+
+    made, empty = [], []
+    for p, got in zip(parts, rendered):
+        if got is None:
             empty.append(p["name"])
-            continue
-        made.append({"name": p["name"], "stl": str(out_stl)})
+        else:
+            made.append(got)
 
     # A COMPONENT THAT RENDERED NOTHING MEANS THE SOURCE IS WRONG ABOUT ITSELF,
     # and shipping the rest as an assembly hands him a model with a piece

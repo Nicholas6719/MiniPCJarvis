@@ -378,6 +378,35 @@ translate([0, 0, 7]) core();
         print(f"  {len(skips)} case(s) SKIPPED:")
         for name, why in skips:
             print(f"     - {name}: {why}")
+    print("\n-- the parts render in parallel, and STILL in source order --")
+    fab = open(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "tools", "fabrication.py"), encoding="utf-8").read()
+    body = fab[fab.index("async def _split_into_parts"):]
+    body = body[:body.index("async def edit_part")]
+
+    check("the per-part renders are gathered, not awaited one at a time",
+          "asyncio.gather(" in body and "async def render_one" in body,
+          "twenty-four half-second renders back to back is twelve seconds "
+          "of him waiting for work the machine can overlap")
+    check("...but bounded, because llama-server is on the same box",
+          "asyncio.Semaphore(" in body and "part_render_lanes" in body,
+          "unbounded would take the machine away from the thing that "
+          "answers him")
+    check("...and ORDER SURVIVES, because gather returns in input order",
+          "zip(parts, rendered)" in body,
+          "the parts are read back to him in the order the source "
+          "declares them; whichever finishes first must not change that")
+    check("...and a part that built nothing is still caught by name",
+          "empty.append(p[" in body and "if got is None" in body,
+          "this is how base and ring both vanished while the whole "
+          "render still looked correct")
+    check("...and the stale-file unlink is still inside the per-part path",
+          "out_stl.unlink()" in body and "async with lanes" in body
+          and body.index("out_stl.unlink()") < body.index("async with lanes"),
+          "OpenSCAD exits 0 and writes nothing on an empty part")
+
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}"
           f"{f' ({len(skips)} skipped)' if skips else ''}")
     return 1 if fails else 0
