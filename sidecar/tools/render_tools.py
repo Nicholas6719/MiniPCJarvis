@@ -71,7 +71,7 @@ async def another_design() -> dict:
 
 async def make_hologram(description: str = "", image_path: str = "", tier: int = -1,
                         name: str = "", confirmed: bool = False,
-                        skip: int = 0) -> dict:
+                        skip: int = 0, pieces: list | None = None) -> dict:
     """Make a 3D model and put it up, in the background, with an estimate."""
     desc = (description or "").strip()
     if not desc and not image_path:
@@ -93,6 +93,48 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
     seconds = est.estimate(t)
     label = _label(desc, image_path, t)
 
+    # A THING MADE OF PIECES IS A DIFFERENT CONVERSATION. "About five minutes,
+    # shall I?" is the right question for a render and the wrong one for a suit:
+    # it answers something he did not ask and skips the two that matter — is
+    # this a project, and which piece first.
+    if t == 6 and not confirmed:
+        import components
+        names = pieces or await components.component_list(desc)
+        if len(names) >= components.MIN_COMPONENTS:
+            # SCALED BY THE PIECES, not a flat number for the tier. Every
+            # component is its own search and its own reconstruction, so six of
+            # them is six times the work and the estimate has to say so.
+            secs = est.estimate(5) * len(names)
+            listed = ", ".join(names[:3])
+            if len(names) > 3:
+                listed += f" and {len(names) - 3} others"
+            # TWO DIFFERENT THINGS, and running them together made a sentence
+            # that argued with itself: "about five minutes, and not something
+            # we'll finish in one afternoon". The minutes are the first pass;
+            # the afternoon is the suit.
+            return {"_ask": {
+                "subject": label,
+                "question": (f"That's {len(names)} pieces, sir — {listed}. "
+                             f"{est.spoken(secs).capitalize()} to get a first "
+                             # NOT the label: it is his own phrasing and produces "the
+                             # our own spider-man suit itself".
+                             f"version of all of them up, though the whole "
+                             f"thing won't be an afternoon's work. Shall I "
+                             f"open a project and start with the {names[0]}?"),
+                "tool": "make_hologram",
+                # The list travels WITH the confirmation: asking again could
+                # return a different one, and then what he agreed to is not
+                # what gets made.
+                "args": {"description": desc, "tier": 6, "name": name,
+                         "pieces": names, "confirmed": True},
+            },
+                "pieces": names, "piece_count": len(names),
+                "instruction": ("This is a project, not a render. Say how many "
+                                "pieces and that it is not one afternoon's "
+                                "work, offer to open a project, and ask which "
+                                "piece to start with. If he names one, make "
+                                "just that piece instead.")}
+
     if not confirmed and seconds > est.ask_threshold():
         return {"_ask": {
             "subject": label,
@@ -109,7 +151,16 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                        "tier": t, "name": name, "skip": skip, "label": label})
 
     async def job():
-        r = await create3d.build(t, desc, image_path, name, skip=skip)
+        if t == 6 and pieces:
+            # What he agreed to, built exactly as listed.
+            import components
+            from tools.fabrication import safe_name
+            r = await components.build_each(desc, list(pieces),
+                                            safe_name(name or desc))
+            if r.get("error") and not r.get("stl"):
+                r = await create3d.build(t, desc, image_path, name, skip=skip)
+        else:
+            r = await create3d.build(t, desc, image_path, name, skip=skip)
         if r.get("stl") and not r.get("error"):
             # Put it up the moment it exists. "Anything becomes a hologram" is
             # the phase; a finished mesh he has to ask to see is half of it.
@@ -187,9 +238,17 @@ def register_all() -> None:
             "tier": {"type": "integer",
                      "description": "0 parametric template, 1 OpenSCAD written by the "
                                     "model, 2 traced extrusion or photo relief, "
-                                    "3 photo to mesh, 4 text to mesh; OMIT to choose "
-                                    "automatically, which is almost always right"},
-            "name": {"type": "string"}},
+                                    "3 photo to mesh, 4 text to mesh, 5 find one "
+                                    "somebody published, 6 build it piece by "
+                                    "piece; OMIT to choose automatically, which "
+                                    "is almost always right"},
+            "name": {"type": "string"},
+            "confirmed": {"type": "boolean",
+                          "description": "he has agreed to the wait"},
+            "pieces": {"type": "array", "items": {"type": "string"},
+                       "description": "for tier 6 only: the exact components he "
+                                      "agreed to, passed straight back from the "
+                                      "question so the list cannot change"}},
             "required": []},
         risk=Risk.LOW, handler=make_hologram, timeout=60))
     registry.register(Tool(

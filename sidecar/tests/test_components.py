@@ -150,6 +150,47 @@ Note: these are the main pieces a person would name when describing the armour.
           whole["size_mm"][0] > sum(sizes[n][0] for n in sizes),
           whole["size_mm"])
 
+    print("\n-- a suit is a project, not a render --")
+    # His words: "sir, this is not a task we can get done in one afternoon, but
+    # we can get started now. Where did you want to start?" The ordinary
+    # question — "that's about five minutes, shall I?" — answers something he
+    # did not ask and skips the two that matter.
+    from tools import render_tools as RT
+    real_list = components.component_list
+
+    async def listed(_d=None):
+        return ["helmet", "chest plate", "left gauntlet", "right gauntlet",
+                "boots", "belt"]
+
+    components.component_list = listed
+    try:
+        big = await RT.make_hologram(description="our own spider-man suit",
+                                     name="spidey")
+        small = await RT.make_hologram(description="a coffee mug", name="mug2")
+    finally:
+        components.component_list = real_list
+
+    q = (big.get("_ask") or {}).get("question", "")
+    check("it says how many pieces and names some",
+          "6 pieces" in q and "helmet" in q, q)
+    check("...and that it is not one afternoon's work", "afternoon" in q, q)
+    check("...and offers a project rather than just starting",
+          "open a project" in q, q)
+    check("...and asks which piece to begin with",
+          "start with the helmet" in q, q)
+    check("...without arguing with itself about the time",
+          "minute" in q and "the whole thing" in q,
+          "the minutes are the first pass; the afternoon is the suit, and "
+          "running them together produced a sentence that contradicted itself")
+    check("the agreed list travels with the confirmation",
+          (big["_ask"]["args"].get("pieces") or [None])[0] == "helmet",
+          "asking the model again could return a different list, and then what "
+          "he agreed to is not what gets made")
+    check("...and a simple request still gets the ordinary question",
+          "pieces" not in (small.get("_ask") or {}).get("question", ""),
+          "a mug is not a project")
+
+
     print("\n-- and it is honest when a piece fails --")
     async def half_build(tier, description="", image_path="", name="", skip=0):
         if description.endswith("helmet"):
