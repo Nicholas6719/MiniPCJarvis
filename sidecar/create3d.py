@@ -78,8 +78,14 @@ TIER_NOTE = {
     3: "a mesh built from the photo — a likeness rather than a measured part",
     4: "built from a reference picture I found, so it's a likeness of that "
        "picture rather than a measured part",
-    5: "found, not made — somebody sculpted this and published it, and I've "
-       "fetched their file",
+    # SAID BEFORE THE WORK RUNS, so it must describe the ATTEMPT. It used to
+    # say "somebody sculpted this and I've fetched their file" — announced at
+    # submission, before anything had been searched for, and then contradicted
+    # forty seconds later by "nobody had one to download, so I built this one".
+    # `spoken_caveats` says which one actually happened, at the end, when it is
+    # known.
+    5: "I'll look for one somebody has already made, and build it from a "
+       "reference picture if nobody has",
 }
 
 # Words that say he wants a FLAT emblem out of a picture rather than a 3D

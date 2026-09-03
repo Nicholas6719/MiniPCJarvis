@@ -288,6 +288,14 @@ async def main() -> int:
         got = create3d.choose_tier(desc, img)
         check(f"{desc!r}{' + a picture' if img else ''} is tier {want}",
               got == want, got)
+    # A NOTE THAT IS SPOKEN BEFORE THE WORK RUNS MUST DESCRIBE THE ATTEMPT.
+    # Tier 5's said "somebody sculpted this and I've fetched their file" — at
+    # submission, before anything had been searched for — and was contradicted
+    # forty seconds later by "nobody had one to download, so I built this one".
+    check("tier 5's note does not claim a model was found before it looks",
+          "I'll look for" in create3d.TIER_NOTE[5]
+          and "fetched their file" not in create3d.TIER_NOTE[5],
+          create3d.TIER_NOTE[5])
     check("every tier explains itself",
           all(create3d.TIER_NOTE.get(t) for t in create3d.TIERS))
     check("...and only tier 1 promises voice editing",
