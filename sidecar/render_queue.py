@@ -230,6 +230,19 @@ class RenderQueue:
                 watch.cancel()
                 self._task = None
                 self._current = None
+            # NOTHING IS COMING. A progressive render leaves a rough carve on
+            # the stage while it works, and a job that ends any way but done —
+            # he said stop, or it failed — would leave that half-resolved blob
+            # sitting there pulsing "resolving" for a part that never arrives.
+            # Here rather than in the job, because a cancellation is caught
+            # above and the job body never reaches its own ending.
+            if job.state != "done":
+                try:
+                    from tools.holo_tools import current, hide_hologram
+                    if current().get("rough"):
+                        await hide_hologram()
+                except Exception:
+                    log.debug("could not clear the rough preview", exc_info=True)
             await self._announce(job.state, job)
 
     async def _watch_overrun(self, job: Job) -> None:

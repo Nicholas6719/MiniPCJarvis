@@ -153,6 +153,51 @@ def main() -> int:
           cur.get("triangles"))
     rung.unlink(missing_ok=True)
 
+    print("\nA STOPPED RENDER TAKES ITS PREVIEW WITH IT")
+    # He says "stop the render" and the queue cancels the job — so the job body
+    # never reaches its own ending, which is why the cleanup lives in the queue
+    # runner. Without it the last rough carve sits on the stage pulsing
+    # "resolving" for a part that is never going to arrive.
+    async def cancelled_render() -> int:
+        import render_queue
+        trimesh.creation.icosphere(subdivisions=2, radius=20.0).export(str(rung))
+        await holo_tools.show_stage(str(rung), "duck", 96)
+        hidden: list[dict] = []
+
+        async def spy2(kind, **kw):
+            hidden.append({"kind": kind, **kw})
+            return await real_emit(kind, **kw)
+
+        started = asyncio.Event()
+
+        async def never() -> dict:
+            started.set()
+            await asyncio.sleep(30)
+            return {"stl": "never"}
+
+        q = render_queue.Queue() if hasattr(render_queue, "Queue") else render_queue.queue
+        bus.emit = spy2                                   # type: ignore
+        try:
+            q.submit(3, "duck", never)
+            await asyncio.wait_for(started.wait(), 5)
+            q.cancel()
+            for _ in range(40):                           # let the runner unwind
+                await asyncio.sleep(0.05)
+                if any(e.get("action") == "hide" for e in hidden):
+                    break
+        finally:
+            bus.emit = real_emit                          # type: ignore
+        return sum(1 for e in hidden
+                   if e.get("kind") == "hologram" and e.get("action") == "hide")
+
+    try:
+        hides = asyncio.run(cancelled_render())
+        check("the rough preview came off the stage", hides >= 1, f"{hides} hides")
+    except Exception as e:
+        check("the rough preview came off the stage", False,
+              f"{type(e).__name__}: {e}")
+    rung.unlink(missing_ok=True)
+
     print("\nthe ladder is the measured one")
     check("96 then 192, and nothing more expensive",
           create3d.PROGRESSIVE_STAGES == "96,192", create3d.PROGRESSIVE_STAGES)
