@@ -1063,10 +1063,17 @@ def slots_video(t: str) -> dict | None:
     subject = clean_video_query(t)
     if len(subject) < 3 or re.fullmatch(_MEDIA_NOUN, subject, re.I):
         return None
-    return {"query": subject, "service": service}
+    # PLAY MEANS PLAY, FIND MEANS SHOW ME THE SHELF. This is the only word that
+    # separates the two and it was being dropped, so both arrived at play_media
+    # identically and it could only ever open a search page. His words: "if I
+    # say play something I expect him to actually play it for me too."
+    play = bool(re.search(r"\b(?:play|put on|start|listen to|watch)\b", t, re.I))
+    return {"query": subject, "service": service, "play": play}
 
 
 def say_video(slots: dict, res: dict) -> str:
+    if not res.get("error") and res.get("playing"):
+        return f"Playing {res['playing']}, sir."
     if res.get("error"):
         return f"I couldn't open that, sir — {res['error']}."
     return f"Opening {res.get('searched', 'it')} in your browser, sir."

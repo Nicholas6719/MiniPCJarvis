@@ -359,7 +359,7 @@ def open_url(url: str) -> dict:
         return {"error": f"could not open {url}: {e}"}
 
 
-def play_media(query: str, service: str = "youtube") -> dict:
+def play_media(query: str, service: str = "youtube", play: bool = False) -> dict:
     """Find something to WATCH or LISTEN to, in his own browser.
 
     His instruction, verbatim: *"Any media searches should be done in my actual
@@ -368,9 +368,16 @@ def play_media(query: str, service: str = "youtube") -> dict:
     go and open himself. A video is something you watch, not something you are
     told about.
 
-    It opens the SEARCH page rather than guessing at one video. Picking for him
-    would mean trusting a scraped first result, and being confidently wrong about
-    which video he wanted is worse than showing him the shelf.
+    THE VERB DECIDES whether it plays or shows the shelf. This used to always
+    open the search page, on the grounds that "being confidently wrong about
+    which video he wanted is worse than showing him the shelf" - which is true
+    of "find me a video of a rocket launch" and false of "play a video of the
+    northern lights". His words: "if I say play something I expect him to
+    actually play it for me too."
+
+    Resolving the first result can fail - YouTube can change its markup, the
+    network can be slow - and when it does this falls back to the search page,
+    which is what it always did. It can only be better than before, never worse.
     """
     # Clean here too, not only in the brain: the LLM path passes whatever the
     # model wrote, which is usually the raw utterance. Same reason the image
@@ -387,11 +394,55 @@ def play_media(query: str, service: str = "youtube") -> dict:
         "netflix": "https://www.netflix.com/search?q=",
     }
     base = sites.get(where, sites["youtube"])
+
+    # PLAY MEANS PLAY. Only for YouTube: Spotify and Netflix need an account
+    # session and a deep link, and guessing at those is a different problem.
+    if play and where == "youtube":
+        vid = _first_youtube_id(q)
+        if vid:
+            res = open_url(f"https://www.youtube.com/watch?v={vid}")
+            if not res.get("error"):
+                return {"playing": q, "service": where, "where": "your browser",
+                        "video": vid, "focused": res.get("focused", False)}
+        log.info("could not resolve a video for %r; showing the results", q)
+
     res = open_url(base + urllib.parse.quote(q))
     if res.get("error"):
         return res
     return {"searched": q, "service": where, "where": "your browser",
             "focused": res.get("focused", False)}
+
+
+def _first_youtube_id(query: str) -> str | None:
+    """The first video on YouTube's results page, or None to show the shelf.
+
+    Deliberately forgiving: any failure at all returns None and the caller
+    opens the search page, which is the behaviour that existed before.
+    """
+    import re as _re
+    import urllib.parse
+    import urllib.request
+    try:
+        url = ("https://www.youtube.com/results?search_query="
+               + urllib.parse.quote(query))
+        req = urllib.request.Request(url, headers={
+            # Without a normal UA YouTube serves a consent wall with no results.
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/125.0 Safari/537.36"),
+            "Accept-Language": "en-US,en;q=0.9"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            # The results page is about 1.4 MB and the first videoId sits
+            # PAST 600 KB - capping there found nothing at all and silently
+            # fell back to the shelf every time.
+            html = r.read(2_500_000).decode("utf-8", "replace")
+        # The top result's id, from the embedded JSON or a watch link.
+        m = (_re.search(r'"videoId":"([A-Za-z0-9_-]{11})"', html)
+             or _re.search(r"/watch\?v=([A-Za-z0-9_-]{11})", html))
+        return m.group(1) if m else None
+    except Exception:
+        log.debug("could not resolve a youtube video", exc_info=True)
+        return None
 
 
 def search_in_browser(query: str, kind: str = "web") -> dict:
@@ -786,12 +837,19 @@ def register_all() -> None:
         description="Find a VIDEO, song or film for the user to watch or listen to, opened "
                     "in their OWN browser. Use this for anything playable - 'find me a "
                     "youtube video of...', 'play some jazz', 'find the trailer for...'. "
+                    "Set play=true when he said PLAY or put on or watch, and it opens "
+                    "the first result instead of the results page. "
                     "NEVER answer a request for something to watch with web_search and a "
                     "recited link: he wants it open, not read out.",
         parameters={"type": "object", "properties": {
             "query": {"type": "string", "description": "what to find, e.g. 'iron man ps3 gameplay'"},
             "service": {"type": "string",
-                        "description": "youtube (default) | spotify | netflix"}},
+                        "description": "youtube (default) | spotify | netflix"},
+            "play": {"type": "boolean",
+                     "description": "true when he said PLAY/put on/watch — opens "
+                                    "the first result directly. false when he "
+                                    "said find/search/look for — shows the "
+                                    "results page so he can choose."}},
             "required": ["query"]},
         risk=Risk.LOW, handler=play_media))
     registry.register(T(
