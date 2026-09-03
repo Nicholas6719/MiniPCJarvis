@@ -2,8 +2,16 @@
 # (scheduled task, see docs/HANDOFF.md "sandbox trap") -> wait for the app -> run every
 # e2e suite against the installed app. Exits non-zero if anything fails.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release.ps1 [-SkipBuild] [-SkipTests]
-param([switch]$SkipBuild, [switch]$SkipTests)
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release.ps1 [-SkipBuild] [-SkipTests] [-Silent]
+#
+# -Silent is for building while he is working and does not want to be
+# interrupted: "I don't want to hear anything, I don't want any Telegram
+# messages and I don't want to see anything". It mutes the speaker for the whole
+# run through /debug/silence — turns still run end to end, they just make no
+# sound — and leaves JARVIS_TELEGRAM_E2E unset, which makes telegram_e2e skip
+# itself rather than message his phone. Everything else is a normal release, so
+# a silent run is still a real gate and not a weaker one.
+param([switch]$SkipBuild, [switch]$SkipTests, [switch]$Silent)
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
@@ -57,6 +65,18 @@ while ((Get-Date) -lt $deadline) {
 # warm yet; every one passed on the same build minutes later. A release that
 # cries wolf is worse than no release check at all, so wait for the subsystems
 # and then make it actually answer something before judging it.
+if ($port -and $Silent) {
+    # BEFORE the warm-up turn, which is the first thing that would speak. An
+    # hour covers the warm-up and every suite; the flag is a deadline on the
+    # speaker rather than a mode, so it cannot be left switched on by accident.
+    try {
+        Invoke-RestMethod "http://127.0.0.1:$port/debug/silence" -Method Post `
+            -Headers @{'X-Jarvis-Token'=$tok} -ContentType 'application/json' `
+            -Body (@{ seconds = 3600 } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+        & $log "silent run: speaker muted for an hour, telegram left unpaired to the suite"
+    } catch { & $log "COULD NOT MUTE - stopping rather than making noise he asked me not to make: $($_.Exception.Message)"; exit 1 }
+}
+
 if ($port) {
     & $log "waiting for the subsystems"
     $deadline = (Get-Date).AddSeconds(240)
@@ -94,7 +114,7 @@ $env:PYTHONIOENCODING = 'utf-8'
 # Telegram runs HERE and not in the ad-hoc suite: it sends real messages to his
 # phone, which is right for a release and wrong every ten minutes.
 [IO.File]::WriteAllText("$root\.agent\session.txt", "$port $tok")
-$env:JARVIS_TELEGRAM_E2E = "1"
+if (-not $Silent) { $env:JARVIS_TELEGRAM_E2E = "1" }
 try {
     & "$root\scripts\suites.ps1"
     $failed = $LASTEXITCODE
