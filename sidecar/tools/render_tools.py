@@ -53,6 +53,9 @@ def _label(description: str, image_path: str, tier: int) -> str:
 # rather than from the model, so another design is simply the next usable picture
 # down the list.
 _last_make: dict = {}
+# The scout's reference picture from the last question, so at most one of them
+# sits in his work folder waiting for a "yes" that may never come.
+_scout_pic: str = ""
 
 
 async def another_design() -> dict:
@@ -73,8 +76,15 @@ async def another_design() -> dict:
 
 async def make_hologram(description: str = "", image_path: str = "", tier: int = -1,
                         name: str = "", confirmed: bool = False,
-                        skip: int = 0, pieces: list | None = None) -> dict:
-    """Make a 3D model and put it up, in the background, with an estimate."""
+                        skip: int = 0, pieces: list | None = None,
+                        reference: str = "",
+                        scouted_model: dict | None = None) -> dict:
+    """Make a 3D model and put it up, in the background, with an estimate.
+
+    `reference` and `scouted_model` are not for the model to fill in: they are
+    what the scout found, handed straight back from the question on "yes" so
+    the thing he agreed to is the thing that gets made.
+    """
     # A RENDER NEEDS THE WEB. Tier 5 searches for a published model and tier 4
     # downloads a reference picture, so with no connection this cannot work at
     # all — and failing slowly is the worst way to say so. His duck took three
@@ -160,6 +170,15 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
     if (not confirmed and not image_path and t not in (0, 6)
             and not create3d._DIMENSIONED.search(desc)):
         import scout
+        # A picture scouted for an earlier question he never said yes to is
+        # scaffolding nobody will use now; one at a time on his disk, at most.
+        global _scout_pic
+        if _scout_pic and _scout_pic != image_path:
+            try:
+                os.remove(_scout_pic)
+            except OSError:
+                pass
+            _scout_pic = ""
         found = await scout.look(desc)
         if found and not found.get("timed_out"):
             q = scout.question(desc, found)
@@ -175,23 +194,21 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
             # tier 1 and generated a case from scratch instead of fetching, and
             # "yes" to a flat emblem handed tier 2 the scouted PHOTOGRAPH to
             # trace — the emblem regression he reported, through the voice
-            # path. A fetch is tier 5; a scouted picture is only for the tiers
-            # that reconstruct one (3 and 4), and the flat tier keeps fetching
-            # its own transparent-PNG reference as it was built to.
+            # path. A fetch is tier 5. The scouted picture is NOT `image_path`
+            # (that would make it a photo HE supplied and route it to tier 3,
+            # or hand tier 2 a photograph to trace); it travels as `reference`,
+            # which only tier 4 — and tier 5 falling back to 4 — reads, and the
+            # found model travels as `scouted_model`, which tier 5 tries first.
+            # Looking again could find something else, and then what he agreed
+            # to is not what gets made.
             fetch = q["route"] == "fetch"
-            # THE SCOUT'S PICTURE IS SCAFFOLDING FOR THE QUESTION, NOT A PART.
-            # It was downloaded into his work folder before he was asked and
-            # never removed: fifteen strangers' JPEGs including
-            # "yes-finish-the-render-ref.jpg". No tier that can receive it uses
-            # it — tier 4 fetches its own reference, tier 3 is only chosen when
-            # HE supplied a photo, and tiers 1/2/5 must not trace or generate
-            # from it — so it comes off the disk here, whichever way he answers.
+            # THE SCOUT'S PICTURE IS SCAFFOLDING, NOT A PART. It was downloaded
+            # into his work folder before he was asked and never removed:
+            # fifteen strangers' JPEGs including "yes-finish-the-render-ref.jpg".
+            # Tier 4 removes it after building from it; a "no" leaves it for
+            # the next scout to remove (above). One on disk at a time.
             pic = (found.get("picture") or {}).get("path", "")
-            if pic:
-                try:
-                    os.remove(pic)
-                except OSError:
-                    pass
+            _scout_pic = pic
             return {"_ask": {
                 "subject": label,
                 "question": ask,
@@ -199,7 +216,9 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                 # What he was shown is what gets used: looking again could find
                 # something else.
                 "args": {"description": desc, "tier": 5 if fetch else t, "name": name,
-                         "image_path": "", "confirmed": True},
+                         "image_path": "", "confirmed": True,
+                         "reference": pic,
+                         "scouted_model": (found.get("model") or {}) if fetch else {}},
             },
                 "found": q["found"], "scouted": found,
                 "instruction": ("Tell him what was actually found — the model, "
@@ -230,7 +249,8 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                                             safe_name(name or desc))
             if r.get("error") and not r.get("stl"):
                 r = await create3d.build(t, desc, image_path, name, skip=skip,
-                                         progressive=True)
+                                         progressive=True, reference=reference,
+                                         scouted_model=scouted_model)
         else:
             # PROGRESSIVE ONLY HERE. This is the one render he asked for as a
             # whole, so it is the one he should watch resolve. The per-part
@@ -238,7 +258,8 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
             # would take turns on the stage and none of them would be the thing
             # he asked for.
             r = await create3d.build(t, desc, image_path, name, skip=skip,
-                                     progressive=True)
+                                     progressive=True, reference=reference,
+                                     scouted_model=scouted_model)
         if r.get("stl") and not r.get("error"):
             # Put it up the moment it exists. "Anything becomes a hologram" is
             # the phase; a finished mesh he has to ask to see is half of it.

@@ -108,12 +108,111 @@ async def main() -> int:
         check("the cost is mentioned after what was found, never instead of it",
               seen["a playstation 5"]["_ask"]["question"].index("dimensions")
               < seen["a playstation 5"]["_ask"]["question"].index("Shall I"))
+        args = seen["a baseball"]["_ask"]["args"]
         check("what he was shown travels into the confirmed call",
-              seen["a baseball"]["_ask"]["args"].get("image_path") == "p.jpg",
+              args.get("reference") == "p.jpg",
               "looking again could find something else, and then what he "
               "agreed to is not what gets made")
+        check("...as a reference, not as a photo he supplied",
+              not args.get("image_path"),
+              "image_path routes to tier 3 / hands tier 2 a photograph to "
+              "trace — the emblem regression")
         check("...and the confirmation does not ask again",
-              seen["a baseball"]["_ask"]["args"].get("confirmed") is True)
+              args.get("confirmed") is True)
+        margs = seen["a nintendo 2ds xl"]["_ask"]["args"]
+        check("a found model is fetched, not generated",
+              margs.get("tier") == 5, margs)
+        check("...and it is THAT model, not a fresh search's",
+              (margs.get("scouted_model") or {}).get("repo") == "x/ps5", margs)
+        check("a picture route carries no model",
+              not args.get("scouted_model"), args)
+
+        print("\n-- and the tiers use what they were handed --")
+        import create3d
+        real_ref, real_photo, real_show = (create3d.reference_image,
+                                           create3d.from_photo,
+                                           create3d._show_reference)
+        real_avail = create3d.available
+        searched = []
+        built = []
+
+        async def no_search(desc, flat=False, skip=0):
+            searched.append(desc)
+            return "other.jpg"
+
+        async def fake_photo(path, name, progressive=False):
+            built.append(path)
+            return {"stl": "x.stl", "name": name}
+
+        async def no_show(*a, **k):
+            return None
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            ref = f.name
+        create3d.reference_image = no_search
+        create3d.from_photo = fake_photo
+        create3d._show_reference = no_show
+        create3d.available = lambda: {**real_avail(), 4: True}
+        try:
+            r = await create3d.from_text("a baseball", "b", reference=ref)
+            check("tier 4 builds from the scouted picture",
+                  built == [ref] and not r.get("error"), (built, r))
+            check("...without searching for another",
+                  not searched, searched)
+            check("...and tidies it away afterwards", not os.path.exists(ref))
+            built.clear()
+            await create3d.from_text("a baseball", "b", reference=ref, skip=1)
+            check("'find another design' does look again",
+                  searched == ["a baseball"] and built == ["other.jpg"],
+                  (searched, built))
+        finally:
+            create3d.reference_image = real_ref
+            create3d.from_photo = real_photo
+            create3d._show_reference = real_show
+            create3d.available = real_avail
+            try:
+                os.remove(ref)
+            except OSError:
+                pass
+
+        import model_find as MF
+        real_find, real_meshes, real_fetch = MF.find, MF.github_meshes, MF.fetch
+        real_scale = create3d._apply_unit_scale
+        asked = []
+
+        async def fake_find(desc, limit=6):
+            return {"candidates": [{"url": "https://github.com/other/ps5",
+                                    "host": "github.com", "title": "other"}]}
+
+        async def fake_meshes(url, want=""):
+            asked.append(url)
+            repo = url.split("github.com/")[1]
+            return [{"repo": repo, "path": "ps5.stl", "bytes": 204800,
+                     "url": f"{url}/raw/ps5.stl"}]
+
+        async def fake_fetch(url, name=""):
+            return {"stl": "ps5.stl", "triangles": 50000,
+                    "size_mm": [390, 104, 260], "name": name}
+
+        async def no_scale(got):
+            return {}
+
+        MF.find, MF.github_meshes, MF.fetch = fake_find, fake_meshes, fake_fetch
+        create3d._apply_unit_scale = no_scale
+        try:
+            r = await create3d.from_the_web(
+                "a ps5", "p", scouted_model={"repo": "x/ps5", "file": "ps5.stl",
+                                             "page": "https://github.com/x/ps5"})
+            check("tier 5 fetches the model he was shown first",
+                  asked[:1] == ["https://github.com/x/ps5"]
+                  and r.get("credit") == "x/ps5", (asked, r.get("credit")))
+            asked.clear()
+            r = await create3d.from_the_web("a ps5", "p")
+            check("...and searches as before when nothing was scouted",
+                  r.get("credit") == "other/ps5", r.get("credit"))
+        finally:
+            MF.find, MF.github_meshes, MF.fetch = real_find, real_meshes, real_fetch
+            create3d._apply_unit_scale = real_scale
 
         print("\n-- and skipped where there is nothing to look up --")
         dimensioned = await RT.make_hologram(

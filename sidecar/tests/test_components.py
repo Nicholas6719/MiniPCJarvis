@@ -129,10 +129,10 @@ Note: these are the main pieces a person would name when describing the armour.
         calls["components"] += 1
         return []
 
-    async def fake_web(description, name="", skip=0, progressive=False):
+    async def fake_web(description, name="", skip=0, progressive=False, **kw):
         return {"stl": helm, "tier": 5, "name": name or "x"}
 
-    async def fake_text(description, name="", skip=0, progressive=False):
+    async def fake_text(description, name="", skip=0, progressive=False, **kw):
         return {"stl": helm, "tier": 4, "name": name or "x"}
 
     real_tier = create3d.choose_tier
@@ -171,7 +171,7 @@ Note: these are the main pieces a person would name when describing the armour.
     sizes = {"helmet": (30, 20, 25), "gauntlet": (10, 8, 20), "boot": (18, 9, 12)}
     stubs = {n: box(os.path.join(d, f"{n}.stl"), *s) for n, s in sizes.items()}
 
-    async def fake_build(tier, description="", image_path="", name="", skip=0):
+    async def fake_build(tier, description="", image_path="", name="", skip=0, **kw):
         for n in sizes:
             if description.endswith(n):
                 return {"stl": stubs[n], "tier": 4}

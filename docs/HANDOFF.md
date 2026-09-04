@@ -3197,7 +3197,11 @@ the sentence "okay, what's the weather" locked the PC and learned the phrasing
 as `lock`. A bare "no" to a guess fell through to the `correction` skill and
 UNLEARNED whatever reflex had fired in the last 40 s. A cost question ("Shall
 I?") was answered by word-counting, so "go to sleep" and "turn on the camera"
-counted as "go ahead" and started renders. Learned examples for number-carrying
+counted as "go ahead" and started renders (now: an anchored yes/no, or an
+utterance made entirely of one branch's words plus filler — "carry on", "leave
+it" — and "never mind" to a cost question is a decline, not a dropped
+question; the first cut of this crashed on `Branch.name`, which no gate
+covered, so `test_clarify` now has an approval section). Learned examples for number-carrying
 skills were deleted on every boot (`learn` validated raw text, `load`
 re-validated the normalised "N" form). "close this tab" hid the HUD; "open the
 start menu" opened settings. Seventy skills would ask "Did you mean wakeack,
@@ -3242,7 +3246,12 @@ component routed back to 6, and the no-components fallback re-picked 6.
 `choose_tier(..., exclude=)` now; `build_each` never splits a piece. Scout's
 confirmation carried the pre-scout tier and the scouted photo regardless of
 route: "yes" to a fetch generated from scratch, "yes" to an emblem traced a
-photograph (his emblem regression, by voice). `_pick()` with no name chose a
+photograph (his emblem regression, by voice). The contract now: a fetch is tier
+5 and the found model travels as `scouted_model` (tier 5 tries THAT repo
+first); the scouted picture travels as `reference`, which only tier 4 reads
+(and tier 5 falling back to 4) — never as `image_path`, which means "a photo
+HE supplied". `test_scout` proves both tiers use what they were handed and
+that "find another design" still looks again. `_pick()` with no name chose a
 sub-part (newer than its whole). Tier 2 built colour parts twice, once before
 the body existed. A tier-2 part was named after its reference file. Scout's
 reference JPEG was never deleted (15 in his folder). `unit_scale` was computed

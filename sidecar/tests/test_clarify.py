@@ -57,6 +57,27 @@ def main() -> int:
     for said in ("what time is it", "open spotify", "", "tell me a joke"):
         check(f"{said!r} is not an answer", clarify.choose(pending, said) is None,
               clarify.choose(pending, said))
+
+    # --- a cost question is answered by a yes or a no, not by a word ---------
+    cost = clarify.Pending(clarify.approval(
+        "a hologram", "About two minutes, sir. Shall I?", "make_hologram",
+        {"description": "a duck"}, lambda a, r: "Started."))
+    go = next(b for b in cost.amb.branches if b.label == "go ahead")
+    leave = next(b for b in cost.amb.branches if b.label == "leave it")
+    for said, want in (("yes", go), ("yes please", go), ("go ahead", go),
+                       ("do it", go), ("carry on", go), ("sure", go),
+                       ("no", leave), ("no thanks", leave), ("leave it", leave),
+                       ("don't", leave), ("not now", leave)):
+        got = clarify.choose(cost, said)
+        check(f"approval: {said!r} is {want.label}", got is want,
+              getattr(got, "label", got))
+    # the approval words include "on", "do", "go", "please", "start", "fine":
+    # a request that happens to contain one is NOT a "go ahead"
+    for said in ("go to sleep", "turn on the camera", "please open spotify",
+                 "do I have reminders", "start dictation", "what's the time"):
+        got = clarify.choose(cost, said)
+        check(f"approval: {said!r} starts nothing", got is None,
+              getattr(got, "label", got))
     # ...and one that matches both readings equally is not an answer either
     check("a sentence hitting both readings is not an answer",
           clarify.choose(pending, "the company stock") is None)

@@ -91,6 +91,10 @@ class Pending:
 _BOTH = re.compile(r"\b(?:both|either|all of (?:it|them)|everything)\b", re.I)
 _DROP = re.compile(r"\b(?:never ?mind|forget it|neither|nothing|no thanks|"
                    r"don'?t worry|skip it|cancel)\b", re.I)
+# Words that carry no meaning in a two-word answer: "leave it", "yes please",
+# "go ahead then, jarvis".
+_FILLER = frozenset({"it", "that", "then", "please", "sir", "jarvis", "thanks",
+                     "thank", "you", "the", "and", "just", "now"})
 
 
 def choose(pending: Pending, text: str) -> Branch | str | None:
@@ -103,8 +107,6 @@ def choose(pending: Pending, text: str) -> Branch | str | None:
     # this, "what's the stock market doing" answers a question about Tesla.
     if len(t.split()) > MAX_ANSWER_WORDS:
         return None
-    if _DROP.search(t):
-        return "drop"
     # A COST QUESTION IS ANSWERED BY A YES OR A NO, NOT BY A WORD. "Shall I?"
     # used to be answered by counting word hits, and the approval branch's
     # words include "on", "do", "go", "please", "start" and "fine" — so "go to
@@ -113,14 +115,26 @@ def choose(pending: Pending, text: str) -> Branch | str | None:
     # while he was asking for something else. For an approval the whole
     # utterance has to BE a yes or a no; anything with a subject in it is the
     # new request it sounds like.
-    names = {b.name for b in pending.amb.branches}
+    names = {b.label for b in pending.amb.branches}
     if names == {"go ahead", "leave it"}:
         from orchestrator import NO_WORDS, YES_WORDS     # lazy: orchestrator imports us
-        if YES_WORDS.match(t):
-            return next(b for b in pending.amb.branches if b.name == "go ahead")
-        if NO_WORDS.match(t):
-            return next(b for b in pending.amb.branches if b.name == "leave it")
+        go = next(b for b in pending.amb.branches if b.label == "go ahead")
+        leave = next(b for b in pending.amb.branches if b.label == "leave it")
+        # "Carry on" and "leave it" are answers too: an utterance made ENTIRELY
+        # of one branch's words (plus filler) counts. "go to sleep" has "sleep"
+        # in it, so it does not. A "never mind" here is a decline, not a
+        # dropped question — declining is a real answer with its own line.
+        toks = [w for w in re.findall(r"[a-z']+", t) if w not in _FILLER]
+
+        def only(b) -> bool:
+            return bool(toks) and all(w in b.words for w in toks)
+        if NO_WORDS.match(t) or _DROP.search(t) or only(leave):
+            return leave
+        if YES_WORDS.match(t) or only(go):
+            return go
         return None
+    if _DROP.search(t):
+        return "drop"
     hits = [(sum(1 for w in b.words if re.search(r"\b" + re.escape(w) + r"\b", t)), b)
             for b in pending.amb.branches]
     best = max(hits, key=lambda p: p[0])

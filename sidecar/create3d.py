@@ -1353,8 +1353,15 @@ async def _download_reference(img: dict, description: str, d) -> str:
 
 
 async def from_text(description: str, name: str = "",
-                    skip: int = 0, progressive: bool = False) -> dict:
-    """TIER 4: a description to a mesh, by way of a reference picture."""
+                    skip: int = 0, progressive: bool = False,
+                    reference: str = "") -> dict:
+    """TIER 4: a description to a mesh, by way of a reference picture.
+
+    `reference` is a picture already found and SHOWN to him — the scout's. When
+    it is given, it is what gets built; searching again could find a different
+    picture, and then what he agreed to is not what gets made. "Find another
+    design" (`skip`) is the one case that must look again.
+    """
     from tools.fabrication import safe_name
     if not available()[4]:
         return _missing(4)
@@ -1362,7 +1369,11 @@ async def from_text(description: str, name: str = "",
     if not desc:
         return {"error": "what should I make, sir?", "tier": 4}
 
-    ref = await reference_image(desc, skip=skip)
+    ref = ""
+    if reference and not skip and os.path.exists(reference):
+        ref = reference
+    else:
+        ref = await reference_image(desc, skip=skip)
     if not ref:
         return {"error": "I couldn't find a picture to build that from, sir",
                 "tier": 4}
@@ -1786,7 +1797,8 @@ def _unit_doubt(size) -> dict:
 
 
 async def from_the_web(description: str, name: str = "", skip: int = 0,
-                       progressive: bool = False) -> dict:
+                       progressive: bool = False, scouted_model: dict | None = None,
+                       reference: str = "") -> dict:
     """TIER 5: fetch a model somebody already sculpted, and say whose it is.
 
     Falls back to the tier this request would otherwise have used, so it never
@@ -1800,6 +1812,20 @@ async def from_the_web(description: str, name: str = "", skip: int = 0,
 
     desc = (description or "").strip()
     found = await MF.find(desc)
+    # WHAT HE WAS SHOWN IS TRIED FIRST. The scout named a file and a repo in
+    # its question ("x/ps5 has ps5.stl — shall I fetch it?"); a fresh search
+    # here can rank a different repo first, and "yes" then fetched something he
+    # was never asked about. The scouted page goes to the front of the queue,
+    # and the same picker chooses the same file from it. `skip` is the one case
+    # that must move past it, and it does — it is counted like any other.
+    cands = []
+    page = (scouted_model or {}).get("page", "")
+    if page:
+        cands.append({"url": page, "host": "github.com",
+                      "title": (scouted_model or {}).get("repo", ""),
+                      "scouted": True})
+    cands += [c for c in (found.get("candidates") or [])
+              if c.get("url") != page]
     # "FIND ANOTHER DESIGN" HAS TO ACTUALLY FIND ANOTHER ONE. `skip` reached
     # every other tier and was dropped here, so asking again returned the same
     # file from the same repo and looked like the request had been ignored.
@@ -1808,7 +1834,7 @@ async def from_the_web(description: str, name: str = "", skip: int = 0,
     passed = 0
     # The best fragment seen so far, kept in case nothing whole exists.
     _spare = None
-    for c in found.get("candidates") or []:
+    for c in cands:
         if "github.com" not in c.get("host", ""):
             continue
         meshes = await MF.github_meshes(c["url"], want=desc)
@@ -1912,7 +1938,7 @@ async def from_the_web(description: str, name: str = "", skip: int = 0,
     back = _fallback_tier(desc)
     log.info("no fetchable model for %r; falling back to tier %d", desc[:40], back)
     r = await build(back, description=desc, name=name, skip=skip,
-                    progressive=progressive)
+                    progressive=progressive, reference=reference)
     extra = {"fell_back_from": 5, "pages_found": pages}
     if parts_note:
         extra["parts_available"] = parts_note
@@ -1934,8 +1960,13 @@ async def from_the_web(description: str, name: str = "", skip: int = 0,
 
 
 async def build(tier: int, description: str = "", image_path: str = "",
-                name: str = "", skip: int = 0, progressive: bool = False) -> dict:
+                name: str = "", skip: int = 0, progressive: bool = False,
+                reference: str = "", scouted_model: dict | None = None) -> dict:
     """Run one tier and return its result, tier included.
+
+    `reference` and `scouted_model` are what the scout found and he was asked
+    about; tiers 4 and 5 use them instead of looking again. Other tiers ignore
+    them — a flat emblem must not trace a photograph.
 
     Every generated mesh is checked before it is handed on. Non-manifold
     geometry is the commonest reason a slicer refuses a file and AI-generated
@@ -2019,10 +2050,11 @@ async def build(tier: int, description: str = "", image_path: str = "",
         r = await from_photo(image_path, name, progressive=progressive)
     elif tier == 4:
         r = await from_text(description, name, skip=skip,
-                            progressive=progressive)
+                            progressive=progressive, reference=reference)
     elif tier == 5:
         r = await from_the_web(description, name, skip=skip,
-                               progressive=progressive)
+                               progressive=progressive,
+                               scouted_model=scouted_model, reference=reference)
     elif tier == 7:
         import composite
         r = await composite.build(description, name)
