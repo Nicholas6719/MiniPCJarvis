@@ -104,7 +104,13 @@ DEFAULTS: dict[str, Any] = {
     "news": {"enabled": True},
     # hold-to-dictate into any app (Ctrl+Shift+D): local Parakeet, no turn taken
     "dictation": {"enabled": True, "strip_fillers": True,
-                  "spoken_punctuation": True, "restore_clipboard": True},
+                  "spoken_punctuation": True, "restore_clipboard": True,
+                  # How long the dictated text stays on the clipboard before his
+                  # own clipboard is handed back. Ctrl+V only ASKS the app to
+                  # read it; at 0.35 the old contents were back first and the
+                  # sentence was silently lost. Measured: 0.35 loses it, 1.5
+                  # lands it. Raise it if an app ever swallows one.
+                  "clipboard_restore_delay_s": 1.5},
     "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
     # --- the Evolution (2026-09-01) -------------------------------------
     # External binaries, same shape as llm.server_binary above: a path that may

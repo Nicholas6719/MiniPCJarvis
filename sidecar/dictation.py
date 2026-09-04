@@ -194,7 +194,27 @@ def _paste(text: str) -> bool:
         log.warning("paste keystroke failed; text is on the clipboard", exc_info=True)
         return False
     if previous is not None and config.get("dictation", "restore_clipboard", default=True):
-        time.sleep(0.35)                       # let the target app read it first
+        # 1.5s, NOT 0.35. Ctrl+V does not paste anything — it tells the app to go
+        # and read the clipboard, and the app does that whenever it gets round to
+        # it. Putting the old contents back 350ms later beat modern Notepad to
+        # it, so the dictated sentence went nowhere while this still returned
+        # True, because the keystroke HAD been sent.
+        #
+        # Measured on his machine, same window, one trial each:
+        #
+        #     no restore     LANDED
+        #     restore 0.35s  LOST      <- what was shipping
+        #     restore 1.5s   LANDED
+        #
+        # This is why hands_e2e could not prove dictation reached the document:
+        # it never did. The receipt was looking at the wrong property AND the
+        # thing it was looking for was genuinely absent.
+        #
+        # The cost of the longer wait is that his clipboard is borrowed for a
+        # second and a half instead of a third of one, on a background thread.
+        # The cost of the shorter one was losing what he said.
+        time.sleep(float(config.get("dictation", "clipboard_restore_delay_s",
+                                    default=1.5)))
         _set_clip(previous)
     return True
 
