@@ -130,12 +130,24 @@ async def main() -> int:
             check("and pasted it into the focused window", sp.get("pasted") is True, sp)
             await asyncio.sleep(1.5)
 
-            # Windows names the tab after what is IN it, so the control tree
-            # itself is the receipt: the words reached the document.
-            tabs = await controls(c, "Notepad")
+            # THE DOCUMENT'S TEXT, not the labels around it. This used to look
+            # for the dictated words among control NAMES, on the theory that
+            # Windows names a Notepad tab after its contents. Modern Notepad
+            # names it "Untitled" and reports "Unmodified", so the receipt
+            # failed on builds where dictation worked perfectly — every other
+            # assertion here passed, including that the text was pasted and that
+            # selecting all and deleting emptied the document.
+            #
+            # A control's contents live in its ValuePattern, which nothing in
+            # the sidecar could read. read_window_text is that capability, added
+            # rather than weakening this assertion: it is the same proof, taken
+            # from the place the proof actually lives.
+            doc = await tool(c, "read_window_text", window="Notepad")
+            said = (doc.get("text") or "")
             check("Windows itself reports the dictated words are in the document",
-                  any(DICTATED.lower().strip(".")[:24] in t.lower() for t in tabs),
-                  tabs[:6])
+                  DICTATED.lower().strip(".")[:24] in said.lower(),
+                  f"document reads {said[:120]!r}")
+            tabs = await controls(c, "Notepad")
 
             # --- a click by name, with a consequence that can be seen ---------
             before = [t for t in tabs if "unmodified" in t.lower()]
