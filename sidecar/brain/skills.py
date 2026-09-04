@@ -126,6 +126,14 @@ def _number(text: str) -> int | None:
     m = re.search(r"\b(\d{1,3})\b", text)
     if m:
         return int(m.group(1))
+    # "in AN hour", "in A minute", "in A FEW minutes". The article is the number
+    # — but ONLY in front of a unit of time. A bare "a" meaning 1 everywhere is
+    # the mistake that cost him seven pictures in query_clean ("a few pictures
+    # of spider-man" became one picture), so the unit is required, not optional.
+    m = re.search(r"\b(?:a|an)\s+(few\s+)?(?:second|minute|hour|day|week|month)s?\b",
+                  text.lower())
+    if m:
+        return 3 if m.group(1) else 1
     toks = re.findall(r"[a-z]+", text.lower())
     # combine an adjacent tens + ones ("twenty five" -> 25); else take the first number word
     for i, w in enumerate(toks):
@@ -727,7 +735,12 @@ _PIN_AMOUNTS = {"a": 1, "an": 1, "one": 1, "two": 2, "five": 5, "ten": 10, "fift
 
 
 def slots_ui(t: str) -> dict | None:
-    if re.search(r"\b(?:hide|close|clear|dismiss)\b.*\b(?:everything|all|the panels?|the tabs?|the stage|that|this|it)\b|^(?:hide|dismiss)\b", t):
+    # "close this tab" is a BROWSER tab, not the HUD. It used to be in this
+    # list, so the browser tab stayed open, the HUD panels vanished, and he
+    # heard "Done." — while "close the panels" is the HUD and stays.
+    if re.search(r"\b(?:close|quit)\b.*\b(?:tab|tabs|window)\b", t):
+        return None
+    if re.search(r"\b(?:hide|close|clear|dismiss)\b.*\b(?:everything|all|the panels?|the stage|that|this|it)\b|^(?:hide|dismiss)\b", t):
         return {"action": "hide"}
     # "bring that back" / "bring back the pictures" — restore the last stage (§6.3)
     if re.search(r"\bbring\b.*\bback\b|\brestore\b.*\b(?:that|it|the stage|the panel)\b|\bput (?:that|it) back\b", t):
@@ -773,6 +786,10 @@ def slots_ui(t: str) -> dict | None:
     if re.search(r"\b(?:smaller|zoom out|back to the grid|show (?:them|the grid|all of them)( again)?)\b", t):
         return {"action": "focus", "index": None}
     # old tab-era phrasings land on the settings stage — the nearest designed surface
+    # ...unless the menu is Windows' own: "open the start menu" opened JARVIS's
+    # settings panel and answered "Here you go."
+    if re.search(r"\b(?:start|context|file|edit|right[- ]click)\s+menu\b", t):
+        return None
     if re.search(r"\b(?:show|bring up|pull up|open|display)\b.*\b(?:tabs|menu|navigation|nav|the bar|panels|hidden)\b", t):
         return {"action": "show", "view": "settings"}
     # "show settings", "open the history", "pull up diagnostics" — suffix optional now
@@ -2734,8 +2751,16 @@ CONFIRM_AS = {
 
 
 def confirm_as(name: str) -> str:
-    """The spoken name of a skill, for a confirmation question."""
-    return CONFIRM_AS.get(name) or (name or "").replace("_", " ")
+    """The spoken name of a skill, for a confirmation question.
+
+    EMPTY when there is none. The fallback used to be the identifier with the
+    underscores swapped for spaces, so a near-miss on a skill outside the table
+    asked "Did you mean wakeack, sir?", "…media pause, sir?", "…grid shot,
+    sir?" — seventy of the eighty-eight skills, and the gate that was meant to
+    catch it only looked at the entries that already existed. A skill with no
+    English name does not get to ask; the caller falls through to the LLM.
+    """
+    return CONFIRM_AS.get(name) or ""
 
 
 SKILL_BY_NAME = {s.name: s for s in SKILLS}

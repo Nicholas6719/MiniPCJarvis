@@ -295,8 +295,19 @@ def main() -> int:
               not (a and a[0].name == "holo_edit"),
               "an edit is not undone by looking away")
 
-        check("every skill it can offer to guess has a spoken name",
-              all(confirm_as(k) != k.replace("_", " ") for k in CONFIRM_AS),
+        # EVERY SKILL, not every entry in the table. The old form iterated
+        # CONFIRM_AS itself, so it only ever checked names that already had a
+        # phrase — a test that could not fail while "Did you mean wakeack,
+        # sir?" went out for seventy skills. A skill without English now
+        # declines to ask (confirm_as returns ""), which is the other correct
+        # answer; what is never allowed is the identifier read aloud.
+        from brain.skills import SKILLS
+        spoken_wrong = [s.name for s in SKILLS
+                        if confirm_as(s.name) == s.name.replace("_", " ")]
+        check("no skill can ever be asked about by its identifier",
+              not spoken_wrong, str(spoken_wrong)[:120])
+        check("...and the ones it does ask about are English",
+              all(" " in confirm_as(k) or confirm_as(k).isalpha() for k in CONFIRM_AS),
               "'did you mean holo make, sir?' is not English")
 
     asyncio.run(brain_checks())

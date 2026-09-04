@@ -193,6 +193,10 @@ async def health():
     return {"ok": True, "state": orchestrator.sm.state.value}
 
 
+# Mirrors credentials::KNOWN_SECRETS in the Rust core — the only names it ever pushes.
+KNOWN_SECRETS = frozenset({"brave_api_key", "finnhub_api_key"})
+
+
 @app.post("/secrets")
 async def set_secret(body: dict, x_jarvis_token: str | None = Header(None)):
     """Rust core injects secrets from Windows Credential Manager. Memory-only."""
@@ -200,6 +204,11 @@ async def set_secret(body: dict, x_jarvis_token: str | None = Header(None)):
     name, value = body.get("name"), body.get("value")
     if not name or value is None:
         raise HTTPException(400, "name and value required")
+    # ONLY THE NAMES THIS PROGRAM USES. The Rust core pushes exactly two; the
+    # endpoint accepted any name, which is a bag anything on loopback with the
+    # token could fill. Hygiene rather than a hole — but it costs nothing.
+    if name not in KNOWN_SECRETS:
+        raise HTTPException(400, f"unknown secret {name!r}")
     secrets[name] = value
     return {"ok": True}
 
@@ -265,7 +274,7 @@ async def patch_config(body: dict, x_jarvis_token: str | None = Header(None)):
     from config import _merge
     old = config.data
     config.data = _merge(config.data, body)
-    config.save()
+    await asyncio.to_thread(config.save)      # a file write, off the loop
 
     applied = []
     if body.get("tts"):
@@ -278,11 +287,12 @@ async def patch_config(body: dict, x_jarvis_token: str | None = Header(None)):
         applied.append("stt")
     if (body.get("audio") or {}).get("input_device") is not None:
         from audio.io import mic
-        mic.restart()
+        # Closes and reopens a PortAudio stream — driver time, not loop time.
+        await asyncio.to_thread(mic.restart)
         applied.append("microphone")
     if (body.get("audio") or {}).get("output_device") is not None:
         from audio.io import speaker
-        speaker.close()
+        await asyncio.to_thread(speaker.close)
         applied.append("speaker")
     new_model = (body.get("llm") or {}).get("active_model")
     if new_model and new_model != (old.get("llm") or {}).get("active_model"):
@@ -297,8 +307,9 @@ async def patch_config(body: dict, x_jarvis_token: str | None = Header(None)):
 async def audio_devices(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
     import sounddevice as sd
-    devs = sd.query_devices()
-    apis = sd.query_hostapis()
+    # PortAudio enumerates every endpoint on this call — 0.3-2 s on Windows —
+    # and it ran on the event loop each time Settings opened.
+    devs, apis = await asyncio.to_thread(lambda: (sd.query_devices(), sd.query_hostapis()))
     mme = next((i for i, h in enumerate(apis) if "MME" in h["name"].upper()), 0)
     # Only shared-mode (MME) entries: the WDM-KS/DirectSound/WASAPI duplicates
     # Windows exposes would let a user accidentally pick an exclusive-mode path.
@@ -563,7 +574,10 @@ async def stats(x_jarvis_token: str | None = Header(None)):
     from llm.llama_server import llama
     vm = psutil.virtual_memory()
     return {
-        "cpu": psutil.cpu_percent(interval=0.1),
+        # interval=None returns the utilisation since the LAST call instead of
+        # sleeping 100 ms on the event loop — which this did on every /stats
+        # poll, every few seconds, for as long as the HUD was open.
+        "cpu": psutil.cpu_percent(interval=None),
         "ram_percent": vm.percent,
         "ram_used_gb": round(vm.used / 1e9, 1),
         "model": llama.model_name,
@@ -692,30 +706,66 @@ async def debug_silence(body: dict, x_jarvis_token: str | None = Header(None)):
     return {"ok": True, "until": speaker.silent_until}
 
 
+@app.get("/debug/desktop")
+async def debug_desktop(x_jarvis_token: str | None = Header(None)):
+    """Where THIS process's keystrokes would go. A sidecar on a different
+    window station or desktop from the app in front of him types into nothing,
+    reports success, and no log anywhere says why — this is the one question
+    that settles that, asked from inside the process that is doing the typing."""
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    import keys
+    return keys.desktop_info()
+
+
 @app.get("/brain/export")
 async def brain_export(x_jarvis_token: str | None = Header(None)):
     """Training dataset: every user turn with the assistant reply and the tools that ran
     between them (from the audit log), as JSONL in %APPDATA%/JARVIS/dataset.jsonl.
     This is what a future LoRA fine-tune on a rented GPU would consume."""
     _auth(x_jarvis_token)
-    import json as _json, sqlite3 as _sq
-    from config import APP_DIR, DB_PATH
-    db = _sq.connect(DB_PATH)
-    turns = db.execute("SELECT ts, role, content FROM transcript ORDER BY id").fetchall()
-    audit = db.execute("SELECT ts, tool, args, status FROM audit_log WHERE status='success' ORDER BY id").fetchall()
-    out = APP_DIR / "dataset.jsonl"
-    n = 0
-    with out.open("w", encoding="utf-8") as f:
-        for i, (ts, role, content) in enumerate(turns):
-            if role != "user":
-                continue
-            reply = next(((t2, c2) for t2, r2, c2 in turns[i + 1:i + 3] if r2 == "assistant"), None)
-            end = reply[0] if reply else ts + 120
-            tools = [{"tool": t, "args": _json.loads(a) if a else {}} for (ta, t, a, st) in audit if ts <= ta <= end]
-            f.write(_json.dumps({"ts": ts, "user": content, "tools": tools,
-                                 "assistant": reply[1] if reply else None}, ensure_ascii=False) + chr(10))
-            n += 1
-    return {"ok": True, "path": str(out), "examples": n}
+
+    def export() -> dict:
+        # OFF THE LOOP, and not quadratic. This read the whole transcript and
+        # the whole audit log synchronously on the event loop, then scanned
+        # every audit row for every turn — months of turns times months of
+        # tool calls, with JARVIS deaf and mute for the duration. The rows are
+        # fetched in a thread and the audit log is bisected by timestamp.
+        import bisect
+        import json as _json
+        import sqlite3 as _sq
+        from config import APP_DIR, DB_PATH
+        db = _sq.connect(DB_PATH)
+        try:
+            turns = db.execute("SELECT ts, role, content FROM transcript ORDER BY id").fetchall()
+            audit = db.execute("SELECT ts, tool, args, status FROM audit_log "
+                               "WHERE status='success' ORDER BY ts").fetchall()
+        finally:
+            db.close()
+        audit_ts = [row[0] for row in audit]
+        out = APP_DIR / "dataset.jsonl"
+        n = 0
+        with out.open("w", encoding="utf-8") as f:
+            for i, (ts, role, content) in enumerate(turns):
+                if role != "user":
+                    continue
+                reply = next(((t2, c2) for t2, r2, c2 in turns[i + 1:i + 3] if r2 == "assistant"), None)
+                end = reply[0] if reply else ts + 120
+                lo, hi = bisect.bisect_left(audit_ts, ts), bisect.bisect_right(audit_ts, end)
+                tools = []
+                for (_ta, t, a, _st) in audit[lo:hi]:
+                    try:
+                        tools.append({"tool": t, "args": _json.loads(a) if a else {}})
+                    except ValueError:
+                        tools.append({"tool": t, "args": {}})
+                f.write(_json.dumps({"ts": ts, "user": content, "tools": tools,
+                                     "assistant": reply[1] if reply else None},
+                                    ensure_ascii=False) + chr(10))
+                n += 1
+        return {"ok": True, "path": str(out), "examples": n}
+
+    return await asyncio.to_thread(export)
 
 
 @app.post("/debug/view")
@@ -1198,8 +1248,28 @@ async def ws(websocket: WebSocket):
         await bus.detach(websocket)
 
 
+def _declare_dpi_awareness() -> None:
+    """Per-monitor DPI aware, before anything measures or clicks the screen.
+
+    UIA hands back bounding rectangles in PHYSICAL pixels; a DPI-unaware
+    process gets its SetCursorPos virtualised to LOGICAL ones. At 150 %
+    scaling a fallback mouse click on a control without an Invoke pattern —
+    text, custom, most XAML items — landed at two-thirds of the target, and
+    the screenshot grid, `_screen_size` and mss disagreed about how big the
+    screen was. Nothing in the sidecar declared awareness; this does, once.
+    """
+    try:
+        import ctypes
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 == -4
+        if not ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)      # older fallback
+    except Exception:
+        logging.getLogger("jarvis").debug("could not declare DPI awareness", exc_info=True)
+
+
 def main() -> None:
     global SESSION_TOKEN
+    _declare_dpi_awareness()
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--token", default="")

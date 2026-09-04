@@ -293,9 +293,24 @@ class Delivery:
                         image, kind="photo", caption=(written or text)[:900])
                 except Exception:
                     log.warning("could not send the render photo", exc_info=True)
-            if not sent_photo:
-                await telegram.send_proactive(written or text, tier=tier,
-                                              subject=subject)
+            sent = sent_photo or await telegram.send_proactive(
+                written or text, tier=tier, subject=subject)
+            if not sent:
+                # NOT delivered, and it must not be filed as if it were. This
+                # path used to append to _sent, remember the text as told and
+                # return "telegram" whatever the bridge said — so with the
+                # network down while he was away, an ALERT vanished, the hourly
+                # budget was charged for it, and "any update on that?" later
+                # got an answer that assumed he had heard it.
+                log.warning("telegram did not accept a %s message; holding it", tier)
+                # Release the dedup claim taken before the send (claim-before-
+                # speak is the rule from the 2,600-message night, and it is
+                # right) — but a claim on a message that never left would stop
+                # the retry too, which is the other half of losing it.
+                self._last.pop(self._key_for(key, text), None)
+                await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
+                return {"delivered": "held", "why": "telegram did not accept it",
+                        "tier": tier}
             self._sent.append(time.time())
             _remember_proactive(text)
             await bus.emit("proactive", text=text, tier=tier, channel="telegram",

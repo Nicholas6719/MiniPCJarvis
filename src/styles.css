@@ -63,6 +63,10 @@ body.compact .holo__head { display: flex; }
    the numbers were invisible on the first try, along with BEST MATCH and the
    source host, all of which are .mono-sub. */
 body.compact .imtile__n { display: block; }
+/* ...and the machine panel's "NO READING · <reason>" line. It is .mono-sub, so
+   in compact — which is always on for his window — the one message that
+   explains a blank panel was itself blank. */
+body.compact .machine__none { display: block; }
 
 /* ---------------------------------------------------------------- keyframes */
 @keyframes arcSpin { to { transform: rotate(360deg); } }
@@ -360,7 +364,12 @@ body.compact .imtile__n { display: block; }
   line-height: 1.5; word-break: break-word;
 }
 .machine__mono { line-height: 1.7; letter-spacing: normal; padding-top: calc(4px * var(--s)); }
-body.compact .stage__machine { display: none; }
+/* NOT HIDDEN IN COMPACT. His window is about 1000px, so compact is always on
+   — which means the machine panel he reported as "blank" had never rendered
+   at all, and yesterday's fix to it could not be seen either, while /system
+   was still polled every five seconds for a panel with display:none. It stays,
+   slimmer: the numbers are the point, the padding is not. */
+body.compact .stage__machine { padding-left: calc(18px * var(--s)); min-width: calc(150px * var(--s)); }
 
 /* condensed footer for visual stages */
 .stage__vfoot {

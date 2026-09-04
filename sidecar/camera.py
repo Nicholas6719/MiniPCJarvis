@@ -194,6 +194,17 @@ class Camera:
         """Open the camera. Idempotent; never raises."""
         if self.is_on:
             return {"ok": True, "already_on": True, **self.status()}
+        # A THREAD THAT NEVER CAME BACK STILL OWNS THE DEVICE. If the last
+        # stop() timed out with the capture thread stuck inside the driver,
+        # clearing `_stop` here would let that thread — if it ever returns —
+        # run its loop forever alongside the new one: two capture threads and a
+        # light that never goes out. Refuse until it is actually gone.
+        stuck = getattr(self, "_stuck", None)
+        if stuck is not None and stuck.is_alive():
+            self._error = "the camera is still held by a capture that did not stop"
+            log.warning("camera: %s", self._error)
+            return {"ok": False, "error": self._error}
+        self._stuck = None
         self._stop.clear()
         self._error = None
         self._frames = 0
@@ -204,8 +215,15 @@ class Camera:
         self._thread.start()
         # Wait only for the OPEN, not for a frame: the first frame off a C920 is
         # ~900 ms behind the open and he should not wait for it to be told yes.
-        ready.wait(OPEN_TIMEOUT_S)
+        opened = ready.wait(OPEN_TIMEOUT_S)
         if self._error:
+            self.stop()
+            return {"ok": False, "error": self._error}
+        if not opened:
+            # NOT "ok". The open is still blocked in the driver (MSMF after a
+            # sleep/resume does this); this used to answer "Camera's on, sir"
+            # with a black stream behind it.
+            self._error = "the camera did not open in time"
             self.stop()
             return {"ok": False, "error": self._error}
         return {"ok": True, **self.status()}
@@ -220,6 +238,7 @@ class Camera:
                 # Do not pretend. A capture thread stuck in the driver is the
                 # same family as the audio writer that would not come back.
                 log.warning("camera thread did not stop; the device may still be held")
+                self._stuck = t          # start() refuses until this has exited
         with self._lock:
             self._frame = None          # never leave the last picture of him lying around
         try:

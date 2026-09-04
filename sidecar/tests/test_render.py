@@ -527,7 +527,20 @@ async def main() -> int:
 
     # ...and when it IS installed, the same request asks instead, with a number.
     if create3d.available().get(4):
-        r = await render_tools.make_hologram(description="a dragon")
+        # HERMETIC: with nothing stubbed this ran the scout for real on every
+        # build — a Brave search, a GitHub search, and a stranger's dragon JPEG
+        # written into his real work folder ("a-dragon-ref.jpg" was there).
+        import netcheck as _net
+        import scout as _scout
+        _real = (_scout.look, _net.online)
+
+        async def nothing(desc):
+            return {}
+        _scout.look, _net.online = nothing, lambda force=False: True
+        try:
+            r = await render_tools.make_hologram(description="a dragon")
+        finally:
+            _scout.look, _net.online = _real
         check("an installed tier asks, with an estimate", bool(r.get("_ask")), r)
         check("...and does not start until he answers", not r.get("started"), r)
 

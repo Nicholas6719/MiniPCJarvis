@@ -191,21 +191,31 @@ async def main() -> int:
 
     check("an empty change is refused", bool((await F.edit_part("")).get("error")))
     if F.openscad_path():
-        wd = F.work_dir()
-        # A mesh with no source cannot be edited, and must SAY so rather than
-        # approximate. This is every tier-3 and tier-4 part: a mesh from a photo
-        # has no parameters to change, and quietly doing something else to it
-        # would be the worst possible answer.
-        orphan = wd / "gate-orphan-mesh.stl"
-        orphan.write_bytes(b"solid x\nendsolid x\n")
-        r = await F.edit_part("make the hole bigger", name="gate-orphan-mesh")
-        check("a part with no source is refused", bool(r.get("error")), r)
-        check("...and told why, in words",
-              "source" in (r.get("error") or ""), r.get("error"))
+        # In a temp folder, not his: this wrote gate-orphan-mesh.stl into the
+        # real work folder, where a failed run would have left a nameless
+        # "newest part" for `_pick()` to project.
+        import tempfile
+        from pathlib import Path as _P
+        _real_work_dir = F.work_dir
+        wd = _P(tempfile.mkdtemp(prefix="jarvis-holoctl-gate-"))
+        F.work_dir = lambda: wd
         try:
-            orphan.unlink()
-        except OSError:
-            pass
+            # A mesh with no source cannot be edited, and must SAY so rather than
+            # approximate. This is every tier-3 and tier-4 part: a mesh from a photo
+            # has no parameters to change, and quietly doing something else to it
+            # would be the worst possible answer.
+            orphan = wd / "gate-orphan-mesh.stl"
+            orphan.write_bytes(b"solid x\nendsolid x\n")
+            r = await F.edit_part("make the hole bigger", name="gate-orphan-mesh")
+            check("a part with no source is refused", bool(r.get("error")), r)
+            check("...and told why, in words",
+                  "source" in (r.get("error") or ""), r.get("error"))
+            try:
+                orphan.unlink()
+            except OSError:
+                pass
+        finally:
+            F.work_dir = _real_work_dir
         r = await F.revert_part(name="gate-nothing-here")
         check("reverting a part with no earlier version is refused",
               bool(r.get("error")), r)

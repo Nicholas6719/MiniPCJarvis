@@ -97,6 +97,13 @@ class HandControl:
         if self._task and not self._task.done():
             self._task.cancel()
         self._task = None
+        # Tell the HUD from here too: set_camera's off path stands the tracker
+        # down through this and never emitted, so the badge lied. A sync method,
+        # so the event is spawned rather than awaited.
+        try:
+            spawn(bus.emit("hands", action="off", why=why), name="hands-off")
+        except Exception:
+            log.debug("could not announce the hands standing down", exc_info=True)
         return {"armed": False, "was": was, "why": why}
 
     # ---- the loop -------------------------------------------------------
@@ -109,11 +116,17 @@ class HandControl:
             while self.armed:
                 await asyncio.sleep(period)
                 # Every reason to stop, checked before any work is done.
+                # SAY SO, EVERY TIME. Only the idle path below told the HUD;
+                # these two stood down in silence, so "WATCHING YOUR HANDS",
+                # the grab brackets and the corner camera stayed up over a
+                # tracker that had stopped and a stream that was dead.
                 if not current().get("path"):
                     self._stand_down()
+                    await bus.emit("hands", action="disarmed", why="nothing on the stage")
                     break
                 if not camera.is_on:
                     self._stand_down()
+                    await bus.emit("hands", action="disarmed", why="the camera went off")
                     break
                 if time.time() - self._last_hand_at > IDLE_OFF_S:
                     self._stand_down()

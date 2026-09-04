@@ -735,6 +735,19 @@ def wake_display() -> dict:
 
 def exit_sleep_mode() -> dict:
     """Bring him back and put him in front, from minimised or merely buried."""
+    # NOT FROM HIS PHONE. The wake-word path learned this on 2026-09-02 —
+    # "Telegram must never wake the monitor or raise the window" — but the TOOL
+    # path did not: the model could still call this from a remote turn, and
+    # "come back" typed from bed nudged the mouse, lit the monitor and raised
+    # the HUD in an empty room. The state machine still leaves SLEEPING for a
+    # remote turn; the screen and the window stay exactly as he left them.
+    try:
+        from remote_telegram import telegram
+        if telegram._orch is not None and getattr(telegram._orch, "remote_turn", False):
+            return {"sleeping": False, "restored": 0,
+                    "note": "awake for the phone; the screen and window are left alone"}
+    except Exception:
+        log.debug("could not tell whether this is a remote turn", exc_info=True)
     # The screen first. Restoring the window to a monitor that is still off is
     # what he actually hit: heard, answered, and invisible.
     if config.get("presence", "wake_display", default=True):
@@ -952,12 +965,17 @@ def register_all() -> None:
                     "insomnia is a question to answer, not an instruction to go away. NOT for "
                     "suspending the PC - that is power_action('sleep').",
         parameters={"type": "object", "properties": {}, "required": []},
-        risk=Risk.SAFE, handler=enter_sleep_mode))
+        # LOW, not SAFE. The tier describes what the handler DOES: this one
+        # stops the camera, disarms hand tracking and minimises the window.
+        # SAFE is defined as "no side effects", and a tier that misdescribes
+        # the handler is the face_confirm-at-SAFE mistake over again.
+        risk=Risk.LOW, handler=enter_sleep_mode))
     registry.register(T(
         name="exit_sleep_mode",
         description="Bring the JARVIS window back and put it in front.",
         parameters={"type": "object", "properties": {}, "required": []},
-        risk=Risk.SAFE, handler=exit_sleep_mode))
+        # LOW: sends synthetic input, wakes the monitor, takes the foreground.
+        risk=Risk.LOW, handler=exit_sleep_mode))
     registry.register(T(
         name="lock_computer",
         description="Lock the Windows session immediately.",

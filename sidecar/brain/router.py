@@ -73,7 +73,15 @@ _CANON = [
     # and "press alt tab" both canonicalised into the UI skill's territory and
     # clashed head-on with "show me the files tab". A keystroke and a panel are
     # not the same request, and only the verb tells them apart.
-    (r"(?!.*\b(?:press|hit|tap|push)\b).*\b(?:tab|tabs|panel|panels|menu|navigation)\b.*",
+    # ...nor is CLOSING a browser tab, or OPENING the Start menu. Folded onto
+    # "show the VIEW tab", "close this tab" became the UI skill's hide-all at
+    # 1.00 (his browser tab stayed open, the HUD vanished, "Done.") and "open
+    # the start menu" opened JARVIS's own settings panel. The rule is for the
+    # HUD's tabs and panels; a verb that acts on a window, or a menu that is
+    # Windows' rather than ours, is not that.
+    (r"(?!.*\b(?:press|hit|tap|push|close|quit|new)\b)"
+     r"(?!.*\b(?:start|context|file|edit|right[- ]click)\s+menu\b)"
+     r".*\b(?:tab|tabs|panel|panels|menu|navigation)\b.*",
      "show the VIEW tab"),
     # "hide the panels" is a UI request; "hide YOURSELF" is a dismissal — without the
     # exclusion this rewrote it to "hide everything" and it hit the UI skill at 1.00.
@@ -576,12 +584,28 @@ class Brain:
 
     @staticmethod
     def _executable(text: str, skill: str) -> bool:
-        """A phrasing is only worth learning if the skill could act on it by itself."""
+        """A phrasing is only worth learning if the skill could act on it by itself.
+
+        STORED ROWS ARE NORMALISED, AND THE CHECK HAS TO KNOW IT. `learn()`
+        validates the RAW text ("ping me in 10 minutes") and stores `_norm()`
+        of it ("ping me in N minutes"). `load()` then re-validates the stored
+        form — and a slot extractor that needs a number returns None on "N",
+        so every confirmed reminder, watch and volume phrasing was dropped as
+        "unusable" on the next boot. Rejections persisted; confirmations did
+        not, and he was asked the same "did you mean" again after every
+        restart. Placeholders get stand-in values here so the check is asked
+        the question it was meant to be asked.
+        """
+        import re
         sk = SKILL_BY_NAME.get(skill)
         if sk is None or skill == "general":
             return False
+        probe = re.sub(r"\bN\b", "10", text)
+        probe = re.sub(r"\bTIME\b", "5 pm", probe)
+        probe = re.sub(r"\bTASK\b", "stretch", probe)
+        probe = re.sub(r"\bMETRIC\b", "cpu", probe)
         try:
-            return sk.slots(_light(text)) is not None
+            return sk.slots(_light(probe)) is not None
         except Exception:
             return False
 

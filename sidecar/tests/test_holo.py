@@ -61,6 +61,16 @@ async def main() -> int:
         return await real_emit(kind, **kw)
     events.bus.emit = spy
 
+    # A TEMP FOLDER, NOT HIS. This wrote gatetest-cube.stl into the real
+    # %APPDATA%\JARVIS\fabrication on every build — and `_pick()` with no name
+    # means "the newest thing you made", so for the length of the gate his
+    # newest part was a test cube. The gate's own cleanup was the only thing
+    # standing between a failed run and a cube he could not explain.
+    import tempfile
+    from pathlib import Path as _P
+    _real_work_dir = F.work_dir
+    _tmp_work = _P(tempfile.mkdtemp(prefix="jarvis-holo-gate-"))
+    F.work_dir = lambda: _tmp_work
     work = F.work_dir()
     cube = write_cube(os.path.join(str(work), "gatetest-cube.stl"))
 
@@ -142,6 +152,7 @@ async def main() -> int:
               "without this the model reaches for a hologram when he wanted pictures")
     finally:
         events.bus.emit = real_emit
+        F.work_dir = _real_work_dir
         for f in ("gatetest-cube.stl", "gatetest-broken.stl"):
             try:
                 os.remove(os.path.join(str(work), f))

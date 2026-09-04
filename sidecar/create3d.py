@@ -129,8 +129,15 @@ _ORGANIC = re.compile(
     r"tree|flower|plant|leaf|shell|rock|organic)\b", re.I)
 
 
-def choose_tier(description: str = "", image_path: str = "") -> int:
+def choose_tier(description: str = "", image_path: str = "",
+                exclude: tuple[int, ...] = ()) -> int:
     """Which technique fits what he asked for.
+
+    `exclude` is for the fallbacks: a tier that has just FAILED for this
+    description must not be chosen again for it. Without it, tier 6 ("build
+    it as pieces") asked the LLM what a suit was made of, got NONE, fell back
+    to `choose_tier(desc)` — which saw "suit" and returned 6 — and asked again,
+    forever, with every make_hologram after it queued behind the loop.
 
     Deliberately explicit rather than asking the model: this decides how long he
     waits and whether the result can be edited afterwards, and a coin-flip
@@ -150,7 +157,7 @@ def choose_tier(description: str = "", image_path: str = "") -> int:
     # words. "A mug with the batman logo" contains "logo" and the flat-emblem
     # rule claimed the whole sentence — so he got a logo and no mug.
     import composite
-    if composite.split(desc):
+    if 7 not in exclude and composite.split(desc):
         return 7
 
     # A shape we can write out exactly needs no model and takes a fifth of a
@@ -189,7 +196,7 @@ def choose_tier(description: str = "", image_path: str = "") -> int:
     # picture of a gauntlet — and then he can zoom into each. Tier 6 falls back
     # to building the thing whole when it turns out not to come apart.
     import components
-    if components.worth_splitting(desc):
+    if 6 not in exclude and components.worth_splitting(desc):
         return 6
     if _ORGANIC.search(desc):
         # SOMEBODY HAS ALREADY MADE THIS ONE, AND MADE IT PROPERLY.
@@ -756,8 +763,10 @@ async def from_image(image_path: str, name: str = "", thickness_mm: float = 3.0,
     # geometry as six hundred loose coordinates with no eye in it; these are the
     # outlines and holes, which is what "make his eyes smaller" needs to exist.
     save_shapes(str(stl), shapes, thickness_mm, width_mm)
-    # ...and, when the picture has more than one colour in it, as coloured parts.
-    await _colour_parts(str(p), str(stl), shapes, thickness_mm, width_mm)
+    # (The coloured parts are built AFTER the body below, once. This used to
+    # build them here as well — every colour part through OpenSCAD twice, and a
+    # manifest naming a body STL that did not exist yet, so a failed main build
+    # left the colour parts behind as the newest files in the folder.)
     rc, out, err = await _run([exe, "-o", str(stl), str(scad)], 180)
     if rc != 0 or not stl.exists():
         return {"error": f"OpenSCAD could not build that: {(err or out or '').strip()[:200]}",
@@ -949,6 +958,14 @@ async def _run_model3d(script: str, args: list[str], timeout: float,
         await asyncio.wait_for(proc.wait(), timeout=30)
     except asyncio.TimeoutError:
         stop()
+        # A FINISHED RENDER IS NOT A TIMEOUT. Both pipes can be at EOF with the
+        # final JSON already in `result`, and the child then take longer than
+        # thirty seconds to exit — torch tearing down 1.7 GB of weights. That
+        # used to come back as "timed out after 900s" for a part that was on
+        # disk, and "show me that again" projected it a moment later.
+        if result and not result.get("error"):
+            log.info("%s answered but was slow to exit; keeping the answer", script)
+            return result
         return {"error": f"timed out after {int(timeout)}s"}
     except asyncio.CancelledError:
         stop()
@@ -1701,6 +1718,42 @@ def _too_flat(size) -> bool:
         return False
 
 
+async def _apply_unit_scale(got: dict) -> dict:
+    """DO the scaling `_unit_doubt` recommends, rather than announce it.
+
+    `unit_scale` was computed and had no consumer. A tier-5 download authored
+    in inches — common for US-published STLs — was measured raw: a 3.5 x 2 x
+    0.3 inch part became "4 by 2 by 0 millimetres", the sliver guard called it
+    degenerate, and he heard "most likely inches, so I'd scale it 25.4 times;
+    that came out 4 by 2 by 0 millimetres, which isn't right" in one breath,
+    with a four-millimetre hologram on the stage. The mesh is rewritten in
+    millimetres here, before anything downstream measures it.
+    """
+    doubt = _unit_doubt(got.get("size_mm") or [])
+    mult = float(doubt.get("unit_scale") or 0)
+    path = got.get("stl")
+    if not (mult and mult != 1.0 and path):
+        return doubt
+
+    def rescale() -> list[float]:
+        import meshio
+        tris = meshio.load(str(path)) * mult
+        meshio.write_stl(tris, str(path))
+        flat = tris.reshape(-1, 3)
+        return [float(v) for v in (flat.max(axis=0) - flat.min(axis=0))]
+    try:
+        got["size_mm"] = await asyncio.to_thread(rescale)
+    except Exception:
+        log.warning("could not rescale %s from %s", path, doubt.get("unit_guess"),
+                    exc_info=True)
+        return doubt
+    # Scaled, so no longer in doubt — and the caveat says what was done.
+    return {"units_uncertain": False, "unit_guess": doubt.get("unit_guess"),
+            "unit_scale": mult, "unit_scaled": True,
+            "unit_note": f"it was in {doubt.get('unit_guess') or 'other units'}, "
+                         f"so I've scaled it to millimetres"}
+
+
 def _unit_doubt(size) -> dict:
     """Say when a downloaded mesh is probably not in millimetres.
 
@@ -1796,6 +1849,7 @@ async def from_the_web(description: str, name: str = "", skip: int = 0,
         found_as = f"{pick['path'].split('/')[-1]} from {pick['repo']}"
         if in_pieces:
             found_as += f" — one of {len(siblings) + 1} parts"
+        units = await _apply_unit_scale(got)
         return {**got, "tier": 5, "note": TIER_NOTE[5],
                 "credit": pick["repo"], "found_not_made": True,
                 "source_page": c.get("url", ""),
@@ -1803,7 +1857,7 @@ async def from_the_web(description: str, name: str = "", skip: int = 0,
                 "in_pieces": in_pieces,
                 "coarse": int(got.get("triangles") or 0) < COARSE_TRIANGLES,
                 "part_count": len(siblings) + 1 if in_pieces else 1,
-                **_unit_doubt(got.get("size_mm") or []),
+                **units,
                 "alternatives": [{"path": o["path"], "url": o["url"],
                                   "bytes": o["bytes"]} for o in others[:6]],
                 # SAY WHAT ARRIVED, not what was asked for. A search for the
@@ -1945,8 +1999,14 @@ async def build(tier: int, description: str = "", image_path: str = "",
         # Which KIND of tier 2: an extruded outline for a logo, a relief for a
         # photograph. Decided from his words, and reported either way.
         outline = (note_for(2, description) == TIER_NOTE[2])
-        r = await (from_image(image_path, name) if outline
-                   else from_relief(image_path, name))
+        # NAMED FOR WHAT HE ASKED FOR, not for the reference it was traced
+        # from. With no name this fell through to the picture's stem, so the
+        # part, its .scad, its shapes and its manifest were all
+        # "spider-man-s-spider-emblem-ref.*" — and "show me the spider emblem"
+        # then looked for spider-emblem.stl, found nothing, and offered to make
+        # the thing it had just made. Tier 4 already did this right.
+        r = await (from_image(image_path, name or description) if outline
+                   else from_relief(image_path, name or description))
         if ref_fetched:
             r.setdefault("reference_used", True)
             # Scaffolding, not a part. Kept on failure so it can be looked at.
@@ -1967,8 +2027,10 @@ async def build(tier: int, description: str = "", image_path: str = "",
         import composite
         r = await composite.build(description, name)
         if r.get("not_composite"):
-            r = await build(choose_tier(description, image_path), description,
-                            image_path, name, skip=skip,
+            # Never tier 7 again for this description: that is the tier that
+            # just said it was not a composite.
+            r = await build(choose_tier(description, image_path, exclude=(7,)),
+                            description, image_path, name, skip=skip,
                             progressive=progressive)
     elif tier == 6:
         # TAKE THE REQUEST APART, NOT THE MESH. A suit cannot be reconstructed
@@ -1981,8 +2043,13 @@ async def build(tier: int, description: str = "", image_path: str = "",
             # Not made of anything nameable after all, so make the thing itself
             # rather than refusing him over a decomposition he never asked for.
             log.info("%r did not come apart; building it whole", description[:40])
-            r = await build(choose_tier(description, image_path), description,
-                            image_path, name, skip=skip,
+            # THIS IS THE LINE THAT LOOPED. choose_tier saw "suit" in the
+            # description and returned 6 — the tier that had just failed — and
+            # from_components asked the LLM what the suit was made of again,
+            # forever, with every later make_hologram queued behind it. Six is
+            # excluded now (and seven, which would hand it straight back).
+            r = await build(choose_tier(description, image_path, exclude=(6, 7)),
+                            description, image_path, name, skip=skip,
                             progressive=progressive)
     else:
         return {"error": f"I don't have a way to make that (tier {tier})"}

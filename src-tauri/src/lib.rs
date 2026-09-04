@@ -156,7 +156,18 @@ pub fn run() {
                 missed_health = 0;
                 recent_restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
                 if recent_restarts.len() >= 3 {
-                    // crash-looping — stop trying for this 10-minute window
+                    // crash-looping — stop trying for this 10-minute window.
+                    // SAID OUT LOUD. This used to `continue` in silence, so a
+                    // sidecar that died three times left him with a HUD
+                    // reading OFFLINE and nothing anywhere saying why or for
+                    // how long — the "silent assistant" this supervisor was
+                    // rewritten to prevent, one level up.
+                    let wait = 600u64.saturating_sub(
+                        recent_restarts.iter().map(|t| t.elapsed().as_secs()).max().unwrap_or(0));
+                    eprintln!(
+                        "[jarvis] sidecar has died {} times in ten minutes — not restarting \
+                         it again for about {}s; check %APPDATA%\\JARVIS\\logs\\sidecar.log",
+                        recent_restarts.len(), wait);
                     continue;
                 }
                 eprintln!("[jarvis] sidecar died — restarting");

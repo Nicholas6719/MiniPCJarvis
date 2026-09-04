@@ -56,6 +56,7 @@ class FakeTelegram:
 
     async def send_proactive(self, text, tier="notable", subject=""):
         self.sent.append((text, tier))
+        return True          # the bridge reports whether Telegram accepted it
 
 
 def setup(present: bool, state=State.IDLE, telegram=True):
@@ -122,6 +123,27 @@ def main() -> int:
         r = asyncio.run(dv.delivery.deliver("Something", dv.ALERT))
         check("with no phone paired it is kept, not thrown away",
               "held" in r["delivered"], r)
+
+        # --- the phone was there and Telegram REFUSED -------------------------
+        # This used to file the message as delivered regardless: _sent charged,
+        # the text remembered as told, "telegram" returned — with the network
+        # down while he was away, an ALERT vanished and "any update on that?"
+        # was later answered as though he had heard it.
+        orch, tg = setup(present=False)
+        _original_send = FakeTelegram.send_proactive      # BEFORE overriding it
+        async def refused(self, text, tier="notable", subject=""):
+            tg.sent.append((text, tier))
+            return False
+        type(tg).send_proactive = refused
+        before = len(dv.delivery._sent)
+        r = asyncio.run(dv.delivery.deliver("The oven is on fire.", dv.ALERT, key="fire"))
+        check("a send Telegram refused is reported as held, not delivered",
+              r.get("delivered") == "held" and "accept" in r.get("why", ""), r)
+        check("...and is not charged to the hourly budget",
+              len(dv.delivery._sent) == before, len(dv.delivery._sent))
+        check("...and is not remembered as told, so it can be sent again",
+              "fire" not in dv.delivery._last, list(dv.delivery._last)[:4])
+        type(tg).send_proactive = _original_send
 
         # --- he is not told the same thing over and over ---------------------
         orch, tg = setup(present=False)
@@ -204,6 +226,7 @@ def main() -> int:
     class _FakeTG:
         async def send_proactive(self, text, tier=None, subject=None):
             sent.append(text)
+            return True
 
     real_orch = _D.delivery.orchestrator
     real_present, real_avail = _D.is_present, _D.telegram_available

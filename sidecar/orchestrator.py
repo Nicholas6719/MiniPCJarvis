@@ -76,9 +76,19 @@ YES_WORDS = re.compile(r"^\s*(?:yes|yes please|yeah|yep|yup|sure|ok|okay|do it|g
 # whether to run a skill the brain already nearly chose - the worst case is a
 # rotated view and another "no" - and "yes please go ahead and finish the
 # render" is unmistakably a yes that YES_WORDS threw away.
+#
+# ANCHORED AT BOTH ENDS. This used to match only the opening word, so after
+# "Did you mean lock, sir?" the sentence "okay, what's the weather like" was a
+# yes: the PC locked, the weather went unanswered, and "press the windows key"
+# was learned as `lock` for good. A yes is the whole utterance, or a yes-word
+# followed by nothing but the tails people put on one ("yes please", "ok go
+# ahead", "sure, do it"). Anything with a subject after it is a new request.
 GUESS_YES = re.compile(r"^\s*(?:yes|yeah|yep|yup|sure|ok|okay|correct|right|"
                        r"that'?s (?:right|it)|please do|go ahead|do it|"
-                       r"carry on|keep going|continue)\b", re.I)
+                       r"carry on|keep going|continue)"
+                       r"(?:\s*[,.!]?\s*(?:please|sir|thanks|thank you|go ahead|"
+                       r"do it|do that|carry on|finish (?:it|the render)))*"
+                       r"\s*[.!]?\s*$", re.I)
 NO_WORDS = re.compile(r"^\s*(?:no|no thanks|no thank you|nope|nah|naw|cancel|stop|don't|do not|"
                       r"never\s*mind|negative|forget it|not now|n[aã]o|nein|non|nyet|nej|no way)"
                       r"\s*[.!,]?\s*$", re.I)
@@ -564,6 +574,10 @@ class Orchestrator:
 
     def _arm_conversation(self) -> None:
         """Open the follow-up window: speech alone opens a turn, no wake word."""
+        # Never while asleep. Six call sites reach here; guarding each one is
+        # the kind of thing that stays right until the seventh is added.
+        if self.sm.state is State.SLEEPING:
+            return
         mode = config.get("wake", "mode", default="push_to_talk")
         win = float(config.get("conversation", "window_s", default=15))
         # WORKING ON A MODEL IS A CONVERSATION, NOT A COMMAND.
@@ -659,6 +673,33 @@ class Orchestrator:
                     config.get("audio", "preferred_input_names",
                                default=["C920", "Webcam", "Logitech"])]
         last_switch = 0.0
+        last_heal = 0.0
+
+        async def reopen(reason: str) -> bool:
+            """Stop, re-enumerate, start — OFF THE EVENT LOOP, and honestly.
+
+            Every one of these calls was running on the loop thread: mic.stop()
+            joins the callback, Pa_Initialize probes every endpoint (0.3-2 s on
+            Windows), and InputStream open talks to the driver. And when the
+            reopen FAILED — the C920 mid-re-enumeration, an exclusive-mode app
+            holding the only mic — the exception landed in a DEBUG line, and
+            nothing retried: JARVIS was deaf until restart with the HUD saying
+            nothing. Now it says so, at a level that is read, and tries again.
+            """
+            def work() -> None:
+                mic.stop()
+                _spk.close()      # a re-init would close the output stream underneath us
+                refresh_devices()  # refuses, safely, while a writer is stuck in an orphan
+                mic.start()
+            try:
+                await asyncio.to_thread(work)
+            except Exception as e:
+                log.warning("microphone reopen after %s failed: %s", reason, e)
+                await bus.emit("boot", summary="microphone unavailable — retrying")
+                return False
+            await bus.emit("boot", summary=f"microphone recovered: {mic.device_name}")
+            return True
+
         while True:
             await asyncio.sleep(15)
             try:
@@ -667,13 +708,22 @@ class Orchestrator:
                 if (mic._stream is not None and mic.last_frame_at
                         and time.time() - mic.last_frame_at > 6
                         and self.sm.state in (State.IDLE, State.SLEEPING)):
+                    # BACKED OFF. A stream that opens but never delivers made
+                    # this fire every 15 s forever, each time announcing
+                    # "microphone recovered" — the 157-false-alarm log.
+                    if time.time() - last_heal < 120:
+                        continue
+                    last_heal = time.time()
                     log.warning("microphone went silent — reopening")
-                    mic.stop()
-                    _spk.close()          # refresh_devices() terminates PortAudio; drop the stale output stream too
-                    refresh_devices()
-                    mic.start()
-                    await bus.emit("boot", summary=f"microphone recovered: {mic.device_name}")
+                    await reopen("silence")
                     last_switch = time.time()
+                    continue
+                # ...and a mic that FAILED to reopen last time gets another go,
+                # rather than staying dead because nothing was open to heal.
+                if mic._stream is None and time.time() - last_heal > 60 \
+                        and self.sm.state in (State.IDLE, State.SLEEPING):
+                    last_heal = time.time()
+                    await reopen("earlier failure")
                     continue
                 if time.time() - last_switch < 300:
                     continue  # never thrash the device: one switch per 5 min max
@@ -706,11 +756,7 @@ class Orchestrator:
                     log.info("audio device change: webcam mic %s",
                              "connected" if present else "disconnected")
                     last_switch = time.time()
-                    mic.stop()
-                    _spk.close()
-                    refresh_devices()
-                    mic.start()
-                    await bus.emit("boot", summary=f"microphone: {mic.device_name}")
+                    await reopen("device change")
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -844,8 +890,12 @@ class Orchestrator:
             async for chunk in tts.synthesize_stream(clean_for_speech(text), cancel):
                 if cancel.is_set():
                     break
-                await speaker.play_chunk(chunk, tts.sample_rate)
-                heard = True
+                # play_chunk says whether it WROTE. Under /debug/silence it
+                # returns early without writing, and `heard = True` here used
+                # to open the follow-up window anyway — a mic listening in a
+                # silenced room, the exact case the comment below describes.
+                if await speaker.play_chunk(chunk, tts.sample_rate):
+                    heard = True
         finally:
             if self.sm.state == State.SPEAKING:
                 await self.sm.to(State.IDLE, force=True)
@@ -948,6 +998,18 @@ class Orchestrator:
                 if score >= wake.threshold and time.time() - last_fire > 2.0:
                     last_fire = time.time()
                     log.info("wake word detected (%.2f)", score)
+                    # SNAPSHOT FIRST, SURFACE SECOND. The pre-roll used to be
+                    # taken AFTER the window was brought forward — EnumWindows,
+                    # an ALT tap, SetForegroundWindow, a display check — and the
+                    # audio blocks that arrived in that gap sat in the queue
+                    # un-appended, then were drained by the capture. "hey
+                    # jarvis what…" in one breath lost its first syllable now
+                    # and then. The words are kept before anything else moves.
+                    wake.reset()
+                    self._preroll = np.concatenate(list(preroll))
+                    preroll.clear()
+                    self.vad.reset()
+                    self._listen_flag.set()
                     if self.sm.state == State.SLEEPING:
                         # must also LEAVE the sleeping state, not just raise the window —
                         # the capture/turn path only runs from IDLE, so restoring the
@@ -962,11 +1024,6 @@ class Orchestrator:
                         # name is a deliberate approach; it brings him forward.
                         await self._surface()
                     await bus.emit("wake", score=round(score, 2))
-                    wake.reset()
-                    self._preroll = np.concatenate(list(preroll))
-                    preroll.clear()
-                    self.vad.reset()
-                    self._listen_flag.set()
                     await self.play_sound("chime")
         except asyncio.CancelledError:
             raise
@@ -1016,6 +1073,32 @@ class Orchestrator:
     async def _listen_loop(self) -> None:
         while True:
             await self._listen_flag.wait()
+            if self.sm.state is State.WAITING and registry.has_pending:
+                # "JARVIS, YES" WHILE A QUESTION IS OPEN. The wake word fires
+                # in WAITING, plays the chime and sets the flag — and this loop
+                # used to spin at 20 Hz until the state left WAITING, so the
+                # answer was never captured: he said yes, nothing happened,
+                # thirty seconds later "I didn't get a yes", and the stale
+                # flag then opened a capture at IDLE that ran his "yes" as a
+                # brand-new turn ("Did you mean sleep, sir?"). The answer is
+                # captured here without touching the state machine and put to
+                # the question directly; anything that is not a yes or a no is
+                # dropped, and the question stays open for its timer.
+                utterance = await self._capture_utterance()
+                self._listen_flag.clear()
+                self._preroll = None
+                if utterance is not None and len(utterance) >= MIC_RATE // 4:
+                    try:
+                        spoken = (await stt.transcribe(utterance) or "").strip()
+                        spoken = WAKE_PHRASE.sub("", spoken, count=1).strip()
+                        await bus.emit("transcript", role="user", text=spoken,
+                                       source="confirm")
+                        if not await self.try_voice_confirmation(spoken):
+                            log.info("heard %r during a confirmation; not an answer",
+                                     spoken[:40])
+                    except Exception:
+                        log.exception("could not hear the answer to a question")
+                continue
             if self.sm.state in (State.IDLE, State.INTERRUPTED):
                 await self.sm.to(State.LISTENING)
                 utterance = await self._capture_utterance()
@@ -1207,10 +1290,22 @@ class Orchestrator:
         the turn waits its turn instead."""
         if self.sm.state is State.SPEAKING:
             await self.interrupt()
-        for _ in range(600):                      # up to 60 s of patience
+        # PATIENCE, THEN HONESTY — never force. This waited 60 s and then forced
+        # PROCESSING over whatever was still running, so a phone message during
+        # a long market read (90 s budget) started a second `_converse` on top
+        # of the first: both shared `_speak_cancel` and `_history`, and the
+        # first turn's ending forced IDLE out from under the second. The wait
+        # now covers the longest tool budget, and if it is still busy after
+        # that he is told so rather than having two turns fighting.
+        for _ in range(1800):                     # up to 180 s of patience
             if self.sm.state in (State.IDLE, State.INTERRUPTED, State.SLEEPING):
                 break
             await asyncio.sleep(0.1)
+        else:
+            await bus.emit("transcript", role="user", text=text, source="text")
+            await bus.emit("turn_done", text="I'm still on the last one, sir — give "
+                                             "me a moment and say it again.")
+            return
         await self.sm.to(State.PROCESSING, force=True)
         self.metrics.begin()
         await bus.emit("transcript", role="user", text=text, source="text")
@@ -1220,12 +1315,21 @@ class Orchestrator:
             # a failed turn must never wedge the state machine
             log.exception("text turn failed")
             await bus.emit("error", summary=f"turn failed: {e}")
+            # ...and must never leave a remote listener waiting either. The
+            # Telegram bridge waits on `turn_done` to know a turn ended; with
+            # only `error` emitted here it sat for its full 240 s and then sent
+            # "Done, sir." for a turn that had blown up.
+            await bus.emit("turn_done", text="Something went wrong with that one, sir.")
             await self.sm.to(State.IDLE, force=True)
 
     # Skills whose confirmation is not worth the risk of a mis-heard yes.
     # edit_part rewrites the source and re-renders a part he may be about to
     # print; a wrong view is free and a wrong edit is not.
-    _NEVER_GUESS = frozenset({"holo_edit", "holo_revert"})
+    # ...and lock, sleep and to_phone: a mis-heard "yes" to "Did you mean lock,
+    # sir?" locks the PC, and to "to phone" sends whatever was last on screen to
+    # his phone. Neither is a wrong view; both are a wrong action he then has to
+    # undo, which is exactly the class the guess flow is not allowed to touch.
+    _NEVER_GUESS = frozenset({"holo_edit", "holo_revert", "lock", "sleep", "to_phone"})
 
     async def _ask_if_unsure(self, text: str, t_start: float) -> bool:
         """One short question when the brain nearly knew. True if it was asked."""
@@ -1241,6 +1345,10 @@ class Orchestrator:
             return False        # he has already told me no to exactly this
         from brain.skills import confirm_as
         say = confirm_as(name)
+        if not say:
+            # No English for it means no question: "Did you mean wakeack,
+            # sir?" is worse than a plain answer from the LLM.
+            return False
         line = f"Did you mean {say}, sir?"
         self._unsure = {"skill": name, "args": u.get("args") or {},
                         "text": text}
@@ -1252,7 +1360,11 @@ class Orchestrator:
             log.warning("could not speak the confirmation aloud", exc_info=True)
         await bus.emit("turn_done",
                        latency_ms=int((time.time() - t_start) * 1000), breakdown={})
-        if self.sm.state not in (State.ERROR, State.STARTING):
+        # Not over a NEWER turn: a barge-in during this reply already moved the
+        # machine to LISTENING, and forcing IDLE here made the next PROCESSING
+        # transition (non-forced, from IDLE) refuse — the HUD showed idle for
+        # that whole next turn. Same guard as _ask_clarification.
+        if self.sm.state not in (State.ERROR, State.STARTING, *_NEXT_TURN_STATES):
             await self.sm.to(State.IDLE, force=True)
         return True
 
@@ -1330,7 +1442,14 @@ class Orchestrator:
             await self.sm.to(State.IDLE)
             return
         await self._converse(text, t_start)
-        self._arm_conversation()
+        # NOT AFTER "GO TO SLEEP". The sleep reflex disarms the window and moves
+        # to SLEEPING; this unconditional re-arm then opened it again, so the
+        # HUD showed the open-mic badge right after he had dismissed him, and
+        # anything said in the next fifteen seconds set the listen flag — which
+        # is never cleared until the next wake word, and stored a stale pre-roll
+        # that came out in front of his next real request.
+        if self.sm.state is not State.SLEEPING:
+            self._arm_conversation()
 
     async def _converse(self, text: str, t_start: float) -> None:
         # Just his NAME and nothing else. By voice this is handled up in the turn
@@ -1359,6 +1478,14 @@ class Orchestrator:
                     brain.reject(pend.get("text") or "", pend.get("skill") or "")
                 except Exception:
                     log.debug("could not record the rejection", exc_info=True)
+                # AND STOP HERE. A bare "no" that fell through went to the
+                # router as its own utterance, matched the `correction` skill
+                # at 1.0, and unlearned whatever reflex had fired in the last
+                # forty seconds — a phrasing he had confirmed the day before,
+                # silently gone — before answering "Sorry about that. What did
+                # you want?" to a question he had just answered.
+                await self._say_and_finish("Understood, sir.", text, t_start, "guess")
+                return
             # Anything else is not an answer to the question. Fall through and
             # treat it as the request it is - he asked for something else.
         # ---- a question he was asked is still open: this may be the answer ----
@@ -1410,7 +1537,7 @@ class Orchestrator:
                 # to happen without a line in the log saying why.
                 log.warning('could not speak the reply aloud', exc_info=True)
             await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000), breakdown={})
-            if self.sm.state not in (State.ERROR, State.STARTING):
+            if self.sm.state not in (State.ERROR, State.STARTING, *_NEXT_TURN_STATES):
                 await self.sm.to(State.IDLE, force=True)
             return
         # brain thinks this is a plain question -> steer the LLM away from needless tool use
@@ -1567,7 +1694,8 @@ class Orchestrator:
         # the transcript takes the markdown-free text; the streamed deltas are raw
         await bus.emit("turn_done", latency_ms=latency,
                        breakdown=breakdown, text=strip_markdown(full_reply or ""))
-        if self.sm.state != State.ERROR:
+        # The LLM path, same rule: a barge-in mid-reply has already moved on.
+        if self.sm.state not in (State.ERROR, *_NEXT_TURN_STATES):
             await self.sm.to(State.IDLE, force=True)
 
     _FILLERS = ["Let me see.", "One moment.", "Let me think.", "Hmm, let me check.", "Just a second."]
@@ -1656,7 +1784,20 @@ class Orchestrator:
                 await queue.put(clean_for_speech(extra))
         else:
             try:
-                reply = polish(skill.speak(args, res))
+                # A SKILL WITH NO TEMPLATE SPEAKS ITS TOOL'S OWN WORDS. Six
+                # skills (project_list, project_open, project_note, return_home,
+                # media_play and friends) have `speak=None`; calling None
+                # raised TypeError into the except below, which answered "Done."
+                # to "what projects do we have" while the tool's actual answer —
+                # the list, in its `spoken` field — was thrown away, and the log
+                # filled with "reflex speak template failed" for every one.
+                if skill.speak is not None:
+                    reply = polish(skill.speak(args, res))
+                else:
+                    spoken = res.get("spoken") if isinstance(res, dict) else None
+                    if not spoken and isinstance(res, dict) and res.get("error"):
+                        spoken = str(res["error"])
+                    reply = polish(spoken or "Done.")
             except Exception:
                 log.exception("reflex speak template failed")
                 reply = "Done." if "error" not in res else "I'm afraid that didn't work."

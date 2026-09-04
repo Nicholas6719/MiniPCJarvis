@@ -33,7 +33,14 @@ export async function sidecarInfo(): Promise<SidecarInfo> {
 
 export async function api(path: string, opts: RequestInit = {}): Promise<any> {
   const { port, token } = await sidecarInfo();
+  // A DEADLINE, ALWAYS. On a wedged event loop (the forty-minute case) a fetch
+  // with no timeout never rejects, so the machine panel's error path never ran
+  // and the last healthy numbers sat there looking healthy while the 5-second
+  // poll stacked hung requests behind them until the supervisor killed the
+  // process. Eight seconds is longer than anything the HUD asks for takes;
+  // a caller that needs more passes its own signal.
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    signal: AbortSignal.timeout(8000),
     ...opts,
     headers: {
       "Content-Type": "application/json",

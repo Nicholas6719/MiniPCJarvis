@@ -5,6 +5,7 @@ Everything is sandboxed to those roots (from config "folders"). Deletes go to th
 Recycle Bin (undoable). Everything is reversible (Recycle Bin / move back), so nothing asks for confirmation."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import ctypes
 import logging
@@ -108,13 +109,19 @@ async def list_folder(path: str = "downloads", limit: int = 200) -> dict:
                 "roots": list(roots())}
     if not p.is_dir():
         return {"error": f"{_display(p)} is a file, not a folder"}
-    entries = []
-    try:
-        for child in p.iterdir():
-            if child.name.startswith((".", "~$")) or child.name.lower() == "desktop.ini":
-                continue
-            entries.append(_entry(child))
-    except PermissionError:
+    def scan() -> list[dict] | None:      # iterdir + a stat per entry: off the loop
+        out = []
+        try:
+            for child in p.iterdir():
+                if child.name.startswith((".", "~$")) or child.name.lower() == "desktop.ini":
+                    continue
+                out.append(_entry(child))
+        except PermissionError:
+            return None
+        return out
+
+    entries = await asyncio.to_thread(scan)
+    if entries is None:
         return {"error": f"no permission to read {_display(p)}"}
     entries.sort(key=lambda e: (e["kind"] != "folder", -e.get("modified", 0)))
     total = len(entries)
@@ -133,26 +140,37 @@ async def find_files(query: str, folder: str | None = None, limit: int = 40) -> 
         return {"error": "empty query"}
     words = [w for w in re.split(r"\s+", q) if w]
     bases = [_resolve(folder)] if folder else list(roots().values())
-    hits: list[dict] = []
-    t0 = time.time()
-    for base in bases:
-        if base is None:
-            continue
-        for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [d for d in dirnames if not d.startswith((".", "node_modules", "__pycache__", ".venv", "target"))]
-            depth = len(Path(dirpath).relative_to(base).parts)
-            if depth >= 5:
-                dirnames[:] = []
-            for n in filenames + dirnames:
-                nl = n.lower()
-                if all(w in nl for w in words):
-                    hits.append(_entry(Path(dirpath) / n))
-                    if len(hits) >= limit:
-                        break
+
+    # OFF THE EVENT LOOP. This is an `async def`, so the registry runs it on
+    # the loop rather than in the tool pool — and a six-second os.walk across
+    # Documents and Downloads (OneDrive-backed, on a bad day) is six seconds
+    # with no wake word, no speech and no HUD: the forty-minute-freeze shape,
+    # from "find files called report". The walk is a plain function now and
+    # the loop only waits for it.
+    def walk() -> list[dict]:
+        hits: list[dict] = []
+        t0 = time.time()
+        for base in bases:
+            if base is None:
+                continue
+            for dirpath, dirnames, filenames in os.walk(base):
+                dirnames[:] = [d for d in dirnames if not d.startswith((".", "node_modules", "__pycache__", ".venv", "target"))]
+                depth = len(Path(dirpath).relative_to(base).parts)
+                if depth >= 5:
+                    dirnames[:] = []
+                for n in filenames + dirnames:
+                    nl = n.lower()
+                    if all(w in nl for w in words):
+                        hits.append(_entry(Path(dirpath) / n))
+                        if len(hits) >= limit:
+                            break
+                if len(hits) >= limit or time.time() - t0 > 6:
+                    break
             if len(hits) >= limit or time.time() - t0 > 6:
                 break
-        if len(hits) >= limit or time.time() - t0 > 6:
-            break
+        return hits
+
+    hits = await asyncio.to_thread(walk)
     hits.sort(key=lambda e: (-(e["name"].lower() == q), -(e["name"].lower().startswith(q)), -e.get("modified", 0)))
     await bus.emit("files", path=None, label=f'search: "{query}"', parent=None, count=len(hits),
                    entries=hits, roots={k: str(v) for k, v in roots().items()}, query=query)
@@ -169,28 +187,33 @@ async def open_by_name(query: str) -> dict | None:
     words = [w for w in re.split(r"[\s_\-.]+", q) if w]
     if not words:
         return None
-    best: Path | None = None
-    best_mtime = -1.0
-    t0 = time.time()
-    for base in roots().values():
-        for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [d for d in dirnames if not d.startswith((".", "node_modules", "__pycache__", ".venv", "target"))]
-            if len(Path(dirpath).relative_to(base).parts) >= 5:
-                dirnames[:] = []
-            for n in filenames + dirnames:
-                nl = re.sub(r"[\s_\-.]+", " ", n.lower())
-                if all(w in nl for w in words):
-                    p = Path(dirpath) / n
-                    try:
-                        mt = p.stat().st_mtime
-                    except OSError:
-                        continue
-                    if mt > best_mtime:
-                        best, best_mtime = p, mt
+
+    def newest_match() -> Path | None:      # a walk, so off the loop (see find_files)
+        best: Path | None = None
+        best_mtime = -1.0
+        t0 = time.time()
+        for base in roots().values():
+            for dirpath, dirnames, filenames in os.walk(base):
+                dirnames[:] = [d for d in dirnames if not d.startswith((".", "node_modules", "__pycache__", ".venv", "target"))]
+                if len(Path(dirpath).relative_to(base).parts) >= 5:
+                    dirnames[:] = []
+                for n in filenames + dirnames:
+                    nl = re.sub(r"[\s_\-.]+", " ", n.lower())
+                    if all(w in nl for w in words):
+                        p = Path(dirpath) / n
+                        try:
+                            mt = p.stat().st_mtime
+                        except OSError:
+                            continue
+                        if mt > best_mtime:
+                            best, best_mtime = p, mt
+                if time.time() - t0 > 6:
+                    break
             if time.time() - t0 > 6:
                 break
-        if time.time() - t0 > 6:
-            break
+        return best
+
+    best = await asyncio.to_thread(newest_match)
     if best is None:
         return None
     if best.is_dir():
@@ -209,18 +232,24 @@ async def preview_file(path: str) -> dict:
     ext = p.suffix.lower()
     size = p.stat().st_size
     base = {"path": str(p), "label": _display(p), "name": p.name, "size": size, "modified": p.stat().st_mtime}
-    if ext in IMAGE_EXT and size <= 12_000_000:
-        mime = mimetypes.guess_type(p.name)[0] or "image/png"
-        return {**base, "type": "image", "data": f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()}
-    if ext in TEXT_EXT or size <= 64_000:
-        try:
-            text = p.read_text("utf-8", errors="replace")
-            if "\x00" in text[:4000]:
-                return {**base, "type": "binary"}
-            return {**base, "type": "text", "text": text[:MAX_PREVIEW], "truncated": len(text) > MAX_PREVIEW}
-        except Exception as e:
-            return {**base, "type": "binary", "error": str(e)}
-    return {**base, "type": "binary"}
+
+    def read() -> dict:
+        # A 12 MB image read and base64-encoded ON THE LOOP was a full second
+        # of nothing answering, per preview. Same rule as the walks above.
+        if ext in IMAGE_EXT and size <= 12_000_000:
+            mime = mimetypes.guess_type(p.name)[0] or "image/png"
+            return {**base, "type": "image", "data": f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode()}
+        if ext in TEXT_EXT or size <= 64_000:
+            try:
+                text = p.read_text("utf-8", errors="replace")
+                if "\x00" in text[:4000]:
+                    return {**base, "type": "binary"}
+                return {**base, "type": "text", "text": text[:MAX_PREVIEW], "truncated": len(text) > MAX_PREVIEW}
+            except Exception as e:
+                return {**base, "type": "binary", "error": str(e)}
+        return {**base, "type": "binary"}
+
+    return await asyncio.to_thread(read)
 
 
 def _shell_op(op: int, src: str, dst: str | None, flags: int) -> int:
@@ -242,6 +271,11 @@ def _shell_op(op: int, src: str, dst: str | None, flags: int) -> int:
 FO_MOVE, FO_DELETE, FO_RENAME = 1, 3, 4
 FOF_SILENT, FOF_NOCONFIRMATION, FOF_ALLOWUNDO, FOF_NOERRORUI = 0x4, 0x10, 0x40, 0x400
 _QUIET = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI
+# The largest folder tree delete_file will send to the bin. The bin's real
+# limit is a slice of the volume that cannot be read cheaply; anything past
+# this is refused rather than risked, because over the limit FOF_NOCONFIRMATION
+# turns "recycle" into "delete permanently" without a word.
+MAX_RECYCLE_TREE_BYTES = 512_000_000
 
 
 def _near_matches(name: str, limit: int = 5) -> list[str]:
@@ -298,7 +332,32 @@ async def delete_file(path: str) -> dict:
         return {"error": f"not found: {path}"}
     if p in roots().values():
         return {"error": "refusing to delete a root folder"}
-    rc = _shell_op(FO_DELETE, str(p), None, _QUIET | FOF_ALLOWUNDO)
+    if p.is_dir():
+        # "UNDOABLE" HAS A LIMIT AND THIS TOOL WAS LYING ABOUT IT. The shell op
+        # runs with FOF_NOCONFIRMATION, which answers Windows' own "too big for
+        # the Recycle Bin — delete permanently?" with yes. A whole folder tree
+        # over the bin's limit was therefore gone for good, at LOW risk with no
+        # question asked — and "delete the JARVIS folder" is one mis-heard word
+        # from "delete the JARVIS file". Trees are sized first; a big one is
+        # refused here and left to him in Explorer, where the prompt is real.
+        def tree_bytes() -> int:
+            total = 0
+            for dirpath, _, files in os.walk(p):
+                for f in files:
+                    try:
+                        total += (Path(dirpath) / f).stat().st_size
+                    except OSError:
+                        pass
+                if total > MAX_RECYCLE_TREE_BYTES:
+                    break
+            return total
+        size = await asyncio.to_thread(tree_bytes)
+        if size > MAX_RECYCLE_TREE_BYTES:
+            return {"error": f"{_display(p)} is over {MAX_RECYCLE_TREE_BYTES // 1_000_000} MB, "
+                             "which may not fit in the Recycle Bin — I won't delete a "
+                             "folder that size where it can't be undone; please do that "
+                             "one in Explorer"}
+    rc = await asyncio.to_thread(_shell_op, FO_DELETE, str(p), None, _QUIET | FOF_ALLOWUNDO)
     if rc != 0:
         return {"error": f"could not recycle {_display(p)} (code {rc})"}
     await _refresh(p.parent)
@@ -393,7 +452,9 @@ async def move_file(path: str, destination: str) -> dict:
         target = d
     if target.exists():
         return {"error": f"{_display(target)} already exists"}
-    rc = _shell_op(FO_MOVE, str(p), str(target), _QUIET | FOF_ALLOWUNDO)
+    # Off the loop: SHFileOperation on a large tree is seconds, and a
+    # wait_for cannot cancel work running on the loop itself.
+    rc = await asyncio.to_thread(_shell_op, FO_MOVE, str(p), str(target), _QUIET | FOF_ALLOWUNDO)
     if rc != 0:
         return {"error": f"could not move {_display(p)} (code {rc})"}
     await _refresh(target.parent)
@@ -420,13 +481,25 @@ async def rename_file(path: str, new_name: str) -> dict:
     return {"renamed": p.name, "to": target.name}
 
 
+# What LOW risk is allowed to run. `os.startfile` on a program is EXECUTING
+# it — "open the installer I downloaded" ran an .msi with no "shall I?", from a
+# phone turn, at a tier that is supposed to mean "undoable". Documents and
+# media open; anything Windows would execute is refused at this tier.
+_EXECUTABLE_EXT = {".exe", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".vbe", ".js",
+                   ".jse", ".wsf", ".wsh", ".scr", ".com", ".pif", ".lnk", ".url",
+                   ".reg", ".msp", ".appx", ".appxbundle", ".hta", ".cpl"}
+
+
 async def open_with_windows(path: str) -> dict:
     """Open a file in its default Windows app (explicit user ask only)."""
     p = _resolve(path)
     if p is None or not p.exists():
         return {"error": f"not found: {path}"}
+    if p.suffix.lower() in _EXECUTABLE_EXT:
+        return {"error": f"{_display(p)} is a program, not a document — I don't run "
+                         "programs from here, sir; open it yourself if you meant to"}
     try:
-        os.startfile(str(p))
+        await asyncio.to_thread(os.startfile, str(p))
         return {"opened": _display(p)}
     except Exception as e:
         return {"error": f"could not open: {e}"}

@@ -20,7 +20,7 @@ import logging
 import re
 
 from events import bus
-from tools.registry import Risk, Tool, registry
+from tools.registry import Risk, Tool, registry, run_in_tool_pool
 
 log = logging.getLogger("jarvis.uia")
 
@@ -316,7 +316,7 @@ def _read_text(window_title: str | None = None, limit: int = 4000) -> list[dict]
 async def read_window_text(window: str = "", limit: int = 4000) -> dict:
     """What is written in a window — the contents of its fields, not their labels."""
     try:
-        found = await asyncio.to_thread(_read_text, window or None, int(limit))
+        found = await run_in_tool_pool(_read_text, window or None, int(limit))
     except Exception as e:
         log.warning("UIA text read failed", exc_info=True)
         return {"error": f"couldn't read that window ({type(e).__name__})"}
@@ -334,7 +334,7 @@ async def list_controls(window: str = "", clickable_only: bool = True,
                         limit: int = 40) -> dict:
     """What this window actually offers, straight from Windows."""
     try:
-        found = await asyncio.to_thread(_collect, window or None)
+        found = await run_in_tool_pool(_collect, window or None)
     except Exception as e:
         log.warning("UIA walk failed", exc_info=True)
         return {"error": f"couldn't read that window's controls ({type(e).__name__})"}
@@ -355,7 +355,7 @@ async def click_control(name: str, window: str = "", double: bool = False) -> di
     if not (name or "").strip():
         return {"error": "which control should I click?"}
     try:
-        found = await asyncio.to_thread(_collect, window or None)
+        found = await run_in_tool_pool(_collect, window or None)
     except Exception as e:
         return {"error": f"couldn't read that window's controls ({type(e).__name__})"}
     if not found:
@@ -397,15 +397,15 @@ async def click_control(name: str, window: str = "", double: bool = False) -> di
     # mouse, which nothing can block.
     how = "clicked"
     try:
-        if await asyncio.wait_for(asyncio.to_thread(_invoke), timeout=INVOKE_TIMEOUT_S):
+        if await asyncio.wait_for(run_in_tool_pool(_invoke), timeout=INVOKE_TIMEOUT_S):
             how = "invoked"
         else:
-            await asyncio.to_thread(_mouse)
+            await run_in_tool_pool(_mouse)
     except asyncio.TimeoutError:
         log.warning("UIA Invoke on %r did not answer in %.1fs - clicking it instead",
                     best["name"], INVOKE_TIMEOUT_S)
         how = "clicked (invoke timed out)"
-        await asyncio.to_thread(_mouse)
+        await run_in_tool_pool(_mouse)
     await bus.emit("remote_input", action="click_control", control=best["name"], how=how)
     return {"clicked": best["name"], "role": best["role"], "how": how,
             "match": round(best_score, 2), "x": best["x"], "y": best["y"]}

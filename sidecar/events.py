@@ -57,6 +57,16 @@ class EventBus:
                 await asyncio.wait_for(ws.send_text(payload), timeout=2.0)
             except Exception:
                 await self.detach(ws)
+                # AND CLOSE IT, or the HUD never finds out. Detached, the socket
+                # was skipped by every later emit while the client still sat in
+                # receive() with the connection open — no `onclose`, so no
+                # reconnect — and the orb showed the last state it had heard
+                # until the page was reloaded, while the sidecar was healthy.
+                # A best-effort close makes the HUD's reconnect path run.
+                try:
+                    await asyncio.wait_for(ws.close(code=1011), timeout=1.0)
+                except Exception:
+                    pass
         for fn in list(self._listeners):
             try:
                 fn(evt)

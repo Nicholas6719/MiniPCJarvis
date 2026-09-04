@@ -55,6 +55,7 @@ def main() -> int:
     class FakeTelegram:
         async def send_proactive(self, text, tier=NOTABLE, subject=""):
             sent.append((tier, text))
+            return True          # the bridge now reports whether Telegram took it
 
     fake_module = type(sys)("remote_telegram")
     fake_module.telegram = FakeTelegram()

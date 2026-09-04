@@ -115,6 +115,57 @@ Note: these are the main pieces a person would name when describing the armour.
               "an LLM emitting coordinates places objects at or below random")
     check("...it is asked for names only", "no sizes" in prompt.lower())
 
+    print("\n-- IT TERMINATES: a suit that will not come apart is built, not asked about forever --")
+    # The loop that ate a render: build(6) -> from_components -> LLM says NONE
+    # -> fall back to choose_tier(desc), which sees "suit" and returns 6 ->
+    # from_components again, forever. And every piece of a suit still contains
+    # the word "suit", so build_each routed each helmet back to tier 6 too.
+    # Nothing heavy runs here: the web tier and the reconstructor are stubbed
+    # to answer instantly, and the LLM is stubbed to say NONE.
+    calls = {"components": 0, "tiers": []}
+    helm = box(os.path.join(tempfile.mkdtemp(), "helmet.stl"), 30, 20, 25)
+
+    async def no_components(desc):
+        calls["components"] += 1
+        return []
+
+    async def fake_web(description, name="", skip=0, progressive=False):
+        return {"stl": helm, "tier": 5, "name": name or "x"}
+
+    async def fake_text(description, name="", skip=0, progressive=False):
+        return {"stl": helm, "tier": 4, "name": name or "x"}
+
+    real_tier = create3d.choose_tier
+
+    def spy_tier(description="", image_path="", exclude=()):
+        t = real_tier(description, image_path, exclude=exclude)
+        calls["tiers"].append((t, tuple(exclude)))
+        return t
+
+    saved = (components.component_list, create3d.from_the_web, create3d.from_text,
+             create3d.choose_tier)
+    components.component_list = no_components
+    create3d.from_the_web, create3d.from_text, create3d.choose_tier = fake_web, fake_text, spy_tier
+    try:
+        r = await asyncio.wait_for(create3d.build(6, "iron man mark 3 suit", name="suit"), 10)
+        check("build(6) on a suit with no components comes back at all",
+              bool(r.get("stl")) and not r.get("error"), r)
+        check("...having asked what it is made of exactly once",
+              calls["components"] == 1, calls["components"])
+        check("...and never choosing tier 6 or 7 again for the same words",
+              all(t not in (6, 7) for t, _ in calls["tiers"]), calls["tiers"])
+        calls["tiers"].clear()
+        await components.build_each("iron man mark 3 suit", ["helmet"], "suit")
+        check("a component of a suit is never itself split into components",
+              calls["tiers"] and all(6 in ex and 7 in ex for _, ex in calls["tiers"]),
+              calls["tiers"])
+    except asyncio.TimeoutError:
+        check("build(6) on a suit with no components comes back at all", False,
+              "it looped for ten seconds — the recursion is back")
+    finally:
+        (components.component_list, create3d.from_the_web, create3d.from_text,
+         create3d.choose_tier) = saved
+
     print("\n-- the bench: pieces laid out, measured, not guessed --")
     d = tempfile.mkdtemp()
     sizes = {"helmet": (30, 20, 25), "gauntlet": (10, 8, 20), "boot": (18, 9, 12)}
@@ -173,6 +224,20 @@ Note: these are the main pieces a person would name when describing the armour.
         return ["helmet", "chest plate", "left gauntlet", "right gauntlet",
                 "boots", "belt"]
 
+    # HERMETIC. These two calls used to run with the scout live and the work
+    # folder real: every build did a Brave and a GitHub lookup for a coffee
+    # mug and wrote a stranger's JPEG into %APPDATA%\JARVIS\fabrication —
+    # fifteen of them were found there. The scout is told there is nothing to
+    # find, the network is told it is up, and the folder is a temp dir.
+    import scout as _scout
+    import netcheck as _net
+    real_look, real_online = _scout.look, _net.online
+
+    async def nothing_found(desc):
+        return {}
+
+    _scout.look, _net.online = nothing_found, lambda force=False: True
+    fab.work_dir = lambda: Path(d)
     components.component_list = listed
     try:
         big = await RT.make_hologram(description="our own spider-man suit",
@@ -180,6 +245,8 @@ Note: these are the main pieces a person would name when describing the armour.
         small = await RT.make_hologram(description="a coffee mug", name="mug2")
     finally:
         components.component_list = real_list
+        _scout.look, _net.online = real_look, real_online
+        fab.work_dir = real_wd
 
     q = (big.get("_ask") or {}).get("question", "")
     check("it says how many pieces and names some",

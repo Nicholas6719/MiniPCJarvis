@@ -107,7 +107,10 @@ async def analyze_screen(question: str = "Describe what is on the screen.",
     if not await vision.ensure():
         return {"error": "the vision model is not available right now"}
     try:
-        answer = await vision.describe(_downscale(Path(shot["path"])), q, max_tokens=120)
+        # PIL decode + resize + JPEG encode of a 2560-px screenshot is ~1 s of
+        # loop time — a second of no wake word — so it runs in a thread.
+        small = await asyncio.to_thread(_downscale, Path(shot["path"]))
+        answer = await vision.describe(small, q, max_tokens=120)
     except Exception as e:
         return {"error": f"vision analysis failed: {e}"}
     return {"method": "vision", "screenshot": shot["path"], "analysis": answer}
@@ -134,7 +137,7 @@ async def analyze_image(path: str, question: str = "Describe this image.") -> di
         return {"error": "image too large"}
     if not await vision.ensure():
         return {"error": "the vision model is not available right now"}
-    img = _downscale(p)
+    img = await asyncio.to_thread(_downscale, p)     # up to 15 MB of decode, off the loop
     try:
         answer = await vision.describe(img, question)
     except Exception as e:

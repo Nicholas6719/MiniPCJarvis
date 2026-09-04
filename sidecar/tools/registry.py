@@ -60,6 +60,23 @@ def _run_in_tool_pool(handler, args: dict):
     return asyncio.get_running_loop().run_in_executor(_tool_executor(), call)
 
 
+def run_in_tool_pool(fn, *args, **kwargs):
+    """For ASYNC handlers that still have to do win32/UIA/COM work.
+
+    The pool above exists because those calls wedge and `wait_for` cannot kill
+    a thread — but only sync handlers were routed through it. The async input
+    and UIA tools hopped through `asyncio.to_thread`, which is the DEFAULT
+    executor shared with STT, TTS and the embeddings: one UIA walk stuck on a
+    modal ate a shared thread for the life of the process, and a few of those
+    had speech queueing behind the mouse. Same pool, same context copy.
+    """
+    import contextvars
+    import functools
+    ctx = contextvars.copy_context()
+    call = functools.partial(ctx.run, functools.partial(fn, *args, **kwargs))
+    return asyncio.get_running_loop().run_in_executor(_tool_executor(), call)
+
+
 class Risk(str, enum.Enum):
     SAFE = "safe"        # read-only, no side effects
     LOW = "low"          # minor side effects, logged
@@ -101,6 +118,25 @@ class ToolRegistry:
         self._audit_db = None
         # widened to 120 s during remote (Telegram) turns — phones answer slower
         self.confirm_timeout = 30
+        # ONE thread for the audit connection, so the sqlite handle is only
+        # ever touched from one place, and the INSERT+commit is never on the
+        # event loop: with WAL a writer still serialises, and busy_timeout is
+        # 15 s — so a tool call landing while night school held the lock held
+        # the whole assistant for up to 15 s, per call, in silence.
+        import concurrent.futures as _cf
+        self._audit_pool = _cf.ThreadPoolExecutor(max_workers=1,
+                                                  thread_name_prefix="jarvis-audit")
+
+    async def _audit_async(self, tool: str, args: Any, risk: str, status: str,
+                           confirmed: bool | None = None) -> None:
+        """`_audit`, off the loop. Never raises; an audit failure is logged
+        inside `_audit` and must not turn a finished tool call into an error."""
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(self._audit_pool, self._audit, tool, args,
+                                       risk, status, confirmed)
+        except Exception:
+            log.exception("audit dispatch failed")
 
     def _audit(self, tool: str, args: Any, risk: str, status: str,
                confirmed: bool | None = None) -> None:
@@ -212,14 +248,34 @@ class ToolRegistry:
             self._pending[confirm_id] = fut
             await bus.emit("confirmation_required", confirm_id=confirm_id,
                            call_id=call_id, tool=name, args=args, risk=tool.risk.value)
+            hook_task: asyncio.Task | None = None
             try:
-                if self.confirm_hook:      # speak the question; listen for a spoken yes/no
-                    await self.confirm_hook(name, args)
+                # THE QUESTION AND THE ANSWER RACE. The hook speaks the question
+                # and listens for a spoken yes/no for up to two 8-second tries;
+                # it used to be awaited to completion BEFORE the future was
+                # looked at. So a tap on the HUD's YES button, or on DO IT from
+                # the phone, resolved the future instantly — and then sat for up
+                # to eight seconds while the microphone finished not hearing
+                # anything. Now the first answer wins, whichever door it came by.
+                # And a hook that raises (the recogniser, a mic that has gone)
+                # no longer takes the whole turn down with it: it is logged and
+                # the answer is awaited through the other doors.
+                if self.confirm_hook:
+                    async def _hook() -> None:
+                        try:
+                            await self.confirm_hook(name, args)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            log.exception("confirmation hook failed for %s", name)
+                    hook_task = asyncio.create_task(_hook())
                 approved = await asyncio.wait_for(fut, timeout=self.confirm_timeout)
             except asyncio.TimeoutError:
                 self._pending.pop(confirm_id, None)
                 await bus.emit("tool_call", call_id=call_id, tool=name,
                                status="denied", detail="confirmation timed out")
+                await self._audit_async(name, args, tool.risk.value, "confirm_timeout",
+                                        confirmed=False)
                 return {"ok": False, "error": "user did not confirm in time",
                         "unconfirmed": True}
             finally:
@@ -227,11 +283,17 @@ class ToolRegistry:
                 # interrupted while waiting) leaves it in _pending forever, and every
                 # later utterance is misrouted as an answer to a dead question.
                 self._pending.pop(confirm_id, None)
+                if hook_task is not None and not hook_task.done():
+                    hook_task.cancel()
+                    try:
+                        await hook_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
                 if self.confirm_done_hook:
                     await self.confirm_done_hook()
             if not approved:
                 await bus.emit("tool_call", call_id=call_id, tool=name, status="denied")
-                self._audit(name, args, tool.risk.value, "denied", confirmed=False)
+                await self._audit_async(name, args, tool.risk.value, "denied", confirmed=False)
                 return {"ok": False, "error": "user declined the action", "declined": True}
 
             # A SECOND signal for HIGH risk only, and only ever a refusal.
@@ -248,11 +310,24 @@ class ToolRegistry:
                 if not allow:
                     await bus.emit("tool_call", call_id=call_id, tool=name,
                                    status="denied", detail=why)
-                    self._audit(name, args, tool.risk.value, "denied", confirmed=False)
+                    await self._audit_async(name, args, tool.risk.value, "denied",
+                                            confirmed=False)
                     return {"ok": False, "error": f"face check failed: {why}",
                             "declined": True, "face_failed": True}
 
-            self._audit(name, args, tool.risk.value, "confirmed", confirmed=True)
+            await self._audit_async(name, args, tool.risk.value, "confirmed", confirmed=True)
+
+        # A TypeError that comes from BINDING the arguments is the model's fault;
+        # one raised INSIDE the handler (an int(None) on a bad payload, a COM
+        # property that came back None) is ours. Both used to be reported as
+        # "bad arguments", which sent the model off to "fix" arguments that were
+        # fine. Bind first, so the two can be told apart.
+        try:
+            inspect.signature(tool.handler).bind(**args)
+        except TypeError as e:
+            await bus.emit("tool_call", call_id=call_id, tool=name, status="error",
+                           detail=str(e))
+            return {"ok": False, "error": f"bad arguments: {e}"}
 
         t0 = time.time()
         try:
@@ -264,20 +339,22 @@ class ToolRegistry:
             ms = int((time.time() - t0) * 1000)
             await bus.emit("tool_call", call_id=call_id, tool=name,
                            status="success", latency_ms=ms, result=_truncate(result))
-            self._audit(name, args, tool.risk.value, "success")
+            await self._audit_async(name, args, tool.risk.value, "success")
             return {"ok": True, "result": result}
         except asyncio.TimeoutError:
             await bus.emit("tool_call", call_id=call_id, tool=name, status="error",
                            detail="timeout")
+            # THE TRAIL SAYS WHAT HAPPENED AFTER "confirmed". A HIGH action that
+            # was approved and then timed out or blew up left a "confirmed" row
+            # and nothing after it — the log could not say whether the thing
+            # ran. Now every ending is written down.
+            await self._audit_async(name, args, tool.risk.value, "timeout")
             return {"ok": False, "error": f"{name} timed out"}
-        except TypeError as e:
-            await bus.emit("tool_call", call_id=call_id, tool=name, status="error",
-                           detail=str(e))
-            return {"ok": False, "error": f"bad arguments: {e}"}
         except Exception as e:
             log.exception("tool %s failed", name)
             await bus.emit("tool_call", call_id=call_id, tool=name, status="error",
                            detail=str(e))
+            await self._audit_async(name, args, tool.risk.value, "error")
             return {"ok": False, "error": str(e)}
 
 

@@ -133,8 +133,14 @@ class Identity:
         if rec is None:
             return None
         try:
-            aligned = rec.alignCrop(small_frame, face_row)
-            return rec.feature(aligned)
+            # `_lock` existed and was never taken. SFace is one cv2.dnn net
+            # shared by the capture thread's once-a-second check, the "remember
+            # my face" loop and the face-confirm gate; cv2.dnn is not
+            # thread-safe, and a corrupted embedding written to his profile
+            # makes him "unknown" from then on. Milliseconds under a lock.
+            with self._lock:
+                aligned = rec.alignCrop(small_frame, face_row)
+                return rec.feature(aligned)
         except Exception:
             log.debug("identity: embed failed", exc_info=True)
             return None

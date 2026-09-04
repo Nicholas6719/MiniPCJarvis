@@ -96,13 +96,30 @@ def cancel_reminders_matching(query: str = "") -> dict:
     pending = scheduler.list_pending()
     if not pending:
         return {"cancelled": 0, "none_pending": True}
-    words = [w for w in re.split(r"\s+", (query or "").lower().strip()) if len(w) > 2]
+    q = (query or "").lower().strip()
+    if re.search(r"\b(?:all|everything|every|each)\b", q) and len(q.split()) <= 4:
+        hits = pending                   # he said every one of them, in words
+        for t in hits:
+            scheduler.cancel(t["id"])
+        return {"cancelled": len(hits), "texts": [t["text"] for t in hits][:5],
+                "query": query, "remaining": 0}
+    words = [w for w in re.split(r"\s+", q) if len(w) > 2]
     if words:
         hits = [t for t in pending if all(w in t["text"].lower() for w in words)]
         if not hits:   # looser: any word matches
             hits = [t for t in pending if any(w in t["text"].lower() for w in words)]
+    elif len(pending) == 1:
+        hits = pending                   # "cancel that reminder" with one pending: obvious
     else:
-        hits = pending
+        # AN EMPTY QUERY IS NOT "ALL OF THEM". The model passes query="" when
+        # he says "cancel that reminder" and it cannot name which — and this
+        # tool, at LOW risk with no confirmation and no undo, then cancelled
+        # every reminder he had. Several pending and nothing named is a
+        # question back to him, not a sweep.
+        return {"error": "which reminder? there are several pending",
+                "pending": [t["text"] for t in pending][:8],
+                "hint": "call again with words from the one he means, or "
+                        "'all of them' if he really said every reminder"}
     for t in hits:
         scheduler.cancel(t["id"])
     return {"cancelled": len(hits), "texts": [t["text"] for t in hits][:5],

@@ -313,8 +313,14 @@ def repair(db_path: str, *, keep_backup: bool = True,
             os.remove(leftover)
 
     src = sqlite3.connect(db_path, timeout=30)
-    src.text_factory = bytes            # never choke on a mangled UTF-8 blob
-    src.text_factory = str
+    # NEVER CHOKE ON A MANGLED UTF-8 BLOB — and actually mean it. The line
+    # that set `bytes` here was overwritten by `str` on the very next line, so a
+    # text cell damaged by the corruption raised "Could not decode to UTF-8",
+    # which is a DatabaseError, which counted the row as unreadable and dropped
+    # it — in a PRECIOUS table, a memory quietly gone after a repair that
+    # reported success. Decode with replacement instead: a memory with one
+    # bad character in it is a memory; a missing one is not.
+    src.text_factory = lambda b: b.decode("utf-8", "replace")
     # Best effort: fold whatever the WAL still holds into the main file so the
     # salvage sees the newest data. On a corrupt tree this legitimately fails.
     try:

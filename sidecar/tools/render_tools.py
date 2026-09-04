@@ -25,7 +25,9 @@ half-written file in the work folder to tidy up afterwards.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 
 import create3d
 import render_estimates as est
@@ -83,7 +85,7 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
     # shape simple enough to write out as code, still works perfectly offline.
     if not image_path:
         import netcheck
-        if not netcheck.online():
+        if not await asyncio.to_thread(netcheck.online):     # sync connect, off the loop
             return {"error": "I can't reach the internet at the moment, sir",
                     "offline": True,
                     "spoken": ("I can't reach the internet at the moment, sir — "
@@ -167,15 +169,37 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
             if q["found"] in ("model", "dimensions"):
                 ask = ask.replace("Shall I", f"{est.spoken(secs).capitalize()}. "
                                              f"Shall I", 1)
+            # THE ANSWER RUNS WHAT HE AGREED TO. These args used to carry the
+            # pre-scout tier and the scouted photo regardless of the route, so
+            # "Somebody's already made one — shall I fetch it?" / "yes" ran
+            # tier 1 and generated a case from scratch instead of fetching, and
+            # "yes" to a flat emblem handed tier 2 the scouted PHOTOGRAPH to
+            # trace — the emblem regression he reported, through the voice
+            # path. A fetch is tier 5; a scouted picture is only for the tiers
+            # that reconstruct one (3 and 4), and the flat tier keeps fetching
+            # its own transparent-PNG reference as it was built to.
+            fetch = q["route"] == "fetch"
+            # THE SCOUT'S PICTURE IS SCAFFOLDING FOR THE QUESTION, NOT A PART.
+            # It was downloaded into his work folder before he was asked and
+            # never removed: fifteen strangers' JPEGs including
+            # "yes-finish-the-render-ref.jpg". No tier that can receive it uses
+            # it — tier 4 fetches its own reference, tier 3 is only chosen when
+            # HE supplied a photo, and tiers 1/2/5 must not trace or generate
+            # from it — so it comes off the disk here, whichever way he answers.
+            pic = (found.get("picture") or {}).get("path", "")
+            if pic:
+                try:
+                    os.remove(pic)
+                except OSError:
+                    pass
             return {"_ask": {
                 "subject": label,
                 "question": ask,
                 "tool": "make_hologram",
                 # What he was shown is what gets used: looking again could find
                 # something else.
-                "args": {"description": desc, "tier": t, "name": name,
-                         "image_path": (found.get("picture") or {}).get("path", ""),
-                         "confirmed": True},
+                "args": {"description": desc, "tier": 5 if fetch else t, "name": name,
+                         "image_path": "", "confirmed": True},
             },
                 "found": q["found"], "scouted": found,
                 "instruction": ("Tell him what was actually found — the model, "

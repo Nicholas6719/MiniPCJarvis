@@ -134,8 +134,11 @@ def main() -> int:
           "_upload(" in dl and dl.index("if telegram_available()") < dl.index("_upload("),
           "when he is at the machine he can already see the stage")
     check("...and falls back to words if the upload fails",
-          "if not sent_photo:" in dl,
+          "sent_photo or await telegram.send_proactive" in dl,
           "a failed upload must not swallow the announcement")
+    check("...and a message Telegram refuses is held, not filed as delivered",
+          "telegram did not accept it" in dl and "proactive_held" in dl,
+          "a send that never left must not be remembered as told")
 
     print("\n-- one scale across front, side and plan --")
     # Left to scale itself, each view filled its own panel: a 40 x 28 x 30

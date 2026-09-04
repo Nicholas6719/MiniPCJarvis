@@ -263,7 +263,9 @@ export function HoloStage() {
         any.material?.dispose();
       }
     }
-    const clear = () => [shell, marks, path, bed].forEach(empty);
+    // ...and the grabber brackets, which were rebuilt per model and never
+    // disposed — sixteen models in a session is sixteen sets of leaked lines.
+    const clear = () => [shell, marks, path, bed, grabber].forEach(empty);
 
     async function load() {
       let geo: Geometry;
@@ -276,6 +278,13 @@ export function HoloStage() {
       if (disposed || geo.error || !positions.length) return;
 
       clear();
+      // A NEW MESH INVALIDATES THE OLD CHECK. The same name re-rendered
+      // (an edit, or a progressive rung) reloads geometry here, but the
+      // overhang positions and the layer count cached from the previous mesh
+      // survived — amber triangles from the old part floating on the new one
+      // the next time he asked "will it print".
+      lastCheck = null;
+      loadedLayers = false;
       const faces = new BufferGeometry();
       faces.setAttribute("position", new Float32BufferAttribute(positions, 3));
       faces.computeVertexNormals();
@@ -711,6 +720,12 @@ export function HoloStage() {
       ro.disconnect();
       clear();
       renderer.dispose();
+      // dispose() frees the resources but not the CONTEXT. One WebGL context
+      // is built per model, and Chrome drops the oldest live context once
+      // sixteen exist — which after sixteen distinct models in a session can
+      // be the one currently on the stage. Losing it on purpose here is what
+      // actually returns it.
+      try { renderer.forceContextLoss(); } catch { /* already lost */ }
       if (renderer.domElement.parentNode === el) el.removeChild(renderer.domElement);
     };
   }, [holo?.name]);

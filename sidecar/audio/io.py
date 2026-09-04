@@ -18,14 +18,28 @@ MIC_RATE = 16000
 MIC_BLOCK = 1024  # 64 ms
 
 
-def refresh_devices() -> None:
+def refresh_devices() -> bool:
     """PortAudio caches the device list at init; re-init so hot-plugged
-    devices (the webcam mic) show up. Only call with no streams open."""
+    devices (the webcam mic) show up. Only call with no streams open.
+
+    AND NEVER WITH AN ORPHAN ALIVE. An output write that hung leaves its
+    stream deliberately unclosed with a writer thread still inside it — the
+    handle is kept on purpose, because closing it under that thread takes the
+    process down with no traceback. `Pa_Terminate` closes EVERY stream, orphans
+    included, which is that exact crash by another route: one sleeping
+    monitor, then one quiet microphone, and the sidecar was gone. Refused here
+    rather than hoped about; the caller reopens by name without a re-init."""
+    if _ORPHANS or _ORPHAN_POOLS:
+        log.warning("audio: not re-initialising PortAudio while %d orphaned "
+                    "stream(s) may still have a writer inside them", len(_ORPHANS))
+        return False
     try:
         sd._terminate()
         sd._initialize()
+        return True
     except Exception as e:
         log.debug("portaudio re-init failed: %s", e)
+        return False
 
 
 def resolve_input_device() -> tuple[int | None, str, bool]:
@@ -187,6 +201,13 @@ class Microphone:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        # A STOPPED MIC IS NOT "STILL ON THE WEBCAM". `using_preferred` stayed
+        # True across a stop, so when the reopen after it failed, the device
+        # watch saw `present == using_preferred` and never tried again — deaf
+        # until restart, with nothing on the HUD. Stopped means nothing chosen.
+        self.using_preferred = False
+        self.device_name = "not started"
+        self.last_frame_at = 0.0
 
 
 # --- the writer's own threads ---------------------------------------------------
@@ -276,17 +297,22 @@ class Speaker:
     _DEAF_OUTPUT_S = 60.0
     _deaf_output_until: float = 0.0
 
-    async def play_chunk(self, chunk: np.ndarray, rate: int) -> None:
+    async def play_chunk(self, chunk: np.ndarray, rate: int) -> bool:
         """Play one chunk. NEVER blocks the turn forever: PortAudio's write is a
         blocking call, and when the output device disappears mid-sentence (a
         headset disconnects, the monitor speakers sleep, the default device
         changes) it never returns — on 2026-08-27 that wedged a whole turn in
         SPEAKING for 90 minutes and JARVIS answered nothing, on any channel,
         until he was restarted. A write that overruns its own audio duration by
-        a wide margin means the device is gone: abort it and self-heal."""
+        a wide margin means the device is gone: abort it and self-heal.
+
+        Returns True only if audio was actually WRITTEN. Silent mode returns
+        False, and callers that open a microphone "because he just heard me"
+        must look at that — a mic opened after a suppressed announcement is a
+        mic listening in a room nobody spoke to."""
         if time.time() < self.silent_until:
             await asyncio.sleep(len(chunk) / float(rate) * 0.25)   # keep timing roughly real
-            return
+            return False
         # A device that just refused to accept audio will refuse the next chunk
         # too. Without this, every sentence pays the full write budget again to
         # rediscover the same sleeping monitor - twelve seconds a chunk, with
@@ -304,9 +330,13 @@ class Speaker:
             executor call is bounded by wait_for and the stuck thread is
             abandoned, never joined.
             """
-            stream = self._ensure(rate)
-
             def _write() -> None:
+                # THE OPEN HAPPENS HERE TOO, on the writer thread, under the
+                # same wait_for budget as the write. `_ensure` was called on
+                # the event loop before this closure, and Pa_OpenStream against
+                # a DisplayPort endpoint that has gone to sleep can hold for
+                # seconds — which held the HUD, HTTP and the wake word with it.
+                stream = self._ensure(rate)
                 with self._wlock:
                     if stream.closed:
                         return
@@ -331,7 +361,7 @@ class Speaker:
 
         # generous: only a dead device exceeds this
         if await _attempt(max(5.0, secs * 4 + 3.0)):
-            return
+            return True
 
         # ONE RETRY, ON A FRESH STREAM, BEFORE GIVING UP FOR A MINUTE.
         #
@@ -351,7 +381,7 @@ class Speaker:
         log.info("audio: the output device refused a write; reopening once")
         if await _attempt(3.0):
             log.info("audio: the device took it on a fresh stream — it was asleep")
-            return
+            return True
 
         self._deaf_output_until = time.time() + self._DEAF_OUTPUT_S
         log.error("audio write hung twice (%.1fs of audio) — output device is not "

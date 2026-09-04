@@ -58,7 +58,15 @@ let machineErr = "";
 let machineTimer: ReturnType<typeof setInterval> | null = null;
 const machineListeners = new Set<() => void>();
 
+let machineInFlight = false;
+
 async function readMachine() {
+  // ONE AT A TIME. With the sidecar wedged, a fetch that never returned was
+  // joined by another every five seconds until the supervisor killed the
+  // process; api() now has a deadline, and this makes sure a slow answer is
+  // waited for rather than piled on.
+  if (machineInFlight) return;
+  machineInFlight = true;
   // SAY WHY. This used to swallow every failure, so a blank machine panel
   // looked identical to a healthy one reading zeros — nothing on screen,
   // nothing in a log, nothing in the console.
@@ -68,6 +76,8 @@ async function readMachine() {
   } catch (e) {
     machineErr = String((e as Error)?.message ?? e);
     console.error("machine panel: /system failed", e);
+  } finally {
+    machineInFlight = false;
   }
   machineListeners.forEach((fn) => fn());
 }
@@ -399,19 +409,29 @@ function ImagesStage() {
             <span className="mono-sub">DUCKDUCKGO IMAGES · KEYLESS</span>
           </div>
           <div className="images__grid">
-            {imgs.slice(0, 8).map((im, i) => (
-              <div key={i} className={`imtile ${i === 0 ? "imtile--best" : ""}`}>
+            {/* EVERY picture the sidecar can address, numbered as the sidecar
+                numbers them. This drew eight of up to twelve — "12 IMAGES",
+                eight tiles, and "image number 11" focused a picture he had
+                never seen. And after "give me 5 to 8" the tiles were relabelled
+                1..4 while his numbers, and the sidecar's, were still 5..8. The
+                label is the position in the full set, whatever is on screen. */}
+            {imgs.map((im, i) => {
+              const all = images?.all ?? imgs;
+              const n = Math.max(0, all.indexOf(im)) + 1;
+              return (
+              <div key={i} className={`imtile ${n === 1 ? "imtile--best" : ""}`}>
                 <img src={im.src} alt={im.alt} loading="lazy" />
                 {/* The number he says out loud. He refers to these by position —
                     "image number 6" — and until now nothing on screen told him
                     which one that was; he had to count the tiles himself. Four
                     across, then back to the left and down, which is exactly the
                     order they are laid out in. */}
-                <div className="imtile__n mono-sub">{i + 1}</div>
-                {i === 0 && <div className="imtile__best mono-sub">BEST MATCH</div>}
+                <div className="imtile__n mono-sub">{n}</div>
+                {n === 1 && <div className="imtile__best mono-sub">BEST MATCH</div>}
                 <div className="imtile__src mono-sub">{im.page ? hostOf(im.page) : ""}</div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -512,7 +532,8 @@ function FolderStage() {
             {files.entries.slice(0, 60).map((e) => (
               <div key={e.path} className="fline fline--row" onClick={() => e.kind === "file" && preview(e.path)}
                    style={{ cursor: e.kind === "file" ? "pointer" : "default" }}>
-                <span className="fline__kind mono-sub">{e.kind === "dir" ? "DIR" : (e.type ?? "").toUpperCase().slice(0, 4)}</span>
+                {/* the sidecar sends "folder"; "dir" never matched, so folders had a blank kind */}
+                <span className="fline__kind mono-sub">{e.kind === "folder" ? "DIR" : (e.type ?? "").toUpperCase().slice(0, 4)}</span>
                 <span className="fline__text">{e.name}</span>
                 <span className="fline__meta mono-sub">{e.kind === "file" ? `${(e.size / 1024).toFixed(0)} KB` : ""}</span>
               </div>

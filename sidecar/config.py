@@ -295,6 +295,25 @@ class Config:
             try:
                 self.data = _merge(DEFAULTS, json.loads(CONFIG_PATH.read_text("utf-8")))
             except Exception:
+                # KEEP THE DAMAGED FILE. This used to fall back to DEFAULTS and
+                # then, because `_migrate` reports a change on a fresh dict,
+                # immediately save the defaults over whatever was there — so a
+                # power cut mid-write (he has had several) took the Telegram
+                # pairing, the watchlist, quiet hours and every proactive rule
+                # with it, silently, with no line in the log naming the loss.
+                # The bad file is set aside with a timestamp so nothing in it is
+                # gone, and the loss is logged where it can be seen.
+                import logging
+                import time as _t
+                aside = CONFIG_PATH.with_name(
+                    f"config.json.bad-{_t.strftime('%Y%m%d-%H%M%S')}")
+                try:
+                    CONFIG_PATH.replace(aside)
+                except OSError:
+                    aside = None
+                logging.getLogger("jarvis.config").error(
+                    "config.json would not parse; starting from defaults, damaged "
+                    "copy kept at %s", aside, exc_info=True)
                 self.data = dict(DEFAULTS)
             if self._migrate():
                 self.save()
@@ -331,7 +350,15 @@ class Config:
         return changed
 
     def save(self) -> None:
-        CONFIG_PATH.write_text(json.dumps(self.data, indent=2), "utf-8")
+        # ATOMIC. `write_text` truncates first and writes second, so a crash or
+        # power cut between the two leaves an empty or half-written file — the
+        # exact shape `load()` above then has to set aside. Writing beside it
+        # and renaming over the top means the file on disk is always either the
+        # old config or the new one, never a torn one.
+        import os
+        tmp = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+        tmp.write_text(json.dumps(self.data, indent=2), "utf-8")
+        os.replace(tmp, CONFIG_PATH)
 
     def set(self, *keys: str, value: Any) -> None:
         cur = self.data

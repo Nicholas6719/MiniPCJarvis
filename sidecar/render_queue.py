@@ -204,6 +204,15 @@ class RenderQueue:
                 # or blocks on a model goes to a thread. Getting this wrong in
                 # either direction blocks the loop, and the loop is where he
                 # waits for answers.
+                if job.state == "cancelled":
+                    # "STOP" LANDED DURING THE ANNOUNCEMENT. `_announce` awaits
+                    # every HUD socket (up to 2 s each) before `_task` exists,
+                    # so a cancel in that window found nothing to cancel,
+                    # answered "Stopped the duck, sir" — and the job then ran
+                    # to completion here with its state overwritten to done,
+                    # so a minute later "the duck is ready". Honour it.
+                    job.result = {"cancelled": True}
+                    raise asyncio.CancelledError
                 if asyncio.iscoroutinefunction(job.run):
                     self._task = asyncio.ensure_future(job.run())
                 else:

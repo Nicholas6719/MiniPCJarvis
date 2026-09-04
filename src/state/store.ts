@@ -244,6 +244,18 @@ const stepDefaults = (): RunStep[] => [
   { label: "Speak it", sub: "KOKORO", status: "pending", kind: "tts" },
 ];
 
+// A PIN BELONGS TO THE PANEL THAT WAS PINNED, not to whatever replaces it.
+// Every stage that opened from an event copied `pinned` off the outgoing
+// stage — and a hologram or camera panel is always auto-pinned, so "what's the
+// weather" while a model was up replaced it with a browser panel that had
+// inherited the pin: the model never came back on its own, the browser panel
+// never drained, and "turn it ninety degrees" spoke to a panel with no model
+// in it. A pin carries over only onto the SAME kind of panel (a second search
+// while a search is pinned keeps the pin; anything else starts unpinned).
+function keepPin(st: { stage: { kind: StageKind; pinned?: boolean } | null }, kind: StageKind): boolean {
+  return st.stage?.kind === kind ? (st.stage.pinned ?? false) : false;
+}
+
 function patchStep(turn: TurnState | null, i: number, patch: Partial<RunStep>): TurnState | null {
   if (!turn) return turn;
   const steps = turn.steps.map((s, j) => (j === i ? { ...s, ...patch } : s));
@@ -354,6 +366,19 @@ export const useStore = create<Store>((set, get) => ({
         set((st) => {
           const next: Partial<Store> = { state: evt.state };
           if (evt.state !== "idle") next.armedUntil = 0;
+          // OFFLINE MEANS THE SIDECAR IS GONE, AND SO IS WHAT IT WAS HOLDING.
+          // The socket reconnects on the same port and token after a restart,
+          // but the restarted sidecar has no model on its stage and no camera
+          // open — while the HUD kept rendering cached geometry at anchor
+          // layout, a pinned hologram he could look at but not command
+          // ("turn it" → "nothing on the stage, sir").
+          if (evt.state === "offline") {
+            next.holo = null;
+            next.cameraOn = false;
+            if (st.stage && (st.stage.kind === "holo" || st.stage.kind === "camera")) {
+              next.stage = null;
+            }
+          }
           // Speaking finished → the stage holds then collapses (unless pinned or
           // the user asked for this surface explicitly).
           if (evt.state === "idle" && st.stage && !st.stage.pinned && !st.stage.holdUntil) {
@@ -466,7 +491,13 @@ export const useStore = create<Store>((set, get) => ({
               get().openStage("camera", { holdUntil: 0, pinned: true });
             }
           } else {
-            set((st) => (st.stage?.kind === "camera" ? { stage: null } : {}));
+            // Camera off means the tracker has nothing to watch with. The
+            // sidecar's off path disarms it without an event, so without this
+            // the badge kept saying "WATCHING YOUR HANDS" over a dead stream.
+            set((st) => ({
+              ...(st.stage?.kind === "camera" ? { stage: null } : {}),
+              ...(st.holo ? { holo: { ...st.holo, hands: "off" as const } } : {}),
+            }));
           }
         }
         // A confirmation that resolves ANYWHERE has to take the card with it.
@@ -562,7 +593,7 @@ export const useStore = create<Store>((set, get) => ({
           if (evt.error) next.error = evt.error;
           return {
             web: next,
-            stage: { kind: "browser" as StageKind, openedTs: st.stage?.openedTs ?? Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
+            stage: { kind: "browser" as StageKind, openedTs: st.stage?.openedTs ?? Date.now(), holdUntil: 0, pinned: keepPin(st, "browser") },
             turn: patchStep(st.turn, 2, {
               status: evt.stage === "done" ? "done" : "active",
               label:
@@ -582,14 +613,14 @@ export const useStore = create<Store>((set, get) => ({
       case "files":
         set((st) => ({
           files: { path: evt.path, label: evt.label, parent: evt.parent, count: evt.count, entries: evt.entries ?? [], roots: evt.roots ?? {}, query: evt.query, ts: evt.ts },
-          stage: { kind: "folder" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
+          stage: { kind: "folder" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: keepPin(st, "folder") },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "files", summary: `files: ${evt.label} (${evt.count})` });
         break;
       case "file_preview":
         set((st) => ({
           filePreview: { path: evt.path, name: evt.name, type: evt.type, text: evt.text, data: evt.data, size: evt.size },
-          stage: { kind: "file" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
+          stage: { kind: "file" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: keepPin(st, "file") },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "files", summary: `preview: ${evt.name}` });
         break;
@@ -599,7 +630,7 @@ export const useStore = create<Store>((set, get) => ({
           // search resets both, so a narrowed grid never outlives its query.
           images: { query: evt.query, images: evt.images ?? [],
                     all: evt.images ?? [], ts: evt.ts },
-          stage: { kind: "images" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: st.stage?.pinned ?? false },
+          stage: { kind: "images" as StageKind, openedTs: Date.now(), holdUntil: 0, pinned: keepPin(st, "images") },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web", summary: `images: ${(evt.images ?? []).length} for "${evt.query}"` });
         break;
@@ -625,8 +656,13 @@ export const useStore = create<Store>((set, get) => ({
           // so the hand state, the check and the layer view all survive it and
           // only the geometry is re-read. Losing `hands` here would drop the
           // model mid-turn, which is the one moment he would be holding it.
+          // ...and so does the FINAL mesh of the same name. The rough path
+          // kept `st.holo`; the finished carve did not, so the moment a
+          // progressive render completed the hand state, the check and the
+          // layer view were dropped while the tracker was still armed — the
+          // HUD said "not watching" with his hands in the air.
           set((st) => ({
-            holo: { ...(evt.rough && st.holo?.name === evt.name ? st.holo : {}),
+            holo: { ...(st.holo?.name === evt.name ? st.holo : {}),
                     name: evt.name, triangles: evt.triangles,
                     size_mm: evt.size_mm, ts: evt.ts,
                     rough: evt.rough ?? null },
@@ -663,7 +699,7 @@ export const useStore = create<Store>((set, get) => ({
           renderPreview: { image: String(evt.image ?? ""),
                            label: String(evt.label ?? ""), ts: evt.ts },
           stage: { kind: "render" as StageKind, openedTs: Date.now(),
-                   holdUntil: 0, pinned: st.stage?.pinned ?? false },
+                   holdUntil: 0, pinned: keepPin(st, "render") },
         }));
         push({ id: evt.id, ts: evt.ts, kind: "web",
                summary: `building ${evt.label} from a reference` });
@@ -674,7 +710,15 @@ export const useStore = create<Store>((set, get) => ({
         // longer making. The hologram arriving does the same, below.
         if (evt.action === "done" || evt.action === "failed"
             || evt.action === "cancelled") {
-          set({ renderPreview: null });
+          // ...and the panel it was in, when nothing replaced it. A failed or
+          // cancelled render used to leave `stage.kind === "render"` with no
+          // preview in it — the core slid left beside an empty box until the
+          // next idle — and when the failure went to his phone, nothing spoke
+          // and it sat there until he next said something.
+          set((st) => ({
+            renderPreview: null,
+            ...(st.stage?.kind === "render" ? { stage: null } : {}),
+          }));
         }
         if (evt.action === "started") {
           push({ id: evt.id, ts: evt.ts, kind: "web",
@@ -700,6 +744,15 @@ export const useStore = create<Store>((set, get) => ({
           : {}));
         break;
       case "holo_control":
+        // A COMMAND FOR THE MODEL BRINGS THE MODEL BACK. If a search or a
+        // picture panel took the stage while a model was up, the sidecar still
+        // holds the model and "turn it" still arrives — and used to patch a
+        // rotation into state that nothing was rendering, while JARVIS said
+        // "Turning it, sir". The stage reopens on the model, pinned as before.
+        set((st) => (st.holo && st.stage?.kind !== "holo"
+          ? { stage: { kind: "holo" as StageKind, openedTs: Date.now(), holdUntil: 0,
+                       pinned: true, pinUntil: st.stage?.pinUntil } }
+          : {}));
         set((st) => (st.holo
           ? { holo: { ...st.holo,
                       // Asking for a LAYER implies wanting the layers up. Left
@@ -750,9 +803,16 @@ export const useStore = create<Store>((set, get) => ({
       case "filler":
         push({ id: evt.id, ts: evt.ts, kind: "speaking", summary: `filler: "${evt.text}"` });
         break;
-      case "proactive":
-        push({ id: evt.id, ts: evt.ts, kind: "proactive", summary: `proactive: ${evt.alert}`, detail: evt.text });
+      case "proactive": {
+        // delivery.py sends text / tier / channel / subject; only proactive.py
+        // ever sent `alert`, so the trail read "proactive: undefined" for
+        // everything that reached him through delivery.
+        const what = evt.subject ?? evt.alert ?? evt.tier ?? "";
+        const via = evt.channel ? ` · ${String(evt.channel)}` : "";
+        push({ id: evt.id, ts: evt.ts, kind: "proactive",
+               summary: `proactive: ${what}${via}`, detail: evt.text });
         break;
+      }
       case "task_due":
         push({ id: evt.id, ts: evt.ts, kind: "task", summary: `reminder fired: ${evt.text}` });
         break;
@@ -814,7 +874,7 @@ export const useStore = create<Store>((set, get) => ({
                 kind: "images" as StageKind,
                 openedTs: st.stage?.kind === "images" ? st.stage.openedTs : Date.now(),
                 holdUntil: Date.now() + ASKED_FOR_HOLD_MS,
-                pinned: st.stage?.pinned ?? false,
+                pinned: keepPin(st, "images"),
               },
             };
           });
@@ -823,15 +883,23 @@ export const useStore = create<Store>((set, get) => ({
           // "bigger" / "the second one" — feature one image; null returns to the grid
           set((st) => {
             if (!st.images) return {};
-            const n = st.images.images.length;
-            const idx = evt.index == null ? null : Math.max(0, Math.min(n - 1, Number(evt.index)));
+            // HIS NUMBER IS THE ORIGINAL NUMBER. After "just give me 5 to 8"
+            // the grid was renumbered 1..4 while the sidecar still counted
+            // 1..12, so "image number 6" clamped to the last of the narrowed
+            // four (original #8) on screen and `focus_image` handed the model
+            // #6's URL — "make a 3D print of that" built from a picture that
+            // was not the one enlarged. Focus indexes the full set and shows
+            // it, so the screen and the sidecar always mean the same picture.
+            const all = st.images.all ?? st.images.images;
+            const idx = evt.index == null ? null
+              : Math.max(0, Math.min(all.length - 1, Number(evt.index)));
             return {
-              images: { ...st.images, focus: idx },
+              images: { ...st.images, all, images: all, focus: idx },
               stage: {
                 kind: "images" as StageKind,
                 openedTs: st.stage?.kind === "images" ? st.stage.openedTs : Date.now(),
                 holdUntil: Date.now() + ASKED_FOR_HOLD_MS,
-                pinned: st.stage?.pinned ?? false,
+                pinned: keepPin(st, "images"),
               },
             };
           });

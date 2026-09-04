@@ -164,8 +164,16 @@ impl Sidecar {
             // plain kill() would orphan on Windows.
             #[cfg(windows)]
             {
+                // CREATE_NO_WINDOW, like the spawn above. taskkill is a
+                // console program; without the flag every close and every
+                // supervisor restart flashed a command prompt on his screen —
+                // the same defect the sidecar's own launchers all carry the
+                // flag for.
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
                 let _ = Command::new("taskkill")
                     .args(["/F", "/T", "/PID", &child.id().to_string()])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
                     .status();

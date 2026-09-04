@@ -26,7 +26,7 @@ import win32con
 import win32gui
 
 from events import bus
-from tools.registry import Risk, Tool, registry
+from tools.registry import Risk, Tool, registry, run_in_tool_pool
 
 log = logging.getLogger("jarvis.input")
 
@@ -69,39 +69,49 @@ def _focus(window: str | None) -> str | None:
     if not window:
         hwnd = win32gui.GetForegroundWindow()
         return win32gui.GetWindowText(hwnd) if hwnd else None
-    q = window.strip().lower()
-    hits: list[tuple[int, str]] = []
-
-    def _scan(hwnd, _):
-        if win32gui.IsWindowVisible(hwnd):
-            t = win32gui.GetWindowText(hwnd)
-            if t and q in t.lower():
-                hits.append((hwnd, t))
-        return True
-    win32gui.EnumWindows(_scan, None)
-    if not hits:
+    # THE SAME LOOKUP AS focus_window, not a raw EnumWindows pass. This took
+    # hits[0] from every "visible" window, and a closed packaged app (modern
+    # Notepad is one) leaves a CLOAKED ghost frame that reports visible and
+    # sorts ahead of the live window — so the ghost was "focused", the keys
+    # went to whatever was really in front, and the receipt named Notepad.
+    # windows_tools._find_window already excludes cloaked, tool and off-screen
+    # windows; two definitions of "which window he means" were one too many.
+    from tools.windows_tools import _find_window
+    hit = _find_window(window)
+    if not hit:
         return None
-    hwnd, title = hits[0]
+    hwnd, title = hit
     try:
         if win32gui.IsIconic(hwnd):
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         # Windows refuses SetForegroundWindow from a background process unless we
         # nudge it; ALT is the documented trick and is harmless.
         win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-        win32gui.SetForegroundWindow(hwnd)
-        win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        finally:
+            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
     except Exception:
         log.warning("could not focus %r", title, exc_info=True)
     time.sleep(0.25)
+    # SAY WHETHER IT TOOK. Returning the title regardless is how "pressed h in
+    # Notepad" was reported for a keystroke that went somewhere else entirely.
+    if win32gui.GetForegroundWindow() != hwnd:
+        log.warning("focus did not take: wanted %r, foreground is %r", title,
+                    win32gui.GetWindowText(win32gui.GetForegroundWindow()))
+        return None
     return title
 
 
 def _type_unicode(text: str) -> None:
-    for ch in text:
-        code = ord(ch)
-        win32api.keybd_event(0, code, win32con.KEYEVENTF_UNICODE, 0)
-        win32api.keybd_event(0, code, win32con.KEYEVENTF_UNICODE | win32con.KEYEVENTF_KEYUP, 0)
-        time.sleep(0.005)
+    # keys.type_text, not keybd_event: keybd_event's scan argument is a BYTE,
+    # so a curly apostrophe (U+2019) — which the model writes constantly —
+    # raised OverflowError and the tool answered "could not type", and an em
+    # dash came out as a control character. SendInput's Unicode path takes a
+    # WORD and handles surrogate pairs; it also waits for his own modifier
+    # keys to lift, so a held Ctrl cannot turn the text into shortcuts.
+    import keys
+    keys.type_text(text, per_char_delay=0.004)
 
 
 _VK = {
@@ -127,16 +137,25 @@ def _press(combo: str) -> bool:
     if len(rest) != 1:
         return False
     key = rest[0]
-    vk = _VK.get(key) or (win32api.VkKeyScan(key) & 0xFF if len(key) == 1 else None)
+    vk = _VK.get(key)
+    if vk is None and len(key) == 1:
+        scan = win32api.VkKeyScan(key)
+        if scan == -1:
+            return False
+        vk = scan & 0xFF
+        # THE HIGH BYTE IS THE SHIFT STATE, and masking it off pressed '/' for
+        # '?' and '1' for '!'. Bit 1 = Shift, 2 = Ctrl, 4 = Alt.
+        state = (scan >> 8) & 0xFF
+        if state & 1 and win32con.VK_SHIFT not in mods:
+            mods = [win32con.VK_SHIFT, *mods]
+        if state & 2 and win32con.VK_CONTROL not in mods:
+            mods = [win32con.VK_CONTROL, *mods]
+        if state & 4 and win32con.VK_MENU not in mods:
+            mods = [win32con.VK_MENU, *mods]
     if not vk or vk == 0xFF:
         return False
-    for m in mods:
-        win32api.keybd_event(m, 0, 0, 0)
-    win32api.keybd_event(vk, 0, 0, 0)
-    win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
-    for m in reversed(mods):
-        win32api.keybd_event(m, 0, win32con.KEYEVENTF_KEYUP, 0)
-    return True
+    import keys
+    return keys.press(vk, mods=tuple(mods))
 
 
 # ------------------------------------------------------------------ the tools
@@ -146,12 +165,12 @@ async def type_text(text: str, window: str | None = None, press_enter: bool = Fa
         return {"error": "the PC is locked — Windows blocks typing until it's unlocked"}
     if not text:
         return {"error": "nothing to type"}
-    title = await asyncio.to_thread(_focus, window)
+    title = await run_in_tool_pool(_focus, window)
     if window and title is None:
         return {"error": f"I don't see a window matching '{window}'"}
-    await asyncio.to_thread(_type_unicode, text)
+    await run_in_tool_pool(_type_unicode, text)
     if press_enter:
-        await asyncio.to_thread(_press, "enter")
+        await run_in_tool_pool(_press, "enter")
     await bus.emit("remote_input", action="type", chars=len(text), window=title)
     return {"typed": text[:80], "window": title, "sent": press_enter}
 
@@ -160,15 +179,20 @@ async def press_keys(keys: str, window: str | None = None, repeat: int = 1) -> d
     """Press a key or combination: 'enter', 'ctrl+s', 'alt+tab', 'win+d'."""
     if _locked():
         return {"error": "the PC is locked — Windows blocks key presses until it's unlocked"}
-    title = await asyncio.to_thread(_focus, window)
+    title = await run_in_tool_pool(_focus, window)
     if window and title is None:
-        return {"error": f"I don't see a window matching '{window}'"}
+        return {"error": f"I couldn't bring '{window}' to the front, so I didn't press anything"}
     for _ in range(max(1, min(20, repeat))):
-        if not await asyncio.to_thread(_press, keys):
+        if not await run_in_tool_pool(_press, keys):
             return {"error": f"I don't know the key combination '{keys}'"}
         await asyncio.sleep(0.05)
-    await bus.emit("remote_input", action="keys", keys=keys, window=title)
-    return {"pressed": keys, "window": title}
+    # THE WINDOW THAT GOT THE KEYS, read at press time — not the one that was
+    # matched a moment earlier. The receipt cannot prove the app acted on them,
+    # but it can at least name where they went.
+    landed = await run_in_tool_pool(
+        lambda: win32gui.GetWindowText(win32gui.GetForegroundWindow()))
+    await bus.emit("remote_input", action="keys", keys=keys, window=landed or title)
+    return {"pressed": keys, "window": landed or title}
 
 
 async def click_screen(cell: str = "", x: int | None = None, y: int | None = None,
@@ -197,7 +221,7 @@ async def click_screen(cell: str = "", x: int | None = None, y: int | None = Non
             win32api.mouse_event(down, x, y, 0, 0)
             win32api.mouse_event(up, x, y, 0, 0)
             time.sleep(0.06)
-    await asyncio.to_thread(_do)
+    await run_in_tool_pool(_do)
     await asyncio.sleep(0.35)   # let the click land; asyncio.sleep, because a
     # plain sleep here froze the event loop and the wake word with it
     await bus.emit("remote_input", action="click", x=x, y=y, cell=cell or None)
@@ -216,7 +240,7 @@ async def scroll_screen(direction: str = "down", amount: int = 3) -> dict:
             win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0,
                                  120 if clicks > 0 else -120, 0)
             time.sleep(0.04)
-    await asyncio.to_thread(_do)
+    await run_in_tool_pool(_do)
     return {"scrolled": direction, "amount": abs(clicks)}
 
 
@@ -226,8 +250,8 @@ async def screenshot_grid(window: str | None = None) -> dict:
     from PIL import Image, ImageDraw
     from tools.windows_tools import take_screenshot
     if window:
-        await asyncio.to_thread(_focus, window)
-    shot = await asyncio.to_thread(take_screenshot, 0, True, None, None)
+        await run_in_tool_pool(_focus, window)
+    shot = await run_in_tool_pool(take_screenshot, 0, True, None, None)
     if "error" in shot:
         return shot
     path = shot["path"]
@@ -249,7 +273,7 @@ async def screenshot_grid(window: str | None = None) -> dict:
                 d.text((x, y), label, fill=(39, 199, 255), font_size=size)
         img.save(path)
         return img.size
-    size = await asyncio.to_thread(_draw)
+    size = await run_in_tool_pool(_draw)
     await bus.emit("remote_input", action="grid_screenshot", path=path)
     return {"path": path, "width": size[0], "height": size[1],
             "grid": f"A1 to {chr(ord('A') + GRID_COLS - 1)}{GRID_ROWS}",

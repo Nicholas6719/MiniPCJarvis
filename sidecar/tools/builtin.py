@@ -617,7 +617,8 @@ async def web_search(query: str, count: int = 5) -> dict:
     # working search never waits on a probe.
     if not out.get("results"):
         import netcheck
-        if not netcheck.online():
+        # a sync socket connect (up to 1.2 s when the link is down) — off the loop
+        if not await asyncio.to_thread(netcheck.online):
             return {"query": query, "results": [], "offline": True,
                     "error": "I can't reach the internet at the moment, sir",
                     "note": ("THERE IS NO NETWORK. This search did not happen — "

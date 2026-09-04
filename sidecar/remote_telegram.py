@@ -29,6 +29,11 @@ from config import APP_DIR, config
 from events import bus, spawn
 
 log = logging.getLogger("jarvis.telegram")
+# AT IMPORT, not at the start of the poll loop. httpx logs every request URL at
+# INFO, and the bot token lives IN that URL. The poll loop silenced it — but
+# `set_token` calls getMe BEFORE the loop starts, so saving a token in Settings
+# wrote it to sidecar.log in plaintext exactly once, which is once too many.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 MAX_VOICE_BYTES = 20_000_000        # Telegram's own download ceiling anyway
 
@@ -98,13 +103,29 @@ class TelegramBridge:
             self._task = asyncio.create_task(self._poll_loop())
 
     async def set_token(self, token: str) -> dict:
-        """Store (encrypted), verify with getMe, (re)start polling."""
-        save_token(token.strip())
-        self.token = token.strip()
-        me = await self._api("getMe")
-        self.bot_username = (me or {}).get("username", "")
+        """Verify with getMe FIRST, then store (encrypted) and (re)start polling.
+
+        The order matters. This used to save and adopt the new token before
+        asking Telegram about it, so one typo in Settings overwrote the working
+        token on disk, the poller switched to the bad one, and the bridge sat
+        at 401 every five seconds until he typed the right one again — while
+        the endpoint had told him only that "Telegram rejected the token".
+        """
+        if self._orch is None:
+            # The bridge was never started — remote.telegram is off in config,
+            # so `start()` never ran and there is no orchestrator to hand a
+            # message to. Saving a token here used to start polling anyway:
+            # pairing "succeeded", and then every message he sent raised an
+            # AttributeError that was swallowed, one traceback per message.
+            return {"ok": False, "error": "Telegram is switched off in Settings — "
+                                          "turn it on before adding a token"}
+        candidate = token.strip()
+        me = await self._api("getMe", _token=candidate)
         if not me:
             return {"ok": False, "error": "Telegram rejected the token"}
+        await asyncio.to_thread(save_token, candidate)   # DPAPI + a file write, off the loop
+        self.token = candidate
+        self.bot_username = me.get("username", "")
         if not config.get("remote", "telegram_chat_id", default=None):
             self.pairing_code = f"{pysecrets.randbelow(1000000):06d}"
         if self._task is None or self._task.done():
@@ -119,15 +140,18 @@ class TelegramBridge:
                 "polling": bool(self._task and not self._task.done())}
 
     # ------------------------------------------------------------- transport
-    async def _api(self, method: str, http_timeout: float = 30, **params):
+    async def _api(self, method: str, http_timeout: float = 30, _token: str | None = None,
+                   **params):
         """`params` go to Telegram as the JSON body; http_timeout is ours alone.
-        (They used to be the same knob, which quietly disabled long polling.)"""
-        if not self.token:
+        (They used to be the same knob, which quietly disabled long polling.)
+        `_token` lets set_token try a candidate without adopting it first."""
+        token = _token or self.token
+        if not token:
             return None
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10))
         try:
-            r = await self._client.post(f"{API}/bot{self.token}/{method}",
+            r = await self._client.post(f"{API}/bot{token}/{method}",
                                         json=params, timeout=http_timeout)
             data = r.json()
             if not data.get("ok"):
@@ -138,12 +162,39 @@ class TelegramBridge:
             log.warning("telegram %s failed", method, exc_info=True)
             return None
 
-    async def _send(self, text: str) -> None:
+    async def _send(self, text: str) -> bool:
+        """True only if every chunk was accepted. A send that failed used to be
+        indistinguishable from one that landed, and delivery.py then remembered
+        the message as told and charged the hourly budget for it."""
         chat = config.get("remote", "telegram_chat_id", default=None)
-        if chat and text:
-            # Telegram caps messages at 4096 chars
-            for i in range(0, len(text), 4000):
-                await self._api("sendMessage", chat_id=chat, text=text[i:i + 4000])
+        if not (chat and text):
+            return False
+        ok = True
+        # Telegram caps messages at 4096 chars
+        for i in range(0, len(text), 4000):
+            if await self._api("sendMessage", chat_id=chat, text=text[i:i + 4000]) is None:
+                ok = False
+        return ok
+
+    def _answers_pending(self, text: str) -> bool:
+        """A TYPED (or spoken) YES IS A YES. The inline buttons carried the
+        confirm_id and were the only thing that could answer a question; a
+        reply of "Do it!" instead queued a brand-new turn, which then waited
+        for the state machine to go idle — and it could not, because the tool
+        was blocked on the very confirmation he had just answered.
+
+        Called BEFORE the turn lock on purpose: taking that lock is what would
+        put him behind the deadlock. Anything that is not a plain yes or no is
+        a real message and runs as its own turn once the question resolves."""
+        from tools.registry import registry as _reg
+        if not _reg.awaiting_confirmation():
+            return False
+        from orchestrator import NO_WORDS, YES_WORDS
+        if YES_WORDS.match(text):
+            return _reg.answer_pending_confirmation(True)
+        if NO_WORDS.match(text):
+            return _reg.answer_pending_confirmation(False)
+        return False
 
     async def _send_photo_url(self, url: str, caption: str = "") -> bool:
         chat = config.get("remote", "telegram_chat_id", default=None)
@@ -162,10 +213,11 @@ class TelegramBridge:
         try:
             if self._client is None:
                 self._client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10))
+            blob = await asyncio.to_thread(p.read_bytes)    # up to 49 MB: not on the loop
             r = await self._client.post(
                 f"{API}/bot{self.token}/{method}",
                 data={"chat_id": str(chat), "caption": caption[:1000]},
-                files={field: (p.name, p.read_bytes())}, timeout=120)
+                files={field: (p.name, blob)}, timeout=120)
             return bool(r.json().get("ok"))
         except Exception:
             log.warning("telegram upload failed", exc_info=True)
@@ -200,10 +252,23 @@ class TelegramBridge:
                     continue
                 for u in updates:
                     self._offset = max(self._offset, u["update_id"] + 1)
-                    try:
-                        await self._handle_update(u)
-                    except Exception:
-                        log.exception("telegram update failed")
+                    # SPAWNED, NOT AWAITED. This loop used to run each update
+                    # inline, so while a remote turn sat waiting 120 s for his
+                    # DO IT tap, getUpdates was never called again — and the
+                    # tap, and the typed "Do it!", sat in Telegram's queue until
+                    # the question had already expired. That is the whole of
+                    # the 2026-09-04 transcript: "That question expired", then
+                    # "I didn't get a yes", then two stray "Done, sir."s from
+                    # the turns his answers started. The typed-yes fix was
+                    # correct and never once executed in production, because
+                    # the answer could not arrive while the question was open.
+                    #
+                    # `_turn_lock` already serialises turns, so spawning does
+                    # not let two commands run at once; it only lets an ANSWER
+                    # arrive while a command is waiting for one. It also acks
+                    # the offset on the very next poll instead of after the
+                    # turn, so a restart mid-turn no longer replays the command.
+                    spawn(self._handle_update(u), name=f"tg-update:{u['update_id']}")
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -285,6 +350,12 @@ class TelegramBridge:
             if ok and not edited:
                 await self._send("Got your location, sir.")
             return
+        if edited:
+            # "edited_message" exists here for live location, which Telegram
+            # delivers by editing the original. A text edit took the same path
+            # as a new message: fixing a typo in "delete the screenshot on my
+            # desktop" ran the delete a second time, with a second DO IT.
+            return
         if text and _health_payload(text):
             from tools import health as _health
             res = _health.ingest_payload(text)
@@ -300,8 +371,13 @@ class TelegramBridge:
         if not text:
             voice = msg.get("voice") or msg.get("audio") or msg.get("video_note")
             if voice:
+                # A voice note is him looking at his phone as much as a typed
+                # line is, so it stops a chase — and a spoken "yes" to an open
+                # question answers it rather than queuing a turn behind it, the
+                # same deadlock the typed path had.
+                self.acknowledge_all()
                 spoken = await self._hear(voice)
-                if spoken:
+                if spoken and not self._answers_pending(spoken):
                     await self._remote_turn(spoken)
                 return
             photo = msg.get("photo")
@@ -318,29 +394,8 @@ class TelegramBridge:
             await self._send("At your service. Ask me anything you would at the PC.")
             return
         self.acknowledge_all()        # he is looking at his phone; stop chasing
-
-        # A TYPED YES IS A YES. The inline buttons carried the confirm_id and
-        # were the only thing that could answer a question; typing "Do it!"
-        # instead queued a brand-new turn, which then waited for the state
-        # machine to go idle — and it could not, because the tool was blocked on
-        # the very confirmation he had just answered. The question timed out and
-        # he was told "I didn't get a yes, so I left it alone" a minute after
-        # saying yes, followed by two stray "Done, sir."s from the turns his
-        # replies had started. 2026-09-04, from his phone.
-        #
-        # Checked BEFORE the turn lock on purpose: taking that lock is what would
-        # make him wait behind the deadlock.
-        from tools.registry import registry as _reg
-        if _reg.awaiting_confirmation():
-            from orchestrator import NO_WORDS, YES_WORDS
-            if YES_WORDS.match(text):
-                _reg.answer_pending_confirmation(True)
-                return
-            if NO_WORDS.match(text):
-                _reg.answer_pending_confirmation(False)
-                return
-            # Anything else is a real message and runs as its own turn once the
-            # question resolves; it is not silently swallowed as an answer.
+        if self._answers_pending(text):
+            return
         await self._remote_turn(text)
 
     # ------------------------------------------------------------- the turn
@@ -436,7 +491,11 @@ class TelegramBridge:
             if self._client is None:
                 self._client = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10))
             r = await self._client.get(f"{API}/file/bot{self.token}/{path}", timeout=90)
-            r.raise_for_status()
+            # NOT raise_for_status(): its exception message carries the full
+            # URL, and the URL carries the bot token — straight into the
+            # traceback that log.exception below writes to sidecar.log.
+            if r.status_code != 200:
+                raise RuntimeError(f"telegram file download returned HTTP {r.status_code}")
             suffix = os.path.splitext(path)[1] or ".jpg"
             fd, tmp = tempfile.mkstemp(prefix="jarvis-tg-", suffix=suffix)
             with os.fdopen(fd, "wb") as fh:
@@ -476,7 +535,8 @@ class TelegramBridge:
             if self._client is None:
                 self._client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10))
             r = await self._client.get(f"{API}/file/bot{self.token}/{path}", timeout=60)
-            r.raise_for_status()
+            if r.status_code != 200:      # never raise_for_status: the URL holds the token
+                raise RuntimeError(f"telegram file download returned HTTP {r.status_code}")
             audio = await asyncio.to_thread(to_pcm16k, r.content)
         except Undecodable as e:
             log.warning("voice note undecodable: %s", e)
@@ -497,27 +557,34 @@ class TelegramBridge:
         return heard
 
     async def send_proactive(self, text: str, tier: str = "notable",
-                             subject: str = "") -> None:
+                             subject: str = "") -> bool:
         """Something he did not ask for, reaching him where he is.
 
         Urgent carries an acknowledge button and keeps asking until he taps it:
         the whole point of the tier is that it must not be missed. Everything
         else is said once.
+
+        Returns whether Telegram ACCEPTED it. delivery.py used to treat this as
+        fire-and-forget: a network blip or a revoked token while he was away
+        meant an alert that never left was remembered as told, charged to the
+        hourly budget, and answered later as though he had heard it.
         """
         chat = config.get("remote", "telegram_chat_id", default=None)
         if not chat or not text:
-            return
+            return False
         if tier != "urgent":
-            await self._send(text)
-            return
+            return await self._send(text)
         token = pysecrets.token_hex(4)
+        sent = await self._api("sendMessage", chat_id=chat, text=text,
+                               reply_markup={"inline_keyboard": [[
+                                   {"text": "Got it", "callback_data": f"ack:{token}"}]]})
+        if sent is None:
+            return False                 # nothing to chase: he never got it
         self._urgent[token] = {"text": text, "at": time.time(), "sent": 1}
-        await self._api("sendMessage", chat_id=chat, text=text,
-                        reply_markup={"inline_keyboard": [[
-                            {"text": "Got it", "callback_data": f"ack:{token}"}]]})
         log.info("telegram urgent %s sent, chasing until acknowledged: %r",
                  token, text[:70])
         spawn(self._chase(token), name="tg-urgent-chase")
+        return True
 
     async def _chase(self, token: str) -> None:
         """Keep asking until he acknowledges.
@@ -625,7 +692,12 @@ class TelegramBridge:
                 try:
                     await asyncio.wait_for(self._turn_done.wait(), timeout=240)
                 except asyncio.TimeoutError:
-                    pass
+                    # Not "Done, sir." A turn that never signalled completion
+                    # is a turn that failed or is still going, and the only
+                    # honest thing to send is that. This used to fall through
+                    # to the default reply four minutes later.
+                    log.warning("remote turn for %r did not finish in 240s", text[:60])
+                    self._collect["timed_out"] = True
                 c = self._collect
                 # SHOW HIM, DON'T TELL HIM. If the turn moved something on his
                 # desktop and did not already take a picture, take one now — he
@@ -651,6 +723,9 @@ class TelegramBridge:
                     # he took a screenshot by him actually showing me." A caption
                     # that says nothing the image does not is one more thing to
                     # read on a phone.
+                    if c.get("timed_out") and not line.strip():
+                        line = ("That one didn't come back to me, sir — I'm not "
+                                "certain it finished. Worth checking.")
                     if line.strip() or not c.get("screenshot"):
                         await self._send(line or "Done, sir.")
                 for url in c.get("images", []):

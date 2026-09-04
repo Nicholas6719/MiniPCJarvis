@@ -63,6 +63,10 @@ class Presence:
     def __init__(self) -> None:
         self._det = None
         self._lock = threading.Lock()
+        # Guards the YuNet net itself, which `_lock` (state) never did: capture
+        # thread, enrolment thread and the face-confirm gate all ran detect()
+        # on the same cv2.dnn object with nothing between them.
+        self._net_lock = threading.Lock()
         self._last_check = 0.0
         self._misses = 0
         self._seen = False
@@ -109,7 +113,14 @@ class Presence:
         try:
             import cv2
             small = cv2.resize(frame, (DETECT_W, DETECT_H))
-            _, faces = det.detect(small)
+            # ONE THREAD IN THE NET AT A TIME. cv2.dnn is not thread-safe, and
+            # this runs on an executor thread ("remember my face", every
+            # 0.2 s) while `consider` runs the same detector on the capture
+            # thread once a second. Best case a corrupted embedding stored to
+            # his face profile; worst case an access violation with no
+            # traceback. The call is milliseconds, so the lock costs nothing.
+            with self._net_lock:
+                _, faces = det.detect(small)
             return small, faces
         except Exception:
             log.debug("find_faces failed", exc_info=True)
@@ -156,13 +167,12 @@ class Presence:
         det = self._det
         if det is None:
             return                       # not warm yet; look again next second
-        if det is None:
-            return
         try:
             import cv2
             t0 = time.time()
             small = cv2.resize(frame, (DETECT_W, DETECT_H))
-            _, faces = det.detect(small)
+            with self._net_lock:         # see find_faces: the net is shared
+                _, faces = det.detect(small)
             took = (time.time() - t0) * 1000.0
             n = 0 if faces is None else int(len(faces))
         except Exception:

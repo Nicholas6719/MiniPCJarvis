@@ -3161,6 +3161,124 @@ keep changing code against a test environment that may itself be the fault.
 Note also: `session.token` is only written under `JARVIS_DEBUG=1`. A production
 launch publishes none, so authenticated endpoints 401 while `/health` answers.
 
+## 2026-09-04 afternoon — the full audit
+
+His instruction: *"Audit the code base fix everything that needs to be fixed and
+then perfect every feature."* Six read-only subsystem audits ran in parallel
+(brain, tools, audio/camera/vision, 3D, remote/main/persistence, HUD) against a
+baseline silent release that was RELEASE OK. Roughly seventy confirmed findings;
+what follows is what changed and why, by the thing he would have hit.
+
+### Telegram — why yesterday's transcript happened
+The poll loop handled each update INLINE. While a remote turn sat 120 s waiting
+for his DO IT tap, `getUpdates` was never called again, so the tap and the typed
+"Do it!" sat in Telegram's queue until the question had expired: "That question
+expired" → "I didn't get a yes" → two stray "Done, sir."s. Yesterday's typed-yes
+fix was correct and never executed in production. Updates are spawned now
+(`_turn_lock` still serialises turns), so an ANSWER can arrive while a command
+waits for one — and the offset is acked on the next poll, so a restart mid-turn
+no longer replays the command.
+
+Also: a failed send was filed as delivered (budget charged, text remembered as
+told); the bot token was written to sidecar.log twice (httpx at INFO before the
+loop silenced it; `raise_for_status` tracebacks carry the URL); a typo in
+Settings overwrote the working token before Telegram was asked; an EDITED
+message re-ran as a new command; a voice-note "yes" queued behind its own
+question; a turn that raised held the bridge 240 s then said "Done, sir.";
+`config.save` was not atomic and a torn file was overwritten with defaults on
+the next boot (pairing, watchlist, rules gone — kept aside as
+`config.json.bad-<stamp>` now).
+
+### Brain
+Six skills had `speak=None` and every one answered "Done." — "what projects do
+we have" got "Done." while the list sat unread in the tool's `spoken`.
+`GUESS_YES` matched the opening word only, so after "Did you mean lock, sir?"
+the sentence "okay, what's the weather" locked the PC and learned the phrasing
+as `lock`. A bare "no" to a guess fell through to the `correction` skill and
+UNLEARNED whatever reflex had fired in the last 40 s. A cost question ("Shall
+I?") was answered by word-counting, so "go to sleep" and "turn on the camera"
+counted as "go ahead" and started renders. Learned examples for number-carrying
+skills were deleted on every boot (`learn` validated raw text, `load`
+re-validated the normalised "N" form). "close this tab" hid the HUD; "open the
+start menu" opened settings. Seventy skills would ask "Did you mean wakeack,
+sir?" (identifier read aloud; the gate iterated the table so could not fail).
+"Jarvis, yes" during a confirmation was never captured. "Go to sleep" re-armed
+the 15 s window while asleep. "remind me in an hour" refused itself.
+
+### Tools
+File scans/reads/moves ran ON the event loop inside `async def` handlers (a
+six-second walk = six seconds deaf). The audit INSERT ran on the loop with a
+15 s busy timeout. `press_keys`/`type_text` hopped through the shared default
+executor. `_focus` took `hits[0]` from a raw EnumWindows that includes CLOAKED
+ghost frames (modern Notepad leaves them) and reported focus it never got. Every
+keystroke went through `keybd_event` with scan code 0, a BYTE for Unicode (curly
+apostrophe → OverflowError), and no regard for his own fingers — `keys.py` is the
+replacement: SendInput, real scan codes, WORD Unicode, and it WAITS for physical
+modifiers to lift (dictation is hold-to-talk on Ctrl+Shift+D; the paste fired
+while they were still down = Ctrl+Shift+V). `open_with_windows` (LOW) ran .exe
+and .msi. `browser_click` (LOW) submitted forms the MEDIUM tool gated.
+`delete_file` recycled whole trees and, over the bin limit, deleted permanently
+with FOF_NOCONFIRMATION answering yes (now refuses >512 MB). An empty query
+cancelled every reminder. `exit_sleep_mode` could be called from a phone turn
+and lit the monitor. DPI awareness was never declared (fallback clicks at
+two-thirds of the target on scaled displays). A HUD/phone answer waited up to
+8 s behind the voice listener (hook now races the future). Handler TypeErrors
+were relabelled "bad arguments".
+
+### Audio / camera / vision
+`refresh_devices` called `Pa_Terminate` while an orphaned stream could still
+have a writer inside it (the no-traceback crash); the whole heal ran on the
+loop; a failed mic reopen was a DEBUG line and never retried (`using_preferred`
+never reset). Dictation's 120 s guard stopped recording but not the session
+(deaf to his name; next release pasted two minutes). YuNet/SFace shared across
+three threads with no lock. `play_chunk` under silence still set `heard` and
+opened the mic. Camera `start()` said ok on an open that merely timed out and
+could run two capture threads. Pre-roll snapshot taken AFTER surfacing (clipped
+first syllable).
+
+### 3D
+Tier 6 recursed forever: every piece of a "suit" still contains "suit", so each
+component routed back to 6, and the no-components fallback re-picked 6.
+`choose_tier(..., exclude=)` now; `build_each` never splits a piece. Scout's
+confirmation carried the pre-scout tier and the scouted photo regardless of
+route: "yes" to a fetch generated from scratch, "yes" to an emblem traced a
+photograph (his emblem regression, by voice). `_pick()` with no name chose a
+sub-part (newer than its whole). Tier 2 built colour parts twice, once before
+the body existed. A tier-2 part was named after its reference file. Scout's
+reference JPEG was never deleted (15 in his folder). `unit_scale` was computed
+and never applied ("I'd scale it 25.4 times; that came out 4 by 2 by 0 mm").
+"Stop" during the started-announcement cancelled nothing. A finished
+reconstruction slow to exit was reported as a 900 s timeout. Gates hit the live
+network and wrote into his REAL work folder (now hermetic; a termination gate
+exists and fails on the recursion).
+
+### HUD
+Every event-opened stage inherited `pinned` from the outgoing stage, so a search
+during a hologram replaced the model with a browser panel that never drained,
+and "turn it" spoke to nothing. Fixed with `keepPin` (same-kind only); a model
+command reopens the model. After "give me 5 to 8", the grid renumbered 1..4 while
+the sidecar counted 5..8 — "image number 6" showed one picture and handed the
+model another. The machine panel is HIDDEN in compact, and his window is always
+compact: yesterday's fix was invisible. Offline never cleared a cached hologram.
+The CONVERSATION badge outlived the window by up to 15 s. Hands badge stayed lit
+after the tracker stood down silently. `api()` had no timeout.
+
+### Shell
+`taskkill` without CREATE_NO_WINDOW flashed a console on every close/restart.
+The supervisor gave up silently after three restarts. `/secrets` accepted any
+name. Ctrl+Shift+S is a GLOBAL hotkey (Save As stolen from every app) — his
+chosen key, flagged, not changed.
+
+### Not done / open
+* voice_ux_e2e T2 ("CONVERSATION WINDOW: FAIL") is pre-existing and non-fatal;
+  likely wake.mode push_to_talk in the release config. Not investigated.
+* `free_port()` bind-then-release race: a taken port restarts on the same port
+  forever. Documented; changing the port mid-session would strand the HUD.
+* Dictation/press_keys not landing in the hands_e2e harness — the keys.py
+  rewrite (scan codes, modifier wait, cloaked-window-aware focus) addresses
+  every identified cause; `/debug/desktop` answers the window-station question
+  from inside the process. Needs the next hands_e2e run to confirm.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

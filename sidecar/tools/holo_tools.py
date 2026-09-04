@@ -95,6 +95,18 @@ def _pick(path: str = "", name: str = "") -> Path | None:
         found = [f for ext in meshio.READABLE
                  for f in work_dir().glob(f"*{ext}")
                  if not _ROUGH.search(f.name)]
+        # NOR A SUB-PART OF A WHOLE THAT IS SITTING RIGHT NEXT TO IT. Tier 1
+        # renders `<base>.<part>.stl` AFTER `<base>.stl`, and tier 2 writes its
+        # colour parts after the body, so the newest file was reliably one
+        # eye or one rim — and "will it print" gave a bed-fit verdict about a
+        # fragment, "show me the hologram" projected a lone rim as the part.
+        # A file whose stem has a dot, where the stem before the dot exists as
+        # its own model beside it, is a piece of that model, not a model.
+        names = {f.name for f in found}
+        found = [f for f in found
+                 if not ("." in f.stem and
+                         any(f"{f.stem.split('.', 1)[0]}{ext}" in names
+                             for ext in meshio.READABLE))]
         found.sort(key=lambda f: f.stat().st_mtime)
         return _resolve(str(found[-1])) if found else None
     except OSError:

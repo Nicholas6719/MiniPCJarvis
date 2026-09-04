@@ -19,6 +19,7 @@ in his hand is worse than "I can't tell from this angle".
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -58,7 +59,7 @@ async def analyze_object(path: str, question: str = "") -> dict:
     ask = (question or "").strip()
     prompt = f"{OBJECT_PROMPT}\n\nAlso answer specifically: {ask}" if ask else OBJECT_PROMPT
     try:
-        img = _downscale(p)
+        img = await asyncio.to_thread(_downscale, p)    # decode off the loop
         answer = await vision.describe(img, prompt, max_tokens=260)
     except Exception as e:
         log.exception("object analysis failed")

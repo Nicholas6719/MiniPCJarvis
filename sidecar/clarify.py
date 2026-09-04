@@ -105,6 +105,22 @@ def choose(pending: Pending, text: str) -> Branch | str | None:
         return None
     if _DROP.search(t):
         return "drop"
+    # A COST QUESTION IS ANSWERED BY A YES OR A NO, NOT BY A WORD. "Shall I?"
+    # used to be answered by counting word hits, and the approval branch's
+    # words include "on", "do", "go", "please", "start" and "fine" — so "go to
+    # sleep", "turn on the camera", "please open spotify" and "do I have
+    # reminders" all counted as "go ahead", and a multi-minute render started
+    # while he was asking for something else. For an approval the whole
+    # utterance has to BE a yes or a no; anything with a subject in it is the
+    # new request it sounds like.
+    names = {b.name for b in pending.amb.branches}
+    if names == {"go ahead", "leave it"}:
+        from orchestrator import NO_WORDS, YES_WORDS     # lazy: orchestrator imports us
+        if YES_WORDS.match(t):
+            return next(b for b in pending.amb.branches if b.name == "go ahead")
+        if NO_WORDS.match(t):
+            return next(b for b in pending.amb.branches if b.name == "leave it")
+        return None
     hits = [(sum(1 for w in b.words if re.search(r"\b" + re.escape(w) + r"\b", t)), b)
             for b in pending.amb.branches]
     best = max(hits, key=lambda p: p[0])

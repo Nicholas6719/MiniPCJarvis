@@ -53,7 +53,11 @@ def register_all() -> None:
             "target": {"type": "string",
                        "description": "Visible text of the button/link"}},
             "required": ["target"]},
-        risk=Risk.LOW, handler=browser_click, timeout=20))
+        # MEDIUM, the same tier as browser_submit — because it IS a submit.
+        # This profile is persistent and may be signed in; clicking "Place
+        # order", "Send" or "Delete account" by its visible text does exactly
+        # what pressing Enter in the form does, and only Enter was gated.
+        risk=Risk.MEDIUM, handler=browser_click, timeout=20))
     registry.register(Tool(
         name="browser_type",
         description="Type text into a form field located by its label, "

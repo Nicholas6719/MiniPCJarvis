@@ -135,7 +135,13 @@ async def build_each(description: str, names: list[str], base_name: str) -> dict
     for n in names:
         want = f"{description} {n}".strip()
         try:
-            tier = create3d.choose_tier(want, "")
+            # A PIECE IS NEVER SPLIT AGAIN. "iron man mark 3 suit helmet" still
+            # contains "suit", so choose_tier returned 6 for every component
+            # and each one asked the LLM what a helmet was made of — and each
+            # of THOSE contained "suit" too. The render never finished, and
+            # every make_hologram after it queued behind the loop. A component
+            # is built by a technique, not decomposed.
+            tier = create3d.choose_tier(want, "", exclude=(6, 7))
             r = await create3d.build(tier, description=want,
                                      name=f"{base_name}-{safe_name(n)}")
         except Exception:

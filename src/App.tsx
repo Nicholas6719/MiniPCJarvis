@@ -169,6 +169,18 @@ export default function App() {
   }, [web, stage]);
 
   const armed = state === "idle" && armedUntil > Date.now() / 1000;
+  // THE BADGE CLEARS WHEN THE WINDOW DOES. `armed` is computed at render time,
+  // and with a hologram up (pinned, so nothing else re-renders) the only thing
+  // that re-rendered was the fifteen-second clock — so "CONVERSATION · no wake
+  // word needed" stayed up for as long as fifteen seconds after the mic had
+  // closed, and he spoke into it. One timer, keyed on the deadline itself.
+  const [, expireArmed] = useState(0);
+  useEffect(() => {
+    if (!armed) return;
+    const ms = Math.max(0, armedUntil * 1000 - Date.now()) + 50;
+    const t = setTimeout(() => expireArmed(Date.now()), ms);
+    return () => clearTimeout(t);
+  }, [armed, armedUntil]);
   const radialWord = gateOpen ? "NEEDS YOU" : armed ? "CONVERSATION" : word;
   const radialSub = gateOpen ? "nothing has happened yet"
     : armed ? "listening · no wake word needed"

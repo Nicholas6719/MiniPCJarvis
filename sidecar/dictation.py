@@ -112,6 +112,23 @@ class Dictation:
             raise
         except Exception:
             log.exception("dictation recording failed")
+        if self.active:
+            # THE DEADLINE ENDS THE SESSION, NOT JUST THE RECORDING. Hitting
+            # MAX_SECONDS used to leave `active` True with two minutes of audio
+            # in the buffer: the wake loop skips every block while dictation is
+            # active, so "hey JARVIS" was ignored indefinitely — and the NEXT
+            # hotkey release transcribed the whole two minutes and pasted them
+            # into whatever had focus. The lost release (a UAC prompt, an
+            # elevated window in front, a sidecar restart mid-hold) is not
+            # rare enough for that.
+            log.warning("dictation ran %ds with no release — ending it", MAX_SECONDS)
+            self.active = False
+            self._task = None
+            if self._q is not None:
+                mic.unsubscribe(self._q)
+                self._q = None
+            self._buf = []
+            await bus.emit("dictation", stage="cancelled", reason="too long")
 
     async def stop(self) -> dict:
         """Release: transcribe what was said and paste it where the cursor is."""
@@ -186,10 +203,19 @@ def _paste(text: str) -> bool:
     if not _set_clip(text):
         return False
     try:
-        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-        win32api.keybd_event(ord("V"), 0, 0, 0)
-        win32api.keybd_event(ord("V"), 0, win32con.KEYEVENTF_KEYUP, 0)
-        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+        # THROUGH keys.press, NOT keybd_event. The hotkey is Ctrl+Shift+D held
+        # down; the release fires when D comes up and the transcript is back
+        # in ~140 ms, so his fingers are still on Ctrl and Shift when this
+        # runs. keybd_event added a Ctrl of its own on top of the physical
+        # ones and the app received Ctrl+Shift+V — paste-as-plain-text in
+        # Chrome, "paste formatting" in Word, nothing at all in the document —
+        # while this returned True because a keystroke had been sent. keys.press
+        # waits for the physical modifiers to lift, sends a real scan code,
+        # and puts the whole combination in one SendInput call.
+        import keys
+        if not keys.press(ord("V"), mods=(keys.VK_CONTROL,)):
+            log.warning("paste keystroke was not delivered; text is on the clipboard")
+            return False
     except Exception:
         log.warning("paste keystroke failed; text is on the clipboard", exc_info=True)
         return False
