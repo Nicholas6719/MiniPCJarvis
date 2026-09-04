@@ -9,6 +9,9 @@ import asyncio
 from collections import OrderedDict
 import logging
 
+import json
+import re
+
 import numpy as np
 
 from config import APP_DIR, config
@@ -101,12 +104,67 @@ class PiperTTS:
 KOKORO_DIR = VOICES_DIR / "kokoro"
 
 
+KOKORO_PREFIXES = ("af_", "am_", "bf_", "bm_")
+DEFAULT_VOICE = "bm_george"
+
+
+def parse_voice(spec: str) -> list[tuple[str, float]]:
+    """A voice spec into [(voice, weight)], weights summing to 1.
+
+    One name ("bm_george"), or a BLEND: "bm_george+bm_daniel" (equal parts)
+    or "bm_george:0.7+bm_daniel:0.3". Kokoro voices are style vectors, and a
+    weighted sum of two is a voice that exists between them — which is how a
+    voice that sounds like nobody in the pack gets made. Anything unparseable
+    is the default, never an exception: a typo in Settings must not cost him
+    his voice.
+    """
+    parts: list[tuple[str, float]] = []
+    for piece in (spec or "").replace(" ", "").split("+"):
+        if not piece:
+            continue
+        name, _, w = piece.partition(":")
+        if not name.startswith(KOKORO_PREFIXES):
+            continue
+        try:
+            weight = float(w) if w else 1.0
+        except ValueError:
+            weight = 1.0
+        if weight > 0:
+            parts.append((name, weight))
+    if not parts:
+        return [(DEFAULT_VOICE, 1.0)]
+    total = sum(w for _, w in parts)
+    return [(n, w / total) for n, w in parts]
+
+
+def kokoro_lang(parts: list[tuple[str, float]]) -> str:
+    """British voices get British phonemes. They were being phonemised as
+    American — "schedule", "privacy", every "r" — and sounded like an
+    Englishman doing an impression."""
+    british = sum(w for n, w in parts if n.startswith(("bf_", "bm_")))
+    return "en-gb" if british >= 0.5 else "en-us"
+
+
 class KokoroTTS:
     """Kokoro-82M ONNX — measured 3.4-3.8x realtime on this CPU."""
 
     def __init__(self) -> None:
         self._k = None
         self._sample_rate = 24000
+        self._styles: dict[str, object] = {}     # blended style vectors, by spec
+
+    def _style(self, k, spec: str):
+        """The style vector for a spec — a pack voice by name, or a blend."""
+        parts = parse_voice(spec)
+        if len(parts) == 1:
+            return parts[0][0]
+        key = "+".join(f"{n}:{w:.3f}" for n, w in parts)
+        st = self._styles.get(key)
+        if st is None:
+            st = sum(w * k.get_voice_style(n) for n, w in parts)
+            st = np.asarray(st, dtype=np.float32)
+            self._styles[key] = st
+        return st
 
     def _ensure(self):
         if self._k is None:
@@ -131,13 +189,17 @@ class KokoroTTS:
 
     async def synthesize_stream(self, text: str, cancel: asyncio.Event):
         k = await asyncio.to_thread(self._ensure)
-        voice = config.get("tts", "voice", default="bm_george")
-        if not voice.startswith(("af_", "am_", "bf_", "bm_")):
-            voice = "bm_george"
+        spec = str(config.get("tts", "voice", default=DEFAULT_VOICE))
+        parts = parse_voice(spec)
         speed = float(config.get("tts", "rate", default=1.0))
+        # Measured delivery: the pause after a sentence, in seconds. JARVIS
+        # does not rush from one sentence into the next.
+        pause = float(config.get("tts", "sentence_pause", default=0.3))
         try:
+            voice = await asyncio.to_thread(self._style, k, spec)
             samples, sr = await asyncio.to_thread(
-                k.create, text, voice=voice, speed=speed)
+                k.create, text, voice=voice, speed=speed,
+                lang=kokoro_lang(parts), sentence_pause=pause)
         except Exception as e:
             log.error("kokoro synth failed: %s", e)
             return
@@ -149,6 +211,118 @@ class KokoroTTS:
             if cancel.is_set():
                 return
             yield audio[i:i + step]
+
+
+POCKET_VOICES = ["george", "paul", "michael", "charles", "jean", "marius",
+                 "cosette", "anna", "alba"]
+
+
+class PocketTTS:
+    """Kyutai Pocket TTS, run as a worker process under its own interpreter
+    (audio/pocket_worker.py explains why and how). Streams: the first 80 ms of
+    audio arrives ~100 ms after the request, so JARVIS starts speaking before
+    the sentence is synthesised."""
+
+    def __init__(self) -> None:
+        self._proc = None
+        self._port = 0
+        self._sample_rate = 24000
+        self._lock = asyncio.Lock()
+
+    @staticmethod
+    def python() -> str:
+        return str(config.get("tts", "pocket_python",
+                              default=r"C:\AI\tts\pocket\Scripts\python.exe"))
+
+    @classmethod
+    def installed(cls) -> bool:
+        import os
+        return os.path.exists(cls.python())
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    def reload(self) -> None:
+        # The temperature is baked into the loaded model; a change restarts
+        # the worker on the next synthesis. Voice/tempo/polish are per call.
+        pass
+
+    async def _ensure(self) -> int:
+        async with self._lock:
+            if self._proc is not None and self._proc.returncode is None and self._port:
+                return self._port
+            import os
+            import subprocess
+            from pathlib import Path
+            if not self.installed():
+                raise FileNotFoundError(f"pocket tts is not installed at {self.python()}")
+            worker = Path(__file__).with_name("pocket_worker.py")
+            temp = float(config.get("tts", "pocket_temp", default=0.5))
+            log.info("starting pocket tts worker")
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            self._proc = await asyncio.create_subprocess_exec(
+                self.python(), str(worker), "--temp", str(temp),
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, creationflags=flags,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            try:
+                line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=120)
+            except asyncio.TimeoutError:
+                self._proc.kill()
+                self._proc = None
+                raise RuntimeError("pocket tts worker did not come up in 120 s")
+            text = line.decode("utf-8", "replace").strip()
+            if not text.startswith("PORT "):
+                self._proc.kill()
+                self._proc = None
+                raise RuntimeError(f"pocket tts worker said {text!r}")
+            self._port = int(text.split()[1])
+            log.info("pocket tts ready on :%d", self._port)
+            return self._port
+
+    async def warmup(self) -> None:
+        await self._ensure()
+
+    def close(self) -> None:
+        p, self._proc, self._port = self._proc, None, 0
+        if p is not None and p.returncode is None:
+            try:
+                p.kill()
+            except Exception:
+                pass
+
+    async def synthesize_stream(self, text: str, cancel: asyncio.Event):
+        port = await self._ensure()
+        voice = str(config.get("tts", "voice", default="george"))
+        if voice not in POCKET_VOICES:
+            voice = "george"
+        # Words he has ruled on. The engine samples pronunciation with the rest
+        # of the delivery; a respelling here is how a ruling sticks.
+        for word, said in (config.get("tts", "pronounce", default={}) or {}).items():
+            text = re.sub(rf"\b{re.escape(str(word))}\b", str(said), text, flags=re.I)
+        req = {"text": text, "voice": voice,
+               "tempo": float(config.get("tts", "tempo", default=0.97)),
+               "polish": bool(config.get("tts", "polish", default=False)),
+               "seed": int(config.get("tts", "seed", default=2))}
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            writer.write((json.dumps(req) + "\n").encode("utf-8"))
+            await writer.drain()
+            while True:
+                head = await reader.readexactly(4)
+                n = int.from_bytes(head, "little")
+                if n == 0:
+                    return
+                pcm = await reader.readexactly(n)
+                if cancel.is_set():
+                    return                    # closing the socket cancels the worker
+                yield np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32767.0
+        finally:
+            try:
+                writer.close()
+            except Exception:
+                pass
 
 
 # Lines JARVIS says constantly. Synthesising one costs ~0.4-0.7 s every single time,
@@ -178,6 +352,7 @@ class TTSRouter:
     def __init__(self) -> None:
         self.kokoro = KokoroTTS()
         self.piper = PiperTTS()
+        self.pocket = PocketTTS()
         self._cache: "OrderedDict[tuple, list]" = OrderedDict()
         # Kokoro is one ONNX session; two concurrent create() calls are not something to
         # rely on, and the background phrase warm made that a real possibility.
@@ -190,6 +365,8 @@ class TTSRouter:
         return (config.get("tts", "engine", default="kokoro"),
                 str(config.get("tts", "voice", default="bm_george")),
                 float(config.get("tts", "rate", default=1.0)),
+                float(config.get("tts", "tempo", default=0.97)),
+                bool(config.get("tts", "polish", default=False)),
                 text.strip())
 
     async def warm_phrases(self) -> None:
@@ -221,8 +398,14 @@ class TTSRouter:
         # voice prefix wins over engine setting so a single dropdown works
         if voice.startswith("en_"):
             return self.piper
+        if voice.startswith(KOKORO_PREFIXES):
+            return self.kokoro
         if engine == "piper":
             return self.piper
+        if engine == "pocket" or voice in POCKET_VOICES:
+            if self.pocket.installed():
+                return self.pocket
+            log.warning("pocket tts is not installed; using kokoro")
         return self.kokoro
 
     @property
@@ -232,6 +415,7 @@ class TTSRouter:
     def reload(self) -> None:
         self.kokoro.reload()
         self.piper.reload()
+        self.pocket.reload()
         self._cache.clear()          # voice/engine changed: cached audio is stale
 
     async def warmup(self) -> None:
@@ -268,8 +452,16 @@ class TTSRouter:
             if produced or cancel.is_set():
                 return
         except Exception as e:
-            log.warning("tts engine failed (%s) — falling back to piper", e)
-        if active is not self.piper:  # graceful quality->latency fallback
+            log.warning("tts engine failed (%s) — falling back", e)
+        # Graceful fallback, best first: pocket -> kokoro -> piper.
+        if active is self.pocket:
+            try:
+                async for chunk in self.kokoro.synthesize_stream(text, cancel):
+                    yield chunk
+                return
+            except Exception as e:
+                log.warning("kokoro failed too (%s) — falling back to piper", e)
+        if active is not self.piper:
             async for chunk in self.piper.synthesize_stream(text, cancel):
                 yield chunk
 

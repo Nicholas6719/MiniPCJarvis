@@ -1811,6 +1811,15 @@ def _to_second_person(s: str) -> str:
     return out[0].upper() + out[1:] if out else out
 
 
+from brain import mathskill as _mathskill   # noqa: E402  (pure text, no cycle)
+from brain import protocols as _protocols   # noqa: E402  (pure text, no cycle)
+
+
+def _say_protocols() -> str:
+    from brain.router import brain           # lazy: router imports this module
+    return _protocols.list_line(_protocols.taught(brain))
+
+
 def say_recall(slots: dict, res: dict) -> str:
     """Answers from memory WITHOUT the LLM when one memory clearly matches —
     recall was the slowest thing he did (11 s to speak a sentence already on disk)."""
@@ -1949,6 +1958,16 @@ SKILLS: list[Skill] = [
         "do you know my name", "say my name", "who do you think i am",
         "tell me my name", "who are you talking to"],
         speak=say_who_am_i),
+    # Arithmetic, instantly. "What's 17 times 23" was a 17-second model round;
+    # the parse in brain/mathskill.py answers it in a millisecond and refuses
+    # anything that is not clearly a sum, so "volume to 50 percent" stays put.
+    Skill("math", None, [
+        "what's 17 times 23", "what is 12 plus 5", "what's 100 divided by 7",
+        "what's 20 percent of 150", "what's the square root of 81", "what's 2 to the power of 10",
+        "what's 9 squared", "calculate 7 times 8", "how much is 14 times 12",
+        "what's 100 minus 37", "seventeen times twenty three", "half of 30",
+        "what does 6 times 7 make", "what's 3 point 5 times 2"],
+        slots=_mathskill.slots, speak=_mathskill.say),
     Skill("time", None, [
         "what time is it", "what's the time", "tell me the time", "do you have the time",
         "current time", "time check", "what time is it right now", "got the time",
@@ -2684,6 +2703,15 @@ SKILLS: list[Skill] = [
         "lock the computer", "lock my pc", "lock the screen", "lock it", "lock my computer",
         "lock the workstation", "lock windows", "lock up"],
         speak=say_lock),
+    # "What protocols do I have" — the film's word for the routines he teaches
+    # ("when I say lockdown protocol, lock the pc and mute"). Running one is
+    # handled in brain.router.match_command; this is only the listing.
+    Skill("protocols", None, [
+        "what protocols do i have", "list my protocols", "which protocols have i set up",
+        "show me my protocols", "tell me my protocols", "what protocols are there",
+        "what protocols do you know"],
+        slots=lambda t: ({} if _protocols.wants_listing(t) else None),
+        speak=lambda s, r: _say_protocols()),
     Skill("teach", None, [
         "when i say lights out, mute and open spotify", "from now on when i say good night, lock the computer",
         "teach you a command", "if i say movie time, set the volume to 70 and open netflix.com",

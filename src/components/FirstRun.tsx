@@ -1,3 +1,4 @@
+import { prettyVoice, voiceMeta } from "../lib/voices";
 // Boot (§ JarvisBoot) and first run (§ JarvisFirstRun) — every line a real event.
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../state/store";
@@ -173,11 +174,3 @@ export function FirstRunSetup() {
   );
 }
 
-function prettyVoice(v: string) {
-  const name = v.replace(/^en_[A-Z]{2}-/, "").replace(/-\w+$/, "").replace(/^[abm][fm]_/, "");
-  return name.charAt(0).toUpperCase() + name.slice(1);
-}
-function voiceMeta(v: string) {
-  const gb = /en_GB|bf_|bm_/.test(v);
-  return `${gb ? "EN-GB" : "EN-US"} · ${/f_|female/i.test(v) ? "WARM" : "DRY, CLIPPED"}`;
-}

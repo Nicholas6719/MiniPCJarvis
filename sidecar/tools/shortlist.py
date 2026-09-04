@@ -52,9 +52,36 @@ MAX_TOOLS = 30          # ...nor more. 60 -> ~34 sent: most of the win, with hea
 
 
 class ToolShortlist:
+    # THE BLOCK MUST BE A PREFIX OF ITSELF, TURN TO TURN. llama.cpp caches the
+    # prompt as a prefix and the tools sit before the history, so one tool
+    # swapped or reordered re-processes everything after it: ~800 tokens and
+    # ~3.3 s before the first token on an ordinary turn in the real log, against
+    # ~100 tokens when the prefix holds. So a tool once offered stays offered,
+    # in first-seen order, and new ones are APPENDED — the previous block is a
+    # literal prefix of the next and the model only reads what is new. Past
+    # MAX_STICKY the least recently wanted go, and that one turn pays.
+    MAX_STICKY = 48
+
     def __init__(self) -> None:
         self._names: list[str] = []
         self._matrix: np.ndarray | None = None
+        self._sticky: list[str] = []          # first-seen order
+        self._last_wanted: dict[str, int] = {}
+        self._tick = 0
+
+    def stable_order(self, wanted: set[str]) -> list[str]:
+        """`wanted` merged into the session's sticky block, order preserved."""
+        self._tick += 1
+        for n in wanted:
+            self._last_wanted[n] = self._tick
+        for n in sorted(wanted):
+            if n not in self._sticky:
+                self._sticky.append(n)
+        if len(self._sticky) > self.MAX_STICKY:
+            keep = set(sorted(self._sticky, key=lambda n: -self._last_wanted.get(n, 0))
+                       [:self.MAX_STICKY])
+            self._sticky = [n for n in self._sticky if n in keep]
+        return list(self._sticky)
 
     async def build(self, registry) -> None:
         """Embed each tool once, from its name and description."""
@@ -99,8 +126,9 @@ class ToolShortlist:
                 if len(wanted) >= MIN_TOOLS:
                     break
                 wanted.add(self._names[i])
-            out = [t.openai_schema() for n, t in registry._tools.items()
-                   if n in wanted and not n.startswith("_")]
+            wanted = {n for n in wanted if n in registry._tools and not n.startswith("_")}
+            out = [registry._tools[n].openai_schema() for n in self.stable_order(wanted)
+                   if n in registry._tools]
             return out or registry.schemas()
         except Exception:
             log.exception("shortlist failed — sending all tools")

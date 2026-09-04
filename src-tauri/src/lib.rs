@@ -16,7 +16,7 @@ struct AppState {
 
 #[tauri::command]
 fn sidecar_info(state: tauri::State<AppState>) -> SidecarInfo {
-    state.sidecar.info.clone()
+    state.sidecar.info()
 }
 
 #[tauri::command]
@@ -35,8 +35,8 @@ fn push_secret_async(sc: Arc<Sidecar>, name: String, value: String) {
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::new();
         let _ = client
-            .post(format!("http://127.0.0.1:{}/secrets", sc.info.port))
-            .header("X-Jarvis-Token", &sc.info.token)
+            .post(format!("http://127.0.0.1:{}/secrets", sc.info().port))
+            .header("X-Jarvis-Token", &sc.info().token)
             .json(&serde_json::json!({"name": name, "value": value}))
             .timeout(Duration::from_secs(5))
             .send()
@@ -55,8 +55,8 @@ async fn sidecar_secret_names(sc: &Sidecar) -> Option<Vec<String>> {
     }
     let client = reqwest::Client::new();
     let r = client
-        .get(format!("http://127.0.0.1:{}/secrets", sc.info.port))
-        .header("X-Jarvis-Token", &sc.info.token)
+        .get(format!("http://127.0.0.1:{}/secrets", sc.info().port))
+        .header("X-Jarvis-Token", &sc.info().token)
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -84,8 +84,8 @@ async fn reconcile_secrets(sc: &Arc<Sidecar>) {
 async fn sidecar_post(sc: &Sidecar, path: &str) {
     let client = reqwest::Client::new();
     let _ = client
-        .post(format!("http://127.0.0.1:{}{}", sc.info.port, path))
-        .header("X-Jarvis-Token", &sc.info.token)
+        .post(format!("http://127.0.0.1:{}{}", sc.info().port, path))
+        .header("X-Jarvis-Token", &sc.info().token)
         .timeout(Duration::from_secs(5))
         .send()
         .await;
@@ -202,24 +202,14 @@ pub fn run() {
                     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyJ),
                     // hold to dictate into whatever app has focus (no turn taken)
                     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyD),
-                    // stand down: close the conversation window early, without
-                    // waiting it out. The window is short on purpose; this is
-                    // how he ends it when he is done talking.
-                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS),
+                    // Standing down (closing the conversation window early)
+                    // is Ctrl+Shift+J AGAIN: /listen/toggle stands down when
+                    // the window is open. It used to be Ctrl+Shift+S, which
+                    // as a GLOBAL shortcut stole Save As from every app on
+                    // the machine.
                 ])
                 .expect("register hotkeys")
                 .with_handler(move |app, shortcut, event| {
-                    // Stand down. Deliberately does NOT raise or hide the
-                    // window: this is about the microphone, not the view.
-                    if shortcut.key == Code::KeyS {
-                        if event.state == ShortcutState::Pressed {
-                            let sc = sc_for_hotkey.clone();
-                            tauri::async_runtime::spawn(async move {
-                                sidecar_post(&sc, "/standby").await;
-                            });
-                        }
-                        return;
-                    }
                     let dictating = shortcut.key == Code::KeyD;
                     if dictating {
                         // press starts capture, release transcribes and pastes; the

@@ -3275,14 +3275,117 @@ after the tracker stood down silently. `api()` had no timeout.
 ### Shell
 `taskkill` without CREATE_NO_WINDOW flashed a console on every close/restart.
 The supervisor gave up silently after three restarts. `/secrets` accepted any
-name. Ctrl+Shift+S is a GLOBAL hotkey (Save As stolen from every app) — his
-chosen key, flagged, not changed.
+name. Ctrl+Shift+S was a GLOBAL hotkey (Save As stolen from every app): his
+answer was "do whatever you need to do", so it is gone — Ctrl+Shift+J is now
+both directions (pressed while the ears are open or the window is armed,
+`toggle_listen` stands down; `stand_down` clears the capture flag too).
+`free_port()`'s bind-then-release race is closed at the restart: `restart()`
+test-binds the old port, moves to a fresh one if it is taken, `Sidecar.info`
+is behind a Mutex with an `info()` accessor, and the HUD drops its cached
+port on every socket close so it re-asks the core before reconnecting.
+voice_ux_e2e T2 passed in release 13 (the wake-fire ordering fix, most
+likely); it was never reproduced after that.
+
+### The voice (2026-09-04 evening)
+He asked for a JARVIS that "sounds even similar to the movies". Not a clone of
+the actor — a voice built from the pack: `tts.voice` now accepts a BLEND
+("bm_george:0.6+bm_lewis:0.4"), a weighted sum of Kokoro style vectors, and
+British voices are finally phonemised as British (`lang="en-gb"`; they had
+been en-us all along), with a `tts.sentence_pause` (0.3 s) for the measured
+delivery. Eight candidates were synthesised and sent to him as an audition
+file with measured pitch and pace; George+Lewis (126 Hz, 155 wpm) is the
+default until he names a number. `test_voice_spec` gates the parsing.
+
+### The voice, second act: Pocket TTS (2026-09-04 evening)
+"Daniel is still the best but I was hoping for better." The Kokoro pack was the
+ceiling, so a second engine was auditioned on this CPU (Ryzen 7 8845HS, no
+CUDA): **Kyutai Pocket TTS** (~100M, MIT, `pip install pocket-tts`, torch CPU)
+runs 3x realtime — same as Kokoro — but STREAMS: first 80 ms of audio 80-125 ms
+after the request, against Kokoro's whole-sentence 0.5-1 s. Chatterbox Nano
+(3x realtime claimed) was installed twice and never exposed its `nano=True`
+loader; dropped. Pocket's zero-shot cloning needs gated HF weights (terms he
+would have to accept himself); its catalogue voices do not. He picked
+**George**, then variant 2 of five tunings (`temp=0.5`), "a little faster"
+(tempo 0.97 — plain resampling, so slightly higher too), and ruled on
+"scheduling": eight seeded takes, takes 1 and 2 right. Measured on the word's
+own span (faster-whisper word timestamps → log-mel DTW against the two he
+approved vs the six he did not), 1-2 say "sked-", 3-8 "shed-"; the hyphenated
+respelling "sked-juling" lands the approved way under most seeds and the
+recogniser still hears "schedule" for every form. His verdict: "voice is
+basically perfect and locked in."
+
+How it is built: `audio/pocket_worker.py` runs under `C:\AI\tts\pocket`'s
+interpreter (torch is not bundled — same pattern as `C:\AI\model3d`), one TCP
+connection per utterance on loopback, JSON request line in, length-prefixed
+int16 frames out, hang up to cancel; `--fake` runs the identical protocol with
+a tone so `tests/test_pocket_tts.py` gates framing/streaming/cancel/tempo/
+polish on a machine with no Pocket. `audio/tts.py` `PocketTTS` starts and talks
+to it; the router routes a bare voice name to Pocket, a `bm_`/`bf_` name to
+Kokoro, `en_` to Piper, and falls back pocket → kokoro → piper. Config
+`tts.{engine,voice,tempo,seed,pocket_temp,polish,pronounce}`; migration v6
+switches a saved Kokoro voice to George when the worker exists and keeps the
+old one as `kokoro_voice`. NOTE the scipy import had to move to module level in
+the worker: imported inside the request coroutine it stalled the loop for good
+(no exception, no stderr) — a real Windows-specific trap, cause not chased.
+
+### Also this evening
+* **Deaf after a clarifying question** (6× in two days in the real log: "stuck
+  in processing for 35s… recovering to IDLE" right after "the company or the
+  stock, sir?"). `_NEXT_TURN_STATES` guarded turn-ends by LOOKING AT THE STATE,
+  and a turn's own state is PROCESSING, so a turn that ended without passing
+  through SPEAKING left itself there. Replaced by a turn GENERATION
+  (`_begin_turn` / `_newer_turn_started` / `_turn_is_current` /
+  `_settle_idle`, contextvar-carried); `test_wake_display` gates it with a real
+  barge-in sequence.
+* `/stock/price-target` is not on the free Finnhub plan: 560 warnings, each
+  with the key in the URL. A 403 is remembered for the process.
+* Log noise: phonemizer "words count mismatch" (7,836 lines) and asyncio's
+  proactor `_call_connection_lost` (123) filtered at source.
+* `tests/speech_symbols.py` now accepts the recogniser's own "$40"/"£25"
+  normalisation (the audio says "forty dollars"; the STT writes it back), and
+  runs the clock-duration comparison under Kokoro explicitly — Pocket samples
+  its timing, so "2 oh 4" and "2 hundred 4" land within 80 ms of each other.
+* **Protocols** (`brain/protocols.py`): the film's idiom over the routines he
+  already teaches. "Initiate the lockdown protocol" / "engage protocol
+  lockdown" / "lockdown protocol, now" all run the routine taught as "lockdown
+  protocol" (matched by name before the 0.92 embedding threshold); one he never
+  taught gets "I don't have a lockdown protocol yet, sir. Tell me what it
+  should do — say 'when I say lockdown protocol, do…'"; "what protocols do I
+  have" lists them (skill `protocols`). Gated by `test_protocols`.
+* **Sticky tool shortlist** (`tools/shortlist.py stable_order`): the real
+  llama-server log showed ~800 prompt tokens / ~3.3 s of prompt processing on
+  an ORDINARY turn (p50) against ~100 when the prefix holds — the per-turn
+  shortlist changed the tools block, and everything after it was re-read. A
+  tool once offered now stays offered, in first-seen order, new ones appended,
+  cap 48 with least-recently-wanted eviction from the end of the block. Gated
+  by `test_shortlist_sticky`; the live effect is to be measured with
+  `scratchpad/latency_bench.py` on an idle machine.
+* **Arithmetic is a reflex** (`brain/mathskill.py`, skill `math`): "what's
+  17 times 23" was a 17-second model round on the idle bench; he said "that
+  should be instant". Number words, percent-of, powers, roots, halves,
+  decimals, precedence; a recursive-descent parser, never `eval`; refuses
+  anything that is not clearly a sum ("volume to 50 percent", "remind me in
+  5 minutes"). `test_math` gates 30 sums, 18 non-sums, and the routing.
+* **THE 16-SECOND FIRST TOKEN.** Measured on an IDLE machine against release
+  16: reflex turns answer in 0.7-2.2 s, but every LLM turn ("who directed
+  jaws", "17 times 23") took 16-24 s to its first token. The llama-server's own
+  log had the reason: `n_slots = 4` (this build's default), tasks landing on
+  slots 0/1/2/3 in turn, and `prompt eval time = 13971 ms / 4066 tokens` —
+  the WHOLE prompt, every time, because the cache is per slot. The handoff's
+  "2.5-4.5 s on cached prefix" had quietly become 15 s at some llama.cpp
+  upgrade. Fix: `-np 1` in both GPU model arg lists (mirrored into his config
+  on load). Together with the sticky shortlist the prefix should now hold;
+  measure with the bench after release 17.
 
 ### Not done / open
-* voice_ux_e2e T2 ("CONVERSATION WINDOW: FAIL") is pre-existing and non-fatal;
-  likely wake.mode push_to_talk in the release config. Not investigated.
-* `free_port()` bind-then-release race: a taken port restarts on the same port
-  forever. Documented; changing the port mid-session would strand the HUD.
+* voice_ux_e2e T2 ("CONVERSATION WINDOW") is FLAKY, not fixed: PASS in
+  release 13, FAIL in 16 and 17 and in a direct run ("heard: []" — the
+  follow-up injected 0.8 s after idle was never captured; T1's wake scored
+  0.63, a hair over the 0.60 threshold). Non-fatal. Not investigated beyond
+  confirming the turn-generation guard still arms the window in
+  `_run_turn`'s finally.
+* The HUD's clarify chips / dictation pill were verified by tsc and hud_e2e
+  only — he stopped the preview pane, so they were not seen rendered.
 * Dictation/press_keys not landing in the hands_e2e harness — the keys.py
   rewrite (scan codes, modifier wait, cloaked-window-aware focus) addresses
   every identified cause; `/debug/desktop` answers the window-station question

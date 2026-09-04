@@ -37,6 +37,22 @@ logging.basicConfig(
 )
 log = logging.getLogger("jarvis.main")
 
+# NOISE OUT OF THE LOG. The real sidecar.log was 91,000 lines, and 7,836 of
+# them were the phonemizer's "words count mismatch" (Kokoro's phonemiser
+# counting tokens differently from words on nearly every line; it says nothing
+# about the speech) and 123 were asyncio's Windows proactor complaining that a
+# pipe went away while it was closing it — which is every WebSocket close.
+# Both buried the lines that mattered.
+logging.getLogger("phonemizer").setLevel(logging.ERROR)
+
+
+class _QuietProactor(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "_call_connection_lost" not in record.getMessage()
+
+
+logging.getLogger("asyncio").addFilter(_QuietProactor())
+
 SESSION_TOKEN = ""
 
 
@@ -339,10 +355,21 @@ async def voices(x_jarvis_token: str | None = Header(None)):
     piper = sorted(p.stem for p in VOICES_DIR.glob("*.onnx"))
     kokoro = []
     if (KOKORO_DIR / "kokoro-v1.0.onnx").exists():
-        # curated British + strongest general voices (full list is 50+)
-        kokoro = ["bm_george", "bm_fable", "bm_daniel", "bm_lewis",
+        # curated British + strongest general voices (full list is 50+), led
+        # by the BLENDS: a weighted sum of two Kokoro style vectors is a voice
+        # between them, and the JARVIS-like ones live between the pack voices
+        # rather than in any one of them (see audio.tts.parse_voice).
+        kokoro = ["bm_george:0.6+bm_lewis:0.4", "bm_daniel:0.5+bm_lewis:0.5",
+                  "bm_george:0.5+bm_daniel:0.5", "bm_george:0.6+bm_fable:0.4",
+                  "bm_george", "bm_fable", "bm_daniel", "bm_lewis",
                   "bf_emma", "bf_isabella", "am_michael", "af_bella"]
-    return {"voices": kokoro + piper, "active": config.get("tts", "voice"),
+    active = config.get("tts", "voice")
+    if active and active not in kokoro + piper and active.startswith(("bm_", "bf_", "am_", "af_")):
+        kokoro.insert(0, active)          # a blend he typed himself stays pickable
+    # Pocket TTS voices lead when the worker is installed: his pick is George.
+    from audio.tts import POCKET_VOICES, PocketTTS
+    pocket = list(POCKET_VOICES) if PocketTTS.installed() else []
+    return {"voices": pocket + kokoro + piper, "active": active,
             "note": "bm_/bf_/am_/af_ voices use the Kokoro engine (higher quality); en_GB voices use Piper (lowest latency)"}
 
 

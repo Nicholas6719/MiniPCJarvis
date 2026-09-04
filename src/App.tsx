@@ -61,6 +61,8 @@ export default function App() {
   const state = useStore((s) => s.state);
   const stage = useStore((s) => s.stage);
   const confirmation = useStore((s) => s.confirmation);
+  const clarify = useStore((s) => s.clarify);
+  const dictation = useStore((s) => s.dictation);
   const web = useStore((s) => s.web);
   const wakeMode = useStore((s) => s.wakeMode);
   const armedUntil = useStore((s) => s.armedUntil);
@@ -181,8 +183,9 @@ export default function App() {
     const t = setTimeout(() => expireArmed(Date.now()), ms);
     return () => clearTimeout(t);
   }, [armed, armedUntil]);
-  const radialWord = gateOpen ? "NEEDS YOU" : armed ? "CONVERSATION" : word;
+  const radialWord = gateOpen ? "NEEDS YOU" : clarify ? "YOUR CALL" : armed ? "CONVERSATION" : word;
   const radialSub = gateOpen ? "nothing has happened yet"
+    : clarify ? "say it, or tap it"
     : armed ? "listening · no wake word needed"
     : state === "idle" && wakeMode === "wake_word" ? 'say "hey jarvis"'
     : state === "idle" && wakeMode === "both" ? '"hey jarvis" · or ctrl+shift+j'
@@ -252,8 +255,32 @@ export default function App() {
         <div className="radial__word">{radialWord}</div>
         <div className="radial__sub mono-sub">{radialSub}</div>
       </div>
-      {state === "idle" && !stage && !gateOpen && (
+      {state === "idle" && !stage && !gateOpen && !clarify && (
         <div className="radial__hint mono-sub">SAY "HEY JARVIS" OR PRESS CTRL+SHIFT+J</div>
+      )}
+
+      {/* a clarifying question: the question itself, and the answers as chips.
+          Not mono-sub: his window is compact, and mono-sub is hidden there. */}
+      {clarify && !gateOpen && (
+        <div className="clarify">
+          <div className="clarify__q">{clarify.question}</div>
+          <div className="clarify__chips">
+            {clarify.options.map((o) => (
+              <button key={o} className="clarify__chip"
+                      onClick={() => { api("/text", { method: "POST", body: JSON.stringify({ text: o }) }).catch(() => {}); }}>
+                {o}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* hold-to-dictate, while it is happening */}
+      {dictation && (
+        <div className="hud__pill">
+          <span className="dot dot--rim flick" />
+          {dictation.stage === "transcribing" ? "TRANSCRIBING" : "DICTATING"}
+        </div>
       )}
 
       {/* wedges: faults and the gate — radial only */}

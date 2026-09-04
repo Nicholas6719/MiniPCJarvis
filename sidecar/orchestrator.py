@@ -6,6 +6,7 @@ barge-in interruption, and stop-words.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -206,7 +207,19 @@ _NO_SUBJECT_WORDS = {
 #
 # These are the states that mean "something newer is in progress". Ending a turn
 # must leave them alone.
-_NEXT_TURN_STATES = frozenset({State.LISTENING, State.PROCESSING})
+#
+# BUT NOT BY LOOKING AT THE STATE. The first version of this guard asked "is the
+# state LISTENING or PROCESSING?" — and a turn's OWN state is PROCESSING, so any
+# turn that ended without passing through SPEAKING first (a clarifying question:
+# ask, arm the window, return) saw its own PROCESSING, assumed a newer turn owned
+# it, and left it there. He could not answer "the company or the stock?" because
+# JARVIS was deaf in PROCESSING until the 35 s watchdog put him back — six times
+# in two days in the real log, every one right after a question. So the guard is
+# a GENERATION: every turn start (and every barge-in) bumps it, each turn carries
+# its own number in a context variable, and only the newest turn may settle the
+# state. A stale turn unwinding after a barge-in still keeps its hands off.
+_NEXT_TURN_STATES = frozenset({State.LISTENING, State.PROCESSING})   # documentation only now
+_TURN_GEN: contextvars.ContextVar[int] = contextvars.ContextVar("turn_gen", default=0)
 
 
 def _teachable(text: str) -> bool:
@@ -326,6 +339,7 @@ class Orchestrator:
         self.sm = StateMachine()
         self.vad = StreamingVAD()
         self.metrics = TurnMetrics()
+        self._turn_gen = 0                 # see _NEXT_TURN_STATES
         self._history: list[dict] = []
         # Where the prompt's history window starts. Advanced in blocks, never per
         # turn, so the prefix stays byte-identical for the KV cache.
@@ -504,6 +518,26 @@ class Orchestrator:
                 log.exception("idle watch failed")
                 await asyncio.sleep(30)
 
+    def _begin_turn(self) -> None:
+        """This task is now the newest turn; older ones may no longer settle the state."""
+        self._turn_gen += 1
+        _TURN_GEN.set(self._turn_gen)
+
+    def _newer_turn_started(self) -> None:
+        """Something newer took over (a barge-in, a fresh capture) without being
+        a turn task of its own yet."""
+        self._turn_gen += 1
+
+    def _turn_is_current(self) -> bool:
+        return _TURN_GEN.get(0) == self._turn_gen
+
+    async def _settle_idle(self, *keep: "State") -> None:
+        """A turn is over: back to IDLE — unless a newer turn owns the state, or
+        it is in one of `keep` (ERROR, STARTING, SLEEPING as the caller decides)."""
+        if self.sm.state in keep or not self._turn_is_current():
+            return
+        await self.sm.to(State.IDLE, force=True)
+
     async def stand_down(self) -> dict:
         """End the conversation window now. He is done talking.
 
@@ -523,6 +557,7 @@ class Orchestrator:
         except Exception:
             log.debug("could not interrupt on stand down", exc_info=True)
         self._armed_until = 0.0
+        self._listen_flag.clear()          # the ears, not only the window
         await bus.emit("conversation", armed=False)
         try:
             if self.sm.state not in (State.ERROR, State.STARTING, State.SLEEPING):
@@ -1049,11 +1084,20 @@ class Orchestrator:
     # ---------- listening control (push-to-talk / toggle) ----------
 
     async def toggle_listen(self) -> None:
+        """Ctrl+Shift+J, and the tray: reach for him, or tell him you're done.
+
+        One key, both directions. Pressed while he is speaking it interrupts;
+        pressed while the ears are open — capturing, or the conversation
+        window still armed — it STANDS DOWN, closing the window rather than
+        merely dropping the capture flag and leaving the window to wait
+        itself out. Standing down used to be Ctrl+Shift+S, a global hotkey
+        that stole Save As from every application on the machine.
+        """
         if self.sm.state == State.SPEAKING:
             await self.interrupt()
             return
-        if self._listen_flag.is_set():
-            self._listen_flag.clear()
+        if self._listen_flag.is_set() or self.armed():
+            await self.stand_down()
         else:
             mic.drain()
             self.vad.reset()
@@ -1100,6 +1144,7 @@ class Orchestrator:
                         log.exception("could not hear the answer to a question")
                 continue
             if self.sm.state in (State.IDLE, State.INTERRUPTED):
+                self._newer_turn_started()
                 await self.sm.to(State.LISTENING)
                 utterance = await self._capture_utterance()
                 self._listen_flag.clear()
@@ -1306,6 +1351,7 @@ class Orchestrator:
             await bus.emit("turn_done", text="I'm still on the last one, sir — give "
                                              "me a moment and say it again.")
             return
+        self._begin_turn()
         await self.sm.to(State.PROCESSING, force=True)
         self.metrics.begin()
         await bus.emit("transcript", role="user", text=text, source="text")
@@ -1364,8 +1410,7 @@ class Orchestrator:
         # machine to LISTENING, and forcing IDLE here made the next PROCESSING
         # transition (non-forced, from IDLE) refuse — the HUD showed idle for
         # that whole next turn. Same guard as _ask_clarification.
-        if self.sm.state not in (State.ERROR, State.STARTING, *_NEXT_TURN_STATES):
-            await self.sm.to(State.IDLE, force=True)
+        await self._settle_idle(State.ERROR, State.STARTING)
         return True
 
     async def _run_confirmed_guess(self, pend: dict, t_start: float) -> bool:
@@ -1402,6 +1447,7 @@ class Orchestrator:
                 await asyncio.sleep(0.1)
             if not spoken or STOP_WORDS.match(spoken):
                 return
+            self._begin_turn()
             await self.sm.to(State.PROCESSING, force=True)
             self.metrics.begin()
             await bus.emit("transcript", role="user", text=spoken)
@@ -1410,6 +1456,7 @@ class Orchestrator:
             finally:
                 self._arm_conversation()
             return
+        self._begin_turn()
         await self.sm.to(State.PROCESSING)
         t_start = time.time()
         self.metrics.begin()
@@ -1504,6 +1551,14 @@ class Orchestrator:
                 if steps:
                     await self._routine_turn(text, steps, t_start)
                     return
+                # A protocol he never taught gets an offer to set one up, not
+                # the shrug an unknown sentence gets from the model.
+                from brain import protocols
+                pname = protocols.protocol_name(text)
+                if pname and not protocols.wants_listing(text):
+                    await self._say_and_finish(protocols.missing_line(pname), text,
+                                               t_start, "protocol")
+                    return
                 reflex = await brain.decide(
                     text, context=_with_last_skill(self, _screen_context()))
             except Exception:
@@ -1537,8 +1592,7 @@ class Orchestrator:
                 # to happen without a line in the log saying why.
                 log.warning('could not speak the reply aloud', exc_info=True)
             await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000), breakdown={})
-            if self.sm.state not in (State.ERROR, State.STARTING, *_NEXT_TURN_STATES):
-                await self.sm.to(State.IDLE, force=True)
+            await self._settle_idle(State.ERROR, State.STARTING)
             return
         # brain thinks this is a plain question -> steer the LLM away from needless tool use
         self._no_tools_first = False
@@ -1695,8 +1749,7 @@ class Orchestrator:
         await bus.emit("turn_done", latency_ms=latency,
                        breakdown=breakdown, text=strip_markdown(full_reply or ""))
         # The LLM path, same rule: a barge-in mid-reply has already moved on.
-        if self.sm.state not in (State.ERROR, *_NEXT_TURN_STATES):
-            await self.sm.to(State.IDLE, force=True)
+        await self._settle_idle(State.ERROR)
 
     _FILLERS = ["Let me see.", "One moment.", "Let me think.", "Hmm, let me check.", "Just a second."]
     _TOOL_FILLERS = {"web_search": ["Searching.", "Let me look that up.", "Checking the web."],
@@ -1921,9 +1974,7 @@ class Orchestrator:
             log.exception("could not ask the clarifying question")
         await bus.emit("turn_done", latency_ms=int((time.time() - t_start) * 1000),
                        breakdown={}, reflex="clarify", text=amb.question)
-        if self.sm.state not in (State.ERROR, State.SLEEPING,
-                                 *_NEXT_TURN_STATES):
-            await self.sm.to(State.IDLE, force=True)
+        await self._settle_idle(State.ERROR, State.SLEEPING)
         # Answer it without saying his name again — but only if he is IN the room.
         # A question asked over Telegram must not open the microphone here, or
         # anything said near the PC gets treated as his reply to a question he
@@ -2050,7 +2101,7 @@ class Orchestrator:
                 self._drop_clarification("he went to sleep")
                 await self.sm.to(State.SLEEPING, force=True)
                 await bus.emit("conversation", armed=False)
-            elif self.sm.state not in _NEXT_TURN_STATES:
+            elif self._turn_is_current():
                 await self.sm.to(State.IDLE, force=True)
 
     async def ask_confirmation(self, tool: str, args: dict) -> None:
@@ -2568,6 +2619,7 @@ class Orchestrator:
                     self.vad.reset()
                     self._preroll = None
                     self._listen_flag.set()  # capture what the user is saying
+                    self._newer_turn_started()
                     await self.sm.to(State.LISTENING, force=True)
                     await self.play_sound("chime")  # same cue: 'listening now'
                     return

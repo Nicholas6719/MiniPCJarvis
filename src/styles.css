@@ -212,6 +212,55 @@ body.compact .machine__none { display: block; }
   pointer-events: none;
 }
 
+/* a clarifying question, with its answers as chips he can tap */
+.clarify {
+  position: absolute; z-index: 5;
+  left: 50%; bottom: calc(196px * var(--s));
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center;
+  gap: calc(10px * var(--s));
+  max-width: calc(420px * var(--s));
+  text-align: center;
+}
+.clarify__q {
+  font: 500 calc(13px * var(--s))/1.35 "Share Tech Mono", monospace;
+  letter-spacing: .06em;
+  color: var(--text);
+  text-wrap: balance;
+}
+.clarify__chips { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(8px * var(--s)); }
+.clarify__chip {
+  font: 600 calc(11px * var(--s))/1 "Share Tech Mono", monospace;
+  letter-spacing: .22em; text-indent: .22em; text-transform: uppercase;
+  color: var(--rim);
+  background: color-mix(in srgb, var(--rim) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rim) 55%, transparent);
+  border-radius: 999px;
+  padding: calc(8px * var(--s)) calc(14px * var(--s));
+  cursor: pointer;
+  transition: background .2s, box-shadow .2s;
+}
+.clarify__chip:hover, .clarify__chip:focus-visible {
+  background: color-mix(in srgb, var(--rim) 22%, transparent);
+  box-shadow: 0 0 calc(16px * var(--s)) color-mix(in srgb, var(--rim) 40%, transparent);
+  outline: none;
+}
+
+/* a small state pill in the top-right corner (dictation) */
+.hud__pill {
+  position: absolute; z-index: 6;
+  top: calc(18px * var(--s)); right: calc(22px * var(--s));
+  display: inline-flex; align-items: center; gap: calc(8px * var(--s));
+  font: 600 calc(11px * var(--s))/1 "Share Tech Mono", monospace;
+  letter-spacing: .28em; text-indent: .28em;
+  color: var(--rim);
+  padding: calc(7px * var(--s)) calc(12px * var(--s));
+  border: 1px solid color-mix(in srgb, var(--rim) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rim) 8%, transparent);
+  pointer-events: none;
+}
+
 /* spoken prose (faults, gate) */
 .radial__prose {
   position: absolute; z-index: 4;

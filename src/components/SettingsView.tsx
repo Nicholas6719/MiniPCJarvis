@@ -1,3 +1,4 @@
+import { prettyVoice, voiceMeta } from "../lib/voices";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from "@tauri-apps/plugin-autostart";
@@ -180,7 +181,7 @@ export function SettingsView() {
           <div className="settings__row">
             <select value={cfg.tts?.voice ?? ""}
                     onChange={(e) => { patch({ tts: { voice: e.target.value } }); preview(e.target.value); }}>
-              {voiceList.map((v) => <option key={v} value={v}>{v}</option>)}
+              {voiceList.map((v) => <option key={v} value={v}>{prettyVoice(v)} · {voiceMeta(v)}</option>)}
             </select>
             <button className="ghost-btn" onClick={() => preview(cfg.tts?.voice)}>▶ PREVIEW</button>
           </div>

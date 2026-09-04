@@ -82,10 +82,20 @@ async def _rate_limit() -> None:
         await asyncio.sleep(max(0.05, wait))
 
 
+# Endpoints the free tier does not include. /stock/price-target answered 403 on
+# every single call — 560 of them in the real log, four per analyst question,
+# each a warning with the API key in the URL — and it was asked again the next
+# time regardless. A 403 is not a hiccup; it is "not on your plan", and it is
+# remembered for the life of the process.
+_forbidden: set[str] = set()
+
+
 async def _get(path: str, **params) -> dict | list | None:
     key = secrets.get("finnhub_api_key")
     if not key:
         return None
+    if path in _forbidden:
+        return {"_error": "that data is not included in the Finnhub plan"}
     # Finnhub throws 503s in bursts - 245 of them on 2026-08-31, which is what
     # reduced his 07:30 brief to one index and one holding. A 503 is the service
     # coughing, not an answer, so give it two more chances with a short pause
@@ -105,6 +115,10 @@ async def _get(path: str, **params) -> dict | list | None:
                     return {"_error": "Finnhub is rate-limiting us; try again in a moment."}
                 if r.status_code == 401:
                     return {"_error": "Finnhub rejected the API key — it may need replacing in Settings."}
+                if r.status_code == 403:
+                    _forbidden.add(path)
+                    log.info("finnhub %s is not on this plan (403); not asking again", path)
+                    return {"_error": "that data is not included in the Finnhub plan"}
                 if r.status_code in (500, 502, 503, 504):
                     _note_outcome(True)
                     if attempt < 2 and _retries_allowed():

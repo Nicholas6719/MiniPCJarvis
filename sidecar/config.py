@@ -59,16 +59,24 @@ DEFAULTS: dict[str, Any] = {
                 "path": r"C:\AI\models\gemma-4-26B-A4B-it-qat-q4_0.gguf",
                 # q8 KV cache + 12K context: ~1.5 GB less RAM than 16K f16 (measured 2026-08-22)
                 "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256",
-                         "-ctk", "q8_0", "-ctv", "q8_0"],
+                         "-ctk", "q8_0", "-ctv", "q8_0", "-np", "1"],
                 "context": 12288,
                 "template_kwargs": {"enable_thinking": False},
                 "reasoning_field": "reasoning_content",
                 "gpu_full": True,   # fills the iGPU heap: the vision server must use the CPU
                 "note": "Smarter and quicker for text; vision runs on the CPU and RAM peaks ~96% on a 32 GB PC.",
             },
+            # ONE SLOT. This llama.cpp build defaults to FOUR (n_slots = 4 in its
+            # log), and the prompt cache is per slot: requests landed on slots
+            # 0, 1, 2 and 3 in turn, each with somebody else's prefix, and every
+            # ordinary turn re-processed the whole prompt — 4,066 / 4,287 /
+            # 4,613 tokens at ~290 tok/s, 14-16 s before the first token,
+            # measured on an idle machine on 2026-09-04. JARVIS is one voice;
+            # it needs one slot with one cache.
             "gpt-oss-20b": {
                 "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
-                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256"],
+                "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256",
+                         "-np", "1"],
                 "template_kwargs": {"reasoning_effort": "low"},
                 "reasoning_field": "reasoning_content",
             },
@@ -85,7 +93,21 @@ DEFAULTS: dict[str, Any] = {
     },
     # Parakeet TDT 0.6B v3 int8: 139 ms / 0.6% WER vs whisper base.en 450 ms / 5.1% (tests/stt_ab2.py)
     "stt": {"engine": "parakeet", "parakeet_quant": "int8", "model": "base.en", "compute_type": "int8", "device": "cpu"},
-    "tts": {"engine": "kokoro", "voice": "bm_george", "rate": 1.0},
+    # Pocket TTS (Kyutai, streaming, his pick: George) when it is installed under
+    # C:\AI\tts; the Kokoro blend otherwise. `tempo` > 1 is slower and deeper.
+    "tts": {"engine": "pocket", "voice": "george", "rate": 0.97, "sentence_pause": 0.3,
+            "pocket_python": r"C:\AI\tts\pocket\Scripts\python.exe",
+            # His tuning, 2026-09-04: variant 2 (temp 0.5), three percent
+            # faster; seeded so a sentence is repeatable; `pronounce` holds
+            # respellings for words he has ruled on.
+            "pocket_temp": 0.5, "tempo": 0.97, "polish": False, "seed": 2,
+            # "scheduling": eight seeded takes, he picked the two that said
+            # "sked-"; measured on the word's own span, the hyphenated
+            # respelling lands that way under most seeds and the recogniser
+            # still hears "schedule" for every form.
+            "pronounce": {"scheduling": "sked-juling", "schedule": "sked-jule",
+                          "scheduled": "sked-juled", "schedules": "sked-jules"},
+            "kokoro_voice": "bm_george:0.6+bm_lewis:0.4"},
     "speech": {"fillers": True},
     # ~1 line in 3 carries the honorific, matching JARVIS's actual dialogue (see
     # brain/skills.py honorific()). Set honorific "" to switch it off entirely.
@@ -322,7 +344,7 @@ class Config:
 
     # Saved configs snapshot every default, so improved defaults never reach an
     # existing install on their own. Each migration runs once (tracked by version).
-    CONFIG_VERSION = 5
+    CONFIG_VERSION = 6
 
     def _migrate(self) -> bool:
         v = int(self.data.get("config_version", 1) or 1)
@@ -337,6 +359,23 @@ class Config:
             self.data.setdefault("stt", {}).setdefault("engine", "parakeet")
             self.data["stt"].setdefault("parakeet_quant", "int8")
             changed = True
+        if v < 6:
+            # 2026-09-04: HIS VOICE. Pocket TTS's George, tuned by ear over four
+            # auditions and locked in ("voice is basically perfect"). A saved
+            # config still said bm_daniel, and defaults only fill what is
+            # missing, so without this his install would never have switched.
+            # Only when the worker is installed; the Kokoro voice is kept as
+            # the fallback.
+            import os
+            t = self.data.setdefault("tts", {})
+            if os.path.exists(str(t.get("pocket_python") or DEFAULTS["tts"]["pocket_python"])):
+                old = str(t.get("voice") or "")
+                if old.startswith(("bm_", "bf_", "am_", "af_", "en_")):
+                    t["kokoro_voice"] = old
+                t.update({"engine": "pocket", "voice": "george", "tempo": 0.97,
+                          "seed": 2, "pocket_temp": 0.5, "polish": False,
+                          "pronounce": dict(DEFAULTS["tts"]["pronounce"])})
+                changed = True
         if True:
             # built-in model entries are ours to tune: always mirror DEFAULTS (user-added untouched)
             models = self.data.setdefault("llm", {}).setdefault("models", {})

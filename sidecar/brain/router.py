@@ -667,13 +667,32 @@ class Brain:
         """A phrase the user taught ("lights out") -> its steps. Near-exact match only."""
         if self._cmd_matrix is None:
             return None
-        q = (await asyncio.to_thread(self._embed, [_light(text)]))[0]
-        sims = self._cmd_matrix @ q
-        i = int(np.argmax(sims))
-        if float(sims[i]) >= 0.92:
-            self.last_match = {"text": self._cmd_phrases[i], "skill": "command",
-                               "source": "user", "query": text, "confidence": float(sims[i])}
-            return self._cmd_steps[i]
+        # A PROTOCOL ANSWERS TO THE FILM'S PHRASINGS. "Initiate the lockdown
+        # protocol", "engage protocol lockdown", "lockdown protocol, now" are
+        # all the routine he taught as "lockdown protocol" — matched by name
+        # first, so the verb and the article cannot cost it the 0.92.
+        from brain import protocols
+        name = protocols.protocol_name(text)
+        queries = [text]
+        if name:
+            canon = _light(protocols.phrase_for(name))
+            if canon in self._cmd_phrases:
+                i = self._cmd_phrases.index(canon)
+                self.last_match = {"text": canon, "skill": "command", "source": "user",
+                                   "query": text, "confidence": 1.0}
+                return self._cmd_steps[i]
+            queries.insert(0, canon)
+        best_i, best = -1, 0.0
+        for q_text in queries:
+            q = (await asyncio.to_thread(self._embed, [_light(q_text)]))[0]
+            sims = self._cmd_matrix @ q
+            i = int(np.argmax(sims))
+            if float(sims[i]) > best:
+                best_i, best = i, float(sims[i])
+        if best_i >= 0 and best >= 0.92:
+            self.last_match = {"text": self._cmd_phrases[best_i], "skill": "command",
+                               "source": "user", "query": text, "confidence": best}
+            return self._cmd_steps[best_i]
         return None
 
     async def teach_command(self, phrase: str, steps: list[dict]) -> None:

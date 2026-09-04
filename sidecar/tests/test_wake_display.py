@@ -217,17 +217,55 @@ def main() -> int:
     # carried on unwinding and called `to(IDLE, force=True)`, wiping it
     # milliseconds later. A finished turn may not put the state back when a
     # newer one has already taken it.
-    from orchestrator import _NEXT_TURN_STATES
-    check("listening counts as a newer turn in progress",
-          State.LISTENING in _NEXT_TURN_STATES)
-    check("...and so does processing", State.PROCESSING in _NEXT_TURN_STATES)
-    check("...but idle does not, or a turn could never end",
-          State.IDLE not in _NEXT_TURN_STATES)
+    #
+    # ...and the guard is a GENERATION, not a look at the state. The first
+    # version asked "is the state PROCESSING?", and a turn's own state IS
+    # processing, so a clarifying question ("the company or the stock?")
+    # ended with JARVIS deaf in PROCESSING until the watchdog freed him 35 s
+    # later. Six times in two days, every one right after a question.
+    import contextvars
+
+    async def _gen_gate():
+        o = orch_mod.Orchestrator.__new__(orch_mod.Orchestrator)
+        o._turn_gen = 0
+        o.sm = orch_mod.StateMachine()
+        results = {}
+
+        async def turn_a():
+            o._begin_turn()
+            await o.sm.to(State.PROCESSING, force=True)
+            results["own"] = o._turn_is_current()
+            # a barge-in arrives while this turn is still unwinding
+            o._newer_turn_started()
+            await o.sm.to(State.LISTENING, force=True)
+            results["after_bargein"] = o._turn_is_current()
+            await o._settle_idle(State.ERROR)
+            results["state_after_stale_settle"] = o.sm.state
+        await asyncio.create_task(turn_a())
+
+        async def turn_b():
+            o._begin_turn()
+            await o.sm.to(State.PROCESSING, force=True)
+            await o._settle_idle(State.ERROR)        # nothing newer: may settle
+            results["state_after_own_settle"] = o.sm.state
+        await asyncio.create_task(turn_b())
+        return results
+
+    r = asyncio.run(_gen_gate())
+    check("a turn owns the state it started", r.get("own") is True)
+    check("a barge-in makes the old turn stale", r.get("after_bargein") is False)
+    check("...so the old turn leaves LISTENING alone",
+          r.get("state_after_stale_settle") is State.LISTENING,
+          "the interrupted turn stomps the barge-in that replaced it")
+    check("a turn that ends in its own PROCESSING settles to IDLE",
+          r.get("state_after_own_settle") is State.IDLE,
+          "he could not answer 'the company or the stock?': deaf in PROCESSING")
     for meth in ("_finish_reflex", "_ask_clarification"):
         src_m = inspect.getsource(getattr(orch_mod.Orchestrator, meth))
-        check(f"{meth} checks before forcing idle",
-              "_NEXT_TURN_STATES" in src_m,
-              "the interrupted turn stomps the barge-in that replaced it")
+        check(f"{meth} settles through the generation guard",
+              ("_settle_idle(" in src_m or "_turn_is_current()" in src_m)
+              and "_NEXT_TURN_STATES" not in src_m,
+              "a look at the state cannot tell its own PROCESSING from a newer turn's")
 
     check("going to sleep takes the hologram down",
           "hide_hologram" in inspect.getsource(orch_mod),

@@ -76,6 +76,22 @@ export interface Confirmation {
   callId?: string;
 }
 
+// "The company or the stock, sir?" — a question he answers by voice, or by
+// tapping the option. The sidecar emitted this from the start; the HUD dropped
+// it, so the question existed only as audio.
+export interface ClarifyState {
+  subject: string;
+  question: string;
+  options: string[];
+}
+
+// Hold-to-dictate (Ctrl+Shift+D): listening, then transcribing. Nothing on
+// screen said so, and a paste that never landed looked like nothing happened.
+export interface DictationState {
+  stage: string;
+  seconds?: number;
+}
+
 export interface WebResult { title?: string; url: string; snippet?: string; host?: string }
 export interface WebState {
   query: string;
@@ -189,6 +205,8 @@ interface Store {
   transcript: TranscriptEntry[];
   activity: ActivityEntry[];
   confirmation: Confirmation | null;
+  clarify: ClarifyState | null;
+  dictation: DictationState | null;
   assistantDraft: string;
   onEvent: (evt: any) => void;
   clearConfirmation: () => void;
@@ -282,6 +300,8 @@ export const useStore = create<Store>((set, get) => ({
   transcript: [],
   activity: [],
   confirmation: null,
+  clarify: null,
+  dictation: null,
   assistantDraft: "",
 
   setState: (s) => set({ state: s }),
@@ -366,6 +386,10 @@ export const useStore = create<Store>((set, get) => ({
         set((st) => {
           const next: Partial<Store> = { state: evt.state };
           if (evt.state !== "idle") next.armedUntil = 0;
+          if (evt.state === "sleeping" || evt.state === "offline") {
+            next.clarify = null;
+            next.dictation = null;
+          }
           // OFFLINE MEANS THE SIDECAR IS GONE, AND SO IS WHAT IT WAS HOLDING.
           // The socket reconnects on the same port and token after a restart,
           // but the restarted sidecar has no model on its stage and no camera
@@ -390,6 +414,8 @@ export const useStore = create<Store>((set, get) => ({
       }
       case "transcript":
         flushDelta(set);
+        // Whatever he said next answers, supersedes, or drops the question.
+        if (evt.role === "user") set({ clarify: null });
         set((st) => {
           const outgoing = st.stage;
           // The outgoing stage becomes the "bring that back" snapshot.
@@ -449,6 +475,8 @@ export const useStore = create<Store>((set, get) => ({
       }
       case "turn_done": {
         flushDelta(set);
+        // A turn that ended without asking has answered or dropped the question.
+        if (evt.reflex !== "clarify") set({ clarify: null });
         const draft = (evt.text as string | undefined)?.trim() || get().assistantDraft;
         if (draft.trim()) {
           set((st) => ({
@@ -829,6 +857,35 @@ export const useStore = create<Store>((set, get) => ({
         break;
       case "wake":
         push({ id: evt.id, ts: evt.ts, kind: "wake", summary: `wake word (${evt.score})` });
+        break;
+      case "wake_suppressed":
+        push({ id: evt.id, ts: evt.ts, kind: "wake",
+               summary: `heard my name, held (${evt.reason ?? "busy"})` });
+        break;
+      case "clarify":
+        set({ clarify: { subject: String(evt.subject ?? ""), question: String(evt.question ?? ""),
+                         options: Array.isArray(evt.options) ? evt.options.map(String) : [] } });
+        push({ id: evt.id, ts: evt.ts, kind: "clarify", summary: `asked: ${evt.question}` });
+        break;
+      case "dictation": {
+        const over = evt.stage === "done" || evt.stage === "cancelled" || evt.stage === "error";
+        set({ dictation: over ? null : { stage: String(evt.stage), seconds: evt.seconds } });
+        if (evt.stage === "done") {
+          push({ id: evt.id, ts: evt.ts, kind: "dictation",
+                 summary: `dictated ${String(evt.text ?? "").length} characters` });
+        } else if (evt.stage === "cancelled") {
+          push({ id: evt.id, ts: evt.ts, kind: "dictation",
+                 summary: `dictation dropped: ${evt.reason ?? "cancelled"}` });
+        } else if (evt.stage === "error") {
+          push({ id: evt.id, ts: evt.ts, kind: "dictation", summary: "dictation failed" });
+        }
+        break;
+      }
+      case "proactive_held":
+        // A message JARVIS chose not to send (budget, dedup, the phone refused
+        // it). It was invisible; now it is a line he can see.
+        push({ id: evt.id, ts: evt.ts, kind: "held",
+               summary: `held back: ${evt.subject || String(evt.text ?? "").slice(0, 70)}` });
         break;
       case "set_view":
       case "ui": {

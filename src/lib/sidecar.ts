@@ -72,6 +72,11 @@ export function connectEvents(onEvent: (evt: any) => void): () => void {
       // gave up. A HUD that looks fine while the backend is gone is worse than
       // one that looks broken.
       try { onEvent({ kind: "state", state: "offline" }); } catch {}
+      // Ask the core again before reconnecting. A supervisor restart keeps
+      // the port unless something else took it in the meantime, in which
+      // case the sidecar comes back on a NEW one — and a cached port would
+      // have the HUD reconnecting to a dead address forever.
+      if ("__TAURI_INTERNALS__" in window) info = null;
       if (!closed) setTimeout(open, 1500);
     };
     ws.onerror = () => ws?.close();

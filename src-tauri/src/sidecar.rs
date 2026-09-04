@@ -16,7 +16,7 @@ pub struct SidecarInfo {
 }
 
 pub struct Sidecar {
-    pub info: SidecarInfo,
+    info: Mutex<SidecarInfo>,
     child: Mutex<Option<Child>>,
     resource_dir: Option<PathBuf>,
 }
@@ -96,16 +96,41 @@ impl Sidecar {
         };
         let child = Self::spawn_child(&resource_dir, &info)?;
         Ok(Self {
-            info,
+            info: Mutex::new(info),
             child: Mutex::new(Some(child)),
             resource_dir,
         })
     }
 
-    /// Respawn with the SAME port/token so the UI's connection info stays valid.
+    /// Where the sidecar is listening and how to talk to it. A snapshot: the
+    /// port can change across a restart (below), so callers ask each time
+    /// rather than remembering.
+    pub fn info(&self) -> SidecarInfo {
+        self.info.lock().unwrap().clone()
+    }
+
+    /// Respawn with the same token and, where possible, the same port so the
+    /// UI's connection info stays valid.
+    ///
+    /// `free_port()` binds a port and releases it; anything on the machine can
+    /// take it in the gap, and a sidecar restarted onto a taken port fails to
+    /// bind, dies, and is restarted onto the same taken port until the
+    /// supervisor gives up — "OFFLINE" for ten minutes at a time. So the port
+    /// is checked first, and a taken one is replaced. The HUD re-reads the
+    /// info on every reconnect, so a new port reaches it.
     pub fn restart(&self) -> Result<(), String> {
         self.stop();
-        let child = Self::spawn_child(&self.resource_dir, &self.info)?;
+        let mut info = self.info();
+        if TcpListener::bind(("127.0.0.1", info.port)).is_err() {
+            let fresh = free_port();
+            eprintln!(
+                "[jarvis] port {} was taken while the sidecar was down — moving to {}",
+                info.port, fresh
+            );
+            info.port = fresh;
+        }
+        let child = Self::spawn_child(&self.resource_dir, &info)?;
+        *self.info.lock().unwrap() = info;
         *self.child.lock().unwrap() = Some(child);
         Ok(())
     }
@@ -129,7 +154,7 @@ impl Sidecar {
         let client = reqwest::Client::new();
         matches!(
             client
-                .get(format!("http://127.0.0.1:{}/health", self.info.port))
+                .get(format!("http://127.0.0.1:{}/health", self.info().port))
                 .timeout(Duration::from_secs(3))
                 .send()
                 .await,
@@ -138,7 +163,7 @@ impl Sidecar {
     }
 
     pub async fn wait_healthy(&self, timeout: Duration) -> bool {
-        let url = format!("http://127.0.0.1:{}/health", self.info.port);
+        let url = format!("http://127.0.0.1:{}/health", self.info().port);
         let client = reqwest::Client::new();
         let deadline = std::time::Instant::now() + timeout;
         while std::time::Instant::now() < deadline {
