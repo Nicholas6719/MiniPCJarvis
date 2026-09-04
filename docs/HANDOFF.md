@@ -3105,6 +3105,62 @@ is never run by the build even though it passes when invoked by hand.
   * **Spotify playlists** — needs an OAuth app registered under his account.
   * **"Nvidia" → "bye"** — an STT limit; wants a finance-domain hint.
 
+## 2026-09-04 — the dark room, and input that reports success and does nothing
+
+### What his overnight testing actually was
+
+**The camera was never the render's fault.** He asked whether watching the model
+build was worth the camera cost. Measured across a full render, the stream holds
+28-30 fps throughout; a cold start reaches 24 fps in four seconds. It is the
+room: on his camera at 06:40, mean brightness 36.9/255, a third of the pixels
+near black, sharpness 13.8. Hand tracking keys on local contrast, so at 13.8
+there is nothing to track. Every device control is ignored (exposure, gain,
+brightness all accept a value and keep the old one), so the fix is CLAHE on luma
+after capture, applied before presence and hand tracking, only while dark, with
+hysteresis. 13.6 -> 94.9 sharpness for 5.7 ms; 30 fps confirmed on the install.
+
+I FIRST BLAMED THE VISION MODELS and was wrong. The "25-second ramp from 4.8
+fps" was an artifact of computing fps from status counters instead of counting
+frames off the stream. The four models load in 0.93 s total. The preload still
+moved off the capture thread, for the honest reason that the thread producing
+frames should not be doing anything else.
+
+**A typed yes could not answer a question.** The inline Telegram buttons carried
+the confirm_id and were the only thing that could. Typing "Do it!" queued a new
+turn, which waits for idle — and idle never comes, because a tool is blocked on
+the confirmation he just answered. Now checked before the turn lock.
+
+**"press enter" had no skill**, so it fell through to the LLM, which answered
+with the time; and "press enter to send it" matched `to_phone` at 0.855, over
+threshold, so it would have messaged his phone. Now `press_key` at 1.0.
+
+### OPEN, and the important one: synthetic input reports success and does nothing
+
+`press_keys` returned `{"pressed": "h", "window": "*... - Notepad"}` and the 'h'
+never appeared. Dictation's `_paste` behaves identically: `pasted: True`, empty
+document, sampled out to 3.5 s. The SAME win32 calls from a test process land
+in the SAME window immediately.
+
+Ruled out, each by measurement:
+  * integrity level — sidecar, HUD, Notepad and the test process are all `medium`
+  * focus — Notepad is confirmed foreground before, during and after
+  * the clipboard restore race — real (0.35 s loses it, 1.5 s keeps it) and fixed,
+    but not sufficient on its own
+  * a hang in `_focus` — the EnumWindows/GetWindowText sweep is 0.00 s. What
+    looked like a 40 s hang was the MEDIUM risk gate waiting for a confirmation
+    my probe never answered. `press_keys` returns in 9.8 s once approved.
+
+**The live hypothesis, untested:** every JARVIS instance I have driven today was
+launched by a `schtasks` task (hotswap and release both do this). A scheduled
+task's process can differ in window-station/desktop association, which is exactly
+what governs input injection. When HE launches from the shortcut it may work
+fine. Testing that needs a normal launch, which only he can do — so the next step
+is to ask him to launch JARVIS himself and try dictation once, rather than to
+keep changing code against a test environment that may itself be the fault.
+
+Note also: `session.token` is only written under `JARVIS_DEBUG=1`. A production
+launch publishes none, so authenticated endpoints 401 while `/health` answers.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
