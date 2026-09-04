@@ -159,6 +159,27 @@ class ToolRegistry:
             return True
         return False
 
+    def awaiting_confirmation(self) -> bool:
+        """Is a tool sitting here waiting to be told yes or no?"""
+        return any(not f.done() for f in self._pending.values())
+
+    def answer_pending_confirmation(self, approved: bool) -> bool:
+        """Answer the question that is open, without needing to know its id.
+
+        FOR A TYPED YES. The inline buttons carry the confirm_id and were the
+        only thing that could answer; a reply of "Do it!" started a whole new
+        turn instead, the original question timed out, and he was told "I didn't
+        get a yes, so I left it alone" — a minute after saying yes. From his side
+        that is JARVIS ignoring him, which is worse than the action not running.
+
+        Only ever one question is open at a time (the turn is blocked on it), so
+        "the pending one" is unambiguous.
+        """
+        for cid, fut in list(self._pending.items()):
+            if not fut.done():
+                return self.resolve_confirmation(cid, approved)
+        return False
+
     async def _second_signal(self, tool_name: str) -> tuple[bool, str]:
         """The face check for HIGH-risk tools. Imported late and never allowed to
         raise: a webcam problem must not become a wall between him and his own

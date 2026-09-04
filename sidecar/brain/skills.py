@@ -153,6 +153,41 @@ _NOT_AN_APP = {"it", "that", "this", "the pc", "the computer", "computer", "pc",
                "yourself", "himself", "jarvis", "there", "here", "now", "quiet", "dark"}
 
 
+# The keys he actually names out loud. Deliberately a list rather than "any
+# word after press": "press on" and "press ahead" are not keystrokes, and a
+# router that accepts anything there would type gibberish into his desktop.
+_NAMED_KEYS = ("enter", "return", "escape", "esc", "tab", "space", "spacebar",
+               "backspace", "delete", "del", "up", "down", "left", "right",
+               "home", "end", "page up", "page down", "f1", "f2", "f3", "f4",
+               "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12")
+# A combination, said the way people say it: "control s", "ctrl+s", "alt tab",
+# "windows d". The modifier names are spelled out because he says "control",
+# not "ctrl", when he is talking rather than typing.
+_MODS = {"control": "ctrl", "ctrl": "ctrl", "alt": "alt", "shift": "shift",
+         "windows": "win", "win": "win", "command": "ctrl", "cmd": "ctrl"}
+_KEY_ALIAS = {"return": "enter", "esc": "escape", "del": "delete",
+              "spacebar": "space", "page up": "pageup", "page down": "pagedown"}
+
+
+def slots_press(t: str) -> dict | None:
+    """Which key, from how he said it. None when no key was actually named."""
+    m = re.search(r"\b(?:press|hit|tap|push)\s+(?:the\s+)?"
+                  r"(?:(control|ctrl|alt|shift|windows|win|command|cmd)\s*\+?\s*)?"
+                  r"([a-z0-9]+(?:\s+(?:up|down))?)\b", t)
+    if not m:
+        return None
+    mod, key = m.group(1), (m.group(2) or "").strip()
+    key = _KEY_ALIAS.get(key, key)
+    if mod:
+        # A single letter or digit is a real shortcut; "control the volume" is not.
+        if len(key) != 1 and key not in _NAMED_KEYS:
+            return None
+        return {"keys": f"{_MODS[mod]}+{key}"}
+    if key in _KEY_ALIAS.values() or key in _NAMED_KEYS:
+        return {"keys": key}
+    return None
+
+
 def slots_app(t: str) -> dict | None:
     m = re.search(r"\b(?:open|launch|start|run|fire up|bring up|put on|close|quit|exit|kill)\s+(?:up\s+)?(?:the\s+|my\s+)?([a-z0-9 .+#-]{2,40}?)(?:\s+(?:for me|please|now|app|application))*[.!?]*$", t)
     if not m:
@@ -425,6 +460,13 @@ def say_analyst(slots: dict, res: dict) -> str:
     if res.get("target_mean"):
         line += f" Their average price target is {res['target_mean']} dollars."
     return line
+
+
+def say_press(sl: dict, res: dict) -> str:
+    if isinstance(res, dict) and res.get("error"):
+        return res["error"]
+    key = (sl or {}).get("keys", "")
+    return f"Pressed {key}." if key else "Done, sir."
 
 
 def say_to_phone(_s: dict, res: dict) -> str:
@@ -2461,6 +2503,19 @@ SKILLS: list[Skill] = [
         "what's the price target on microsoft", "do analysts like amazon",
         "what are the analyst recommendations for google", "is tesla a good buy according to analysts"],
         slots=slots_analyst, speak=say_analyst),
+    # PRESSING A KEY. "press enter to send it" was matching `to_phone` at 0.855
+    # — over threshold — because "send it" is the loudest thing in that sentence
+    # to an embedding, so asking to press Enter would have sent something to his
+    # phone. The examples below deliberately include the "to send it" phrasing,
+    # so the collision is resolved by this skill matching BETTER rather than by
+    # taking words away from the other one.
+    Skill("press_key", "press_keys", [
+        "press enter", "hit enter", "press the enter key", "press return",
+        "press enter to send it", "hit enter to send it", "press enter for me",
+        "press escape", "hit escape", "press tab", "press the space bar",
+        "press backspace", "press delete", "press control s", "hit ctrl s",
+        "press alt tab", "press the down arrow", "press page down"],
+        slots=slots_press, speak=say_press),
     Skill("to_phone", "send_to_phone", [
         "send it to my phone", "send that to my phone", "send it to me",
         "send that to me", "send it through telegram", "text it to me",

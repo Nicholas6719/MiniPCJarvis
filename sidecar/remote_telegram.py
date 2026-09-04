@@ -318,6 +318,29 @@ class TelegramBridge:
             await self._send("At your service. Ask me anything you would at the PC.")
             return
         self.acknowledge_all()        # he is looking at his phone; stop chasing
+
+        # A TYPED YES IS A YES. The inline buttons carried the confirm_id and
+        # were the only thing that could answer a question; typing "Do it!"
+        # instead queued a brand-new turn, which then waited for the state
+        # machine to go idle — and it could not, because the tool was blocked on
+        # the very confirmation he had just answered. The question timed out and
+        # he was told "I didn't get a yes, so I left it alone" a minute after
+        # saying yes, followed by two stray "Done, sir."s from the turns his
+        # replies had started. 2026-09-04, from his phone.
+        #
+        # Checked BEFORE the turn lock on purpose: taking that lock is what would
+        # make him wait behind the deadlock.
+        from tools.registry import registry as _reg
+        if _reg.awaiting_confirmation():
+            from orchestrator import NO_WORDS, YES_WORDS
+            if YES_WORDS.match(text):
+                _reg.answer_pending_confirmation(True)
+                return
+            if NO_WORDS.match(text):
+                _reg.answer_pending_confirmation(False)
+                return
+            # Anything else is a real message and runs as its own turn once the
+            # question resolves; it is not silently swallowed as an answer.
         await self._remote_turn(text)
 
     # ------------------------------------------------------------- the turn

@@ -67,7 +67,14 @@ _CANON = [
     # subsystem rather than an argument.
     (r"\b(?:stop|quit|cancel|forget about)\b(?!.*\b(?:hands?|gestures?)\b).*\b(?:watching|monitoring|alert|alerts|warning|telling me|rule|rules)\b.*", "stop watching METRIC"),
     (r".*\b(?:weather|forecast|temperature outside|going to rain|raining|snowing|umbrella|hot out|cold out|hot is it|cold is it|will it (?:rain|snow)|is it (?:going to )?(?:rain|snow|be hot|be cold))\b.*", "what's the weather in PLACE"),
-    (r".*\b(?:tab|tabs|panel|panels|menu|navigation)\b.*", "show the VIEW tab"),
+    # PRESSING Tab IS NOT SHOWING A TAB. Same shape as hands, camera and
+    # hologram above: the word names a KEY here, not a piece of the interface,
+    # and folded onto "show the VIEW tab" it erased the difference — "press tab"
+    # and "press alt tab" both canonicalised into the UI skill's territory and
+    # clashed head-on with "show me the files tab". A keystroke and a panel are
+    # not the same request, and only the verb tells them apart.
+    (r"(?!.*\b(?:press|hit|tap|push)\b).*\b(?:tab|tabs|panel|panels|menu|navigation)\b.*",
+     "show the VIEW tab"),
     # "hide the panels" is a UI request; "hide YOURSELF" is a dismissal — without the
     # exclusion this rewrote it to "hide everything" and it hit the UI skill at 1.00.
     # ...and "hide the camera" names a subsystem, not "everything". Folded in, it

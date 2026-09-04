@@ -40,6 +40,8 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_components.py || (echo COMPONENTS FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_progressive.py || (echo PROGRESSIVE RENDER FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_uia_types.py || (echo UIA CONTROL TYPES FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_dark_lift.py || (echo DARK LIFT FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_typed_yes.py || (echo TYPED CONFIRMATION FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_scout.py || (echo SCOUT FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_features.py || (echo FEATURES FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_colours.py || (echo COLOURS FAILED & exit /b 1)

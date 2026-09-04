@@ -147,7 +147,15 @@ class Presence:
         if now - self._last_check < DETECT_EVERY_S:
             return
         self._last_check = now
-        det = self._detector()
+        # NOT ON THIS THREAD. `_detector()` builds the model on first call, and
+        # the first call happens on the very first frame — so a cold camera
+        # session paid for the load inside the capture loop and produced no
+        # frames while it happened. The camera now warms the models on a thread
+        # of their own; this waits for that rather than racing it and putting
+        # the cost straight back where it was.
+        det = self._det
+        if det is None:
+            return                       # not warm yet; look again next second
         if det is None:
             return
         try:

@@ -72,7 +72,80 @@ WIDTH, HEIGHT = 1920, 1080
 # which is latency as well as smoothness.
 TARGET_FPS = 30.0
 JPEG_QUALITY = 75          # ~116 KB/frame, 1.7 MB/s over loopback
+
+# WHEN THE ROOM IS DARK, LIFT THE PICTURE. Measured on his camera at 06:40:
+# mean brightness 36.9/255, a third of the pixels near black, sharpness 13.8.
+# Every device control is ignored by this camera (exposure, gain and brightness
+# all accept a value and keep the old one, exactly as it already ignores
+# resolution and fps), so the only place left to fix it is here.
+#
+# CLAHE on the luma channel took that frame from mean 38.1 / sharpness 13.6 to
+# mean 61.2 / sharpness 94.9 for 5.7 ms. Sharpness is the one that matters:
+# local contrast is what the hand tracker keys on, and "hard to use hand
+# controls" in a dark room is what he actually reported.
+DARK_BELOW = 70.0          # mean luma at which the lift comes on
+LIGHT_ABOVE = 95.0         # ...and the gap it has to climb back over to go off
+DARK_SAMPLE_S = 1.0        # how often brightness is checked, on a thumbnail
 OPEN_TIMEOUT_S = 6.0       # a camera that will not open must not hang the turn
+
+
+class _DarkLift:
+    """Brighten only while it is actually dark, and decide that cheaply.
+
+    Hysteresis rather than a single threshold: a room sitting exactly on the
+    line would otherwise alternate between two visibly different pictures every
+    second, which looks like a fault.
+    """
+
+    def __init__(self) -> None:
+        self._clahe = None
+        self._on = False
+        self._checked = 0.0
+
+    @property
+    def active(self) -> bool:
+        return self._on
+
+    def apply(self, frame):
+        """Never raises. The rule at the top of this file is that nothing
+        optional may stop the camera, and this is as optional as it gets: the
+        whole body is guarded, not just the part that seemed likely to fail.
+
+        Learned immediately. The brightness sample was outside the try, and the
+        camera gate — which drives the loop with a stubbed cv2 — went from
+        passing to "the capture thread failed, no frames within 8s". A cv2 that
+        cannot resize is far-fetched; a cosmetic improvement taking the whole
+        preview down with it is the actual bug, and it would have shipped."""
+        try:
+            import cv2
+            now = time.time()
+            if now - self._checked >= DARK_SAMPLE_S:
+                self._checked = now
+                # On a thumbnail: the mean of a 160-wide image is the mean of
+                # the picture for this, and costs a fraction of a millisecond.
+                small = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_AREA)
+                mean = float(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).mean())
+                if self._on and mean > LIGHT_ABOVE:
+                    self._on = False
+                    log.info("camera: room is lit again (mean %.0f) - lift off", mean)
+                elif not self._on and mean < DARK_BELOW:
+                    self._on = True
+                    log.info("camera: dark room (mean %.0f) - lifting the picture", mean)
+            if not self._on:
+                return frame
+            if self._clahe is None:        # built once, not rebuilt per frame
+                self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
+            yuv[:, :, 0] = self._clahe.apply(yuv[:, :, 0])
+            return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
+        except Exception:
+            # A picture that cannot be improved is still a picture. Switched off
+            # rather than retried every frame for the rest of the session.
+            log.debug("dark-room lift unavailable; leaving the frame alone",
+                      exc_info=True)
+            self._on = False
+            self._checked = float("inf")
+            return frame
 
 
 class Camera:
@@ -88,6 +161,7 @@ class Camera:
         self._new = threading.Condition(self._lock)
         self._started_at = 0.0
         self._frames = 0
+        self._lift = _DarkLift()
         self._error: str | None = None
         self._backend_name = ""
         self._actual = (0, 0)      # what the device really gave, not what we asked
@@ -109,6 +183,9 @@ class Camera:
                 # ignores the request and the HUD should not be lied to
                 "width": self._actual[0], "height": self._actual[1],
                 "error": self._error,
+                # Named, because a brightened picture that does not say it is
+                # brightened is a quiet lie about what the room looks like.
+                "lifted": self._lift.active,
                 "presence": _presence_status()}
 
     # ---------- lifecycle ----------
@@ -198,21 +275,35 @@ class Camera:
             ready.set()          # unblock start() whether it worked or not
 
         self._cap = cap
-        # Load every vision model NOW, on this thread, while the first frames
-        # are still settling. He asked how many fingers he was holding up and
-        # "it was buffering" — a chunk of that wait was YOLOX's 36 MB being read
-        # from disk inside his question. The models load once per camera
-        # session, in dead time he cannot feel.
-        try:
-            presence._detector()
-            from vision_identity import identity
-            identity._recognizer()
-            from vision_objects import objects
-            objects._load()
-            from vision_hands import hands
-            hands._landmarker()
-        except Exception:
-            log.debug("vision model preload failed", exc_info=True)
+
+        # PRELOAD OFF THIS THREAD. Not because it was measurably slow — all four
+        # models together load in 0.93 s (face 0.26, identity 0.07, hands 0.50,
+        # YOLOX 0.10) — but because this is the thread that produces frames, and
+        # anything that blocks it stops the preview by construction. It cost
+        # nothing to move and it removes a whole class of future stall.
+        #
+        # WHAT IT IS NOT: I first blamed this for a 25-second ramp from 4.8 fps
+        # to 30 on a cold start, and that was an artifact of my instrument — fps
+        # computed from the status counters rather than from frames actually
+        # arriving. Counting real frames off the stream, a cold start reaches
+        # 24 fps within four seconds and holds 28-30. The loop itself times at
+        # grab 27ms, retrieve 2.8ms, presence 0.0ms, encode 3.9ms. There was no
+        # frame-rate problem to fix.
+        def _preload() -> None:
+            try:
+                presence._detector()
+                from vision_identity import identity
+                identity._recognizer()
+                from vision_objects import objects
+                objects._load()
+                from vision_hands import hands
+                hands._landmarker()
+                log.info("vision models ready")
+            except Exception:
+                log.debug("vision model preload failed", exc_info=True)
+
+        threading.Thread(target=_preload, name="vision-preload",
+                         daemon=True).start()
         params = [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
         misses = 0
         # LATENCY, measured rather than assumed. He watched his own face in the
@@ -259,6 +350,11 @@ class Camera:
                 if not ok or frame is None:
                     continue
                 misses = 0
+                # BEFORE everything downstream, so the presence detector, the
+                # hand tracker and the picture he sees all get the same lifted
+                # frame. Lifting only the preview would leave hand control
+                # exactly as hard as he found it.
+                frame = self._lift.apply(frame)
                 # Presence looks at roughly one frame a second and returns
                 # immediately the rest of the time. It never raises, so a
                 # detector problem cannot stop the camera.
