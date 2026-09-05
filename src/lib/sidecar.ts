@@ -60,6 +60,16 @@ export function connectEvents(onEvent: (evt: any) => void): () => void {
     const { port, token } = await sidecarInfo();
     if (closed) return; // effect was cleaned up while we awaited
     ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+    // HYDRATE ON CONNECT. The socket only carries CHANGES of state, so a HUD
+    // that connects to a sidecar already running - a reconnect after a
+    // supervisor restart, a reload, the dev page - sat on the boot checklist
+    // until the next turn happened to move the state. Ask once, on open.
+    ws.onopen = async () => {
+      try {
+        const h = await api("/health");
+        if (h && typeof h.state === "string") onEvent({ kind: "state", state: h.state, hydrated: true });
+      } catch {}
+    };
     ws.onmessage = (m) => {
       try {
         onEvent(JSON.parse(m.data));

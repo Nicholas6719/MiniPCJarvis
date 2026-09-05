@@ -3743,7 +3743,18 @@ authenticated endpoint answers 401: after any reboot, stop the three
 processes and relaunch through `.agent/scripts/jarvis_relaunch.cmd` before a
 live test.
 
-### The brief on screen (release 31)
+### 11:05 — a second power loss, and his own words as the test set
+Release 31 died in its gate stage; release 30 stayed installed. Every real
+utterance from the log (2026-09-03 to 09-05, test phrases excluded) was
+routed through `brain.decide` offline. The misses were "Center it", "Stop
+spinning", "Turn on hand view", "What are the systems?", "Set my volume to
+fifty percent", "What's ten plus ten?" - seeds added, parser patterns for
+centre/middle and keep-turning added, all in test_brain and
+test_holo_control. And the transcript showed "Go for it." and "Yes, finish
+the render." three times each in a row: neither was an approval, because
+"for" and "finish" were not yes-words (`clarify.approval`). Release 32.
+
+### The brief on screen (release 31, shipped in 32)
 New HUD stage `brief`: a gauges row (index moves, coloured by direction) and
 the same sections the phone gets. Opened by the scheduled brief
 (`briefing._maybe_brief` emits `brief`) and by `get_market_state`. Held two

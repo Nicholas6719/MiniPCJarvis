@@ -740,6 +740,7 @@ class Orchestrator:
                                default=["C920", "Webcam", "Logitech"])]
         last_switch = 0.0
         last_heal = 0.0
+        last_enum = 0.0
 
         async def reopen(reason: str) -> bool:
             """Stop, re-enumerate, start — OFF THE EVENT LOOP, and honestly.
@@ -797,6 +798,13 @@ class Orchestrator:
                     continue  # user pinned a device explicitly
                 if self.sm.state not in (State.IDLE, State.SLEEPING):
                     continue  # never yank the mic mid-conversation
+                # ONCE A MINUTE, not every tick. Enumerating every audio endpoint
+                # (pycaw CreateDevice per endpoint) was 14% of the sidecar's idle
+                # CPU, measured asleep with py-spy on 2026-09-05. A webcam that
+                # is unplugged is noticed within a minute, which is soon enough.
+                if time.time() - last_enum < 60:
+                    continue
+                last_enum = time.time()
                 from pycaw.pycaw import AudioUtilities
                 present = False
                 for dev in AudioUtilities.GetAllDevices():
