@@ -112,6 +112,23 @@ def main() -> int:
                "The Pentagon confirmed the strikes.") == URGENT,
           tier("Russia launches missile strikes on US base in Poland"))
 
+    # A local desk syndicates the national wire. "Kennedy Center renews call
+    # for Trump-backed shutdown after part of ceiling collapses" came off
+    # Boston.com on 2026-09-05, read as NEAR (provenance), and "shutdown" +
+    # "collapse" made it an ALERT. Washington is a far place, and under
+    # emergencies-only national weight is never an interruption by itself.
+    kc = {"headline": "Kennedy Center renews call for Trump-backed shutdown after part of ceiling collapses",
+          "summary": "A chunk of ceiling fell in the Kennedy Center's main hallway, creating a hole "
+                     "and debris on the red carpet, but no one was injured.",
+          "source": "Boston.com", "_local_feed": True}
+    check("a Washington story off a Boston desk is not near him",
+          not significance.is_local(kc)[0], significance.is_local(kc))
+    check("...and it does not reach him", classify_news(kc)[0] == NONE, classify_news(kc))
+    weighty_local = {"headline": "Massachusetts election officials brace for federal shutdown; state of emergency talk",
+                     "summary": "", "source": "MassLive", "_local_feed": True}
+    check("weighty national news near him waits for the brief under emergencies-only",
+          classify_news(weighty_local)[0] == NONE, classify_news(weighty_local))
+
     # --- somebody else's country is not "the country" -------------------------
     # On 2026-08-31 at 1:42pm he was sent "Nepal rescuers blast hillside in search
     # of hydropower workers" and then chased about it twice. The BBC summary said
@@ -247,8 +264,11 @@ def main() -> int:
           tier("Small explosion reported at a warehouse in Nevada") == ALERT)
 
     # --- national weight -------------------------------------------------------
-    check("war news of consequence is an alert",
-          tier("President declares state of emergency as invasion begins") == ALERT)
+    # the President declaring an emergency is the country's emergency: it
+    # reaches him through the national door, not through "weighty" news
+    check("war news of consequence reaches him",
+          tier("President declares state of emergency as invasion begins") in (URGENT, ALERT),
+          tier("President declares state of emergency as invasion begins"))
     check("routine politics waits for the brief",
           tier("Congress debates infrastructure funding bill") not in (URGENT, ALERT))
 

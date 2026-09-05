@@ -81,7 +81,12 @@ FAR_PLACE = re.compile(
     r"las vegas|nevada|detroit|cleveland|philadelphia|baltimore|st\. louis|"
     r"new jersey|connecticut|rhode island|new hampshire|vermont|maine|"
     r"california|florida|texas|arizona|georgia|ohio|michigan|illinois|"
-    r"oregon|colorado|utah|alaska|hawaii|oklahoma|kentucky|tennessee)\b", re.I)
+    r"oregon|colorado|utah|alaska|hawaii|oklahoma|kentucky|tennessee|"
+    # Washington. A local desk syndicates the national wire, and "Kennedy
+    # Center renews call for shutdown after part of ceiling collapses" off
+    # Boston.com reached ALERT as news from near him (2026-09-05 15:42).
+    r"washington,? d\.?c\.?|d\.c\.|kennedy center|capitol hill|the capitol|"
+    r"white house|pentagon|supreme court)\b", re.I)
 
 # Rejecting every bare "Boston" was too blunt - it cost him a hazmat call at Mass
 # General, a fatal MBTA incident and a Boston police story, all genuinely his.
@@ -242,7 +247,10 @@ DISRUPTION = re.compile(
 SYSTEMIC = re.compile(
     r"\b(?:nuclear (?:plant|reactor|meltdown|accident)|radiation leak|"
     r"pandemic|grid (?:collapse|failure)|nationwide (?:blackout|outage)|"
-    r"national emergency|martial law)\b", re.I)
+    r"national emergency|martial law|"
+    # the President declaring one is the country's emergency; a governor's
+    # "state of emergency" for a hurricane in Florida is not (see the test)
+    r"president declares (?:an? )?(?:national |state of )emergency)\b", re.I)
 
 # Reach, rather than severity. These say a thing is everywhere; something else
 # still has to say it is bad.
@@ -549,6 +557,11 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
         if national_emergency(text, headline=str(story.get("headline") or "")):
             return URGENT, "the whole country needs to know this"
         return NONE, "not local, and not something the country needs to know"
+    # The national door stands whatever the scope: with the whole wire in
+    # play, a national emergency is still the one thing that must not be
+    # left to the "weighty" rules below (which emergencies-only silences).
+    if not near and national_emergency(text, headline=str(story.get("headline") or "")):
+        return URGENT, "the whole country needs to know this"
     hazard = bool(HAZARD.search(text))
     violence = bool(VIOLENCE.search(_violence_text(text)))
     danger = hazard or violence
@@ -625,9 +638,13 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
             return URGENT, "many people have died"
         return NOTABLE, "a death, but not near him"
 
-    if weighty and scale:
+    if weighty and scale and not emergencies_only():
         return ALERT, "national news of consequence"
     if weighty:
+        # Under emergencies-only, national weight is never an interruption
+        # on its own: the one door for the rest of the country is
+        # national_emergency(), above. This is how "Kennedy Center renews
+        # call for shutdown after part of ceiling collapses" got out.
         return NOTABLE, "national, but not breaking"
 
     # His own towns get a lower bar for being MENTIONED — not for interrupting
