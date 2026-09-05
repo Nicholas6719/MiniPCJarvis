@@ -105,7 +105,12 @@ def choose(pending: Pending, text: str) -> Branch | str | None:
     # An answer to "the company or the stock?" is two or three words. A whole
     # sentence is a new request that happens to contain one of them — without
     # this, "what's the stock market doing" answers a question about Tesla.
-    if len(t.split()) > MAX_ANSWER_WORDS:
+    names = {b.label for b in pending.amb.branches}
+    # A yes may run to a few more words ("yes, go ahead and render it") and is
+    # still safe, because the approval branch below only takes an utterance
+    # made ENTIRELY of its own words. A choice between readings stays short.
+    if len(t.split()) > (MAX_ANSWER_WORDS + 3 if names == {"go ahead", "leave it"}
+                         else MAX_ANSWER_WORDS):
         return None
     # A COST QUESTION IS ANSWERED BY A YES OR A NO, NOT BY A WORD. "Shall I?"
     # used to be answered by counting word hits, and the approval branch's

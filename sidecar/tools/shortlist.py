@@ -81,10 +81,19 @@ class ToolShortlist:
     LOW_WATER = 10_000
 
     def warm_block(self, registry) -> list[dict]:
-        """The block a fresh session starts with, for the boot-time prompt warm:
-        the always-offered tools in their sticky order, so the first real turn
-        extends a cached prefix instead of paying for the whole prompt."""
-        names = {n for n in ALWAYS if n in registry._tools}
+        """The block a session starts with, for the boot-time prompt warm.
+
+        EVERY tool, from the start. The block only ever grows (nothing is
+        evicted, by design), and each growth changes the cached prefix, so the
+        next tools-shape turn re-reads everything after the change: 9-10 s to
+        the first word, measured on releases 27-29 for "And Argentina?" right
+        after a boot that had warmed only the always-offered set. By the end
+        of any day the block held 99 tools anyway. Reading all of them once at
+        boot, in the background, is the only time that cost is ever paid; the
+        re-warm in the orchestrator then covers a pin or a new tool.
+        """
+        names = {n for n in registry._tools if not n.startswith("_")} | {
+            n for n in ALWAYS if n in registry._tools}
         return [registry._tools[n].openai_schema() for n in self.stable_order(names)
                 if n in registry._tools]
 

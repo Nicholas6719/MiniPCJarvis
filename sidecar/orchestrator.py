@@ -2006,10 +2006,22 @@ class Orchestrator:
                     return f"{str(r['error']).rstrip('.')}, sir."
                 return str(r.get("spoken") or "Starting now, sir.")
 
+            # THE VERB OF THE THING IS A YES. Asked "about forty seconds, sir,
+            # shall I?" about a Spider-Man render, he said "Render it." and was
+            # told that was not an answer; the words then became a NEW request
+            # for a model called "it". Repeating the order is the plainest
+            # yes there is.
+            verbs = {
+                "make_hologram": ("render", "make", "build", "create", "generate", "show",
+                                  "project", "model"),
+                "generate_part": ("make", "build", "generate", "create", "print", "design"),
+                "slice_part": ("slice", "print", "prepare"),
+            }
             amb = clarify.approval(
                 subject=str(asked.get("subject") or "that"),
                 question=str(asked.get("question") or "Shall I, sir?"),
-                tool=tool, args=dict(asked.get("args") or {}), render=render)
+                tool=tool, args=dict(asked.get("args") or {}), render=render,
+                yes_words=tuple(asked.get("yes_words") or verbs.get(tool, ())))
             self._drop_clarification("superseded")
             self._clarify = clarify.Pending(amb)
             # He must be able to answer without saying the name again — but only
@@ -2450,6 +2462,13 @@ class Orchestrator:
         if getattr(self, "_no_tools_first", False):
             must_use_tool = False   # the brain already ran the tool; the model only composes
         used_tools: list[tuple[str, bool]] = []   # (name, ok) - for self-training
+        # for the follow-up rule (see strip_repeat): what he was told last time
+        from brain.skills import strip_repeat
+        prev_reply = next((str(m.get("content") or "") for m in reversed(self._history)
+                           if m.get("role") == "assistant"), "")
+        spoke_any = False
+        held_repeat: str | None = None
+        dropped_repeat: str | None = None
         for _round in range(8):
             round_text = ""
             pending = ""
@@ -2499,14 +2518,44 @@ class Orchestrator:
                         sentence = pending[: m.end()].strip()
                         pending = pending[m.end():]
                         if sentence and not BARE_HONORIFIC.match(sentence):
+                            # A FOLLOW-UP NEVER REPEATS THE LAST ANSWER. "And
+                            # Chile?" came back "Lima. Santiago." (measured
+                            # 2026-09-05, and a prompt rule changed nothing):
+                            # a first sentence that IS the previous answer is
+                            # held until a second one proves there is more.
+                            if held_repeat is not None:
+                                log.info("dropped a repeated first sentence: %r", held_repeat)
+                                dropped_repeat = held_repeat
+                                held_repeat = None
+                            if not spoke_any:
+                                sentence, only_repeat = strip_repeat(sentence, prev_reply)
+                                if only_repeat:
+                                    held_repeat = sentence
+                                    continue
+                            spoke_any = True
                             await speak_queue.put(clean_for_speech(sentence))
                 if chunk.done:
                     tool_calls = chunk.tool_calls
                     break
             if cancelled:
                 return full_text
-            if pending.strip() and not BARE_HONORIFIC.match(pending.strip()):
-                await speak_queue.put(clean_for_speech(pending.strip()))
+            tail = pending.strip()
+            if tail and not BARE_HONORIFIC.match(tail):
+                if held_repeat is not None:
+                    log.info("dropped a repeated first sentence: %r", held_repeat)
+                    dropped_repeat = held_repeat
+                    held_repeat = None
+                if not spoke_any:
+                    tail, _only = strip_repeat(tail, prev_reply)
+                spoke_any = True
+                await speak_queue.put(clean_for_speech(tail))
+            elif held_repeat is not None:
+                # the whole reply WAS the repeat - "repeat that" - say it
+                spoke_any = True
+                await speak_queue.put(clean_for_speech(held_repeat))
+                held_repeat = None
+            if dropped_repeat and full_text.strip().startswith(dropped_repeat):
+                full_text = full_text.strip()[len(dropped_repeat):].strip()
 
             if not tool_calls:
                 if not round_text.strip() and empty_retries < 1:

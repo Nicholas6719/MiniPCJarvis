@@ -60,6 +60,23 @@ def main() -> int:
           P.wake_line(8 * 3600, 9, None, one))
     check("...but not on an ordinary wake", P.wake_line(30, 9, None, one) == "Yes?")
 
+    print("\n-- a follow-up never repeats the last answer --")
+    # Measured live 2026-09-05: "and Chile?" -> "Lima. Santiago."; "and when was
+    # it published?" -> "Herman Melville, 1851, sir." A prompt rule changed
+    # nothing; this is handled on the way to the speaker.
+    from brain.skills import strip_repeat
+    check("a first sentence that IS the last answer is flagged",
+          strip_repeat("Lima.", "Lima.") == ("Lima.", True))
+    check("...however it was punctuated", strip_repeat("Lima, sir.", "Lima.")[1] is True)
+    check("a leading repeat with a comma is cut off",
+          strip_repeat("Herman Melville, 1851, sir.", "Herman Melville.") == ("1851, sir.", False),
+          strip_repeat("Herman Melville, 1851, sir.", "Herman Melville."))
+    check("a real answer is left alone",
+          strip_repeat("Santiago.", "Lima.") == ("Santiago.", False))
+    check("an answer that merely starts with the same word is left alone",
+          strip_repeat("Lima is in Peru.", "Lima.") == ("Lima is in Peru.", False))
+    check("no previous answer, nothing to strip", strip_repeat("Lima.", "") == ("Lima.", False))
+
     print("\n-- the ledger fills --")
     import asyncio
     import delivery as dv

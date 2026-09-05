@@ -226,6 +226,33 @@ async def main() -> int:
     finally:
         scout.look = real_look
 
+    print("\n-- 'render it' means the pictures on screen --")
+    # 2026-09-05: "Show me a 3D render of Spider Man" scouted the web and asked;
+    # "Render it." became three searches for a model called "it".
+    from tools.render_tools import resolve_pointer
+
+    class Panel:
+        last_images_at = 1000.0
+        _last_subject = {"q": "spider man"}
+        _last_images = [{"url": "https://pics.example/spidey.jpg", "title": "Spider-Man"}]
+    for said in ("it", "that", "that one", "the picture", "This One"):
+        r = resolve_pointer(said, panel=Panel, now=1100.0)
+        check(f"{said!r} -> the subject of the pictures", r.get("description") == "spider man"
+              and r.get("reference") == "https://pics.example/spidey.jpg", r)
+    r = resolve_pointer("it", "https://his.example/own.jpg", panel=Panel, now=1100.0)
+    check("a reference he gave is kept", r.get("reference") == "https://his.example/own.jpg", r)
+    check("a real description passes through untouched",
+          resolve_pointer("a dragon", panel=Panel, now=1100.0) == {"description": "a dragon", "reference": ""})
+    check("stale pictures are not 'it'",
+          "error" in resolve_pointer("it", panel=Panel, now=1000.0 + 3600), resolve_pointer("it", panel=Panel, now=4600.0))
+
+    class Empty:
+        last_images_at = 0.0
+        _last_subject = {"q": ""}
+        _last_images = []
+    r = resolve_pointer("it", panel=Empty, now=1100.0)
+    check("with nothing on screen he asks which one", "which one" in str(r.get("error")), r)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

@@ -1385,6 +1385,8 @@ def slots_holo_make(t: str) -> dict:
     detailed = bool(_DETAILED.search(said))
     bare = re.sub(r"\s{2,}", " ", _DETAILED.sub(" ", said)).strip(" .,")
     desc = _MAKE_STRIP.sub("", bare).strip(" .,")
+    # "Render it" / "make that one 3D" pass the pointer through: make_hologram
+    # resolves it to the pictures on screen (render_tools._POINTER).
     out = {"description": desc or said}
     if detailed:
         out["detailed"] = True
@@ -2876,6 +2878,40 @@ CONFIRM_AS = {
     "images": "show you pictures of that",
     "model_find": "look for a model of that",
 }
+
+
+_CORE_STRIP = re.compile(r"[^a-z0-9 ]+|\bsir\b")
+
+
+def _core(text: str) -> str:
+    return re.sub(r"\s+", " ", _CORE_STRIP.sub(" ", (text or "").lower())).strip()
+
+
+def strip_repeat(sentence: str, previous: str) -> tuple[str, bool]:
+    """A reply's first sentence with a leading repeat of the LAST reply removed.
+
+    Asked Peru's capital and then "and Chile?", gpt-oss answers "Lima.
+    Santiago." - and "Herman Melville, 1851, sir" for "and when was it
+    published?". A prompt rule against it changed nothing (tried 2026-09-05),
+    so the orchestrator handles the two shapes: a first sentence that IS the
+    previous answer is held and dropped once a second sentence proves there
+    is more (the second value says "only the repeat"); a sentence that begins
+    with the previous answer and a comma loses that beginning. A reply that
+    is nothing but the repeat ("repeat that") is spoken as it is.
+    """
+    s = (sentence or "").strip()
+    p = _core(previous)
+    if not s or not p:
+        return s, False
+    if _core(s) == p:
+        return s, True
+    lead = r"\W+".join(re.escape(w) for w in p.split())
+    m = re.match(r"^\W*" + lead + r"\W*[,;:\-–—]\s*(.+)$", s, re.I)
+    if m:
+        rest = m.group(1).strip()
+        if rest and _core(rest):
+            return rest[0].upper() + rest[1:], False
+    return s, False
 
 
 # A sentence that is asking something. The near-miss question ("Did you mean

@@ -28,6 +28,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import time
 
 import create3d
 import render_estimates as est
@@ -35,6 +37,44 @@ from render_queue import queue
 from tools.registry import Risk, Tool, registry
 
 log = logging.getLogger("jarvis.tools.render")
+
+# a description that only points at something already on screen
+_POINTER = re.compile(
+    r"(?:it|that|this|these|those|them|him|her|one|the same|that one|this one|"
+    r"the same one|the same thing|the one|the first one|the second one|the last one|"
+    r"the picture|that picture|this picture|the image|that image)")
+
+
+def resolve_pointer(description: str, reference: str = "", *, panel=None,
+                    now: float | None = None) -> dict:
+    """"Render it" / "make that one 3D": a pointer means the pictures on screen.
+
+    On 2026-09-05 "Render it." became three web searches for a model called
+    "it". The thing he means is the subject of the last picture search, and
+    the first picture is the reference - the image-first, hologram-second
+    path the stage was designed around. With no pictures fresh on screen it
+    asks rather than guesses. Anything that is not a pointer passes through.
+    `panel` and `now` exist for the gate; the live call reads web_tools.
+    """
+    want = (description or "").strip().lower()
+    if not _POINTER.fullmatch(want):
+        return {"description": description, "reference": reference}
+    try:
+        if panel is None:
+            from tools import web_tools as panel
+        fresh = (now or time.time()) - float(getattr(panel, "last_images_at", 0.0) or 0.0)
+        subject = str((getattr(panel, "_last_subject", None) or {}).get("q") or "")
+        if subject and fresh < 1800:
+            if not reference:
+                imgs = list(getattr(panel, "_last_images", []) or [])
+                if imgs and isinstance(imgs[0], dict):
+                    reference = str(imgs[0].get("url") or imgs[0].get("src")
+                                    or imgs[0].get("image") or "")
+            log.info("hologram of %r -> %r (from the picture panel)", want, subject)
+            return {"description": subject, "reference": reference}
+    except Exception:
+        log.debug("could not resolve the pointer from the picture panel", exc_info=True)
+    return {"error": "which one, sir? Show me a picture first, or tell me what to render"}
 
 
 def _label(description: str, image_path: str, tier: int) -> str:
@@ -86,6 +126,16 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
     what the scout found, handed straight back from the question on "yes" so
     the thing he agreed to is the thing that gets made.
     """
+    # "RENDER IT" / "MAKE THAT ONE 3D": a pointer means the pictures on screen.
+    # On 2026-09-05 "Render it." became three web searches for a model called
+    # "it". The thing he means is the subject of the last picture search, and
+    # the picture itself is the reference - which is the image-first,
+    # hologram-second path the stage was designed around.
+    if not image_path:
+        resolved = resolve_pointer(description, reference)
+        if "error" in resolved:
+            return resolved
+        description, reference = resolved["description"], resolved["reference"]
     # A RENDER NEEDS THE WEB. Tier 5 searches for a published model and tier 4
     # downloads a reference picture, so with no connection this cannot work at
     # all — and failing slowly is the worst way to say so. His duck took three

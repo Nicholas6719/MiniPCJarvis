@@ -71,6 +71,19 @@ def main() -> int:
         got = clarify.choose(cost, said)
         check(f"approval: {said!r} is {want.label}", got is want,
               getattr(got, "label", got))
+    # THE VERB OF THE THING IS A YES. Asked whether to render Spider-Man, he
+    # said "Render it." and was told that was not an answer (2026-09-05).
+    verbs = clarify.Pending(clarify.approval(
+        "a hologram", "About forty seconds, sir. Shall I?", "make_hologram",
+        {"description": "spider man"}, lambda a, r: "Started.",
+        yes_words=("render", "make", "build", "create", "generate", "show")))
+    vgo = next(b for b in verbs.amb.branches if b.label == "go ahead")
+    for said in ("render it", "Render it.", "make it", "yes render it", "go ahead and render it",
+                 "build it please"):
+        got = clarify.choose(verbs, said)
+        check(f"approval: {said!r} is the verb, so a yes", got is vgo, getattr(got, "label", got))
+    check("...but the verb with a NEW subject is a new request",
+          clarify.choose(verbs, "render a dragon instead") is None)
     # the approval words include "on", "do", "go", "please", "start", "fine":
     # a request that happens to contain one is NOT a "go ahead"
     for said in ("go to sleep", "turn on the camera", "please open spotify",
