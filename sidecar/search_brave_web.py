@@ -507,11 +507,16 @@ class BraveWebSearch:
                     await page.goto(base + quote_plus(query),
                                     wait_until="domcontentloaded", timeout=25000)
                     self._hide()          # Chromium re-shows the window on navigation
-                    await page.wait_for_timeout(1200)
+                    # WAIT FOR THE RESULTS, NOT FOR THE CLOCK. A flat 1200 ms
+                    # sat in front of every search whether the list was up in
+                    # 300 ms or not; a live search turn measured 1.5 s in the
+                    # tool with most of it here. The selector is the signal;
+                    # a short settle afterwards lets the list finish painting.
                     try:
                         await page.wait_for_selector(sel, timeout=8000)
+                        await page.wait_for_timeout(250)
                     except Exception:
-                        pass
+                        await page.wait_for_timeout(1200)
                     body = ((await page.inner_text("body"))[:400] or "").lower()
                     if any(w in body for w in _CHALLENGE):
                         last_err = f"{name} asked to verify"

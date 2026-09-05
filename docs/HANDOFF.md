@@ -3827,6 +3827,19 @@ first run failed on the persona gate because the build's gates share one
 database and the persisted ledger loaded other gates' rows: the gate now
 judges what it added, not the total.
 
+### 16:20 — the ledger proved, and what it caught (release 40)
+`/debug/ledger` on the process started at 16:0x listed a row from 15:42:
+persistence works. The row itself: "Kennedy Center renews call for
+Trump-backed shutdown after part of ceiling collapses", off Boston.com,
+ALERT "national news of consequence" - held only by the test mute. Cause:
+a local desk syndicates the wire, provenance called it near, and
+weighty+scale is an ALERT door that the emergencies-only rule never
+touched. Now: Washington landmarks are FAR_PLACE (so provenance is
+overridden); under emergencies-only, weighty news is NOTABLE at most; and
+`national_emergency` is checked whatever the scope (the President declaring
+an emergency, an invasion beginning). Gated in test_significance.
+Night school now runs nightly (was every 72 h).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
