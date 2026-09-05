@@ -414,7 +414,18 @@ class TTSRouter:
         """
         import asyncio as _a
         await _a.sleep(20)         # let the model server and the ears finish booting first
-        for phrase in WARM_PHRASES:
+        # UNDER POCKET, ONLY THE SHORT ACKNOWLEDGEMENTS. Pocket streams its
+        # first frame in ~100 ms, so a cache hit buys a tenth of a second —
+        # while a turn arriving mid-phrase waits for that phrase behind
+        # _synth_lock (~0.4 s). Sixty phrases of that after every boot is the
+        # 0.6-0.9 s reflex floor the early benches measured. Kokoro keeps the
+        # full list: there a hit saves half a second.
+        phrases = WARM_PHRASES
+        gap = 0.3
+        if self._active() is self.pocket:
+            phrases = [p for p in WARM_PHRASES if len(p) <= 14][:16]
+            gap = 1.0
+        for phrase in phrases:
             await self.idle.wait()
             if self._key(phrase) in self._cache:
                 continue
@@ -425,7 +436,7 @@ class TTSRouter:
             except Exception as e:
                 log.debug("phrase warm failed for %r: %s", phrase, e)
                 return
-            await _a.sleep(0.3)
+            await _a.sleep(gap)
         log.info("tts cache warmed (%d phrases)", len(self._cache))
 
     def _active(self):

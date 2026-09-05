@@ -3494,6 +3494,14 @@ torn and skewed from the side. So it is the DETAILED render, never the default:
   six hours away the first word is a greeting by the time of day.
 * Speech timing lines in the log ("speak: first chunk of … after N ms" /
   "… to the speaker after N ms") to attribute the 0.6-0.9 s reflex floor.
+  Release 24 measured: first chunk 105-136 ms for a fresh sentence, 0 ms for
+  a cached phrase, and the consumer plays it within 1-2 ms — first_audio on
+  reflexes 46-205 ms (was 600-1,900). The floor did not reproduce; the
+  earlier benches ran within minutes of a hot-swap, while `warm_phrases` was
+  still holding `_synth_lock` for one phrase at a time (~0.4 s each), which
+  is the likeliest explanation. Follow-up: with Pocket the warm buys ~100 ms
+  per cached line and costs a turn that arrives mid-phrase up to 0.4 s, so
+  it should warm only the short acknowledgements.
 * **"While you were away."** `delivery.deliver` now records every proactive
   outcome (spoken / telegram / held / budget, subject, text) in
   `delivery.ledger`; `persona.briefing()` turns the entries since he last
