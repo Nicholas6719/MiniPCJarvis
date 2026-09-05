@@ -341,6 +341,20 @@ class Briefing:
                 near, _town = is_local(story)
                 if near or NATIONAL_WEIGHT.search(head):
                     self._held.append({"kind": "news", "text": head, "why": why})
+        # THE WEATHER SERVICE, in the same lane as the news. A tornado warning
+        # for Southeast Middlesex is the purest local emergency there is, and
+        # the desks carry it late if at all. Tiered like the news (nws.py);
+        # a watch or advisory waits for the brief like any NOTABLE.
+        try:
+            import nws
+            for text, tier, key in await nws.scan(self._seen):
+                self._remember_seen(key)
+                if tier in (ALERT, URGENT):
+                    out.append((text, tier, key))
+                else:
+                    self._held.append({"kind": "weather", "text": text, "why": "weather"})
+        except Exception:
+            log.debug("weather service sweep failed", exc_info=True)
         if market:
             out.extend(await self._market_moves())
         self._forget_old()
@@ -593,12 +607,63 @@ class Briefing:
         return (f"{'up' if v >= 0 else 'down'} {abs(v):.2f}%",
                 f"{'+' if v >= 0 else '-'}{abs(v):.2f}%")
 
+    async def _weather_lines(self) -> list[tuple[str, str]]:
+        """'67 and clear in Framingham, high of 78, low 55, 20 percent chance of rain'
+        - and any weather-service watch or advisory that was held for the brief."""
+        lines: list[tuple[str, str]] = []
+        try:
+            from tools.weather import get_weather
+            w = await get_weather()
+            now, day = (w or {}).get("now") or {}, (w or {}).get("today") or {}
+            if now.get("temp") is not None:
+                where = str(w.get("location") or "").split(",")[0].strip()
+                said = f"{now['temp']} and {now.get('conditions', 'unsettled')}"
+                if where:
+                    said += f" in {where}"
+                if day.get("high") is not None:
+                    said += f", high of {day['high']}, low {day.get('low')}"
+                rain = day.get("rain_chance")
+                if rain is not None and float(rain) >= 20:
+                    said += f", {int(rain)} percent chance of rain"
+                lines.append((said, said))
+        except Exception:
+            log.debug("brief: weather failed", exc_info=True)
+        held = [h for h in self._held if h.get("kind") == "weather"]
+        if held:
+            self._held = [h for h in self._held if h.get("kind") != "weather"]
+            lines += [(h["text"], h["text"]) for h in held[-2:]]
+        return lines
+
+    def _today_lines(self) -> list[tuple[str, str]]:
+        """Reminders due today, for the morning: 'dentist at 4 PM'."""
+        try:
+            from tasks.scheduler import scheduler
+            today = _now().strftime("%Y-%m-%d")
+            out = []
+            for r in scheduler.list_pending():
+                due = str(r.get("due") or "")
+                if not due.startswith(today):
+                    continue
+                hhmm = due[11:16]
+                try:
+                    t = dt.datetime.strptime(hhmm, "%H:%M")
+                    when = t.strftime("%I:%M %p").lstrip("0").replace(":00", "")
+                except ValueError:
+                    when = hhmm
+                text = str(r.get("text") or "").strip()
+                out.append((f"{text} at {when}", f"{when} - {text}"))
+            return out[:5]
+        except Exception:
+            log.debug("brief: reminders failed", exc_info=True)
+            return []
+
     async def _sections(self, final: bool = False,
                         first: bool = False) -> list[tuple[str, list[tuple[str, str]]]]:
         """The brief as titled groups, each line held as (spoken, written).
 
         `final` is the last brief of the day, the only one that carries news;
-        `first` is the morning one, the only one that carries the week's earnings.
+        `first` is the morning one, which opens with the weather and the day's
+        reminders and is the only one that carries the week's earnings.
 
         The single source of truth for both renderings, so the phone and the
         voice can never disagree, and so the market and news calls happen once.
@@ -606,6 +671,17 @@ class Briefing:
         from analyst import display_name
         from tools.market_tools import get_market_movers, get_watchlist
         out: list[tuple[str, list[tuple[str, str]]]] = []
+
+        # THE MORNING OPENS WITH THE DAY. Weather first thing, then what he has
+        # on; a held weather-service advisory rides in whichever brief is next.
+        weather = await self._weather_lines() if (first or any(
+            h.get("kind") == "weather" for h in self._held)) else []
+        if weather:
+            out.append(("Weather", weather))
+        if first:
+            today = self._today_lines()
+            if today:
+                out.append(("Today", today))
 
         try:
             movers = await get_market_movers()

@@ -261,6 +261,67 @@ def main() -> int:
     check("the morning brief carries the week ahead", "Ahead" in [t for t, _l in m_secs],
           [t for t, _l in m_secs])
 
+    # --- the weather service rides in the emergency lane ------------------------
+    import nws as _nws
+    real_nws_scan = _nws.scan
+
+    async def fake_nws(seen=None):
+        return [("The Weather Service has a Tornado Warning for Southeast Middlesex until 4:15 PM. "
+                 "Take shelter now.", "urgent", "nws:a"),
+                ("The Weather Service has a Heat Advisory for Southeast Middlesex until 8 PM.",
+                 "notable", "nws:b")]
+    _nws.scan = fake_nws
+    bW = br.Briefing()
+    bW._fresh_stories = lambda: _fake_stories([])
+    bW._market_moves = lambda: _fake_moves()
+    bW._held = []
+    try:
+        found = asyncio.run(bW.scan(news=True, market=False))
+    finally:
+        _nws.scan = real_nws_scan
+    check("a tornado warning goes out at once, urgent",
+          [(k, t) for _x, t, k in found] == [("nws:a", "urgent")], found)
+    check("...and the advisory is held for the brief as weather",
+          [h["kind"] for h in bW._held] == ["weather"], bW._held)
+    check("both are remembered, so neither is said twice", {"nws:a", "nws:b"} <= set(bW._seen), list(bW._seen))
+
+    # --- the morning opens with the day -----------------------------------------
+    import tools.weather as _W
+    import tasks.scheduler as _S
+    real_get_weather, real_pending = _W.get_weather, _S.scheduler.list_pending
+
+    async def fake_weather(location="", when="now"):
+        return {"location": "Framingham, Massachusetts", "now": {"temp": 67, "conditions": "clear skies"},
+                "today": {"high": 78, "low": 55, "rain_chance": 30}}
+
+    async def _morning(b):
+        import tools.market_tools as mt
+        mt.get_market_movers = lambda: _fake_dict({"markets": []})
+        mt.get_watchlist = lambda: _fake_dict({"stocks": []})
+        import analyst as _an
+        _an.analyst.take = lambda limit=8: _fake_take()
+        return await b._sections(final=False, first=True)
+    _W.get_weather = fake_weather
+    today = br._now().strftime("%Y-%m-%d")
+    _S.scheduler.list_pending = lambda: [
+        {"id": 1, "due": f"{today} 16:00", "text": "dentist", "recurrence": ""},
+        {"id": 2, "due": "2030-01-01 09:00", "text": "not today", "recurrence": ""}]
+    try:
+        morning = asyncio.run(_morning(bW))
+    finally:
+        _W.get_weather = real_get_weather
+        _S.scheduler.list_pending = real_pending
+        _analyst_mod.analyst.take = _real_take
+    titles = [t for t, _l in morning]
+    check("weather first, then today", titles[:2] == ["Weather", "Today"], titles)
+    check("the weather line is one breath",
+          morning and morning[0][1][0][0] == "67 and clear skies in Framingham, high of 78, low 55, 30 percent chance of rain",
+          morning[0][1][0][0] if morning else morning)
+    check("the held advisory rides with the weather",
+          morning and any("Heat Advisory" in s for s, _w in morning[0][1]), morning[0][1] if morning else morning)
+    check("today's reminder, not next year's",
+          len(morning) > 1 and morning[1][1] == [("dentist at 4 PM", "4 PM - dentist")], morning[1][1] if len(morning) > 1 else morning)
+
     # --- news belongs to the LAST brief of the day ------------------------------
     # His instruction, 2026-09-05: by day only local and national emergencies
     # reach him; the nightly brief tells him the general news. So the midday
