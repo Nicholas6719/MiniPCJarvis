@@ -492,10 +492,29 @@ class MarketIntel:
         return out
 
 
+_ABBREV = re.compile(r"\b(?:U\.S|U\.K|U\.N|E\.U|Inc|Corp|Ltd|Co|Mr|Mrs|Ms|Dr|St|vs|a\.m|p\.m|Jan|Feb|Aug|Sept|Oct|Nov|Dec)\.$", re.I)
+
+
+def split_sentences(text: str) -> list[str]:
+    """Sentences, without cutting at 'the U.S.' - which the first live night
+    brief did: 'According to MarketWatch, the U.S.' was sentence one."""
+    out: list[str] = []
+    for piece in re.split(r"(?<=[.!?])\s+", text):
+        if out and (_ABBREV.search(out[-1]) or re.search(r"\b[A-Z]\.$", out[-1])):
+            out[-1] = out[-1] + " " + piece
+        else:
+            out.append(piece)
+    return [p for p in out if p]
+
+
 def tidy_story(text: str) -> str:
     s = re.sub(r"\s+", " ", str(text or "")).strip().strip('"')
     s = re.sub(r"^(?:two sentences|summary|answer)\s*:\s*", "", s, flags=re.I)
-    parts = re.split(r"(?<=[.!?])\s+", s)
+    parts = split_sentences(s)
+    # a trailing fragment (the model ran out of tokens mid-sentence) is dropped
+    # rather than read aloud as a sentence that stops nowhere
+    if parts and not re.search(r"[.!?]$", parts[-1]):
+        parts = parts[:-1]
     s = " ".join(parts[:2]).strip()
     return s if len(s) > 20 else ""
 

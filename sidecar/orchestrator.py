@@ -2477,6 +2477,7 @@ class Orchestrator:
         spoke_any = False
         held_repeat: str | None = None
         dropped_repeat: str | None = None
+        lead_cut: tuple[str, str] | None = None
         for _round in range(8):
             round_text = ""
             pending = ""
@@ -2536,10 +2537,15 @@ class Orchestrator:
                                 dropped_repeat = held_repeat
                                 held_repeat = None
                             if not spoke_any:
+                                raw_first = sentence
                                 sentence, only_repeat = strip_repeat(sentence, prev_reply)
                                 if only_repeat:
                                     held_repeat = sentence
                                     continue
+                                if sentence != raw_first:
+                                    # "Lima, Santiago, sir." -> "Santiago, sir." for the
+                                    # ear; the transcript must say the same thing
+                                    lead_cut = (raw_first, sentence)
                             spoke_any = True
                             await speak_queue.put(clean_for_speech(sentence))
                 if chunk.done:
@@ -2554,7 +2560,10 @@ class Orchestrator:
                     dropped_repeat = held_repeat
                     held_repeat = None
                 if not spoke_any:
+                    raw_tail = tail
                     tail, _only = strip_repeat(tail, prev_reply)
+                    if tail != raw_tail:
+                        lead_cut = (raw_tail, tail)
                 spoke_any = True
                 await speak_queue.put(clean_for_speech(tail))
             elif held_repeat is not None:
@@ -2564,6 +2573,8 @@ class Orchestrator:
                 held_repeat = None
             if dropped_repeat and full_text.strip().startswith(dropped_repeat):
                 full_text = full_text.strip()[len(dropped_repeat):].strip()
+            if lead_cut and lead_cut[0] in full_text:
+                full_text = full_text.replace(lead_cut[0], lead_cut[1], 1)
 
             if not tool_calls:
                 if not round_text.strip() and empty_retries < 1:

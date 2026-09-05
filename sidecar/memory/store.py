@@ -211,6 +211,14 @@ class MemoryStore:
         for hours. Writing the history is bookkeeping. Losing it costs him a
         transcript; letting it raise costs him the assistant.
         """
+        if role == "assistant":
+            # The model still slips markdown out now and then ("*Moby Dick*");
+            # the ear never heard it and the screen should not read it either.
+            try:
+                from audio.speech_text import strip_markdown
+                content = strip_markdown(content)
+            except Exception:
+                pass
         try:
             self.db.execute("INSERT INTO transcript (ts, role, content) VALUES (?,?,?)",
                             (time.time(), role, content))

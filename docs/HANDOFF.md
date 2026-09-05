@@ -3783,6 +3783,20 @@ minutes; part of the "bring that back" snapshot.
   35-60 hidden reasoning tokens at 23 tok/s (`reasoning_effort` is already
   "low"). Not much left to take without faster hardware.
 
+### 13:20 — the Weather Service, and the morning brief (release 35)
+`nws.py`: api.weather.gov active alerts for the home point (no key; verified
+live - a Rip Current Statement for Southeast Middlesex that afternoon).
+Tiered like the news: a WARNING for a deadly kind (tornado, flash flood,
+severe thunderstorm, hurricane, blizzard, ice storm, extreme heat/cold...)
+or anything Extreme+Immediate is URGENT; another warning, or a deadly-kind
+WATCH, is ALERT; a watch/advisory/statement is NOTABLE and is held as
+`kind: weather` for the next brief's Weather section. `briefing.scan` runs
+it in the news lane; keys are the alert ids, remembered like headlines.
+The morning brief (`first`) opens with Weather ("67 and clear skies in
+Framingham, high of 78, low 55, 30 percent chance of rain") and Today
+(reminders due today). Release 34 carried the test mute that holds the
+phone, `/debug/ledger`, and the scout's "nothing" handed back.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

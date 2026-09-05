@@ -106,6 +106,19 @@ def main() -> int:
     check("landing on estimates is said", "landed on estimates" in low, low)
     check("no data is honest", "couldn't get a read" in mi.context_line({"symbol": "Q", "name": "Q"}))
 
+    print("\n-- sentences, with abbreviations intact --")
+    # the first live night brief read "According to MarketWatch, the U.S." and stopped
+    t = mi.tidy_story("According to MarketWatch, the U.S. stock market is mixed today, with energy "
+                      "shares falling. CNBC reports strategists expect a quiet week. A third sentence.")
+    check("'the U.S.' is not the end of a sentence",
+          t == "According to MarketWatch, the U.S. stock market is mixed today, with energy shares "
+               "falling. CNBC reports strategists expect a quiet week.", t)
+    t = mi.tidy_story("Stocks rose on Friday, according to the Journal. Energy shares fell amid job and")
+    check("a fragment the model never finished is dropped", t == "Stocks rose on Friday, according to the Journal.", t)
+    check("Inc. and Mr. do not split either",
+          mi.split_sentences("Apple Inc. rose. Mr. Cook spoke.") == ["Apple Inc. rose.", "Mr. Cook spoke."],
+          mi.split_sentences("Apple Inc. rose. Mr. Cook spoke."))
+
     print("\n-- the story, from the desks, through the model --")
     calls = []
 
