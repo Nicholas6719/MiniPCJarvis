@@ -66,13 +66,13 @@ DEFAULTS: dict[str, Any] = {
                 "gpu_full": True,   # fills the iGPU heap: the vision server must use the CPU
                 "note": "Smarter and quicker for text; vision runs on the CPU and RAM peaks ~96% on a 32 GB PC.",
             },
-            # ONE SLOT. This llama.cpp build defaults to FOUR (n_slots = 4 in its
-            # log), and the prompt cache is per slot: requests landed on slots
-            # 0, 1, 2 and 3 in turn, each with somebody else's prefix, and every
-            # ordinary turn re-processed the whole prompt — 4,066 / 4,287 /
-            # 4,613 tokens at ~290 tok/s, 14-16 s before the first token,
-            # measured on an idle machine on 2026-09-04. JARVIS is one voice;
-            # it needs one slot with one cache.
+            # NOT THE BUILD'S DEFAULT SLOT COUNT. This llama.cpp defaults to
+            # FOUR slots (n_slots = 4 in its log) and the prompt cache is per
+            # slot: requests landed on slots 0-3 in turn, each with somebody
+            # else's prefix, and every ordinary turn re-processed the whole
+            # prompt — 4,066 / 4,287 / 4,613 tokens at ~290 tok/s, 14-16 s
+            # before the first token, measured idle on 2026-09-04. The count
+            # is pinned below, and each prompt shape is pinned to its slot.
             "gpt-oss-20b": {
                 "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
                 # TWO slots, not one: slot 0 is the conversation and its cached
@@ -140,7 +140,11 @@ DEFAULTS: dict[str, Any] = {
                   # sentence was silently lost. Measured: 0.35 loses it, 1.5
                   # lands it. Raise it if an app ever swallows one.
                   "clipboard_restore_delay_s": 1.5},
-    "weather": {"home": "", "units": "fahrenheit"},   # home "" = locate by IP; set e.g. "Framingham, MA" to pin
+    # HOME IS FRAMINGHAM. "" meant "locate by IP", and his ISP's address
+    # geolocates to Cambridge — so every "what's the weather" was Cambridge's.
+    # He lives in Framingham, MA 01701; the phone's fresh location still wins
+    # when he is out (weather._phone_location).
+    "weather": {"home": "Framingham, MA", "units": "fahrenheit"},
     # --- the Evolution (2026-09-01) -------------------------------------
     # External binaries, same shape as llm.server_binary above: a path that may
     # not exist. Neither is installed on this machine today, so fabrication's
@@ -351,7 +355,7 @@ class Config:
 
     # Saved configs snapshot every default, so improved defaults never reach an
     # existing install on their own. Each migration runs once (tracked by version).
-    CONFIG_VERSION = 6
+    CONFIG_VERSION = 7
 
     def _migrate(self) -> bool:
         v = int(self.data.get("config_version", 1) or 1)
@@ -382,6 +386,15 @@ class Config:
                 t.update({"engine": "pocket", "voice": "george", "tempo": 0.97,
                           "seed": 2, "pocket_temp": 0.5, "polish": False,
                           "pronounce": dict(DEFAULTS["tts"]["pronounce"])})
+                changed = True
+        if v < 7:
+            # 2026-09-04: "I keep seeing weather for Cambridge, I live in
+            # Framingham MA 01701." A saved home of "" meant locate-by-IP, and
+            # the IP is in Cambridge. Only an EMPTY home is replaced — one he
+            # typed himself stays.
+            w = self.data.setdefault("weather", {})
+            if not str(w.get("home") or "").strip():
+                w["home"] = DEFAULTS["weather"]["home"]
                 changed = True
         if True:
             # built-in model entries are ours to tune: always mirror DEFAULTS (user-added untouched)
