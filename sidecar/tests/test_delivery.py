@@ -14,6 +14,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "gate.db"))
@@ -117,6 +118,22 @@ def main() -> int:
         r = asyncio.run(dv.delivery.deliver("A mildly interesting thing.", dv.NOTABLE))
         check("notable is held for the next brief", "held" in r["delivered"], r)
         check("...and is not sent on its own", tg.sent == [], tg.sent)
+
+        # --- a test mute holds the phone too ---------------------------------
+        # /debug/silence quietened only the speaker, and a render finished by a
+        # test while he was out went to his phone (2026-09-05 12:03).
+        orch, tg = setup(present=False)
+        dv.delivery.mute_until = time.time() + 60
+        r = asyncio.run(dv.delivery.deliver("Your duck is ready, sir.", dv.ALERT, key="render-done:1"))
+        check("muted: an alert is held, not sent", tg.sent == [] and r["why"] == "muted for a test", r)
+        check("...and the ledger says so", dv.delivery.ledger and dv.delivery.ledger[-1]["why"] == "muted for a test",
+              dv.delivery.ledger[-1:] )
+        r = asyncio.run(dv.delivery.deliver("Active shooter in Natick.", dv.URGENT, key="urgent:1"))
+        check("...but an emergency still reaches him", len(tg.sent) == 1, tg.sent)
+        dv.delivery.mute_until = 0.0
+        orch, tg = setup(present=False)
+        r = asyncio.run(dv.delivery.deliver("Your duck is ready, sir.", dv.ALERT, key="render-done:2"))
+        check("unmuted: it goes to the phone again", len(tg.sent) == 1, tg.sent)
 
         # --- nowhere to send it ----------------------------------------------
         orch, tg = setup(present=False, telegram=False)

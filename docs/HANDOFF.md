@@ -3760,6 +3760,29 @@ the same sections the phone gets. Opened by the scheduled brief
 (`briefing._maybe_brief` emits `brief`) and by `get_market_state`. Held two
 minutes; part of the "bring that back" snapshot.
 
+### 12:00 — release 32 verified, and what the afternoon found
+* The brief stage renders on the dev HUD at 1920x1080 (core shrunk left,
+  "THE MARKET", five gauges coloured by direction, The story / Experts /
+  Session). At the pane's 800x450 it sits ghosted behind the full orb - a
+  viewport artefact, not his display.
+* A HUD connecting to a RUNNING sidecar sat on the boot checklist until the
+  state next changed: the socket carries only changes. `connectEvents` now
+  asks `/health` on open (`sidecar.ts`); the dev page and any reconnect
+  show the true state at once. Release 33.
+* "go for it" live: "Starting now, sir - a few seconds." The duck rendered
+  (60 x 30 x 43 mm, on the stage). Two things seen: after "yes" the build
+  re-ran the scout's two searches because a scout that found NO model
+  hands nothing back (queued: hand the "none" back too); and the finished
+  render is announced through delivery, which routes to Telegram when he is
+  away - so a test render while he is out reaches his phone. `/debug/silence`
+  covers the speaker only. Queued: hold non-urgent deliveries while muted,
+  and a `/debug/ledger` endpoint so a test can check what was sent.
+* py-spy asleep: openWakeWord ~75% of the sidecar's 8% idle CPU, pycaw
+  endpoint enumeration 14% - the latter now runs once a minute (release 33).
+* Latency floor: brain 50-80 ms, memory 100-240 ms, prompt eval ~1 s, then
+  35-60 hidden reasoning tokens at 23 tok/s (`reasoning_effort` is already
+  "low"). Not much left to take without faster hardware.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

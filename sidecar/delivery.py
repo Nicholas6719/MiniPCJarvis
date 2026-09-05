@@ -138,6 +138,9 @@ class Delivery:
         self._last: dict[str, tuple[float, str]] = {}
         # timestamps of everything actually sent, for the hourly ceiling
         self._sent: list[float] = []
+        # a test mute (/debug/silence): until then, nothing short of URGENT
+        # is spoken OR sent - see _deliver
+        self.mute_until: float = 0.0
         self._capped_at = 0.0
         # WHAT HAPPENED WHILE HE WAS AWAY. Every proactive outcome — spoken,
         # sent to the phone, held back, budget — with its subject, so the
@@ -284,6 +287,14 @@ class Delivery:
             await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
             return {"delivered": "nothing", "why": "hourly message budget spent",
                     "tier": tier}
+        # A TEST MUTE HOLDS THE PHONE TOO. /debug/silence quietened the speaker
+        # and nothing else, so a render finished by a test while he was out
+        # went to Telegram as "your duck is ready" (2026-09-05 12:03). While
+        # muted, everything short of an emergency is held; an URGENT alert is
+        # the one thing a test must never be able to swallow.
+        if tier != URGENT and time.time() < self.mute_until:
+            await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
+            return {"delivered": "nothing", "why": "muted for a test", "tier": tier}
 
         present = is_present()
         # NOTABLE never interrupts and is not worth a message on its own: it

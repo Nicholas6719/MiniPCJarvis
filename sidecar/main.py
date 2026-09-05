@@ -732,7 +732,24 @@ async def debug_silence(body: dict, x_jarvis_token: str | None = Header(None)):
     from audio.io import speaker
     import time as _t
     speaker.silent_until = _t.time() + float(body.get("seconds", 600))
+    # ...and the phone. A test render finished while he was out went to
+    # Telegram (2026-09-05); a mute that covered only the speaker was not a
+    # mute. Emergencies still go through (delivery._deliver).
+    from delivery import delivery
+    delivery.mute_until = speaker.silent_until
     return {"ok": True, "until": speaker.silent_until}
+
+
+@app.get("/debug/ledger")
+async def debug_ledger(limit: int = 50, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only: what JARVIS said, sent or held on his own initiative -
+    so a test can PROVE nothing reached his phone, rather than assume it."""
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from delivery import delivery
+    rows = list(delivery.ledger)[-max(1, min(200, int(limit))):]
+    return {"count": len(rows), "muted": delivery.mute_until, "ledger": rows}
 
 
 @app.get("/debug/desktop")

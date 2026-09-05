@@ -268,13 +268,23 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
             # the next scout to remove (above). One on disk at a time.
             pic = (found.get("picture") or {}).get("path", "")
             _scout_pic = pic
+            # THE SCOUT'S "NOTHING" IS AN ANSWER TOO. It looked for a published
+            # model and found none; handing that back means the build does not
+            # run the same two searches again and fall back to tier 4 five
+            # seconds later (the duck, 2026-09-05). A scout that timed out is
+            # not "nothing", so tier 5 still gets its try then.
+            tier_after = 5 if fetch else t
+            if (tier_after == 5 and not fetch and not found.get("timed_out")
+                    and "model" in found):
+                log.info("scout found no model for %r; building from a picture", desc[:40])
+                tier_after = 4
             return {"_ask": {
                 "subject": label,
                 "question": ask,
                 "tool": "make_hologram",
                 # What he was shown is what gets used: looking again could find
                 # something else.
-                "args": {"description": desc, "tier": 5 if fetch else t, "name": name,
+                "args": {"description": desc, "tier": tier_after, "name": name,
                          "image_path": "", "confirmed": True,
                          "reference": pic, "detailed": detailed,
                          "scouted_model": (found.get("model") or {}) if fetch else {}},
