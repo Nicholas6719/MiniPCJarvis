@@ -207,7 +207,18 @@ def main() -> int:
               source="Patch")])
     bA._held = []
 
-    async def _sections_of(b):
+    # Market intelligence is faked: the story, the experts, the week ahead.
+    # What is gated here is where each lands, not what it says.
+    import market_intel as _mi
+
+    async def _fake_intel():
+        return [("The story", [("Stocks rose as the Fed signalled a cut, according to the Journal.",
+                                "Stocks rose as the Fed signalled a cut, according to the Journal. (WSJ)")]),
+                ("Experts", [("CNBC reports Goldman sees the S&P at 7,000", "Goldman sees the S&P at 7,000 (CNBC)")]),
+                ("Ahead", [("Earnings ahead: Apple on Thursday after the close", "Earnings ahead: Apple on Thursday after the close")])]
+    _mi.intel.brief_sections = _fake_intel
+
+    async def _sections_of(b, first=False):
         import tools.market_tools as mt
         mt.get_market_movers = lambda: _fake_dict({"markets": [
             {"symbol": "SPY", "name": "the S&P 500", "percent": -0.23}]})
@@ -216,7 +227,7 @@ def main() -> int:
             {"symbol": "SPCX", "name": "Space Exploration Techn-Cl A", "percent": 0.45}]})
         import analyst as _an
         _an.analyst.take = lambda limit=8: _fake_take()
-        secs = await b._sections()
+        secs = await b._sections(final=True, first=first)
         return secs, await b.compose_brief(secs), await b.compose_brief_written(secs)
 
     import analyst as _analyst_mod
@@ -231,6 +242,76 @@ def main() -> int:
     check("...with headings he can scan", "YOURS" in shown and "NEWS" in shown,
           shown[:120])
     check("the spoken brief has no bullets", "•" not in said, said[:120])
+
+    # --- the market as a story, in every brief; the week ahead in the morning ---
+    titles = [t for t, _l in secs]
+    check("the night brief carries the story and the experts",
+          "The story" in titles and "Experts" in titles, titles)
+    check("...after the numbers and before the news",
+          titles.index("Markets") < titles.index("The story") < titles.index("News"), titles)
+    check("...but not the week ahead, which is a morning thing", "Ahead" not in titles, titles)
+    check("the written story names its desk", "(WSJ)" in shown, shown)
+    m_secs, _m_said, _m_shown = asyncio.run(_sections_of(bA, first=True))
+    _analyst_mod.analyst.take = _real_take
+    check("the morning brief carries the week ahead", "Ahead" in [t for t, _l in m_secs],
+          [t for t, _l in m_secs])
+
+    # --- news belongs to the LAST brief of the day ------------------------------
+    # His instruction, 2026-09-05: by day only local and national emergencies
+    # reach him; the nightly brief tells him the general news. So the midday
+    # briefs carry markets and nothing else, and the night one reads the wire.
+    async def _day_sections(b):
+        import tools.market_tools as mt
+        mt.get_market_movers = lambda: _fake_dict({"markets": [
+            {"symbol": "SPY", "name": "the S&P 500", "percent": -0.23}]})
+        mt.get_watchlist = lambda: _fake_dict({"stocks": []})
+        import analyst as _an
+        _an.analyst.take = lambda limit=8: _fake_take()
+        return await b._sections(final=False)
+    bA._held = [{"kind": "news", "text": "Framingham road closed for a week", "why": ""}]
+    day = asyncio.run(_day_sections(bA))
+    _analyst_mod.analyst.take = _real_take
+    titles = [t for t, _l in day]
+    check("a midday brief carries no news", "News" not in titles and "Also" not in titles, titles)
+    check("...and the held items wait for the night", len(bA._held) == 1, bA._held)
+    check("20:00 is the final slot", br.Briefing.is_final_slot("20:00", br.DEFAULT_TIMES))
+    check("...and 12:30 is not", not br.Briefing.is_final_slot("12:30", br.DEFAULT_TIMES))
+    check("the last slot is the latest time, wherever it sits in the list",
+          br.Briefing.is_final_slot("21:15", ["21:15", "07:30"]))
+
+    # The night brief is GENERAL news, ranked: emergencies, then near him, then
+    # national weight, then the wire. Under emergencies-only, the old ranking
+    # threw away everything but emergencies - a night brief with nothing in it.
+    bC = br.Briefing()
+    wire = [story("Senate passes budget bill after late-night session", source="NPR"),
+            story("New Zealand wins Rugby World Cup", source="BBC"),
+            story("Gas leak forces evacuations in Framingham", source="WCVB"),
+            story("MBTA adds weekend commuter rail service to Framingham", source="MassLive"),
+            story("President signs executive order on tariffs", source="CBS"),
+            story("Senate approves budget bill following overnight session", source="CBS")]
+    for w in wire:
+        if w["source"] in ("WCVB", "MassLive"):
+            w["_local_feed"] = True
+    wire.append(story("Framingham library extends weekend hours", source="Patch"))
+    wire[-1]["_local_feed"] = True
+    # an actor's illness reprinted by MassLive is not Massachusetts news
+    wire.insert(2, story("'Blue Bloods' actor had weird symptom before being diagnosed "
+                         "with terminal cancer", source="MassLive"))
+    wire[2]["_local_feed"] = True
+    picked = [s["headline"] for s in bC.rank_for_brief(wire, 5)]
+    check("the emergency leads the night brief", picked and "Gas leak" in picked[0], picked)
+    check("...then the country and his ground, turn and turn about",
+          len(picked) > 2 and "President" in picked[1] and "MBTA" in picked[2], picked)
+    check("...then the wire, so he is still informed",
+          any("Senate" in p for p in picked[3:]) and any("Rugby" in p for p in picked[3:]), picked)
+    check("...and local colour comes last, if at all",
+          not any("library" in p for p in picked)
+          and "library" in bC.rank_for_brief(wire, 8)[-1]["headline"], picked)
+    check("an actor's illness off a local desk is colour, not the night's news",
+          not any("Blue Bloods" in p for p in picked), picked)
+    check("the same story off two desks is one story",
+          sum("Senate" in p for p in picked) == 1, picked)
+    check("the count is honoured", len(bC.rank_for_brief(wire, 3)) == 3)
 
     # the two must not disagree about the numbers, only about their shape
     check("the screen shows a signed percentage", "-4.07%" in shown, shown)
@@ -317,7 +398,7 @@ def main() -> int:
             return "brief"
         bD.compose_brief = compose
         bD.compose_brief_written = compose
-        bD._sections = lambda: compose()
+        bD._sections = lambda final=False, first=False: compose()
         br._now = lambda: at
         rec.sent.clear()
         await bD._maybe_brief()
@@ -362,6 +443,10 @@ def main() -> int:
         import tools.market_tools as mt
         mt.get_market_movers = lambda: _fake_dict({})
         mt.get_watchlist = lambda: _fake_dict({})
+
+        async def no_intel():
+            return []
+        _mi.intel.brief_sections = no_intel      # the desks have nothing either
         return await b5.compose_brief()
     text = asyncio.run(nothing_at_all())
     check("a quiet day says so rather than padding", "Nothing worth reporting" in text,

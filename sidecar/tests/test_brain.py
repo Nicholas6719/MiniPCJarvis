@@ -99,6 +99,10 @@ CASES = [
     ("goodnight", "sleep"), ("thank you", "thanks"),
     # markets and news (2026-08-27). Prices and headlines are realm 2 — the point
     # of routing them is that they reach a LIVE tool, never the model's memory.
+    # a unit conversion is the math reflex's, not the model's (2026-09-05: "how
+    # many milliliters in a US cup" was met with "did you mean render that in 3D")
+    ("how many milliliters in a US cup", "math"), ("convert 5 miles to kilometers", "math"),
+    ("what's 30 celsius in fahrenheit", "math"), ("how many feet in a mile", "math"),
     ("what's apple trading at", "quote"), ("how is nvidia stock doing", "quote"),
     # by TICKER, and by tickers that are NOT among the seeds — the shape has to
     # generalise, or typing "NVDA" from the phone falls through to the LLM,
@@ -112,6 +116,14 @@ CASES = [
     ("what is the price of an RTX 5090", None),
     ("what do analysts say about tesla", "analyst"), ("is nvidia a buy", "analyst"),
     ("how's the market doing", "markets"), ("how are the markets", "markets"),
+    # the market as a story (2026-09-05): what is driving it, what experts say
+    ("what's going on in the market", "markets"), ("why is the market down today", "markets"),
+    ("what's driving stocks today", "markets"),
+    ("any earnings this week", "earnings"), ("when does apple report earnings", "earnings"),
+    ("who's reporting earnings tomorrow", "earnings"),
+    ("tell me about nvidia stock", "stock_context"),
+    ("what should i know about apple stock", "stock_context"),
+    ("give me the full picture on tesla", "stock_context"),
     # HIS stocks are a different question from THE market, and the two sit close
     # enough in phrasing that it is worth pinning them apart
     # the handoff: "it" is whatever he was just told about

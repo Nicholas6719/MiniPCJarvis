@@ -8,7 +8,11 @@ for pkg in ["faster_whisper", "piper", "fastembed", "onnxruntime", "tokenizers",
             "openwakeword", "trafilatura", "pycaw", "comtypes",
             "kokoro_onnx", "playwright", "mcp",
             "espeakng_loader", "phonemizer", "num2words", "cssselect", "lxml",
-            "onnx_asr", "winocr"]:
+            "onnx_asr", "winocr",
+            # courlan (trafilatura's URL cleaner) reads tld/res/*.dat.txt; without
+            # the package's data it tries to DOWNLOAD the public suffix list into
+            # the bundle on every fetch, cannot, and logs an ERROR each time.
+            "tld"]:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

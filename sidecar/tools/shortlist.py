@@ -94,12 +94,24 @@ class ToolShortlist:
         self._sticky: list[str] = []          # first-seen order
         self._last_wanted: dict[str, int] = {}
         self._tick = 0
+        # Bumped whenever the block changes shape. The orchestrator re-warms
+        # slot 0 in the background when it sees a version it has not warmed:
+        # a changed block means the next tools-shape turn re-reads everything
+        # after the change (2,185 of 7,370 tokens, 9 s, measured on release
+        # 28), and that is a cost to pay while he is not waiting.
+        self.block_version = 0
+
+    def current_block(self, registry) -> list[dict]:
+        """The block as it stands, for a re-warm: the sticky order, nothing added."""
+        return [registry._tools[n].openai_schema() for n in self._sticky
+                if n in registry._tools]
 
     def stable_order(self, wanted: set[str]) -> list[str]:
         """`wanted` merged into the session's sticky block, order preserved."""
         self._tick += 1
         for n in wanted:
             self._last_wanted[n] = self._tick
+        before = len(self._sticky)
         for n in sorted(wanted):
             if n not in self._sticky:
                 self._sticky.append(n)
@@ -109,6 +121,9 @@ class ToolShortlist:
             keep |= wanted                     # never drop what this turn asked for
             self._sticky = [n for n in self._sticky if n in keep]
             log.info("tool block trimmed to %d (cache re-read this turn)", len(self._sticky))
+            self.block_version += 1
+        elif len(self._sticky) != before:
+            self.block_version += 1
         return list(self._sticky)
 
     async def build(self, registry) -> None:

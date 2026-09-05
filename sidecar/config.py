@@ -90,9 +90,18 @@ DEFAULTS: dict[str, Any] = {
                 # read timeout, and three live suites failed. A full SWA cache
                 # needs no checkpoints (~0.8 GB more at this context) and is
                 # what makes the prefix cache honest for an SWA model anyway.
+                # THREE slots since 2026-09-05: 0 the tools-shape conversation,
+                # 1 the no-tools shape, 2 every side call. With two, the side
+                # calls (news summaries, the market story, the fact classifier)
+                # shared slot 1 with the no-tools conversation and evicted its
+                # 1.8k-token prefix: measured on release 27, a knowledge
+                # question right after a brief re-read 1,813 tokens (7.4 s to
+                # the first word) instead of ~260 (1.2 s). 16k per slot as
+                # before; the third costs ~0.8 GB of KV cache, which the 28 GB
+                # machine has.
                 "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256",
-                         "-np", "2", "--swa-full"],
-                "context": 32768,
+                         "-np", "3", "--swa-full"],
+                "context": 49152,
                 "template_kwargs": {"reasoning_effort": "low"},
                 "reasoning_field": "reasoning_content",
             },
@@ -242,6 +251,13 @@ DEFAULTS: dict[str, Any] = {
         # settled here: emergencies and things that change his day, and
         # nothing that merely "waits for the brief".
         "news_mode": "emergencies",
+        # Which briefs carry a news section: "last" | "all" | "none". His
+        # instruction of 2026-09-05: by day only local and national
+        # emergencies reach him; the last brief of the day tells him the
+        # general news so he stays informed. The midday briefs are markets only.
+        "news_in_briefs": "last",
+        # How many stories the night brief reads and summarises.
+        "night_news_count": 5,
         # Massachusetts, weighted to the five towns he named. The whole
         # state is wanted; these come first.
         # Publisher desks with REAL article URLs, so stories can be read and

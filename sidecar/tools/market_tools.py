@@ -17,6 +17,7 @@ recommendation trends. Rate limiting is handled here rather than discovered.
 from __future__ import annotations
 
 import asyncio
+import re
 import datetime as dt
 import logging
 import time
@@ -88,6 +89,12 @@ async def _rate_limit() -> None:
 # time regardless. A 403 is not a hiccup; it is "not on your plan", and it is
 # remembered for the life of the process.
 _forbidden: set[str] = set()
+_TOKEN = re.compile(r"token=[A-Za-z0-9]+")
+
+
+def _redact(err) -> str:
+    """The error, with his API key taken out of the URL."""
+    return _TOKEN.sub("token=***", str(err))
 
 
 async def _get(path: str, **params) -> dict | list | None:
@@ -137,9 +144,11 @@ async def _get(path: str, **params) -> dict | list | None:
             # get_watchlist took 18.6s and market_take timed out completely.
             # Retrying the cheap failure fixes the burst; retrying the expensive
             # one just moves the outage from "missing data" to "no answer".
-            log.warning("finnhub %s failed: %s", path, e)
+            # His API key is in the URL httpx puts in the message. Twelve
+            # hundred lines of the real log carried it in the clear.
+            log.warning("finnhub %s failed: %s", path, _redact(e))
             return {"_error": f"the market data service didn't answer ({type(e).__name__})"}
-    log.warning("finnhub %s failed after 3 tries: %s", path, last)
+    log.warning("finnhub %s failed after 3 tries: %s", path, _redact(last))
     return {"_error": f"the market data service didn't answer ({last})"}
 
 

@@ -498,6 +498,32 @@ def say_take(_s: dict, res: dict) -> str:
     return res.get("spoken") or "I couldn't get a read on the market right now."
 
 
+def say_spoken(_s: dict, res: dict) -> str:
+    """Market intelligence composes its own speech (market_intel.py): the
+    numbers as a sentence, the story from the desks, the experts. Rebuilding
+    it here would turn it back into the list of prices he rejected."""
+    if "error" in res:
+        return res["error"]
+    return res.get("spoken") or "I couldn't get a read on that just now."
+
+
+_EARNINGS_WINDOW = [
+    (re.compile(r"\btoday\b", re.I), 1),
+    (re.compile(r"\btomorrow\b", re.I), 2),
+    (re.compile(r"\bnext (?:two|2) weeks\b|\bfortnight\b", re.I), 14),
+    (re.compile(r"\bnext week\b", re.I), 14),
+    (re.compile(r"\bthis week\b|\bcoming (?:days|week)\b", re.I), 7),
+]
+
+
+def slots_earnings(t: str) -> dict | None:
+    """'any earnings this week' -> 7 days; 'tomorrow' -> 2; default a week."""
+    for pat, days in _EARNINGS_WINDOW:
+        if pat.search(t):
+            return {"days": days}
+    return {}
+
+
 def say_watchlist(_s: dict, res: dict) -> str:
     """His own names, biggest mover first — that is the one he wants to hear."""
     if "error" in res:
@@ -1686,7 +1712,11 @@ def say_remember(slots: dict, res: dict) -> str:
 def say_stats(_: dict, res: dict) -> str:
     free = float(res.get("disk_c_free_gb", 0) or 0)
     space = f"{free / 1000:.1f} terabytes" if free >= 1000 else f"{round(free)} gigabytes"
-    return (f"CPU is at {round(res.get('cpu_percent', 0))} percent, memory at "
+    cpu = float(res.get("cpu_percent", 0) or 0)
+    # "CPU is at 0 percent" is true of an idle machine and sounds like a
+    # broken sensor. Say what it means.
+    load = "CPU is idle" if cpu < 1 else f"CPU is at {round(cpu)} percent"
+    return (f"{load}, memory at "
             f"{round(res.get('ram_percent', 0))} percent, with about {space} free.")
 
 
@@ -1999,7 +2029,13 @@ SKILLS: list[Skill] = [
         "what's 20 percent of 150", "what's the square root of 81", "what's 2 to the power of 10",
         "what's 9 squared", "calculate 7 times 8", "how much is 14 times 12",
         "what's 100 minus 37", "seventeen times twenty three", "half of 30",
-        "what does 6 times 7 make", "what's 3 point 5 times 2"],
+        "what does 6 times 7 make", "what's 3 point 5 times 2",
+        # unit conversions are arithmetic with a table (brain/units.py)
+        "how many milliliters in a cup", "how many ounces in a pound",
+        "convert 5 miles to kilometers", "what's 30 celsius in fahrenheit",
+        "how many feet in a mile", "how many grams in an ounce",
+        "convert 2 liters to gallons", "how many cups in a quart",
+        "what's 70 fahrenheit in celsius", "10 kilometers in miles"],
         slots=_mathskill.slots, speak=_mathskill.say),
     Skill("time", None, [
         "what time is it", "what's the time", "tell me the time", "do you have the time",
@@ -2609,11 +2645,34 @@ SKILLS: list[Skill] = [
         "any stocks worth looking at", "is now a good time to buy",
         "what's worth buying", "what are the top stocks today"],
         speak=say_take),
-    Skill("markets", "get_market_movers", [
+    # THE MARKET AS A STORY, not three percentages. His instruction, 2026-09-05:
+    # "he mentions stocks now but I need more intelligent info". The tool
+    # answers with the indexes, then what is driving them according to the
+    # desks (the Journal, MarketWatch, CNBC, Reuters), then what strategists
+    # are saying - each attributed. get_market_movers stays for the model.
+    Skill("markets", "get_market_state", [
         "how's the market doing", "how are the markets", "how did the market close",
         "what's the market doing today", "how's the stock market", "are the markets up",
-        "how's the s and p doing", "market check"],
-        speak=say_markets),
+        "how's the s and p doing", "market check",
+        "what's going on in the market", "why is the market down today",
+        "why are stocks up today", "what's driving the market", "what's moving the market",
+        "what's driving stocks today", "what's behind the move in stocks",
+        "give me a market update", "what's the story in the markets today",
+        "what's happening with the market", "what are the experts saying about the economy"],
+        speak=say_spoken),
+    Skill("earnings", "get_earnings_ahead", [
+        "any earnings this week", "who reports earnings this week", "when does apple report earnings",
+        "what earnings are coming up", "earnings calendar", "who's reporting this week",
+        "any big earnings coming up", "when does nvidia report", "what companies report this week",
+        "anything reporting tomorrow"],
+        slots=slots_earnings, speak=say_spoken),
+    Skill("stock_context", "get_stock_context", [
+        "tell me about nvidia stock", "what should i know about apple stock",
+        "give me the picture on tesla", "give me the full picture on amazon",
+        "what's the story with microsoft stock", "break down apple stock for me",
+        "tell me about tesla shares", "what's the situation with nvidia stock",
+        "give me a rundown on apple stock", "how is amazon looking as a stock"],
+        slots=slots_analyst, speak=say_spoken),
     Skill("news", "get_news", [
         "what's in the news", "give me the news", "what's happening in the world",
         "catch me up on the news", "any news today", "what's the latest news",
@@ -2794,7 +2853,7 @@ SKILLS.append(Skill("general", None, [
     "what's the tallest mountain", "who wrote hamlet", "what year did world war two end",
     "how do airplanes fly", "what's the speed of light", "is a tomato a fruit",
     "what rhymes with orange", "write a short poem", "tell me a story", "what's a synonym for happy",
-    "how do you spell necessary", "what is 15 percent of 80", "how many ounces in a pound",
+    "how do you spell necessary", "how many bones are in the human body",
     "what does carpe diem mean", "why do cats purr", "how long do elephants live"]))
 
 # ---------------------------------------------------------------- confirming
@@ -2817,6 +2876,33 @@ CONFIRM_AS = {
     "images": "show you pictures of that",
     "model_find": "look for a model of that",
 }
+
+
+# A sentence that is asking something. The near-miss question ("Did you mean
+# X, sir?") is for orders he half-gave, never for questions he fully asked.
+QUESTION_LEAD = re.compile(
+    r"^\s*(?:hey |hi |ok |okay )?(?:jarvis[,!.]?\s*)?"
+    r"(?:how (?:many|much|far|long|tall|old|big|heavy|fast|hot|cold)\b|"
+    r"what(?:'s| is| are| was| were| does| do|'re)\b|who(?:'s| is| was| wrote| made)?\b|"
+    r"whom\b|whose\b|when (?:is|was|did|does|do|will)\b|where (?:is|was|are|do|does)\b|"
+    r"why\b|which\b|is there\b|are there\b|does\b|do you know\b)", re.I)
+
+# Skills that ANSWER a question - the only ones a question may be a near-miss for.
+QUERY_SKILLS = frozenset({
+    "time", "date", "clock", "weather", "stats", "windows", "clipboard", "math",
+    "quote", "analyst", "markets", "market_take", "watchlist", "earnings", "stock_context",
+    "news", "breaking", "general", "recall", "protocols", "briefing", "tasks", "reminders",
+    "battery", "volume_get", "where_am_i", "screen", "read_screen", "camera", "face",
+})
+
+
+def ask_allowed(text: str, skill: str) -> bool:
+    """May "Did you mean <skill>, sir?" be asked for this sentence?
+
+    Not when the sentence is a question and the skill is an action. "How many
+    milliliters in a US cup" ranked holo_make at 0.68 and he was asked whether
+    he meant a 3D render - a wrong answer that also needs a reply."""
+    return not (QUESTION_LEAD.match(text or "") and skill not in QUERY_SKILLS)
 
 
 def confirm_as(name: str) -> str:

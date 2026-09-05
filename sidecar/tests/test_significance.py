@@ -97,6 +97,21 @@ def main() -> int:
                  "Hundreds dead as earthquake levels city"):
         check(f"reaches him: {huge[:42]!r}", tier(huge) == URGENT, tier(huge))
 
+    # A foreign story is judged by its HEADLINE. On 2026-09-05 this one reached
+    # his phone as URGENT and chased him for an acknowledgement: peace talks,
+    # with the war they are about in the summary. The body of a story about a
+    # war is full of the war; only the headline can say the emergency is now.
+    talks = ("US envoys in Moscow in new push for peace between Russia and Ukraine",
+             "Steve Witkoff and Jared Kushner arrived in Moscow for talks with Vladimir "
+             "Putin, more than three years after Russia's full-scale invasion of "
+             "Ukraine. Missile strikes on Kyiv continued overnight.")
+    check("peace talks are not an attack, whatever the background says",
+          tier(*talks) == NONE, tier(*talks))
+    check("...but an attack on us abroad still is",
+          tier("Russia launches missile strikes on US base in Poland",
+               "The Pentagon confirmed the strikes.") == URGENT,
+          tier("Russia launches missile strikes on US base in Poland"))
+
     # --- somebody else's country is not "the country" -------------------------
     # On 2026-08-31 at 1:42pm he was sent "Nepal rescuers blast hillside in search
     # of hydropower workers" and then chased about it twice. The BBC summary said

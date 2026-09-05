@@ -68,6 +68,25 @@ def main() -> int:
         got = M.parse(said)
         check(f"{said!r} is not a sum", got is None, got)
 
+    print("\n-- unit conversions are arithmetic with a table --")
+    # "how many milliliters in a US cup" was answered with "Did you mean render
+    # that in 3D, sir?" on 2026-09-05. A conversion is the math reflex's job.
+    for said, want in (("how many milliliters in a US cup", "1 cup is about 236.6 milliliters."),
+                       ("How many milliliters are in a cup?", "1 cup is about 236.6 milliliters."),
+                       ("convert 5 miles to kilometers", "5 miles is about 8.05 kilometers."),
+                       ("what's 30 celsius in fahrenheit", "30 degrees celsius is 86 degrees fahrenheit."),
+                       ("what's 70 fahrenheit in celsius", "70 degrees fahrenheit is 21.1 degrees celsius."),
+                       ("how many feet in a mile", "1 mile is 5,280 feet."),
+                       ("how many ounces in a pound", "1 pound is 16 ounces."),
+                       ("how many cups in 2 quarts", "2 quarts is 8 cups."),
+                       ("10 kilometers in miles", "10 kilometers is about 6.21 miles."),
+                       ("how many gigs in a terabyte", "1 terabyte is 1,000 gigabytes."),
+                       ("convert 3 pounds to liters",
+                        "I'm afraid pounds and liters measure different things, sir.")):
+        got = M.parse(said)
+        check(f"{said!r}", bool(got) and got.get("said") == want, got and got.get("said"))
+    check("a unit the table does not know is left alone", M.parse("how many furlongs in a mile") is None)
+
     print("\n-- nothing he says can run as code --")
     for said in ("what's __import__('os').system('dir')", "1 + 1; import os", "2 ** 100000000",
                  "what's 9 to the power of 9 to the power of 9"):

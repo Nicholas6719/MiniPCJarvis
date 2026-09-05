@@ -18,6 +18,13 @@ import statistics
 import sys
 import time
 
+# The console is cp1252 and the model writes narrow no-break spaces; the
+# suite crashed mid-run on one (release 27), which is not a JARVIS failure.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import httpx
 import websockets
 

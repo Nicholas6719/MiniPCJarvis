@@ -311,7 +311,7 @@ OURS = re.compile(
     r"white house|congress|federal|nationwide|homeland)\b")
 
 
-def national_emergency(text: str) -> bool:
+def national_emergency(text: str, headline: str = "") -> bool:
     """Would everyone in the country need to hear about this?
 
     Deliberately narrow, and measured against a live wire rather than imagined:
@@ -325,6 +325,15 @@ def national_emergency(text: str) -> bool:
     # every American needs on their phone in the middle of the afternoon.
     if FOREIGN.search(text) and not OURS.search(text):
         return False
+    # A FOREIGN STORY IS JUDGED BY ITS HEADLINE. On 2026-09-05 at 07:19 "US
+    # envoys in Moscow in new push for peace between Russia and Ukraine" went
+    # to his phone as URGENT and chased him for an acknowledgement. Nothing in
+    # the headline is an emergency; the summary's background - "Russia's
+    # full-scale invasion of Ukraine", the overnight missile strikes - matched
+    # ATTACK. The body of a story about a war is full of the war. If the thing
+    # itself is the emergency, the headline says so.
+    if headline and FOREIGN.search(text):
+        text = headline
     return bool(SYSTEMIC.search(text) or ATTACK.search(text)
                 or CATASTROPHIC_TOLL.search(text)
                 or (NATIONWIDE.search(text) and (HAZARD.search(text)
@@ -537,7 +546,7 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
         # One door stays open, and only one: the thing everyone in the country
         # is going to hear about. Everything else that happens elsewhere - and
         # that is nearly all of it - stops here.
-        if national_emergency(text):
+        if national_emergency(text, headline=str(story.get("headline") or "")):
             return URGENT, "the whole country needs to know this"
         return NONE, "not local, and not something the country needs to know"
     hazard = bool(HAZARD.search(text))

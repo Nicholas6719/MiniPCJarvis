@@ -39,12 +39,14 @@ class LocalLLM:
         max_tokens: int = 1024,
         tool_choice: str | None = None,
         sampling: dict | None = None,
-        slot: int = 1,
+        slot: int = 2,
     ) -> AsyncIterator[Chunk]:
-        """`slot` 0 is the CONVERSATION and its cached prefix; anything else is
-        a side call (fact classifier, night school, newsroom, part generation)
-        and goes to slot 1 when the server has one, so it cannot evict the
-        conversation's cache. On a one-slot server the field is omitted."""
+        """`slot` 0 is the CONVERSATION with tools and its cached prefix, 1 the
+        conversation without tools; anything else is a side call (fact
+        classifier, night school, newsroom, the market story, part generation)
+        and goes to the LAST slot the server has, so it cannot evict either
+        conversation cache. On a two-slot server that is slot 1 again; on a
+        one-slot server the field is omitted."""
         model_name = llama.model_name or config.get("llm", "active_model")
         mcfg = config.get("llm", "models", default={}).get(model_name, {})
         body: dict[str, Any] = {

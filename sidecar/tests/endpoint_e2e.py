@@ -101,7 +101,9 @@ async def main() -> int:
     check("a dangling one gets the patient budget", db == 1900, f"{db} ms")
     fs, ds = fin.get("silence_ms") or 0, dang.get("silence_ms") or 0
     check("he really did cut the finished one early", 0 < fs < 900, f"{fs} ms")
-    check("and really did hold on for the dangling one", ds > 1900, f"{ds} ms")
+    # >= : the budget IS the hold. Release 27 measured exactly 1900 ms of
+    # silence against a 1900 ms budget and this read it as giving up early.
+    check("and really did hold on for the dangling one", ds >= 1900, f"{ds} ms")
     # The endpoint check transcribed this audio already; doing it twice is
     # ~1.5 s of dead air on every single turn.
     ms = fin.get("stt_ms")

@@ -291,6 +291,26 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(move |window, event| {
+            // A MINIMISED WEBVIEW2 KEEPS RENDERING. wry only stops resizing the
+            // control on SIZE_MINIMIZED; it never tells WebView2 the window is
+            // gone, so document.hidden stays false, the rails and the reactor
+            // keep animating, and the renderer plus the GPU process sat at ~30%
+            // of a core all night with JARVIS asleep in the taskbar. WebView2's
+            // own guidance is to set IsVisible(false) while minimised. Restore
+            // is the same event with the other answer.
+            if let WindowEvent::Resized(_) = event {
+                if window.label() == "main" {
+                    let minimized = window.is_minimized().unwrap_or(false);
+                    if let Some(wv) = window.app_handle().get_webview_window("main") {
+                        let _ = wv.with_webview(move |pw| {
+                            #[cfg(windows)]
+                            unsafe {
+                                let _ = pw.controller().SetIsVisible((!minimized).into());
+                            }
+                        });
+                    }
+                }
+            }
             // Close button = full shutdown, immediately: kill the backend
             // (which takes the model server and any in-progress speech with
             // it) and exit. The tray "Exit" does the same.

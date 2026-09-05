@@ -36,7 +36,7 @@ from config import config
 from events import bus, spawn
 from llm.llama_server import llama
 from brain.skills import want_honorific
-from llm.prompts import system_prompt, turn_context
+from llm.prompts import pinned_block, system_prompt, turn_context
 from llm.provider import local_llm
 from memory.store import memory
 from state_machine import State, StateMachine
@@ -564,6 +564,10 @@ class Orchestrator:
         if self.sm.state in keep or not self._turn_is_current():
             return
         await self.sm.to(State.IDLE, force=True)
+        # The turn may have changed the tool block; if so, re-read the tools
+        # prefix now rather than on his next question (see _rewarm_tools_shape).
+        if getattr(self, "_warmed_block", None) != shortlist.block_version:
+            asyncio.create_task(self._rewarm_tools_shape())
 
     async def stand_down(self) -> dict:
         """End the conversation window now. He is done talking.
@@ -782,7 +786,7 @@ class Orchestrator:
                     continue
                 # ...and a mic that FAILED to reopen last time gets another go,
                 # rather than staying dead because nothing was open to heal.
-                if mic._stream is None and time.time() - last_heal > 60 \
+                if mic.failed and mic._stream is None and time.time() - last_heal > 60 \
                         and self.sm.state in (State.IDLE, State.SLEEPING):
                     last_heal = time.time()
                     await reopen("earlier failure")
@@ -845,7 +849,7 @@ class Orchestrator:
     async def _warm_prompts(self) -> None:
         """Pay the prompt-cache cost for both prefix variants (with tools / without) in the
         background at boot, so the user's first real question isn't the slow one (~12 s)."""
-        sysmsg = {"role": "system", "content": system_prompt()}
+        sysmsg = {"role": "system", "content": system_prompt(pinned_block(memory.list_pinned()))}
         user = {"role": "user", "content": turn_context("") + chr(10) + "hi"}
         # The tools variant warms the block a session actually STARTS with
         # (the always-offered set in sticky order), not the full registry in
@@ -859,7 +863,39 @@ class Orchestrator:
             except Exception as e:
                 log.info("prompt warm skipped: %s", e)
                 return
+        self._warmed_block = shortlist.block_version
         log.info("prompt cache warmed (tools + no-tools prefixes)")
+
+    async def _rewarm_tools_shape(self) -> None:
+        """Re-read the tools-shape prefix in the background when the block changed.
+
+        A turn that used a tool outside the sticky block changes the block, and
+        the NEXT tools-shape turn then re-reads everything after the change -
+        2,185 of 7,370 tokens, nine seconds to the first word, measured on
+        release 28 right after the suites. Pay it now, while he is not
+        waiting, on slot 0, one token, only when nothing else is going on.
+        """
+        await asyncio.sleep(3.0)
+        try:
+            if getattr(self, "_warmed_block", None) == shortlist.block_version:
+                return
+            if self.sm.state not in (State.IDLE, State.SLEEPING) or not getattr(self, "_llm_ready", True):
+                return
+            version = shortlist.block_version
+            tools = shortlist.current_block(registry)
+            if not tools:
+                return
+            sysmsg = {"role": "system", "content": system_prompt(pinned_block(memory.list_pinned()))}
+            user = {"role": "user", "content": turn_context("") + chr(10) + "hi"}
+            t0 = time.time()
+            async for _ in local_llm.stream([sysmsg, user], tools=tools, max_tokens=1, slot=0):
+                pass
+            self._warmed_block = version
+            log.info("tools prefix re-warmed (%d tools) in %.1f s", len(tools), time.time() - t0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("tools prefix re-warm skipped: %s", e)
 
     async def _audio_boot(self) -> None:
         """Warm STT/TTS/wake and open the mic; start the listening loops. Failures
@@ -1421,6 +1457,16 @@ class Orchestrator:
             return False
         if brain.was_rejected(text, name):
             return False        # he has already told me no to exactly this
+        # A QUESTION IS NOT A NEAR-MISS FOR AN ACTION. "How many milliliters in
+        # a US cup" ranked holo_make at 0.68 and he was asked "Did you mean
+        # render that in 3D, sir?" - which is worse than a wrong answer,
+        # because it is a wrong answer that also needs a reply. If he is
+        # asking how many, who, when or why, the model answers; only a skill
+        # that itself answers questions may still be offered.
+        from brain.skills import ask_allowed
+        if not ask_allowed(text, name):
+            log.info("not asking about %s: '%s' is a question, not an order", name, text[:60])
+            return False
         from brain.skills import confirm_as
         say = confirm_as(name)
         if not say:
@@ -1599,6 +1645,7 @@ class Orchestrator:
                     text, context=_with_last_skill(self, _screen_context()))
             except Exception:
                 log.exception("brain decide failed - falling back to the LLM")
+        self.metrics.mark("brain_ms")
         if reflex and (not reflex[0].llm_after
                        or (reflex[0].direct_if is not None and reflex[0].direct_if(text))):
             await self._reflex_turn(text, reflex, t_start)
@@ -1658,15 +1705,19 @@ class Orchestrator:
         except Exception:
             log.exception("memory search failed — continuing without recall")
             mem_hits = []
+        self.metrics.mark("memory_ms")
+        # PINNED MEMORIES LIVE IN THE SYSTEM PROMPT, not in the turn note. They
+        # change once a week; the turn note changes every minute. Carrying ten
+        # of them in the note made them part of the ~300 tokens the model had
+        # to read afresh on every turn, at five milliseconds a token.
         pinned = memory.list_pinned()
-        lines = [f"- {p}" for p in pinned]
-        lines += [f"- {m['content']}" for m in mem_hits
-                  if m["content"] not in pinned]
+        lines = [f"- {m['content']}" for m in mem_hits
+                 if m["content"] not in pinned]
         mem_ctx = "\n".join(lines)
 
         # Static prefix (persona + tools) is identical every turn -> KV-cache hit.
         # Time + memories ride along inside the latest user message instead.
-        messages: list[dict] = [{"role": "system", "content": system_prompt()}]
+        messages: list[dict] = [{"role": "system", "content": system_prompt(pinned_block(pinned))}]
         # The window START must not move every turn. `self._history[-10:]`
         # advanced by two entries per turn, so everything after the tool block
         # was new text and llama.cpp re-processed the lot - the prompt cache
@@ -2422,6 +2473,7 @@ class Orchestrator:
             # re-read ~5k tokens (21-22 s, measured on release 20 while every
             # same-shape turn took 1.5-3.5 s). The no-tools shape lives on the
             # side slot, where it keeps its own prefix.
+            self.metrics.mark("llm_sent_ms")
             async for chunk in local_llm.stream(messages, tools=round_tools, max_tokens=4096,
                                                 tool_choice=None if choice == "none" else choice,
                                                 sampling=sampling,

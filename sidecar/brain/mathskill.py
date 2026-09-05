@@ -203,6 +203,13 @@ def fmt(v: float) -> str:
 
 def parse(text: str) -> dict | None:
     """{"expr": "17 times 23", "value": 391.0, "said": "17 times 23 is 391."} or None."""
+    # A unit conversion is arithmetic with a table - "how many milliliters in
+    # a cup" went to the model's near-miss path and came back as "did you
+    # mean render that in 3D". Tried first: its shapes are narrower.
+    from brain import units
+    conv = units.convert(text)
+    if conv:
+        return conv
     t = (text or "").strip().lower()
     t = _LEAD.sub("", t, count=1)
     t = _TRAIL.sub("", t)

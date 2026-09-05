@@ -71,6 +71,8 @@ async def lifespan(app: FastAPI):
     weather.register_all()
     camera_tools.register_all()   # the webcam view; the device stays shut until asked
     market_tools.register_all()   # quotes/analysts: realm 2, never cached
+    import market_intel
+    market_intel.register_all()   # the market as a story: desks, experts, what's ahead
     news_tools.register_all()     # keyless RSS
     # The Evolution (2026-09-01). Registered as stubs in Phase 0 on purpose: the
     # wiring is proved by the gated build BEFORE any of them has behaviour, so an
@@ -964,7 +966,10 @@ async def debug_brief(body: dict, x_jarvis_token: str | None = Header(None)):
     # endpoint useless for the thing he actually complained about - the brief on
     # his phone - and a verification tool that cannot see the output it is meant
     # to verify is worse than none.
-    sections = await briefing._sections()
+    # `final` builds the night brief - the one that carries the news - so what
+    # he will get at 20:00 can be looked at during the day.
+    sections = await briefing._sections(final=bool(body.get("final")),
+                                        first=bool(body.get("first")))
     text = await briefing.compose_brief(sections)
     written = await briefing.compose_brief_written(sections)
     if body.get("send"):

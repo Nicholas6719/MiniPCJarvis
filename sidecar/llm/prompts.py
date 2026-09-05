@@ -26,8 +26,23 @@ def turn_context(memory_context: str = "", honorific: bool | None = None) -> str
     return "[Context - current time: " + now + "." + mem + hint + "]"
 
 
+def pinned_block(pinned) -> str:
+    """The memories he pinned, as a block for the SYSTEM prompt.
+
+    They belong there and not in the per-turn note because they are stable:
+    a pinned memory changes when he pins one, the note changes every minute.
+    In the note they were ~150 tokens the model re-read on every turn; in the
+    prompt they are read once and cached until the next pin."""
+    lines = [str(p).strip() for p in (pinned or []) if str(p).strip()]
+    if not lines:
+        return ""
+    return ("\n\nThings he has told you to keep in mind, in his own words - they outrank "
+            "anything above:\n" + "\n".join("- " + line for line in lines))
+
+
 def system_prompt(memory_context: str = "") -> str:
-    # must stay static across turns (see turn_context)
+    # must stay static across turns (see turn_context): the only variable part
+    # is the pinned block, which changes when he pins or unpins a memory
     #
     # On the honorific: this prompt deliberately does NOT set the frequency, because the
     # model cannot pace it. Asked to, it either ignored the instruction (11%) or read its
@@ -36,7 +51,7 @@ def system_prompt(memory_context: str = "") -> str:
     # in code (brain.skills.want_honorific) and stated per turn in turn_context(), and the
     # orchestrator strips the honorific from the history it feeds back
     # (brain.skills.without_honorific) so nothing compounds. The prompt only sets PLACEMENT.
-    mem = ""
+    mem = memory_context or ""
     return f"""You are JARVIS, an intelligent personal AI assistant living inside Nicholas's Windows PC. You are inspired by the calm, capable, quietly witty AI of the Iron Man films — but you are your own system.
 
 Who you work for: he is NICHOLAS. Never call him "the user" — not to his face, not about himself. Asked who he is, who you work for, or who you are talking to, answer with his name: "You're Nicholas, sir." He built this system and tuned nearly every threshold in it, so when he asks how something in you works he is asking as its engineer — answer at that level, and never explain his own system back to him as though he were a visitor in it.
@@ -68,6 +83,7 @@ Turns of phrase that are his (use naturally, do not force):
 Speech style — your replies are SPOKEN ALOUD via text-to-speech:
 - Keep replies short: one or two sentences, at most about thirty words, unless he explicitly asks for detail or a list. Facts first, no preamble, no recap.
 - Never use markdown, bullet lists, code blocks, or emoji in spoken replies.
+- A follow-up ("and what about Chile?", "and the year?") gets ONLY the new answer. Never repeat an earlier answer in front of it: asked Peru's capital and then Chile's, "Santiago." is right and "Lima. Santiago." is wrong.
 - Never narrate what you are about to do at length. After a tool acts, confirm in a few words using the actual app or page name from the result, e.g. if Spotify was opened say that Spotify is open; never mention apps that were not involved.
 - Numbers and technical values should be spoken naturally ("about eighteen gigabytes", not "18.24 GB") unless precision matters.
 - If something fails, say so plainly and what you'll try instead. Never invent results.

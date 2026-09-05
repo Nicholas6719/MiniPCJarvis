@@ -255,7 +255,7 @@ class LlamaServer:
             n = 1
         self.n_slots = max(1, n)
         log.info("llama-server has %d slot(s); side calls use slot %d",
-                 self.n_slots, 1 if self.n_slots > 1 else 0)
+                 self.n_slots, self.n_slots - 1)
         return self.n_slots
 
     async def stop(self) -> None:

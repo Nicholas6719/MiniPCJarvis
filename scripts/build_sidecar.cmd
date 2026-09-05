@@ -77,10 +77,12 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_briefing.py || (echo BRIEFING TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_analyst.py || (echo ANALYST TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_market_intel.py || (echo MARKET INTEL TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_newsroom.py || (echo NEWSROOM TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_audio_io.py || (echo AUDIO IO TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_mic_offloop.py || (echo MIC OFFLOOP TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_audio_deaf_output.py || (echo AUDIO DEAF OUTPUT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_speech_pipeline.py || (echo SPEECH PIPELINE TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_isolation.py || (echo ISOLATION TEST FAILED & exit /b 1)

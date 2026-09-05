@@ -222,7 +222,8 @@ class Briefing:
             log.info("brief due at %s but it is quiet hours - holding", stamp)
             return
         # Composed once, shaped twice: sentences for the ear, bullets for the eye.
-        sections = await self._sections()
+        sections = await self._sections(final=self.is_final_slot(slot, times),
+                                        first=self.is_first_slot(slot, times))
         text = await self.compose_brief(sections)
         written = await self.compose_brief_written(sections)
         if text:
@@ -578,8 +579,12 @@ class Briefing:
         return (f"{'up' if v >= 0 else 'down'} {abs(v):.2f}%",
                 f"{'+' if v >= 0 else '-'}{abs(v):.2f}%")
 
-    async def _sections(self) -> list[tuple[str, list[tuple[str, str]]]]:
+    async def _sections(self, final: bool = False,
+                        first: bool = False) -> list[tuple[str, list[tuple[str, str]]]]:
         """The brief as titled groups, each line held as (spoken, written).
+
+        `final` is the last brief of the day, the only one that carries news;
+        `first` is the morning one, the only one that carries the week's earnings.
 
         The single source of truth for both renderings, so the phone and the
         voice can never disagree, and so the market and news calls happen once.
@@ -636,31 +641,40 @@ class Briefing:
         except Exception:
             log.debug("brief: market take failed", exc_info=True)
 
-        stories = await self._fresh_stories()
-        ranked: list[tuple[str, dict]] = []
-        for st in stories:
-            tier, _ = classify_news(st)
-            if tier != NONE:
-                ranked.append((tier, st))
-        ranked.sort(key=lambda pair: {URGENT: 0, ALERT: 1}.get(pair[0], 2))
-        seen: set[str] = set()
-        picked: list[dict] = []
-        for _tier, st in ranked:
-            head = self._tidy(st.get("headline"))
-            if not head or head.lower() in seen:
-                continue
-            seen.add(head.lower())
-            picked.append(st)
-            if len(picked) == 3:        # three is a brief; five is a newsletter
-                break
+        # THE INTELLIGENT HALF. His instruction, 2026-09-05: "he mentions stocks
+        # now but I need more intelligent info". What is moving the market and
+        # why, from the desks he would trust; what the experts are saying; and
+        # what reports this week - that last one in the first brief of the day
+        # only, because the week's calendar does not change by the afternoon.
+        try:
+            from market_intel import intel
+            for title, lines in await intel.brief_sections():
+                if title == "Ahead" and not first:
+                    continue
+                out.append((title, lines))
+        except Exception:
+            log.debug("brief: market intelligence failed", exc_info=True)
+
+        # NEWS BELONGS TO THE LAST BRIEF OF THE DAY. His instruction, 2026-09-05:
+        # by day he wants only local and national emergencies, and "for his
+        # nightly brief (last of the day) he can tell me general news so that
+        # I'm still informed that way". So the midday briefs carry markets and
+        # nothing else, and the night brief carries the news of the day -
+        # GENERAL news, ranked, not only what would have interrupted him.
+        mode = str(config.get("briefing", "news_in_briefs", default="last")).lower()
+        want_news = mode == "all" or (mode == "last" and final)
+        if not want_news:
+            return out
+        count = int(config.get("briefing", "night_news_count", default=5)) if final else 3
+        picked = self.rank_for_brief(await self._fresh_stories(), count)
         # The brief says what happened, not what was printed. Read in parallel:
-        # three articles one after another would put ~15s into a brief nobody is
+        # articles one after another would put ~15s into a brief nobody is
         # waiting on, and they have nothing to do with each other.
         news: list[tuple[str, str]] = []
         if picked:
             from newsroom import summarize_all
-            said_all = await summarize_all(picked, limit=3)
-            # ONE call with all three. note_result REPLACES the link list, so
+            said_all = await summarize_all(picked, limit=count)
+            # ONE call with all of them. note_result REPLACES the link list, so
             # calling it per story in a loop left only the last one - and "give
             # me the article" opened story three whatever he asked for.
             self._remember_all(said_all)
@@ -677,6 +691,89 @@ class Briefing:
             self._held.clear()
             out.append(("Also", [(e, e) for e in extra if e]))
         return out
+
+    @staticmethod
+    def is_final_slot(slot, times) -> bool:
+        """Is this the last brief of the day - the one that carries the news?"""
+        def minutes(s) -> int:
+            try:
+                t = dt.datetime.strptime(str(s), "%H:%M").time()
+                return t.hour * 60 + t.minute
+            except ValueError:
+                return -1
+        valid = [s for s in (times or []) if minutes(s) >= 0]
+        return bool(valid) and str(slot) == str(max(valid, key=minutes))
+
+    @staticmethod
+    def is_first_slot(slot, times) -> bool:
+        """Is this the morning brief - the one that carries the week ahead?"""
+        def minutes(s) -> int:
+            try:
+                t = dt.datetime.strptime(str(s), "%H:%M").time()
+                return t.hour * 60 + t.minute
+            except ValueError:
+                return -1
+        valid = [s for s in (times or []) if minutes(s) >= 0]
+        return bool(valid) and str(slot) == str(min(valid, key=minutes))
+
+    def rank_for_brief(self, stories: list[dict], count: int) -> list[dict]:
+        """The day's news, in the order he would want to hear it.
+
+        Emergencies first, then what happened near him, then national news
+        of weight, then the rest of the wire - the general news he asked to
+        stay informed of. This deliberately uses the FULL classifier, not the
+        emergencies-only gate: that gate decides what may interrupt him by day,
+        and the night brief is the opposite of an interruption.
+        """
+        from significance import (NATIONAL_WEIGHT, _classify_news_full, _is_obituary, _text_of,
+                                  is_local)
+        # Five buckets, then an ORDER that mixes them. The first live night
+        # brief (release 27) was five Massachusetts-desk items - penguin vests
+        # off WCVB among them - and nothing from the wire, because "near him"
+        # outranked everything that was not an emergency. Informed means both:
+        # what happened in the country, and what happened near him, the
+        # emergencies first and the fluff last.
+        buckets: dict[str, list[dict]] = {k: [] for k in ("alarm", "national", "local", "wire", "colour")}
+        for st in stories:
+            tier, why = _classify_news_full(st)
+            near, _town = is_local(st)
+            if tier in (URGENT, ALERT):
+                buckets["alarm"].append(st)
+            elif NATIONAL_WEIGHT.search(_text_of(st)):
+                buckets["national"].append(st)
+            elif "death" in why or _is_obituary(_text_of(st)):
+                # an obituary, an illness, a far-off death reprinted by a local
+                # desk - a 'Blue Bloods' actor's cancer reached the first night
+                # brief as Massachusetts news. Colour, not what happened today.
+                buckets["colour"].append(st)
+            elif near and tier != NONE and why not in ("local routine", "local colour"):
+                buckets["local"].append(st)
+            elif not near:
+                buckets["wire"].append(st)
+            else:
+                buckets["colour"].append(st)
+        ordered: list[dict] = list(buckets["alarm"])
+        # national and local, turn and turn about, the country first
+        a, b = buckets["national"], buckets["local"]
+        for i in range(max(len(a), len(b))):
+            if i < len(a):
+                ordered.append(a[i])
+            if i < len(b):
+                ordered.append(b[i])
+        ordered += buckets["wire"] + buckets["colour"]
+        seen: set[str] = set()
+        picked: list[dict] = []
+        for st in ordered:
+            head = self._tidy(st.get("headline"))
+            if not head or head.lower() in seen:
+                continue
+            if any(self._same_story(head, h) for h in seen):
+                continue
+            seen.add(head.lower())
+            picked.append(st)
+            if len(picked) >= max(1, count):
+                break
+        return picked
 
     async def compose_brief(self, sections=None) -> str:
         """The spoken brief: flowing sentences, because he is hearing it.

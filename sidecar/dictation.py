@@ -168,7 +168,46 @@ class Dictation:
 
 
 def _paste(text: str) -> bool:
-    """Put the text where the cursor is, then give the clipboard back."""
+    """Put the text where the cursor is.
+
+    PASTED, as one keystroke, with the clipboard given back only if it still
+    holds our text. On 2026-09-05 this looked broken from every angle - a
+    shell script in the document, then a typed version that lost its first
+    word and repeated letters ("kkkk") from the busy sidecar - and the cause
+    was neither the paste nor the typing: the focus routine tapped ALT, which
+    put Notepad into menu mode and fed the next keys to its menu bar. With
+    that fixed (windows_tools.bring_to_front) the paste is the right delivery:
+    atomic, and it lands whole. Typing as Unicode key events is kept as the
+    fallback for when the clipboard cannot be taken, and can be made primary
+    with `dictation.prefer_typing` for apps that refuse a paste.
+    """
+    import keys
+    limit = int(config.get("dictation", "type_up_to", default=400))
+    if len(text) <= limit and config.get("dictation", "prefer_typing", default=False):
+        # NOT AS A BURST. Fifty characters in one go reached modern Notepad as
+        # "The ??????????": it reads the character from the keyboard state,
+        # and the state had moved on. Four ms apart still lost letters; ten was clean, fifteen is the margin.
+        gap = float(config.get("dictation", "type_char_delay_s", default=0.015))
+        try:
+            if keys.type_text(text, per_char_delay=gap):
+                return True
+            log.warning("typing the dictation was not fully delivered; pasting instead")
+        except Exception:
+            log.warning("typing the dictation failed; pasting instead", exc_info=True)
+    if _paste_clipboard(text):
+        return True
+    # The clipboard could not be taken (another program holding it open).
+    # Type it rather than leave him with nothing.
+    try:
+        return bool(keys.type_text(text, per_char_delay=float(
+            config.get("dictation", "type_char_delay_s", default=0.015))))
+    except Exception:
+        log.warning("typing the dictation failed too", exc_info=True)
+        return False
+
+
+def _paste_clipboard(text: str) -> bool:
+    """Put the text where the cursor is via the clipboard, then give it back."""
     import win32api
     import win32clipboard
     import win32con
@@ -241,7 +280,10 @@ def _paste(text: str) -> bool:
         # The cost of the shorter one was losing what he said.
         time.sleep(float(config.get("dictation", "clipboard_restore_delay_s",
                                     default=1.5)))
-        _set_clip(previous)
+        # ONLY IF IT IS STILL OURS. If he copied something in that second and
+        # a half, putting the old contents back would throw his copy away.
+        if _get_clip() == text:
+            _set_clip(previous)
     return True
 
 

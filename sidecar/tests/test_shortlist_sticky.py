@@ -42,6 +42,16 @@ def main() -> int:
     check("a tool not wanted this turn STAYS (that is the point)", c == b, (b, c))
     d = s.stable_order(set(b) | {"take_screenshot"})
     check("many turns later the prefix still holds", d[:len(c)] == c and d[-1] == "take_screenshot")
+    # The block's VERSION is what the orchestrator re-warms slot 0 against: it
+    # moves only when the block changes shape, never on an ordinary turn.
+    v = s.block_version
+    s.stable_order({"recall"})
+    check("a turn that adds nothing leaves the version alone", s.block_version == v, (v, s.block_version))
+    s.stable_order({"recall", "get_weather"})
+    check("...and a new tool bumps it", s.block_version == v + 1, (v, s.block_version))
+    from tools.registry import registry
+    check("the current block is the sticky order", [t["function"]["name"] for t in s.current_block(registry)]
+          == [n for n in s._sticky if n in registry._tools])
 
     print("\n-- the default never evicts --")
     # Release 18 trimmed once a minute at 72/48 and every trim was a 15-20 s

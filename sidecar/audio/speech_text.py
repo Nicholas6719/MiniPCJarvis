@@ -50,6 +50,7 @@ def _money_words(m: re.Match) -> str:
     amount = m.group(2)
     return f"{amount} {one if amount in ('1', '1.00') else many}"
 
+_ODD_SPACE = re.compile("[" + chr(0xA0) + chr(0x2000) + "-" + chr(0x200B) + chr(0x202F) + chr(0x205F) + chr(0x3000) + "]")
 _LEFTOVER = re.compile(r"[*_`#\|~^<>{}\[\]]")
 _WS = re.compile(r"[ \t]+")
 _SPACE_PUNCT = re.compile(r"\s+([,.;:!?])")   # "45 degrees ." after symbol expansion
@@ -80,7 +81,10 @@ def strip_markdown(text: str) -> str:
 
 
 def clean_for_speech(text: str) -> str:
-    t = text
+    # The model writes "8,848 meters" and "212 °F" with a NARROW
+    # NO-BREAK SPACE, and "Mount Everest" too. Neither the width rule
+    # below nor the voice knows the character; the plain space is what it means.
+    t = _ODD_SPACE.sub(" ", text)
     t = _MD_LINK.sub(r"\1", t)
     t = _MD_CODE.sub(r"\1", t)
     t = _MD_BOLD.sub(lambda m: m.group(1) or m.group(2), t)

@@ -78,6 +78,19 @@ async def main() -> int:
         check("a side call defaults to slot 1", b.get("id_slot") == 1, b.get("id_slot"))
         b = await run(slot=7)
         check("...and never past the last slot", b.get("id_slot") == 1, b.get("id_slot"))
+
+        # THREE slots (2026-09-05): the no-tools conversation gets a slot of its
+        # own, and side calls go to the last one. With two, the news summaries
+        # and the market story evicted the no-tools prefix - a knowledge
+        # question after a brief re-read 1,813 tokens, 7.4 s to the first word.
+        print("\n-- with three slots --")
+        llama.n_slots = 3
+        b = await run(slot=0)
+        check("the tools shape is slot 0", b.get("id_slot") == 0, b.get("id_slot"))
+        b = await run(slot=1)
+        check("the no-tools shape is slot 1", b.get("id_slot") == 1, b.get("id_slot"))
+        b = await run()
+        check("a side call defaults to the LAST slot, 2", b.get("id_slot") == 2, b.get("id_slot"))
         check("the prefix cache is still asked for", b.get("cache_prompt") is True)
 
         print("\n-- with one slot --")
@@ -98,9 +111,9 @@ async def main() -> int:
               "slot=0 if tools is not None else 1" in src)
         from config import DEFAULTS
         args = DEFAULTS["llm"]["models"]["gpt-oss-20b"]["args"]
-        check("gpt-oss runs two slots", args[args.index("-np") + 1] == "2", args)
-        check("...with a context big enough for two of the old size",
-              int(DEFAULTS["llm"]["models"]["gpt-oss-20b"]["context"]) >= 32768)
+        check("gpt-oss runs three slots", args[args.index("-np") + 1] == "3", args)
+        check("...with a context big enough for three of the old size",
+              int(DEFAULTS["llm"]["models"]["gpt-oss-20b"]["context"]) >= 49152)
     finally:
         httpx.AsyncClient = real
         llama.n_slots = 1

@@ -106,20 +106,72 @@ def _find_window(title: str) -> tuple[int, str] | None:
     return None
 
 
+def bring_to_front(hwnd: int) -> bool:
+    """SetForegroundWindow that works from a background process WITHOUT
+    tapping ALT.
+
+    Every focus in this codebase used to press and release ALT around
+    SetForegroundWindow - "the documented trick, harmless". It is not
+    harmless: a lone ALT tap puts the app it lands in into MENU MODE, and the
+    next keystrokes go to its menu bar instead of its document. Measured on
+    2026-09-05 from the running sidecar into Notepad: press_keys h, e, l, l, o
+    landed "h"; the typed dictation lost its first word; Ctrl+V pasted
+    nothing at all - all reported as success, because the keys HAD been sent.
+    This was the whole of "synthetic input reports success and does nothing"
+    from the 4th, and it never happened from a test process because the test
+    process focused the window without the tap.
+
+    The rule Windows actually enforces is that the caller's thread must own
+    the foreground, so attach this thread's input to the foreground thread
+    for the duration of the call (the standard answer). Already-foreground is
+    a no-op, which is the common case. If that still does not take, a SHIFT
+    tap grants the same permission as ALT and enters no menu.
+    """
+    import time as _time
+    import win32api
+    import win32process
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        if win32gui.GetForegroundWindow() == hwnd:
+            return True
+        user32 = ctypes.windll.user32
+        fg = win32gui.GetForegroundWindow()
+        me = win32api.GetCurrentThreadId()
+        fg_thread = win32process.GetWindowThreadProcessId(fg)[0] if fg else 0
+        attached = False
+        try:
+            if fg_thread and fg_thread != me:
+                attached = bool(user32.AttachThreadInput(me, fg_thread, True))
+            user32.AllowSetForegroundWindow(-1)          # ASFW_ANY
+            win32gui.BringWindowToTop(hwnd)
+            win32gui.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(me, fg_thread, False)
+        _time.sleep(0.05)
+        if win32gui.GetForegroundWindow() == hwnd:
+            return True
+        user32.keybd_event(win32con.VK_SHIFT, 0, 0, 0)
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        finally:
+            user32.keybd_event(win32con.VK_SHIFT, 0, win32con.KEYEVENTF_KEYUP, 0)
+        _time.sleep(0.05)
+        return win32gui.GetForegroundWindow() == hwnd
+    except Exception:
+        log.debug("could not bring window %s to the front", hwnd, exc_info=True)
+        return False
+
+
 def focus_window(title: str) -> dict:
     hit = _find_window(title)
     if not hit:
         return {"error": f"no window matching '{title}'"}
     hwnd, wt = hit
     try:
-        if win32gui.IsIconic(hwnd):
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        # nudge foreground permission, then bring forward
-        ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, 0, 0)
-        try:
-            win32gui.SetForegroundWindow(hwnd)
-        finally:
-            ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        if not bring_to_front(hwnd):
+            return {"error": f"could not focus '{wt}': Windows kept the foreground where it was"}
         return {"focused": wt}
     except Exception as e:
         return {"error": f"could not focus '{wt}': {e}"}
@@ -573,13 +625,7 @@ def _focus_newest_browser_window() -> bool:
             l, t, _r, _b = win32gui.GetWindowRect(hwnd)
             if l <= -5000 or t <= -5000:      # inherited the hidden window's position
                 win32gui.SetWindowPos(hwnd, 0, 120, 80, 1360, 880, win32con.SWP_NOZORDER)
-            if win32gui.IsIconic(hwnd):
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-            ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, 0, 0)
-            try:
-                win32gui.SetForegroundWindow(hwnd)
-            finally:
-                ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+            bring_to_front(hwnd)
         except Exception:
             log.debug("could not focus the new browser window", exc_info=True)
             return False
@@ -769,13 +815,7 @@ def exit_sleep_mode() -> dict:
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             else:
                 win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-            # Windows refuses SetForegroundWindow to a process without input focus;
-            # the synthetic ALT press is the standard nudge that grants it.
-            ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, 0, 0)
-            try:
-                win32gui.SetForegroundWindow(hwnd)
-            finally:
-                ctypes.windll.user32.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+            bring_to_front(hwnd)     # no ALT tap: see bring_to_front
             found += 1
         except Exception:
             continue

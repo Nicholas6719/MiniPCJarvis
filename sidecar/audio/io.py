@@ -121,6 +121,10 @@ class Microphone:
         self.device_name: str = "not started"
         self.using_preferred: bool = False
         self.last_frame_at: float = 0.0
+        # True only when the last start() could not open ANY device. The device
+        # watch retries on this, not on "no stream open": a stream is also
+        # closed, deliberately and briefly, while a debug utterance is fed.
+        self.failed: bool = False
         # legacy single-consumer queue, kept for existing call sites
         self.queue: asyncio.Queue[np.ndarray] = self.subscribe()
 
@@ -135,7 +139,24 @@ class Microphone:
     def start(self) -> None:
         if self._stream is not None:
             return
-        self._loop = asyncio.get_running_loop()
+        # The reopen paths run OFF the loop (asyncio.to_thread), where there is
+        # no running loop to ask for. Since the audit of 2026-09-04, every one of
+        # them failed with "no running event loop" before touching the driver:
+        # the self-heal that was meant to bring the mic back never could. Keep
+        # the loop we were first bound to; it is the only one there is.
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            if self._loop is None:
+                raise
+        try:
+            self._start()
+        except Exception:
+            self.failed = True
+            raise
+        self.failed = False
+
+    def _start(self) -> None:
         device, name, preferred = resolve_input_device()
 
         def _cb(indata, frames, t, status):

@@ -82,15 +82,13 @@ def _focus(window: str | None) -> str | None:
         return None
     hwnd, title = hit
     try:
-        if win32gui.IsIconic(hwnd):
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        # Windows refuses SetForegroundWindow from a background process unless we
-        # nudge it; ALT is the documented trick and is harmless.
-        win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-        try:
-            win32gui.SetForegroundWindow(hwnd)
-        finally:
-            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        # NOT the ALT tap. "ALT is the documented trick and is harmless" stood
+        # here from the start, and a lone ALT tap puts the target into menu
+        # mode: the keys that followed went to Notepad's menu bar, not its
+        # document. That was the whole of "input reports success and does
+        # nothing". bring_to_front attaches to the foreground thread instead.
+        from tools.windows_tools import bring_to_front
+        bring_to_front(hwnd)
     except Exception:
         log.warning("could not focus %r", title, exc_info=True)
     time.sleep(0.25)

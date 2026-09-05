@@ -3552,6 +3552,172 @@ started: 16-24 s for every one of those. Installed and pushed.
   every identified cause; `/debug/desktop` answers the window-station question
   from inside the process. Needs the next hands_e2e run to confirm.
 
+## 2026-09-05 morning — "make Jarvis PERFECT", and the news he actually wants
+
+He came back at 06:56 with one line: make him perfect. The method was the
+same as the audit's — read the live log since the last release, measure the
+running install, believe only what was observed — and it found five real
+defects in a system that reported itself healthy, plus one instruction from
+him mid-session.
+
+### The mic could never heal itself
+`Microphone.start()` asked for the RUNNING loop; the audit had moved every
+reopen off the loop (`asyncio.to_thread`), where there is none. Seven times
+since the 4th the self-heal fired, failed with "no running event loop"
+before touching the driver, and logged a warning nobody read. It also fired
+on "no stream open", which is true for the seconds a debug utterance is
+being fed. Now `start()` keeps the loop it was first bound to, `mic.failed`
+says whether the last open really failed, and the device watch retries on
+THAT. Gate: `test_mic_offloop.py`.
+
+### The HUD kept rendering in the taskbar
+Measured with JARVIS asleep and minimised: renderer 11%, GPU process 18% of
+a core. wry only stops resizing WebView2 on SIZE_MINIMIZED; it never tells
+it the window is gone, so `document.hidden` stayed false and every rail and
+reactor animation ran for nobody. The App.tsx comment that said minimising
+sets `document.hidden` was wrong. `lib.rs` now calls
+`controller.SetIsVisible(false)` on the Resized event while minimised and
+`true` on restore — WebView2's own guidance. This is the "idle renderer CPU"
+open item from the 4th; it was never the reactor loop.
+
+### Dictation: the paste raced the clipboard, and the receipt was confounded
+hands_e2e on the live install: every step passed except the document read
+back, which contained a shell script — Git for Windows' `usr/bin/notepad`.
+Two things at once. (1) Modern Notepad restores its last session; a tab
+holding that file was open from earlier, so the receipt read the wrong
+document. (2) Even so, Ctrl+V asks the app to read the clipboard whenever it
+gets round to it, and the clipboard is shared with everything else. So
+dictation now TYPES short transcripts as Unicode key events (no clipboard,
+no restore, no race; lands in terminals too), spaced 15 ms apart — at 4 ms
+modern Notepad turned "quarterly" into "uuarterly oooooooooook", at 10 ms it
+was clean — and keeps the clipboard path for long text, restoring only if
+the clipboard still holds our text. `open_application` also returned a
+dot-relative `notepad.exe` (shutil.which searches the CWD, which a scheduled
+task sets to System32); it is absolute now. `/debug/desktop` on the
+schtasks-launched install says WinSta0/Default/same desktop, so the
+window-station hypothesis from the 4th is dead.
+
+### voice_ux T2 was a race against his own five-second window
+The test synthesised the follow-up INSIDE the window (Kokoro on a busy CPU:
+most of a second), waited a fixed three seconds, then injected — against
+`conversation.window_s = 5`, his setting, not the eight the file assumed.
+It now pre-synthesises every phrase, waits for the `conversation armed`
+event, and injects at once. Not a bug in the window.
+
+### Where the model's time goes, measured
+llama's own timings: every no-tools turn evaluated ~300 new tokens at
+5 ms/token (the tools shape sits at 7.4k tokens; the sticky shortlist is the
+reason and it is deliberate). ~150 of those tokens were the ten PINNED
+memories, re-read every turn because they rode in the per-turn note. They
+live in the system prompt now (`prompts.pinned_block`), which changes only
+when he pins something. New marks in the turn breakdown — `brain_ms`,
+`memory_ms`, `llm_sent_ms` — so the next person can see pre-model overhead
+without guessing. Also fixed: gpt-oss writes U+202F between a number and
+its unit and inside "Mount Everest"; `clean_for_speech` folds every odd
+space to a plain one.
+
+### The news, by his instruction (mid-session)
+*"I want only local and national EMERGENCIES and then for his nightly brief
+(last of the day) he can tell me general news so that I'm still informed."*
+Two changes. The 07:19 URGENT that chased his phone — "US envoys in Moscow
+in new push for peace between Russia and Ukraine" — came from the SUMMARY:
+"Russia's full-scale invasion of Ukraine", overnight missile strikes,
+matched ATTACK. A foreign story is now judged by its headline
+(`national_emergency(text, headline=)`). And the news section moved to the
+LAST brief of the day (`briefing.news_in_briefs = "last"`, 20:00): the
+midday briefs are markets only, the night brief reads five stories ranked
+emergencies → near him → national weight → the wire (`rank_for_brief`,
+using the full classifier, not the emergencies-only gate). `/debug/brief`
+takes `final: true` to preview it. Gates extended in test_significance and
+test_briefing.
+
+### Also
+* `tld` package data was not bundled: courlan tried to download the public
+  suffix list into the bundle on every fetch and logged an ERROR each time.
+  Added to the spec's collect_all list.
+* The real sidecar log holds EVERY day. Filtering by time alone showed me
+  the 09-01 retainer flood as though it were this morning — filter by date.
+* Filler timing left alone on purpose: 0.35 s is a tuned choice.
+
+Release 27 (`-Silent`, he was at the PC) carries all of it. It failed one
+check - endpoint_e2e read "waited 1900 ms of silence, budget 1900 ms" as
+giving up early (`>` for `>=`) - and installed anyway; the check is fixed.
+
+## 2026-09-05 late morning — the ALT tap, the market as a story, three slots
+
+### "Input reports success and does nothing" was an ALT tap
+Release 27 installed, hands_e2e on the real install: dictation typed
+"e uuanumbers kkkk rrrong." into Notepad, then with the clipboard path
+NOTHING at all. A matrix from the live sidecar settled it in one run:
+`press_keys h,e,l,l,o` landed "h"; `type_text` lost its first word; Ctrl+V
+pasted nothing. Every focus helper (input_tools._focus, windows_tools
+focus_window, the browser focus, exit_sleep_mode) pressed and released ALT
+around SetForegroundWindow - "the documented trick, harmless". A lone ALT
+tap puts the app that gets focus into MENU MODE, and the keys that follow
+go to its menu bar. The test process never showed it because it focused
+without the tap. `windows_tools.bring_to_front` (AttachThreadInput, no-op
+when already foreground, SHIFT tap as last resort) replaces all four.
+Dictation is back to the PASTE - one keystroke, atomic - with the clipboard
+returned only if it still holds our text, and typing kept as the fallback
+(`dictation.prefer_typing`). This closes the open item from the 4th; the
+window-station and integrity-level theories were both innocent.
+
+### The market as a story (his instruction)
+*"Let him compile data from finnhub but also verified and trusted news
+sources about the state of the market and what experts are saying... he
+mentions stocks now but I need more intelligent info."* `market_intel.py`:
+the gauges (S&P/Nasdaq/Dow, small caps via IWM, volatility via VIXY, open or
+closed - Finnhub, all verified reachable on his free key), the STORY - two
+spoken sentences written at temperature zero from the headlines of the
+Journal, MarketWatch, CNBC and Reuters (via Finnhub's general feed), the
+desk named - the EXPERTS (strategist and analyst calls off those desks,
+attributed), and the WEEK AHEAD (earnings for his names and the ~50 that
+move the market). Per company: 52-week position, YTD, P/E, beta, last
+quarter's beat or miss, consensus, insider sentiment, next report.
+Briefs: "The story" and "Experts" in every brief after the numbers,
+"Ahead" in the morning one only, news still only at night. Voice: "what's
+going on in the market", "why is the market down", "any earnings this
+week", "when does Apple report", "tell me about Nvidia stock". Gate:
+`test_market_intel.py`; routing cases in test_brain. Also: the Finnhub
+warnings had his API key in the URL (1,200 log lines) - redacted.
+
+### Three llama slots
+Measured on release 27: a knowledge question right after a brief re-read
+1,813 tokens (7.4 s to the first word) because the news summaries and the
+market story share slot 1 with the no-tools conversation. `-np 3`, context
+49152: slot 0 tools shape, slot 1 no-tools shape, slot 2 every side call
+(`provider.stream` default). ~0.8 GB more KV on a 28 GB machine.
+
+### The brain, from the real-world suite
+`real_world_e2e` on release 27: "how many milliliters in a US cup" was
+answered "Did you mean render that in 3D, sir?" - holo_make at 0.68 on the
+near-miss path. Two fixes: `brain/units.py` makes conversions the math
+reflex's (instant, exact: "1 cup is about 236.6 milliliters"), and
+`skills.ask_allowed` never offers an ACTION as a near miss for a QUESTION
+(`QUESTION_LEAD` × `QUERY_SKILLS`). Also "CPU is at 0 percent" now reads
+"CPU is idle"; the suite itself crashed on a U+202F in the console (fixed).
+The night brief's first live run was five Massachusetts-desk items (penguin
+vests off WCVB) and nothing from the wire; `rank_for_brief` now buckets
+alarm / national / local / wire / colour and interleaves country and home.
+
+### Release 28 (09:07, RELEASE OK) — verified on the install
+* hands_e2e PASS: the dictated sentence is in the Notepad document, through
+  the fixed focus routine. The open item from the 4th is closed.
+* `get_market_state` live: "the S&P 500 down 0.4 percent, ... small caps up
+  0.3 percent. The market is closed. The U.S. stock market is mixed today as
+  ... (MarketWatch)". `get_earnings_ahead`: "Adobe on Thursday after the
+  close; Oracle on Thursday after the close". `get_stock_context nvidia`: the
+  full picture in one breath, ending "That is the picture, not advice."
+* Both briefs carry THE STORY; the night one mixes CBS/WCVB national with
+  MassLive local. A 'Blue Bloods' actor's cancer got in as local news, so
+  obituaries and illnesses (`significance._is_obituary`) are colour now.
+* llama: "3 slot(s); side calls use slot 2", and the no-tools question after
+  a brief cost 210 tokens (2.0 s). The tools-shape question still cost 2,185
+  of 7,370 tokens (9 s) because the suites had grown the sticky tool block.
+  So: `shortlist.block_version`, and `_rewarm_tools_shape` re-reads slot 0
+  in the background three seconds after any turn that changed the block.
+  Gated in test_shortlist_sticky; ships in release 29.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

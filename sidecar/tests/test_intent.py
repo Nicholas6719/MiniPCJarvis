@@ -232,6 +232,16 @@ def main() -> int:
         check("...and it can be said out loud as English",
               confirm_as("holo_make") == "render that in 3D",
               confirm_as("holo_make"))
+        # ...but a QUESTION is never a near miss for an ACTION. "How many
+        # milliliters in a US cup" ranked holo_make at 0.68 and he was asked
+        # "Did you mean render that in 3D, sir?" (2026-09-05).
+        from brain.skills import ask_allowed
+        check("an order may be asked about", ask_allowed("make me a duck", "holo_make"))
+        check("a question is not offered an action",
+              not ask_allowed("how many milliliters in a US cup", "holo_make"))
+        check("...nor 'who wrote' an app launch", not ask_allowed("who wrote the hobbit", "open_app"))
+        check("...but a question may be a near miss for a question skill",
+              ask_allowed("what's it like outside", "weather"))
 
         # His confirmation is the lesson. The second time must not ask again.
         if u:

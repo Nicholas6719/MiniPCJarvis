@@ -146,7 +146,7 @@ async def main() -> int:
             said = (doc.get("text") or "")
             check("Windows itself reports the dictated words are in the document",
                   DICTATED.lower().strip(".")[:24] in said.lower(),
-                  f"document reads {said[:120]!r}")
+                  f"document reads {said[:400]!r}")
             tabs = await controls(c, "Notepad")
 
             # --- a click by name, with a consequence that can be seen ---------

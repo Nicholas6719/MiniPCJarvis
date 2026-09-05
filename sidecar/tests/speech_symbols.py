@@ -34,6 +34,9 @@ CASES = [
     ("It is 20°C outside.", r"celsius", None),
     ("Memory at 73%.", r"73|seventy.three", None),
     ("CPU is at 12 percent.", r"12|twelve", None),
+    # gpt-oss writes a NARROW NO-BREAK SPACE between a number and its unit,
+    # and inside "Mount Everest"; the voice must hear ordinary words.
+    ("Mount Everest is 8,848 meters tall.", r"everest.*(8,?848|eight thousand)", None),
 ]
 
 fails = []

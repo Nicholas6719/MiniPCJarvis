@@ -243,6 +243,13 @@ async def open_application(name: str) -> dict:
     # _resolve_app does Start-Menu rglob + a PowerShell Get-StartApps (up to ~15 s on first
     # use). It's sync, so run it off the event loop or it freezes audio/wake/TTS.
     target = await asyncio.to_thread(_resolve_app, name)
+    if target and not target.startswith("shell:") and not os.path.isabs(target):
+        # shutil.which searches the working directory first and answers with a
+        # RELATIVE path when it finds something there. A scheduled-task launch
+        # starts in System32, so "notepad" came back as a dot-relative
+        # notepad.exe - true today, and wrong the moment anything changes the
+        # working directory.
+        target = os.path.abspath(target)
     if not target:
         # not an app — maybe it's a file: "open jarvis install log" after a folder
         # listing (the folder stage says "say open + a file name")
