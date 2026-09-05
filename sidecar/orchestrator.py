@@ -547,6 +547,12 @@ class Orchestrator:
                 since = prev if prev else time.time() - 12 * 3600
                 entries = delivery.entries(since)
                 self._away_since = since
+                # The voice says one sentence; the screen lists what reached
+                # him and what was held back, on the brief stage.
+                sections = persona.briefing_sections(entries) if gap >= persona.AWAY_S else []
+                if sections:
+                    asyncio.create_task(bus.emit("brief", title="While you were away",
+                                                 eyebrow="THE LEDGER", sections=sections))
             except Exception:
                 log.debug("no delivery ledger for the briefing", exc_info=True)
         ack = persona.wake_line(gap, time.localtime().tm_hour,

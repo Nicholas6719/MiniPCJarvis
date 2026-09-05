@@ -59,6 +59,13 @@ def main() -> int:
     check("...and never the whole mail", len(b) < 220, len(b))
     check("nothing-outcomes are not reported",
           P.briefing([{"ts": 1, "outcome": "nothing", "why": "empty"}]) == "")
+    secs = P.briefing_sections(many)
+    check("the screen gets the same ledger as sections",
+          [s["title"] for s in secs] == ["Reached you", "Held back"], secs)
+    check("...a subject and its text on one line",
+          secs[0]["lines"][0] == "the market brief" and "Your dentist is at 4 tomorrow" in secs[0]["lines"][1],
+          secs[0]["lines"])
+    check("...and nothing when nothing happened", P.briefing_sections([]) == [])
     check("the greeting carries it after time away",
           P.wake_line(8 * 3600, 9, None, one).startswith("Good morning, sir. While you were away"),
           P.wake_line(8 * 3600, 9, None, one))

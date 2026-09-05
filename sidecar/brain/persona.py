@@ -89,3 +89,26 @@ def wake_ack(gap_s: float, hour: int, last: str | None = None) -> str:
                 return WAKE_ACKS[j]
             return line
     return WAKE_ACKS[0]
+
+def briefing_sections(entries: list[dict]) -> list[dict]:
+    """The same ledger as sections for the HUD's brief stage: what reached
+    him, what was held back. The voice says one sentence; the screen lists."""
+    if not entries:
+        return []
+
+    def line(e: dict) -> str:
+        subj = _subject(e)
+        text = str(e.get("text") or "").strip().rstrip(".")
+        if subj and text and subj.lower() not in text.lower():
+            return f"{subj}: {text}"
+        return text or subj
+
+    sent = [line(e) for e in entries if e.get("outcome") in ("telegram", "spoken")]
+    held = [line(e) for e in entries
+            if e.get("outcome") not in ("telegram", "spoken", "nothing")]
+    out = []
+    if sent:
+        out.append({"title": "Reached you", "lines": [s for s in sent if s][-6:]})
+    if held:
+        out.append({"title": "Held back", "lines": [h for h in held if h][-6:]})
+    return out
