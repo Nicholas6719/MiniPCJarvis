@@ -228,6 +228,23 @@ class PocketTTS:
         self._port = 0
         self._sample_rate = 24000
         self._lock = asyncio.Lock()
+        self._down_until = 0.0          # after a failed start: no retry before this
+
+    @staticmethod
+    def worker_path():
+        """The worker script on disk: beside this module in the repo, under
+        the bundle's `audio/` when frozen (shipped as a data file by the
+        spec). None when it is nowhere — the caller must not spawn."""
+        import sys
+        from pathlib import Path
+        candidates = [Path(__file__).with_name("pocket_worker.py")]
+        base = getattr(sys, "_MEIPASS", None)
+        if base:
+            candidates.append(Path(base) / "audio" / "pocket_worker.py")
+        for c in candidates:
+            if c.exists():
+                return c
+        return None
 
     @staticmethod
     def python() -> str:
@@ -257,26 +274,45 @@ class PocketTTS:
             from pathlib import Path
             if not self.installed():
                 raise FileNotFoundError(f"pocket tts is not installed at {self.python()}")
-            worker = Path(__file__).with_name("pocket_worker.py")
+            import time as _t
+            if _t.time() < self._down_until:
+                raise RuntimeError("pocket tts worker is down; not retrying yet")
+            worker = self.worker_path()
+            if worker is None:
+                self._down_until = _t.time() + 60
+                raise FileNotFoundError("pocket_worker.py is not in the bundle")
             temp = float(config.get("tts", "pocket_temp", default=0.5))
             log.info("starting pocket tts worker")
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             self._proc = await asyncio.create_subprocess_exec(
                 self.python(), str(worker), "--temp", str(temp),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL, creationflags=flags,
+                stderr=asyncio.subprocess.PIPE, creationflags=flags,
                 env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             try:
                 line = await asyncio.wait_for(self._proc.stdout.readline(), timeout=120)
             except asyncio.TimeoutError:
                 self._proc.kill()
                 self._proc = None
+                self._down_until = _t.time() + 60
                 raise RuntimeError("pocket tts worker did not come up in 120 s")
             text = line.decode("utf-8", "replace").strip()
             if not text.startswith("PORT "):
+                # SAY WHY. The first version threw stderr away and retried on
+                # every sentence: 1,077 spawns of a python that could not open
+                # the worker file, each logged as "worker said ''". Now the
+                # reason is in the log and the next try is a minute away.
+                err = b""
+                try:
+                    err = await asyncio.wait_for(self._proc.stderr.read(4000), timeout=2)
+                except Exception:
+                    pass
                 self._proc.kill()
                 self._proc = None
-                raise RuntimeError(f"pocket tts worker said {text!r}")
+                self._down_until = _t.time() + 60
+                why = err.decode("utf-8", "replace").strip().splitlines()
+                raise RuntimeError(f"pocket tts worker said {text!r}"
+                                   + (f": {why[-1]}" if why else ""))
             self._port = int(text.split()[1])
             log.info("pocket tts ready on :%d", self._port)
             return self._port

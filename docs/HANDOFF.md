@@ -3423,6 +3423,34 @@ the worker: imported inside the request coroutine it stalled the loop for good
   weather fetch); the pure-reflex floor with Pocket is ~0.8 s and is the next
   thing to look at (worker request + speaker start).
 
+### 22:35 — "the app is frozen", and the voice that was never live
+He reported the app frozen. The sidecar answered `/health`, the HUD's socket
+was ESTABLISHED, `jarvis.exe` reported Responding — but the HUD renderer
+had burned 257 s of CPU in 25 minutes and, after a relaunch, sits at ~14%
+idle. Not attributed (no devtools on the installed build); the relaunch
+(Stop-Process + `jarvis_relaunch.cmd` through a one-shot task) brought it
+back. Watch the renderer's CPU on the next session; if it climbs again the
+suspects are the reactor's rAF loop and the reconnect path in
+`src/lib/sidecar.ts`.
+
+The real find in the log: **`pocket tts ready` appeared ZERO times all
+evening.** The worker is RUN AS A FILE by the C:\AI interpreter, and
+PyInstaller does not ship `.py` sources — `Path(__file__).with_name(...)`
+pointed into a bundle where the file did not exist. Every sentence spawned a
+python that died at once ("worker said ''", 1,077 spawns), then fell back to
+Kokoro `bm_daniel`. So everything he heard live tonight was the fallback; the
+Pocket George he approved was only ever the audition files. Release 22 ships
+`audio/pocket_worker.py` as a spec data file, `PocketTTS.worker_path()`
+looks beside the module and under `sys._MEIPASS/audio`, stderr is captured
+into the error, and a failed start backs off 60 s. `test_pocket_tts` now
+checks the spec line.
+
+Also release 22: **the app icon is the arc reactor** — drawn by
+`.agent/scripts/make_icon.py` in the HUD's own palette (#27c7ff on the dark
+well, twelve coils, three spokes), PNG sizes plus an ICO with BMP entries
+(Explorer does not always render PNG-compressed ICO frames; the shortcuts
+point at `jarvis.exe,0`).
+
 ### Not done / open
 * voice_ux_e2e T2 ("CONVERSATION WINDOW") is FLAKY, not fixed: PASS in
   release 13, FAIL in 16 and 17 and in a direct run ("heard: []" — the

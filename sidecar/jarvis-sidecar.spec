@@ -32,6 +32,12 @@ for pkg in ["winrt.runtime", "winrt.windows.foundation", "winrt.windows.foundati
 # own defaults instead of the 0.4 mm FDM profile shipped here, and the estimates
 # would quietly be for a different printer than the one described.
 datas += [("profiles/generic_fdm_0.4.ini", "profiles")]
+# The Pocket TTS worker is RUN AS A FILE by the C:\AI interpreter, not
+# imported, so it has to exist on disk next to the bundle. Without this line
+# the installed build spawned a python that could not open the file, 1,077
+# times in one evening, and JARVIS quietly spoke with the Kokoro fallback
+# while the log said "pocket tts worker said ''".
+datas += [("audio/pocket_worker.py", "audio")]
 datas += [("models/face_detection_yunet_2023mar.onnx", "models"),
           ("models/object_detection_yolox_2022nov.onnx", "models"),
           ("models/face_recognition_sface_2021dec.onnx", "models"),

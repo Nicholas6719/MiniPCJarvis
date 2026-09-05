@@ -33,6 +33,16 @@ async def main() -> int:
 
     worker = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "audio", "pocket_worker.py")
+    # THE BUNDLE MUST CARRY THE FILE. The worker is run by another interpreter,
+    # so it has to exist on disk in the install; the first release without this
+    # line spawned a python that could not open it, on every sentence, and
+    # JARVIS spoke with the fallback voice all evening.
+    spec = open(os.path.join(os.path.dirname(worker), "..", "jarvis-sidecar.spec"),
+                encoding="utf-8").read()
+    check("the spec ships pocket_worker.py as a data file",
+          '("audio/pocket_worker.py", "audio")' in spec)
+    from audio.tts import PocketTTS
+    check("the provider finds the worker beside itself", PocketTTS.worker_path() is not None)
     proc = await asyncio.create_subprocess_exec(
         sys.executable, worker, "--fake", stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
