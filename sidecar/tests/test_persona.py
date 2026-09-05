@@ -96,10 +96,15 @@ def main() -> int:
         asyncio.run(d.deliver("", dv.ALERT))
     finally:
         dv.is_present = real_present
+    # The ledger is persisted and loads the last day on first use, so in the
+    # build's shared gate database it may already hold other gates' rows:
+    # judge by what THIS gate added, never by the total.
     check("a spoken alert is in the ledger",
           d.ledger and d.ledger[-1]["outcome"] == "spoken" and d.ledger[-1]["subject"] == "disk space",
-          d.ledger)
-    check("...and an empty message is not", len(d.ledger) == 1, len(d.ledger))
+          d.ledger[-1:])
+    n_before = len(d.ledger)
+    asyncio.run(d.deliver("", dv.ALERT))
+    check("...and an empty message is not", len(d.ledger) == n_before, (n_before, len(d.ledger)))
     # ...and it survives a restart: a fresh Delivery (what a release makes)
     # still knows what was said, because the ledger is on disk now
     fresh = dv.Delivery()

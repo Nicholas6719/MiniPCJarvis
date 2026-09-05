@@ -3813,6 +3813,13 @@ phone, `/debug/ledger`, and the scout's "nothing" handed back.
   memory, so "what did I miss" knows nothing after any restart, releases
   included. Next: persist it.
 
+### 14:40 — the ledger survives a restart (release 37)
+`deliveries` table in the memory database; `delivery.entries(since)` loads
+the last day on first use; `memory.last_user_turn_ts()` gives "since he
+last spoke" to a process that has never heard him. Gated in test_persona
+(which now has its own JARVIS_DB - it writes). Next: the wake greeting's
+"while you were away" as a HUD brief stage (Reached you / Held back).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
