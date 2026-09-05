@@ -39,7 +39,12 @@ class LocalLLM:
         max_tokens: int = 1024,
         tool_choice: str | None = None,
         sampling: dict | None = None,
+        slot: int = 1,
     ) -> AsyncIterator[Chunk]:
+        """`slot` 0 is the CONVERSATION and its cached prefix; anything else is
+        a side call (fact classifier, night school, newsroom, part generation)
+        and goes to slot 1 when the server has one, so it cannot evict the
+        conversation's cache. On a one-slot server the field is omitted."""
         model_name = llama.model_name or config.get("llm", "active_model")
         mcfg = config.get("llm", "models", default={}).get(model_name, {})
         body: dict[str, Any] = {
@@ -62,6 +67,9 @@ class LocalLLM:
             body["tools"] = tools
             if tool_choice:
                 body["tool_choice"] = tool_choice
+        n_slots = max(1, int(getattr(llama, "n_slots", 1) or 1))
+        if n_slots > 1:
+            body["id_slot"] = 0 if slot == 0 else min(int(slot), n_slots - 1)
 
         # Accumulate streamed tool-call fragments by index.
         pending_tools: dict[int, dict] = {}

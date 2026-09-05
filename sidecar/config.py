@@ -75,11 +75,15 @@ DEFAULTS: dict[str, Any] = {
             # it needs one slot with one cache.
             "gpt-oss-20b": {
                 "path": r"C:\AI\models\gpt-oss-20b-MXFP4.gguf",
+                # TWO slots, not one: slot 0 is the conversation and its cached
+                # prefix, slot 1 takes every side call (fact classifier, night
+                # school, newsroom...) so it cannot evict that cache. Each slot
+                # gets half the context: 16k for the conversation — a full tool
+                # block (~8.5k, cached) plus history, a fetched page and the 4k
+                # generation budget — and 16k the side calls will never fill.
                 "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256",
-                         "-np", "1"],
-                # Headroom for a full tool block (~8.5k tokens, cached) plus
-                # history, a fetched page and the 4k generation budget.
-                "context": 20480,
+                         "-np", "2"],
+                "context": 32768,
                 "template_kwargs": {"reasoning_effort": "low"},
                 "reasoning_field": "reasoning_content",
             },

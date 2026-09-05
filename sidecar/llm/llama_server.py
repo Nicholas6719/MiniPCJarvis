@@ -117,6 +117,13 @@ class LlamaServer:
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.external = False  # adopted server owned by another app (e.g. Houston)
         self.adopted_pid: int | None = None
+        # How many slots the server has (from /props). The conversation owns
+        # slot 0; every side call (fact classifier, night school, newsroom,
+        # part generation) goes to slot 1 when there is one, so its prompt
+        # never evicts the conversation's cached prefix. Measured 2026-09-04:
+        # one shared slot meant the turn after a classified answer re-read
+        # the whole ~6k-token prompt, 20+ s.
+        self.n_slots = 1
         # per-session API key so other local processes can't use our server
         self.api_key: str | None = _secrets.token_hex(16)
         self._starting = asyncio.Lock()
@@ -223,6 +230,7 @@ class LlamaServer:
                 return False
             if await self.healthy():
                 log.info("llama-server ready (%s)", model_name)
+                await self.learn_slots()
                 return True
         log.error("llama-server failed to become healthy")
         await self.stop()
@@ -235,6 +243,20 @@ class LlamaServer:
                 return r.status_code == 200
         except Exception:
             return False
+
+    async def learn_slots(self) -> int:
+        """Ask the server how many slots it has; 1 when it will not say."""
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        try:
+            async with httpx.AsyncClient(timeout=3.0, headers=headers) as c:
+                r = await c.get(f"{self.base_url}/props")
+                n = int((r.json() or {}).get("total_slots") or 1) if r.status_code == 200 else 1
+        except Exception:
+            n = 1
+        self.n_slots = max(1, n)
+        log.info("llama-server has %d slot(s); side calls use slot %d",
+                 self.n_slots, 1 if self.n_slots > 1 else 0)
+        return self.n_slots
 
     async def stop(self) -> None:
         if self.external:

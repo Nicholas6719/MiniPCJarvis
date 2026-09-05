@@ -825,7 +825,8 @@ class Orchestrator:
         # registry order — a prefix nothing would ever extend.
         for tools in (shortlist.warm_block(registry), None):
             try:
-                async for _ in local_llm.stream([sysmsg, user], tools=tools, max_tokens=1):
+                async for _ in local_llm.stream([sysmsg, user], tools=tools, max_tokens=1,
+                                                slot=0):
                     pass
             except Exception as e:
                 log.info("prompt warm skipped: %s", e)
@@ -2383,7 +2384,7 @@ class Orchestrator:
                         if CREATIVE_INTENT.search(raw_user or "") else None)
             async for chunk in local_llm.stream(messages, tools=round_tools, max_tokens=4096,
                                                 tool_choice=None if choice == "none" else choice,
-                                                sampling=sampling):
+                                                sampling=sampling, slot=0):
                 if self._speak_cancel.is_set():
                     # user interrupted: stop generating AND stop streaming to the UI
                     cancelled = True

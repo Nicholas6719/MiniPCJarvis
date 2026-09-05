@@ -3390,8 +3390,17 @@ the worker: imported inside the request coroutine it stalled the loop for good
   (15-21 s); turns without a trim hit (peru 2.7 s, hamlet 4.4 s, octopuses
   8.2 s). Release 19: NO eviction in practice (cap 10,000), the boot warm
   primes the exact block a session starts with (`shortlist.warm_block`), and
-  gpt-oss-20b gets a 20,480 context for headroom. Expect every LLM turn after
-  the first to extend a cached prefix; measure again.
+  gpt-oss-20b gets a 20,480 context for headroom.
+  Release 19 measured: plain turns now HIT (peru 2.7 s, jaws-again 2.8 s,
+  octopuses 3.1 s, down from 16-24) — but the turn AFTER a factual answer
+  still missed (mona lisa 22 s, hamlet 7.8 s): `brain/facts._classify_timeless`
+  runs a small model call with its own prompt after such answers, and with
+  one slot that call REPLACES the conversation's cache. Release 20: two
+  slots (`-np 2`, context 32,768 so each keeps 16k), the conversation pinned
+  to `id_slot` 0 (`_llm_with_tools`, `_warm_prompts`), every other
+  `local_llm.stream` call defaulting to slot 1; `llama.learn_slots()` reads
+  `/props` so a one-slot server (gemma) simply omits the field.
+  `test_llm_slots` gates it with a faked HTTP client.
   Reflex first-audio is 0.75-2.2 s and is mostly the TOOL (cpu sampling,
   weather fetch); the pure-reflex floor with Pocket is ~0.8 s and is the next
   thing to look at (worker request + speaker start).
