@@ -1343,7 +1343,10 @@ def say_holo_check(slots: dict, res: dict) -> str:
 
 _MAKE_STRIP = re.compile(
     r"^(?:please\s+)?(?:can you\s+|could you\s+)?"
-    r"(?:make|create|build|generate|design|model|print|render)\s+"
+    # SHOW and GIVE too: "Show me a three D render of Spider Man" reached the
+    # scout as "show me a three d render of spider man" and that is what was
+    # searched for (2026-09-05).
+    r"(?:make|create|build|generate|design|model|print|render|show|give|project)\s+"
     r"(?:me\s+)?(?:a|an|the)?\s*"
     # "3d" comes out of dictation as "3 d" and "three d" at least as often as
     # "3d" — he said "create me a three D image of Spider-Man's spider emblem"
@@ -1385,6 +1388,8 @@ def slots_holo_make(t: str) -> dict:
     detailed = bool(_DETAILED.search(said))
     bare = re.sub(r"\s{2,}", " ", _DETAILED.sub(" ", said)).strip(" .,")
     desc = _MAKE_STRIP.sub("", bare).strip(" .,")
+    # "Render a duck, please." is a duck, not a "duck, please"
+    desc = re.sub(r"[,\s]*\b(?:please|thanks|thank you|sir)\b[.!]*$", "", desc, flags=re.I).strip(" .,")
     # "Render it" / "make that one 3D" pass the pointer through: make_hologram
     # resolves it to the pictures on screen (render_tools._POINTER).
     out = {"description": desc or said}
@@ -2032,6 +2037,10 @@ SKILLS: list[Skill] = [
         "what's 9 squared", "calculate 7 times 8", "how much is 14 times 12",
         "what's 100 minus 37", "seventeen times twenty three", "half of 30",
         "what does 6 times 7 make", "what's 3 point 5 times 2",
+        # spoken numbers, as dictation writes them ("What's ten plus ten?" fell
+        # to the model on 2026-09-04 at 0.62)
+        "what's ten plus ten", "what is five times six", "twelve minus four",
+        "what's twenty divided by four", "ten plus ten",
         # unit conversions are arithmetic with a table (brain/units.py)
         "how many milliliters in a cup", "how many ounces in a pound",
         "convert 5 miles to kilometers", "what's 30 celsius in fahrenheit",
@@ -2095,7 +2104,11 @@ SKILLS: list[Skill] = [
         # the parser tells them apart by whether he named a layer.
         "show me layer fifty", "go to layer 20", "next layer", "the top layer",
         "back a layer", "show me the first layer",
-        "fit it on the screen", "centre the model"],
+        "fit it on the screen", "centre the model",
+        # said and missed on 2026-09-04: the parser already knew "still" and
+        # "spin" (holo_tools), the router had never heard the words
+        "center it", "centre it", "put it in the middle", "stop spinning",
+        "stop it from spinning", "hold it still", "spin it", "keep it turning"],
         slots=slots_holo_move, speak=say_holo_move),
     # MAKING one, as against showing one he already has. Every seed here names
     # the act of creation — "make", "create", "turn that into" — because
@@ -2265,7 +2278,8 @@ SKILLS: list[Skill] = [
     Skill("hands_on", "hand_control", [
         "let me move it with my hands", "turn on hand control",
         "i want to use my hands", "hand controls on",
-        "let me grab it", "watch my hands", "enable gestures"],
+        "let me grab it", "watch my hands", "enable gestures",
+        "turn on hand view", "hand view on", "turn on hand controls", "toggle hand control"],
         fixed_args={"on": True}, speak=say_hands),
     Skill("hands_off", "hand_control", [
         "stop watching my hands", "turn off hand control",
@@ -2377,7 +2391,8 @@ SKILLS: list[Skill] = [
         "set the volume to 50 percent", "volume 30", "turn the volume to 40",
         "set volume at 70 percent", "make the volume 20", "change the volume to 80",
         "volume to sixty", "turn it up to 90", "turn it down to 25", "put the volume at 10",
-        "set system volume to 45 percent", "lower the volume to 15"],
+        "set system volume to 45 percent", "lower the volume to 15",
+        "set my volume to fifty percent", "set my volume to 50", "my volume to sixty"],
         slots=slots_volume, speak=say_volume),
     Skill("mute", "set_mute", [
         "mute", "mute the sound", "mute the audio", "silence the speakers", "mute everything",
@@ -2490,7 +2505,10 @@ SKILLS: list[Skill] = [
         "how's the system doing", "how much ram am i using", "what's my cpu usage",
         "system status", "how is the pc doing", "check system resources",
         "how much memory is free", "what's the cpu at", "give me a system report",
-        "how much disk space do i have"],
+        "how much disk space do i have",
+        # the film's phrasing, his on 2026-09-04
+        "what are the systems", "systems check", "how are the systems",
+        "systems status"],
         speak=say_stats),
     Skill("windows", "list_windows", [
         "what windows are open", "what do i have open", "list my open windows",

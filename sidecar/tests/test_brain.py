@@ -133,6 +133,13 @@ CASES = [
     ("open notepad", "open_app"), ("open spotify", "open_app"),
     ("how are my stocks doing", "watchlist"), ("how's my portfolio", "watchlist"),
     ("check my stocks", "watchlist"),
+    # his own words from 2026-09-04, each of which fell to the model
+    ("center it", "holo_move"), ("stop spinning", "holo_move"),
+    ("stop it from spinning", "holo_move"),
+    ("turn on hand view", "hands_on"),
+    ("what are the systems", "stats"), ("systems check", "stats"),
+    ("set my volume to fifty percent", "volume_set"),
+    ("what's ten plus ten", "math"), ("what is five times six", "math"),
     ("what's in the news", "news"), ("tell me the tech news", "news"),
     ("any breaking news", "breaking"),
     # The camera is a subsystem, not an executable. Both halves are gated

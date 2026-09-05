@@ -84,6 +84,16 @@ def main() -> int:
         check(f"approval: {said!r} is the verb, so a yes", got is vgo, getattr(got, "label", got))
     check("...but the verb with a NEW subject is a new request",
           clarify.choose(verbs, "render a dragon instead") is None)
+    # "Go for it." three times and "Yes, finish the render." three times, in
+    # his own transcript of 2026-09-04, each time answered with nothing.
+    for said in ("go for it", "Go for it.", "yes, finish the render", "finish it",
+                 "yes please finish it", "proceed", "absolutely", "let's do it", "run it"):
+        got = clarify.choose(verbs, said)
+        check(f"approval: {said!r} is a yes", got is vgo, getattr(got, "label", got))
+    vleave = next(b for b in verbs.amb.branches if b.label == "leave it")
+    for said in ("hold off", "cancel that", "never mind", "wait", "nah"):
+        got = clarify.choose(verbs, said)
+        check(f"approval: {said!r} is a no", got is vleave, getattr(got, "label", got))
     # the approval words include "on", "do", "go", "please", "start", "fine":
     # a request that happens to contain one is NOT a "go ahead"
     for said in ("go to sleep", "turn on the camera", "please open spotify",

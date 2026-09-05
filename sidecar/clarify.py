@@ -94,7 +94,8 @@ _DROP = re.compile(r"\b(?:never ?mind|forget it|neither|nothing|no thanks|"
 # Words that carry no meaning in a two-word answer: "leave it", "yes please",
 # "go ahead then, jarvis".
 _FILLER = frozenset({"it", "that", "then", "please", "sir", "jarvis", "thanks",
-                     "thank", "you", "the", "and", "just", "now"})
+                     "thank", "you", "the", "and", "just", "now", "for", "with",
+                     "this", "one", "of", "so"})
 
 
 def choose(pending: Pending, text: str) -> Branch | str | None:
@@ -336,13 +337,21 @@ def approval(subject: str, question: str, tool: str, args: dict, render,
         subject=subject,
         question=question,
         branches=(
+            # "Go for it" and "yes, finish the render" were each said three
+            # times running on 2026-09-04 and answered nothing: "for" and
+            # "finish" were not yes-words. Everything a person says to mean
+            # "yes, do the thing" belongs here.
             Branch("go ahead", tool, dict(args),
-                   ("yes", "yeah", "yep", "go", "ahead", "do", "please", "sure",
-                    "ok", "okay", "fine", "start", "carry", "on") + tuple(yes_words),
+                   ("yes", "yeah", "yep", "yup", "ya", "go", "ahead", "do", "please", "sure",
+                    "ok", "okay", "fine", "start", "carry", "on", "finish", "proceed",
+                    "continue", "absolutely", "definitely", "alright", "right", "let's",
+                    "lets", "affirmative", "confirmed", "confirm", "correct", "begin",
+                    "launch", "run") + tuple(yes_words),
                    render=render, speculative=False),
             Branch("leave it", "", {},
-                   ("no", "nope", "don't", "dont", "skip", "leave", "later",
-                    "not", "forget", "stop") + tuple(no_words),
+                   ("no", "nope", "nah", "don't", "dont", "skip", "leave", "later",
+                    "not", "forget", "stop", "cancel", "never", "mind", "hold", "wait",
+                    "off") + tuple(no_words),
                    render=lambda a, r: "Of course, sir.", speculative=False),
         ),
     )

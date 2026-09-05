@@ -112,7 +112,11 @@ async def main() -> int:
                        ("fit it on the screen", "fit"),
                        ("cut it in half", "section"), ("turn it upside down", "flip"),
                        ("zoom in", "scale"), ("rotate it 90 degrees", "rotate"),
-                       ("tip it forward", "rotate")):
+                       ("tip it forward", "rotate"),
+                       # his own words, 2026-09-04
+                       ("center it", "fit"), ("put it in the middle", "fit"),
+                       ("stop spinning", "still"), ("stop it from spinning", "still"),
+                       ("keep it turning", "spin")):
         check(f"{said!r} is {want}", A.parse_action(said) == want, A.parse_action(said))
     for said in ("what is the capital of france", "remind me to call dad",
                  "what's the weather", "open spotify"):

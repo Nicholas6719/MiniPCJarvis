@@ -3718,6 +3718,37 @@ alarm / national / local / wire / colour and interleaves country and home.
   in the background three seconds after any turn that changed the block.
   Gated in test_shortlist_sticky; ships in release 29.
 
+### 10:00 — his last conversation before leaving, and what it taught
+Log: "Show me a three D render of Spider Man" scouted the web and asked
+whether to start; he said "Render it." and was told *that was not an
+answer*; the words then became a new request and three searches for a model
+called "it". He closed the app. Three fixes, all gated: the VERB of the thing
+is a yes to a cost question (`_install_cost_question` passes `yes_words`
+per tool; `clarify.choose` allows a few more words for a yes/no), a pointer
+description resolves to the subject and first picture of the last image
+search (`render_tools.resolve_pointer`, "which one, sir?" when nothing is on
+screen), and gpt-oss's follow-up repeat ("Lima. Santiago.", "Herman
+Melville, 1851" - measured live, a prompt rule changed nothing) is held on
+the way to the speaker (`skills.strip_repeat`, in `_llm_with_tools`).
+
+Also: the tools prefix is warmed with EVERY tool at boot
+(`shortlist.warm_block`), because the block only grows and each growth cost
+the next tools-shape turn 9-10 s ("And Argentina?" on releases 27-29).
+
+### 10:43 — power loss, resumed
+The PC lost power during release 30's soak suite (everything before it had
+passed; release 30 was installed at 10:29). JARVIS autostarted at boot, but
+an autostart launch has no `JARVIS_DEBUG=1`, so no `session.token` and every
+authenticated endpoint answers 401: after any reboot, stop the three
+processes and relaunch through `.agent/scripts/jarvis_relaunch.cmd` before a
+live test.
+
+### The brief on screen (release 31)
+New HUD stage `brief`: a gauges row (index moves, coloured by direction) and
+the same sections the phone gets. Opened by the scheduled brief
+(`briefing._maybe_brief` emits `brief`) and by `get_market_state`. Held two
+minutes; part of the "bring that back" snapshot.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

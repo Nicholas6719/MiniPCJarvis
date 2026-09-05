@@ -239,7 +239,8 @@ def parse_action(text: str) -> str | None:
                  r"hologram)|no colou?r|without colou?r)\b", t):
         return "hologram"
     if re.search(r"\b(?:fit it|fit (?:it )?(?:on|to) (?:the )?(?:screen|view|frame)|"
-                 r"frame it|centre it|center it|show all of it|"
+                 r"frame it|centre it|center it|centre the model|center the model|"
+                 r"put it in the middle|in the middle|show all of it|"
                  r"can'?t see (?:all|the whole)|see all of it|"
                  r"it'?s off (?:the )?screen)\b", t):
         return "fit"
@@ -262,7 +263,7 @@ def parse_action(text: str) -> str | None:
     # the commoner reading by far. Starting the idle drift has to be asked
     # for in words that can only mean continuous motion.
     if re.search(r"\b(?:start (?:it )?spinning|let it spin|"
-                 r"keep (?:it )?spinning|turn it slowly|"
+                 r"keep (?:it )?spinning|keep (?:it )?turning|keep it going|turn it slowly|"
                  r"spin (?:it )?slowly)\b", t):
         return "spin"
     # `turn` is last for a reason: "turn it off" is not a rotation, and the hide
