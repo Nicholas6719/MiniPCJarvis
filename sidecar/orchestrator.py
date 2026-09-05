@@ -522,6 +522,20 @@ class Orchestrator:
         """This task is now the newest turn; older ones may no longer settle the state."""
         self._turn_gen += 1
         _TURN_GEN.set(self._turn_gen)
+        # How long since he last spoke to JARVIS, for the wake acknowledgement:
+        # a greeting after hours away, a short word otherwise.
+        now = time.time()
+        self._prev_turn_at = getattr(self, "_last_turn_at", 0.0)
+        self._last_turn_at = now
+
+    def _wake_ack_line(self) -> str:
+        from brain import persona
+        prev = getattr(self, "_prev_turn_at", 0.0)
+        gap = (time.time() - prev) if prev else float("inf")
+        line = persona.wake_ack(gap, time.localtime().tm_hour,
+                                getattr(self, "_last_wake_ack", None))
+        self._last_wake_ack = line
+        return line
 
     def _newer_turn_started(self) -> None:
         """Something newer took over (a barge-in, a fresh capture) without being
@@ -1475,12 +1489,16 @@ class Orchestrator:
                        stt_ms=int((time.time() - t_start) * 1000),
                        silence_ms=int(waited * 1000), budget_ms=int(budget * 1000))
         if not text:
-            # just the wake word — acknowledge and open the window
+            # just the wake word — acknowledge and open the window. Not always
+            # "Yes?": the films' JARVIS varies it, and greets him by the time
+            # of day when he has been away (brain/persona.py).
+            ack = self._wake_ack_line()
             await self.sm.to(State.SPEAKING, force=True)
+            await bus.emit("speaking", text=ack)
             cancel = asyncio.Event()
             self._speak_cancel = cancel
             try:
-                async for chunk in tts.synthesize_stream("Yes?", cancel):
+                async for chunk in tts.synthesize_stream(ack, cancel):
                     if cancel.is_set():
                         break
                     await speaker.play_chunk(chunk, tts.sample_rate)
@@ -2532,12 +2550,19 @@ class Orchestrator:
                     if self.remote_turn:
                         continue   # remote turn: text goes to the phone, not the speakers
                     first = True
+                    t_sent = time.time()
                     try:
                         async for chunk in tts.synthesize_stream(sentence,
                                                                  self._speak_cancel):
                             if self._speak_cancel.is_set():
                                 break
-                            await audio_q.put((sentence, chunk, first))
+                            if first:
+                                # Where the reply's first sound actually waits:
+                                # this line and the "to speaker" one below are
+                                # the two halves of first_audio_ms.
+                                log.info("speak: first chunk of %r after %d ms",
+                                         sentence[:32], int((time.time() - t_sent) * 1000))
+                            await audio_q.put((sentence, chunk, first, t_sent))
                             first = False
                     except Exception:
                         log.exception("synthesis failed for %r", sentence[:60])
@@ -2552,7 +2577,7 @@ class Orchestrator:
                 item = await audio_q.get()
                 if item is None:
                     break
-                sentence, chunk, first = item
+                sentence, chunk, first, t_sent = item
                 if self._speak_cancel.is_set():
                     break
                 if first:
@@ -2561,6 +2586,8 @@ class Orchestrator:
                         spoke = True
                     await bus.emit("speaking", text=sentence)
                     self._saying_own_name = "jarvis" in sentence.lower()
+                    log.info("speak: %r to the speaker after %d ms",
+                             sentence[:32], int((time.time() - t_sent) * 1000))
                 try:
                     self.metrics.mark("first_audio_ms")
                     await speaker.play_chunk(chunk, tts.sample_rate)
