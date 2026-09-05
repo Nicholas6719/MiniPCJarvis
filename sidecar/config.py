@@ -81,8 +81,17 @@ DEFAULTS: dict[str, Any] = {
                 # gets half the context: 16k for the conversation — a full tool
                 # block (~8.5k, cached) plus history, a fetched page and the 4k
                 # generation budget — and 16k the side calls will never fill.
+                # --swa-full: gpt-oss alternates sliding-window layers, and
+                # without a full-size SWA cache llama-server keeps "context
+                # checkpoints" per slot to make prefix reuse possible. On
+                # 2026-09-05 at 01:33 slot 1 fell into an infinite "erasing old
+                # context checkpoint" loop (sixteen warnings a second, 1,669
+                # CPU-seconds), every request behind it hung for the 300 s
+                # read timeout, and three live suites failed. A full SWA cache
+                # needs no checkpoints (~0.8 GB more at this context) and is
+                # what makes the prefix cache honest for an SWA model anyway.
                 "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256",
-                         "-np", "2"],
+                         "-np", "2", "--swa-full"],
                 "context": 32768,
                 "template_kwargs": {"reasoning_effort": "low"},
                 "reasoning_field": "reasoning_content",

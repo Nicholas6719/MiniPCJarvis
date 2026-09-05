@@ -3499,9 +3499,8 @@ torn and skewed from the side. So it is the DETAILED render, never the default:
   reflexes 46-205 ms (was 600-1,900). The floor did not reproduce; the
   earlier benches ran within minutes of a hot-swap, while `warm_phrases` was
   still holding `_synth_lock` for one phrase at a time (~0.4 s each), which
-  is the likeliest explanation. Follow-up: with Pocket the warm buys ~100 ms
-  per cached line and costs a turn that arrives mid-phrase up to 0.4 s, so
-  it should warm only the short acknowledgements.
+  is the likeliest explanation. Done in release 26: under Pocket the warm
+  covers only the sixteen shortest lines, a second apart (`warm_phrases`).
 * **"While you were away."** `delivery.deliver` now records every proactive
   outcome (spoken / telegram / held / budget, subject, text) in
   `delivery.ledger`; `persona.briefing()` turns the entries since he last
@@ -3510,6 +3509,23 @@ torn and skewed from the side. So it is the DETAILED render, never the default:
   back."), the greeting after six hours away carries it, and "what did I
   miss" / "catch me up" / "anything while I was gone" is a reflex (skill
   `briefing`). Gated in `test_persona`.
+
+### 01:55 — release 25 failed three live suites, and it was the model server
+research_e2e's eclipse question hung 302 s (TOOL-ERROR), facts_e2e's web
+turn never answered, endpoint_e2e heard nothing: the sidecar log shows six
+"stuck in thinking/speaking/listening for 35 s" recoveries and `turn
+failed: httpx.ReadTimeout` (the 300 s read timeout on the llama stream). The
+llama-server log ends in an infinite loop — `slot create_check: id 1 | task
+432 | erasing old context checkpoint (pos_min = 1484, pos_max = 1611…)`
+sixteen times a second — and the process had burned 1,669 CPU-seconds by
+02:05. gpt-oss is a sliding-window-attention model; without a full-size SWA
+cache llama-server keeps per-slot "context checkpoints" for prefix reuse,
+and that machinery wedged on slot 1 (the no-tools shape). Release 26 adds
+`--swa-full` to gpt-oss's args (no checkpoints, ~0.8 GB more KV at 32k,
+and honest prefix caching for an SWA model). The sick server was killed and
+the sidecar's watchdog brought a fresh one up (it answers again; the first
+knowledge turn after the restart was 13 s, a cold cache). Release 25's
+SIDECAR BUILD was fine and is installed; only its suites failed.
 
 ### Not done / open
 * voice_ux_e2e T2 ("CONVERSATION WINDOW") is FLAKY, not fixed: PASS in
