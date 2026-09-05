@@ -90,9 +90,12 @@ async def main() -> int:
         print("\n-- the two conversation call sites say so --")
         import orchestrator as O
         src = inspect.getsource(O.Orchestrator._llm_with_tools)
-        check("_llm_with_tools pins slot 0", "slot=0" in src)
+        check("_llm_with_tools pins the tools shape to slot 0 and the no-tools shape to slot 1",
+              "slot=0 if round_tools is not None else 1" in src,
+              "two prompt shapes on one slot evict each other: 21 s per switch")
         src = inspect.getsource(O.Orchestrator._warm_prompts)
-        check("the boot warm pins slot 0", "slot=0" in src)
+        check("the boot warm primes each shape on its own slot",
+              "slot=0 if tools is not None else 1" in src)
         from config import DEFAULTS
         args = DEFAULTS["llm"]["models"]["gpt-oss-20b"]["args"]
         check("gpt-oss runs two slots", args[args.index("-np") + 1] == "2", args)

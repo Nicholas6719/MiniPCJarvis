@@ -3401,6 +3401,17 @@ the worker: imported inside the request coroutine it stalled the loop for good
   `local_llm.stream` call defaulting to slot 1; `llama.learn_slots()` reads
   `/props` so a one-slot server (gemma) simply omits the field.
   `test_llm_slots` gates it with a faked HTTP client.
+  Release 20 measured: same-shape turns 1.5-3.5 s (peru 2.8, jaws-again 2.7,
+  jupiter 3.0, octopuses 3.3, hamlet 4.6); side calls on slot 1 confirmed.
+  Two turns still re-read 5k+ (21-22 s): both were GENERAL-knowledge reflex
+  turns, which the model composes WITHOUT the tools block
+  (`_no_tools_first` → `round_tools=None`), and a prompt without the block
+  shares only the system prompt with one that has it — two shapes, one
+  cache. Release 21: the no-tools shape runs on slot 1, the tools shape on
+  slot 0; each keeps its own prefix.
+  The boot warm primes each shape on its own slot the same way.
+  Still open after this: the pure-reflex first-audio floor (~0.6-0.9 s with
+  Pocket; needs timing inside `PocketTTS.synthesize_stream` to attribute).
   Reflex first-audio is 0.75-2.2 s and is mostly the TOOL (cpu sampling,
   weather fetch); the pure-reflex floor with Pocket is ~0.8 s and is the next
   thing to look at (worker request + speaker start).

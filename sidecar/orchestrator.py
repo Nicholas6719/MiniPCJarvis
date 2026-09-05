@@ -825,8 +825,9 @@ class Orchestrator:
         # registry order — a prefix nothing would ever extend.
         for tools in (shortlist.warm_block(registry), None):
             try:
+                # Each shape on the slot it will live on (see _llm_with_tools).
                 async for _ in local_llm.stream([sysmsg, user], tools=tools, max_tokens=1,
-                                                slot=0):
+                                                slot=0 if tools is not None else 1):
                     pass
             except Exception as e:
                 log.info("prompt warm skipped: %s", e)
@@ -2382,9 +2383,18 @@ class Orchestrator:
             round_tools = None if choice == "none" else tools
             sampling = ({"temperature": CREATIVE_TEMPERATURE}
                         if CREATIVE_INTENT.search(raw_user or "") else None)
+            # TWO PROMPT SHAPES, TWO CACHES. A turn the brain already answered
+            # ("who directed jaws" is a general-knowledge reflex) goes to the
+            # model WITHOUT the tools block, and a prompt without the block
+            # shares nothing past the system prompt with one that has it — on
+            # one slot the two shapes evicted each other, and every switch
+            # re-read ~5k tokens (21-22 s, measured on release 20 while every
+            # same-shape turn took 1.5-3.5 s). The no-tools shape lives on the
+            # side slot, where it keeps its own prefix.
             async for chunk in local_llm.stream(messages, tools=round_tools, max_tokens=4096,
                                                 tool_choice=None if choice == "none" else choice,
-                                                sampling=sampling, slot=0):
+                                                sampling=sampling,
+                                                slot=0 if round_tools is not None else 1):
                 if self._speak_cancel.is_set():
                     # user interrupted: stop generating AND stop streaming to the UI
                     cancelled = True
