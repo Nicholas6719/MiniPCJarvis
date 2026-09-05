@@ -59,7 +59,11 @@ log = logging.getLogger("jarvis.render.estimates")
 # at 0.12-0.30 s on this machine; seeded at 2 s so a cold OpenSCAD start is still
 # inside it, and comfortably under the ask threshold — nobody wants to be asked
 # permission to spend a fifth of a second.
-SEED = {0: 2.0, 1: 25.0, 2: 6.0, 3: 150.0, 4: 170.0, 5: 45.0, 6: 300.0}
+# 8 is not a tier: it is the DETAILED reconstruction (Hunyuan3D-2mini on the
+# CPU) that tiers 3 and 4 run when he asks for a proper one. Measured once on
+# 2026-09-05 at 20 steps / octree 128 before it was wired in; the seed is
+# that measurement rounded up, and the median replaces it after the first run.
+SEED = {0: 2.0, 1: 25.0, 2: 6.0, 3: 150.0, 4: 170.0, 5: 45.0, 6: 300.0, 8: 420.0}
 
 KEEP = 9                       # how many measured runs count toward the median
 _PATH = APP_DIR / "render_times.json"

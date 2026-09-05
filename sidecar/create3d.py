@@ -802,6 +802,21 @@ def model3d_python() -> str | None:
     return found or None
 
 
+def detailed_python() -> str | None:
+    """The interpreter of the DETAILED reconstructor's environment, if installed.
+
+    Hunyuan3D-2mini, in its own venv under the model3d directory (torch CPU,
+    ~2 GB). On the same picture TripoSR returned an 18-unit-thick blocky relief
+    and this returned a smooth, fully volumetric object — at minutes rather
+    than a minute, which is why it is asked for, never assumed.
+    """
+    d = model3d_dir()
+    cand = d / "hy3d" / "Scripts" / "python.exe"
+    if cand.exists() and (d / "hy3d_to_mesh.py").exists():
+        return str(cand)
+    return None
+
+
 def available() -> dict:
     """Which of the heavy tiers can actually run right now.
 
@@ -813,7 +828,8 @@ def available() -> dict:
     py = model3d_python()
     d = model3d_dir()
     has3 = bool(py and (d / "photo_to_mesh.py").exists())
-    return {"python": py, "dir": str(d), 3: has3, 4: has3}
+    return {"python": py, "dir": str(d), 3: has3, 4: has3,
+            "detailed": bool(detailed_python())}
 
 
 def _missing(tier: int) -> dict:
@@ -852,7 +868,7 @@ PROGRESSIVE_STAGES = "96,192"
 
 
 async def _run_model3d(script: str, args: list[str], timeout: float,
-                       on_stage=None) -> dict:
+                       on_stage=None, python: str | None = None) -> dict:
     """Run one of the heavy scripts as a subprocess and read back its JSON.
 
     Reads stdout AS IT ARRIVES rather than after the process exits, because the
@@ -870,7 +886,7 @@ async def _run_model3d(script: str, args: list[str], timeout: float,
     carriage returns with no newline, and `readline` on one accumulates until it
     hits the stream limit and raises.
     """
-    py = model3d_python()
+    py = python or model3d_python()
     if not py:
         return {"error": "the 3D model environment isn't installed"}
     cmd = [py, str(model3d_dir() / script), *args]
@@ -1022,8 +1038,13 @@ def _clear_stages(base: str) -> None:
 
 
 async def from_photo(image_path: str, name: str = "",
-                     progressive: bool = False) -> dict:
+                     progressive: bool = False, detailed: bool = False) -> dict:
     """TIER 3: a photo to a mesh. A likeness, and labelled as one.
+
+    `detailed` runs Hunyuan3D-2mini instead of TripoSR: a smooth, volumetric
+    object rather than a relief, at minutes rather than a minute. Only when he
+    asked for it (or agreed to the wait), and only when it is installed —
+    otherwise the ordinary reconstruction runs and says so.
 
     `progressive` shows him the model resolving instead of a progress bar. It is
     off by default and turned on only for a render he asked for as a whole: a
@@ -1063,17 +1084,34 @@ async def from_photo(image_path: str, name: str = "",
     # rungs are pulled from the same scene code, so what he sees becoming the
     # model IS the model.
     extra = ["--stages", PROGRESSIVE_STAGES] if progressive else []
+    hy = detailed_python() if detailed else None
     try:
-        r = await _run_model3d(
-            "photo_to_mesh.py",
-            [str(p), str(stl), "--resolution", str(res), *extra], 900,
-            _stage_shower(base) if progressive else None)
+        if hy:
+            dres = int(config.get("fabrication", "detailed_resolution", default=192))
+            steps = int(config.get("fabrication", "detailed_steps", default=20))
+            r = await _run_model3d(
+                "hy3d_to_mesh.py",
+                [str(p), str(stl), "--resolution", str(dres), "--steps", str(steps),
+                 "--stages", "64,128" if progressive else ""], 1800,
+                _stage_shower(base) if progressive else None, python=hy)
+        else:
+            r = await _run_model3d(
+                "photo_to_mesh.py",
+                [str(p), str(stl), "--resolution", str(res), *extra], 900,
+                _stage_shower(base) if progressive else None)
     finally:
         _clear_stages(base)
     if r.get("error"):
         return {**r, "tier": 3}
-    return {"tier": 3, "name": base, "stl": str(stl), "note": TIER_NOTE[3],
-            "repair_likely": True}
+    out = {"tier": 3, "name": base, "stl": str(stl), "note": TIER_NOTE[3],
+           "repair_likely": True}
+    if hy:
+        out.update({"detailed": True, "backend": "hunyuan3d-2mini",
+                    "note": "a detailed reconstruction from the picture"})
+    elif detailed:
+        out["instruction"] = ("He asked for a detailed one and the detailed model is not "
+                              "installed; this is the ordinary reconstruction — say so.")
+    return out
 
 
 # What a picture has to be before a reconstruction is run on it. An icon
@@ -1354,7 +1392,7 @@ async def _download_reference(img: dict, description: str, d) -> str:
 
 async def from_text(description: str, name: str = "",
                     skip: int = 0, progressive: bool = False,
-                    reference: str = "") -> dict:
+                    reference: str = "", detailed: bool = False) -> dict:
     """TIER 4: a description to a mesh, by way of a reference picture.
 
     `reference` is a picture already found and SHOWN to him — the scout's. When
@@ -1383,7 +1421,7 @@ async def from_text(description: str, name: str = "",
     # three minutes — his arc reactor came back as a lamp part and he found out
     # at the end.
     await _show_reference(ref, desc)
-    r = await from_photo(ref, name or desc, progressive=progressive)
+    r = await from_photo(ref, name or desc, progressive=progressive, detailed=detailed)
     # Tidy the reference away: it was scaffolding, and his work folder is for
     # parts. Only after the mesh is made, so a failure leaves it to look at.
     try:
@@ -1961,7 +1999,8 @@ async def from_the_web(description: str, name: str = "", skip: int = 0,
 
 async def build(tier: int, description: str = "", image_path: str = "",
                 name: str = "", skip: int = 0, progressive: bool = False,
-                reference: str = "", scouted_model: dict | None = None) -> dict:
+                reference: str = "", scouted_model: dict | None = None,
+                detailed: bool = False) -> dict:
     """Run one tier and return its result, tier included.
 
     `reference` and `scouted_model` are what the scout found and he was asked
@@ -2047,10 +2086,11 @@ async def build(tier: int, description: str = "", image_path: str = "",
             except OSError:
                 pass
     elif tier == 3:
-        r = await from_photo(image_path, name, progressive=progressive)
+        r = await from_photo(image_path, name, progressive=progressive, detailed=detailed)
     elif tier == 4:
         r = await from_text(description, name, skip=skip,
-                            progressive=progressive, reference=reference)
+                            progressive=progressive, reference=reference,
+                            detailed=detailed)
     elif tier == 5:
         r = await from_the_web(description, name, skip=skip,
                                progressive=progressive,

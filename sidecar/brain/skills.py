@@ -1317,7 +1317,7 @@ def say_holo_check(slots: dict, res: dict) -> str:
 
 _MAKE_STRIP = re.compile(
     r"^(?:please\s+)?(?:can you\s+|could you\s+)?"
-    r"(?:make|create|build|generate|design|model|print)\s+"
+    r"(?:make|create|build|generate|design|model|print|render)\s+"
     r"(?:me\s+)?(?:a|an|the)?\s*"
     # "3d" comes out of dictation as "3 d" and "three d" at least as often as
     # "3d" — he said "create me a three D image of Spider-Man's spider emblem"
@@ -1338,6 +1338,16 @@ def say_hands(slots: dict, res: dict) -> str:
     return res.get("spoken") or "Done, sir."
 
 
+# "A DETAILED one" is a different render: Hunyuan3D-2mini instead of TripoSR,
+# minutes instead of a minute, a volumetric object instead of a relief. The
+# adjective is the whole signal, and it must not reach the tier chooser as
+# part of the object's name.
+_DETAILED = re.compile(
+    r"\b(?:detailed|high[- ]quality|high[- ]res(?:olution)?|proper|in (?:full )?detail|"
+    r"full[- ]detail|best quality|top quality|fine|take your time (?:and|with|on)|"
+    r"as good as you can)\b", re.I)
+
+
 def slots_holo_make(t: str) -> dict:
     """What he wants made, with the asking-verb stripped off the front.
 
@@ -1346,8 +1356,13 @@ def slots_holo_make(t: str) -> dict:
     `mm`, and "model" appearing in every request would tell it nothing.
     """
     said = (t or "").strip()
-    desc = _MAKE_STRIP.sub("", said).strip(" .,")
-    return {"description": desc or said}
+    detailed = bool(_DETAILED.search(said))
+    bare = re.sub(r"\s{2,}", " ", _DETAILED.sub(" ", said)).strip(" .,")
+    desc = _MAKE_STRIP.sub("", bare).strip(" .,")
+    out = {"description": desc or said}
+    if detailed:
+        out["detailed"] = True
+    return out
 
 
 _MODEL_FIND_STRIP = re.compile(

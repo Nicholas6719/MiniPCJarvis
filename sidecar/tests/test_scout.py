@@ -140,7 +140,7 @@ async def main() -> int:
             searched.append(desc)
             return "other.jpg"
 
-        async def fake_photo(path, name, progressive=False):
+        async def fake_photo(path, name, progressive=False, **kw):
             built.append(path)
             return {"stl": "x.stl", "name": name}
 

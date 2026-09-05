@@ -226,6 +226,12 @@ class RenderQueue:
                     # 27-second run filed under tier 0 would drag its median from
                     # a fifth of a second to a wait he would then be asked about.
                     ran = int((job.result or {}).get("tier", job.tier))
+                    # A DETAILED reconstruction is tier 3 with a different
+                    # engine and a different clock: filed under its own key
+                    # (8), or five minutes would become the estimate for
+                    # every ordinary photo render.
+                    if (job.result or {}).get("detailed"):
+                        ran = 8
                     timer.tier = ran
                     timer.done()          # only a real success calibrates
             except asyncio.CancelledError:

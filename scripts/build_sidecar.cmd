@@ -49,6 +49,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_math.py || (echo MATH FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_llm_slots.py || (echo LLM SLOTS FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_persona.py || (echo PERSONA FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_detailed.py || (echo DETAILED RENDER FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_scout.py || (echo SCOUT FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_features.py || (echo FEATURES FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_colours.py || (echo COLOURS FAILED & exit /b 1)

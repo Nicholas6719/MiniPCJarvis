@@ -78,7 +78,8 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                         name: str = "", confirmed: bool = False,
                         skip: int = 0, pieces: list | None = None,
                         reference: str = "",
-                        scouted_model: dict | None = None) -> dict:
+                        scouted_model: dict | None = None,
+                        detailed: bool = False) -> dict:
     """Make a 3D model and put it up, in the background, with an estimate.
 
     `reference` and `scouted_model` are not for the model to fill in: they are
@@ -119,8 +120,16 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
     if t in (3, 4) and not avail.get(t):
         return create3d._missing(t)
 
-    seconds = est.estimate(t)
+    # A DETAILED reconstruction is the same tier with a different engine and a
+    # different clock: Hunyuan3D-2mini, minutes rather than a minute, so it is
+    # estimated (and recorded) under its own key and goes through the cost
+    # question like anything else that long.
+    detailed = bool(detailed) and t in (3, 4) and bool(avail.get("detailed"))
+    est_key = 8 if detailed else t
+    seconds = est.estimate(est_key)
     label = _label(desc, image_path, t)
+    if detailed:
+        label = f"a detailed {label}" if not label.startswith(("a ", "an ")) else f"{label}, in detail"
 
     # A THING MADE OF PIECES IS A DIFFERENT CONVERSATION. "About five minutes,
     # shall I?" is the right question for a render and the wrong one for a suit:
@@ -217,7 +226,7 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                 # something else.
                 "args": {"description": desc, "tier": 5 if fetch else t, "name": name,
                          "image_path": "", "confirmed": True,
-                         "reference": pic,
+                         "reference": pic, "detailed": detailed,
                          "scouted_model": (found.get("model") or {}) if fetch else {}},
             },
                 "found": q["found"], "scouted": found,
@@ -228,17 +237,19 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
     if not confirmed and seconds > est.ask_threshold():
         return {"_ask": {
             "subject": label,
-            "question": (f"That's {est.spoken(seconds)}{est.confidence_note(t)}, sir. "
+            "question": (f"That's {est.spoken(seconds)}{est.confidence_note(est_key)}, sir. "
                          f"Shall I?"),
             "tool": "make_hologram",
             # confirmed=True, so answering "go ahead" runs this same tool and
             # takes the other path rather than asking again.
             "args": {"description": desc, "image_path": image_path,
-                     "tier": t, "name": name, "confirmed": True},
+                     "tier": t, "name": name, "confirmed": True,
+                     "detailed": detailed},
         }}
 
     _last_make.update({"description": desc, "image_path": image_path,
-                       "tier": t, "name": name, "skip": skip, "label": label})
+                       "tier": t, "name": name, "skip": skip, "label": label,
+                       "detailed": detailed, "est_key": est_key})
 
     async def job():
         if t == 6 and pieces:
@@ -250,7 +261,7 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
             if r.get("error") and not r.get("stl"):
                 r = await create3d.build(t, desc, image_path, name, skip=skip,
                                          progressive=True, reference=reference,
-                                         scouted_model=scouted_model)
+                                         scouted_model=scouted_model, detailed=detailed)
         else:
             # PROGRESSIVE ONLY HERE. This is the one render he asked for as a
             # whole, so it is the one he should watch resolve. The per-part
@@ -259,7 +270,7 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
             # he asked for.
             r = await create3d.build(t, desc, image_path, name, skip=skip,
                                      progressive=True, reference=reference,
-                                     scouted_model=scouted_model)
+                                     scouted_model=scouted_model, detailed=detailed)
         if r.get("stl") and not r.get("error"):
             # Put it up the moment it exists. "Anything becomes a hologram" is
             # the phase; a finished mesh he has to ask to see is half of it.
@@ -344,6 +355,10 @@ def register_all() -> None:
             "name": {"type": "string"},
             "confirmed": {"type": "boolean",
                           "description": "he has agreed to the wait"},
+            "detailed": {"type": "boolean",
+                         "description": "he asked for a DETAILED / high-quality / proper "
+                                        "one: the slower volumetric reconstruction "
+                                        "(minutes) instead of the quick relief"},
             "pieces": {"type": "array", "items": {"type": "string"},
                        "description": "for tier 6 only: the exact components he "
                                       "agreed to, passed straight back from the "

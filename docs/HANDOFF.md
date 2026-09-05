@@ -3451,6 +3451,50 @@ well, twelve coils, three spokes), PNG sizes plus an ICO with BMP entries
 (Explorer does not always render PNG-compressed ICO frames; the shortcuts
 point at `jarvis.exe,0`).
 
+## 2026-09-05 overnight — the detailed render, and small JARVIS things
+His brief before bed: "improve Jarvis even more, especially his 3D rendering
+ability and then his overall JARVIS feel and ability… continue silently
+overnight and ensure your testing does not even turn on my display."
+
+### 3D: Hunyuan3D-2mini on the CPU, as the DETAILED render
+Researched the 2026 field: TRELLIS 2 (4B, MIT) and Hunyuan3D 2.1 lead on
+quality but want 10-16 GB of CUDA; SF3D's weights are gated. On this machine
+(Ryzen 7 8845HS, 780M, no CUDA) the runnable candidate was
+**Hunyuan3D-2mini** (0.6B DiT, ungated, shape-only). Installed under
+`C:\AI\model3d\hy3d` (torch CPU) with the repo at `C:\AI\model3d\Hunyuan3D-2`.
+Measured: 30 steps / octree 256 = 18.4 min (the volume decode at 256 is 15 of
+them); 20 steps / octree 128 = 5.3 min end to end on the mug photo. Quality:
+on the probe picture TripoSR returned an 18-unit-thick blocky relief and
+Hunyuan a smooth, fully volumetric figure (`.agent/shots/look-hy3d_probe.png`
+vs `look-probe.png`). On the coffee-mug photo (`look-hy3d_mug.png` vs
+`look-triposr_mug.png`): Hunyuan a clean watertight cylinder with a proper
+handle in all three views; TripoSR a shell that is right from the front and
+torn and skewed from the side. So it is the DETAILED render, never the default:
+* `C:\AI\model3d\hy3d_to_mesh.py` — same protocol as `photo_to_mesh.py`
+  (stage JSON lines, then the final object), latents once and the mesh
+  carved at 64 → 128 → final so he watches it resolve; FlashVDM decoder when
+  it loads; Y-up rotated to Z-up like TripoSR's.
+* `create3d.detailed_python()` / `available()["detailed"]`; `from_photo(...,
+  detailed=)` runs it under its own interpreter (`_run_model3d(python=)`),
+  threads through `from_text`, `build`, `render_tools.make_hologram`; a
+  request for a detailed one on a machine without it runs the ordinary
+  reconstruction and says so.
+* The adjective is the signal: `brain.skills._DETAILED` ("detailed", "high
+  quality", "proper", "in full detail", "take your time and…") sets
+  `detailed=True` and is kept out of the object's name; `_MAKE_STRIP` learned
+  "render" as a verb.
+* Its own clock: `render_estimates.SEED[8] = 420` s, filed under 8 by the
+  queue when the result says `detailed`, so five minutes never becomes the
+  estimate for an ordinary photo render. The cost question fires as for any
+  long render. `test_detailed` gates all of it offline.
+
+### Feel
+* `brain/persona.py`: the bare wake word is answered "Yes?" / "Sir?" / "Yes,
+  sir?" / "Go ahead." / "At your service." rotating, never twice running; after
+  six hours away the first word is a greeting by the time of day.
+* Speech timing lines in the log ("speak: first chunk of … after N ms" /
+  "… to the speaker after N ms") to attribute the 0.6-0.9 s reflex floor.
+
 ### Not done / open
 * voice_ux_e2e T2 ("CONVERSATION WINDOW") is FLAKY, not fixed: PASS in
   release 13, FAIL in 16 and 17 and in a direct run ("heard: []" — the
