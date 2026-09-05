@@ -3527,6 +3527,14 @@ the sidecar's watchdog brought a fresh one up (it answers again; the first
 knowledge turn after the restart was 13 s, a cold cache). Release 25's
 SIDECAR BUILD was fine and is installed; only its suites failed.
 
+### 02:30 — release 26, where the night ends
+RELEASE OK (hands/sleep/telegram skipped by the quiet run, voice_ux T2 flaky
+as before). Idle bench: reflex first audio 48-213 ms; knowledge questions
+1.9-3.1 s to the first spoken word (hamlet 2.0, mona lisa 3.1, peru 1.9,
+octopuses 2.6) — the first model turn after a hot-swap and the suites' side
+calls still pays a cold cache once (10.4 s). Where Thursday evening
+started: 16-24 s for every one of those. Installed and pushed.
+
 ### Not done / open
 * voice_ux_e2e T2 ("CONVERSATION WINDOW") is FLAKY, not fixed: PASS in
   release 13 and in a standalone run at 00:36 on the 5th ("heard: ['And
