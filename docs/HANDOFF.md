@@ -3840,6 +3840,16 @@ overridden); under emergencies-only, weighty news is NOTABLE at most; and
 an emergency, an invasion beginning). Gated in test_significance.
 Night school now runs nightly (was every 72 h).
 
+### 16:50 — where the week's turns went, and the search wait (release 41)
+`/turnstats?days=7`: 5,568 turns (mostly suites) - reflex 77% at 2.5 s,
+tool_then_llm 10% at 17 s, llm_general 6% at 10 s, llm_tools 3% at 18 s.
+A live search turn on release 40: brain 0, memory 111, LLM sent at 1.9 s
+(the search itself ~1.5 s), first token 6.0 s - the model reading ~5
+results at 280 chars each plus its reasoning. DuckDuckGo's HTML and lite
+endpoints answer 202 with an anomaly challenge to httpx, so the browser
+stays; its flat 1200 ms wait before checking the results selector is gone
+(selector first, 250 ms settle, the old wait only when it never shows).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
