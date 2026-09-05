@@ -4,8 +4,12 @@ Run: python tests/test_persona.py
 """
 import os
 import sys
+import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# the ledger is persisted now: this gate must write to its own database
+os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "persona.db"))
 
 fails = []
 
@@ -96,6 +100,13 @@ def main() -> int:
           d.ledger and d.ledger[-1]["outcome"] == "spoken" and d.ledger[-1]["subject"] == "disk space",
           d.ledger)
     check("...and an empty message is not", len(d.ledger) == 1, len(d.ledger))
+    # ...and it survives a restart: a fresh Delivery (what a release makes)
+    # still knows what was said, because the ledger is on disk now
+    fresh = dv.Delivery()
+    seen = fresh.entries(time.time() - 60)
+    check("a new process still knows what was said before it",
+          any(e.get("subject") == "disk space" and e.get("outcome") == "spoken" for e in seen), seen)
+    check("...and nothing older than asked for", fresh.entries(time.time() + 60) == [])
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

@@ -34,6 +34,15 @@ CREATE TABLE IF NOT EXISTS turn_stats (
     skill TEXT,
     latency_ms INTEGER
 );
+CREATE TABLE IF NOT EXISTS deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    tier TEXT NOT NULL,
+    outcome TEXT NOT NULL,       -- spoken | telegram | held ... | nothing
+    why TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -201,6 +210,43 @@ class MemoryStore:
         cur = self.db.execute("DELETE FROM memories WHERE id=?", (memory_id,))
         self.db.commit()
         return cur.rowcount > 0
+
+    def log_delivery(self, row: dict) -> None:
+        """One thing JARVIS said, sent or held on his own initiative. Never raises.
+
+        The ledger used to live only in memory, so "what did I miss" knew
+        nothing after any restart - and a release restarts him. This is what
+        the morning greeting and "catch me up" read after a night."""
+        try:
+            self.db.execute(
+                "INSERT INTO deliveries (ts, tier, outcome, why, subject, text) VALUES (?,?,?,?,?,?)",
+                (float(row.get("ts") or time.time()), str(row.get("tier") or ""),
+                 str(row.get("outcome") or "nothing"), str(row.get("why") or ""),
+                 str(row.get("subject") or "")[:120], str(row.get("text") or "")[:160]))
+            self.db.commit()
+        except Exception:
+            log.exception("could not log a delivery")
+            self._unlock()
+
+    def recent_deliveries(self, since: float, limit: int = 200) -> list[dict]:
+        try:
+            rows = self.db.execute(
+                "SELECT ts, tier, outcome, why, subject, text FROM deliveries "
+                "WHERE ts >= ? ORDER BY ts DESC LIMIT ?", (float(since), int(limit))).fetchall()
+        except Exception:
+            log.exception("could not read the deliveries")
+            return []
+        return [{"ts": r[0], "tier": r[1], "outcome": r[2], "why": r[3],
+                 "subject": r[4], "text": r[5]} for r in reversed(rows)]
+
+    def last_user_turn_ts(self) -> float:
+        """When he last said anything - across restarts, from the transcript."""
+        try:
+            row = self.db.execute(
+                "SELECT ts FROM transcript WHERE role='user' ORDER BY ts DESC LIMIT 1").fetchone()
+            return float(row[0]) if row else 0.0
+        except Exception:
+            return 0.0
 
     def log_turn(self, role: str, content: str) -> None:
         """Record a line of conversation. Never raises.

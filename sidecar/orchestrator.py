@@ -539,8 +539,13 @@ class Orchestrator:
             # is the first wake of the session.
             try:
                 from delivery import delivery
+                if not prev:
+                    # first wake of THIS process: he last spoke before the
+                    # restart, and the transcript remembers when
+                    prev = memory.last_user_turn_ts()
+                    gap = (time.time() - prev) if prev else float("inf")
                 since = prev if prev else time.time() - 12 * 3600
-                entries = [e for e in delivery.ledger if e.get("ts", 0) >= since]
+                entries = delivery.entries(since)
                 self._away_since = since
             except Exception:
                 log.debug("no delivery ledger for the briefing", exc_info=True)

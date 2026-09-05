@@ -249,12 +249,41 @@ class Delivery:
                                 written=written, image=image)
         outcome = str(r.get("delivered") or "nothing")
         if outcome != "nothing" or r.get("why") not in ("empty", "said recently"):
-            self.ledger.append({"ts": time.time(), "tier": r.get("tier", tier),
-                                "outcome": outcome, "why": r.get("why", ""),
-                                "subject": (subject or key or "").strip(),
-                                "text": (text or "").strip()[:160]})
+            row = {"ts": time.time(), "tier": r.get("tier", tier),
+                   "outcome": outcome, "why": r.get("why", ""),
+                   "subject": (subject or key or "").strip(),
+                   "text": (text or "").strip()[:160]}
+            self._load_ledger()
+            self.ledger.append(row)
             del self.ledger[:-200]
+            # ...and on disk, so a restart - every release is one - does not
+            # empty "what did I miss".
+            try:
+                from memory.store import memory
+                memory.log_delivery(row)
+            except Exception:
+                log.debug("could not persist a delivery", exc_info=True)
         return r
+
+    def _load_ledger(self) -> None:
+        """The last day's ledger from the database, once, on first use."""
+        if getattr(self, "_ledger_loaded", False):
+            return
+        self._ledger_loaded = True
+        try:
+            from memory.store import memory
+            rows = memory.recent_deliveries(time.time() - 24 * 3600)
+            known = {(round(e.get("ts", 0), 3), e.get("text")) for e in self.ledger}
+            merged = [e for e in rows if (round(e.get("ts", 0), 3), e.get("text")) not in known]
+            self.ledger[:0] = merged
+            del self.ledger[:-200]
+        except Exception:
+            log.debug("could not load the delivery ledger", exc_info=True)
+
+    def entries(self, since: float) -> list[dict]:
+        """What was said, sent or held since `since` - restarts included."""
+        self._load_ledger()
+        return [e for e in self.ledger if e.get("ts", 0) >= since]
 
     async def _deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
                        subject: str = "", written: str = "",

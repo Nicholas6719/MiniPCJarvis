@@ -3797,6 +3797,22 @@ Framingham, high of 78, low 55, 30 percent chance of rain") and Today
 (reminders due today). Release 34 carried the test mute that holds the
 phone, `/debug/ledger`, and the scout's "nothing" handed back.
 
+### 14:00 — release 35 verified live, three small truths (release 36)
+* Morning brief preview: WEATHER / TODAY (wear my retainers at 9 PM) /
+  MARKETS / YOURS / WORTH A LOOK / THE STORY / AHEAD. The story line read
+  "According to MarketWatch, the U.S." - the sentence splitter cut at the
+  abbreviation and kept a fragment the model never finished.
+  `market_intel.split_sentences` protects U.S./Inc./Mr., `tidy_story` drops
+  an unfinished tail.
+* "And what is the capital of Chile?" -> the model now says "Lima, Santiago,
+  sir." in ONE sentence. The ear got "Santiago, sir." (strip_repeat's comma
+  rule); the transcript still showed the whole line. Both agree now
+  (`lead_cut` in `_llm_with_tools`).
+* The stored transcript strips markdown ("*Moby Dick*") at `log_turn`.
+* `/debug/ledger` was empty after the hotswap: the delivery ledger lives in
+  memory, so "what did I miss" knows nothing after any restart, releases
+  included. Next: persist it.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
