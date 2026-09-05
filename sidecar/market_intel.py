@@ -435,6 +435,32 @@ class MarketIntel:
             parts.append("Among the experts, " + "; ".join(
                 f"{h['source']} reports: {h['headline'].rstrip('.')}" for h in ex) + ".")
         spoken = " ".join(parts) or "I couldn't get a read on the market just now."
+        # ON SCREEN too: the gauges as numbers, the story with its desks, the
+        # experts' lines - the same picture he hears, for as long as he looks.
+        try:
+            from events import bus
+            gauges = [{"name": m.get("name"), "percent": float(m.get("percent") or 0)}
+                      for m in g["markets"] if m.get("name")]
+            for extra in (g.get("small_caps"), g.get("volatility")):
+                if extra and extra.get("percent") is not None:
+                    gauges.append({"name": extra["name"], "percent": float(extra["percent"])})
+            sections = []
+            if s.get("text"):
+                src = ", ".join(s.get("sources") or [])
+                sections.append({"title": "The story",
+                                 "lines": [s["text"] + (f" ({src})" if src else "")]})
+            if ex:
+                sections.append({"title": "Experts",
+                                 "lines": [f"{h['headline'].rstrip('.')} ({h['source']})" for h in ex]})
+            status = g.get("status") or {}
+            if status.get("holiday"):
+                sections.append({"title": "Session", "lines": [f"Closed for {status['holiday']}"]})
+            elif status.get("isOpen") is False:
+                sections.append({"title": "Session", "lines": ["The market is closed"]})
+            await bus.emit("brief", title="The market", eyebrow="THE MARKET",
+                           sections=sections, gauges=gauges)
+        except Exception:
+            log.debug("could not put the market on screen", exc_info=True)
         return {"spoken": spoken, "gauges": g, "story": s.get("text"),
                 "sources": s.get("sources"), "experts": ex}
 

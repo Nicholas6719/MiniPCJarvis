@@ -19,7 +19,16 @@ export type StageKind =
   | "camera"     // the live webcam view: "toggle camera view mode"
   | "holo"       // a 3D model, projected — only ever on an explicit request
   | "render"     // the reference a model is being built FROM, while it builds
+  | "brief"      // a brief or the market picture, on screen while it is spoken
   | "settings";  // settings rail incl. History
+
+export interface BriefState {
+  title: string;
+  eyebrow?: string;
+  sections: { title: string; lines: string[] }[];
+  gauges?: { name: string; percent: number }[];
+  ts: number;
+}
 
 export type SettingsSection =
   | "voice" | "model" | "tools" | "memory" | "history" | "tasks" | "learned" | "about";
@@ -38,6 +47,7 @@ interface StageSnapshot {
   stage: StageState;
   web: WebState | null;
   images: ImagesState | null;
+  brief: BriefState | null;
   holo: HoloState | null;
   files: FilesState | null;
   filePreview: FilePreview | null;
@@ -194,6 +204,7 @@ interface Store {
   stage: StageState | null;
   web: WebState | null;
   images: ImagesState | null;
+  brief: BriefState | null;
   renderPreview: RenderPreview | null;
   holo: HoloState | null;
   project: string | null;
@@ -289,6 +300,7 @@ export const useStore = create<Store>((set, get) => ({
   stage: null,
   web: null,
   images: null,
+  brief: null,
   renderPreview: null,
   holo: null,
   project: null,
@@ -332,7 +344,7 @@ export const useStore = create<Store>((set, get) => ({
       if (st.stage && worthKeeping) {
         lastSnapshot = {
           stage: { ...st.stage, pinned: false, pinUntil: undefined },
-          web: st.web, images: st.images, holo: st.holo, files: st.files, filePreview: st.filePreview,
+          web: st.web, images: st.images, holo: st.holo, files: st.files, filePreview: st.filePreview, brief: st.brief,
         };
       }
       return { stage: null };
@@ -342,7 +354,7 @@ export const useStore = create<Store>((set, get) => ({
     const snap = lastSnapshot;
     set({
       stage: { ...snap.stage, openedTs: Date.now(), holdUntil: Date.now() + ASKED_FOR_HOLD_MS },
-      web: snap.web, images: snap.images, files: snap.files,
+      web: snap.web, images: snap.images, files: snap.files, brief: snap.brief,
       filePreview: snap.filePreview,
     });
   },
@@ -422,7 +434,7 @@ export const useStore = create<Store>((set, get) => ({
           if (outgoing && !outgoing.pinned && outgoing.kind !== "prose") {
             lastSnapshot = {
               stage: { ...outgoing, pinned: false, pinUntil: undefined },
-              web: st.web, images: st.images, holo: st.holo, files: st.files, filePreview: st.filePreview,
+              web: st.web, images: st.images, holo: st.holo, files: st.files, filePreview: st.filePreview, brief: st.brief,
             };
           }
           return {
@@ -665,6 +677,18 @@ export const useStore = create<Store>((set, get) => ({
       // The hologram opens and closes its own stage, the way the camera does —
       // the panel appearing IS the feature. It is PINNED because a model he is
       // working on must not evaporate on the panel-hold timer mid-sentence.
+      // A brief, or the market picture, on screen while it is spoken. Held
+      // for a while: a brief is read for a minute and looked at for longer,
+      // and it must not evaporate on the ordinary panel-hold timer.
+      case "brief":
+        set((st) => ({
+          brief: { title: String(evt.title ?? "Brief"), eyebrow: evt.eyebrow,
+                   sections: evt.sections ?? [], gauges: evt.gauges, ts: evt.ts },
+          stage: { kind: "brief" as StageKind, openedTs: Date.now(),
+                   holdUntil: Date.now() + Math.max(120000, holdBaseMs), pinned: keepPin(st, "brief") },
+        }));
+        push({ id: evt.id, ts: evt.ts, kind: "proactive", summary: `on screen: ${evt.title ?? "brief"}` });
+        break;
       case "hologram":
         // The model is here; the picture it was built from has done its job.
         if (evt.action === "show") set({ renderPreview: null });

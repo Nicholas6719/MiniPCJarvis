@@ -242,6 +242,11 @@ def main() -> int:
     check("...with headings he can scan", "YOURS" in shown and "NEWS" in shown,
           shown[:120])
     check("the spoken brief has no bullets", "•" not in said, said[:120])
+    # the HUD's gauges row is the same numbers the voice reads
+    gauges = bA._gauges_of(secs)
+    check("the index moves reach the screen as numbers",
+          gauges and gauges[0]["name"] == "the S&P 500" and gauges[0]["percent"] == -0.23, gauges)
+    check("...and only when a Markets section was built", bA._gauges_of([("News", [])]) == [])
 
     # --- the market as a story, in every brief; the week ahead in the morning ---
     titles = [t for t, _l in secs]

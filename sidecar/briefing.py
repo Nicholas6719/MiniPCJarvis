@@ -227,6 +227,20 @@ class Briefing:
         text = await self.compose_brief(sections)
         written = await self.compose_brief_written(sections)
         if text:
+            # ON SCREEN as well as in his ear. A brief read aloud at 07:30 is
+            # gone by 07:31; the written form went only to his phone until
+            # 2026-09-05. The HUD shows the same sections he would get there.
+            try:
+                from events import bus
+                hour = now.hour
+                title = ("Morning brief" if hour < 11 else "Midday brief" if hour < 15
+                         else "Afternoon brief" if hour < 18 else "Evening brief")
+                await bus.emit("brief", title=title, eyebrow="THE BRIEF",
+                               sections=[{"title": t, "lines": [w for _s, w in lines if w]}
+                                         for t, lines in sections if lines],
+                               gauges=self._gauges_of(sections))
+            except Exception:
+                log.debug("could not put the brief on screen", exc_info=True)
             await delivery.deliver(text, tier=BRIEF, key=f"brief:{stamp}",
                                    written=written)
 
@@ -611,6 +625,9 @@ class Briefing:
                     said.append(f"no data for {', '.join(gap)}")
                     shown.append(f"(no data: {', '.join(gap)})")
                 out.append(("Markets", [("; ".join(said), " · ".join(shown))]))
+                # the numbers themselves, for the HUD's gauges row
+                self._last_gauges = [{"name": display_name(m.get("symbol"), m.get("name")),
+                                      "percent": float(m.get("percent") or 0)} for m in rows]
         except Exception:
             log.debug("brief: markets failed", exc_info=True)
 
@@ -691,6 +708,12 @@ class Briefing:
             self._held.clear()
             out.append(("Also", [(e, e) for e in extra if e]))
         return out
+
+    def _gauges_of(self, sections) -> list[dict]:
+        """The index moves as numbers, for the HUD - recorded when the Markets
+        section was built, so the screen and the voice cannot disagree."""
+        titles = {t for t, _l in (sections or [])}
+        return list(getattr(self, "_last_gauges", []) or []) if "Markets" in titles else []
 
     @staticmethod
     def is_final_slot(slot, times) -> bool:

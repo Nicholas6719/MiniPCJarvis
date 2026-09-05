@@ -746,6 +746,60 @@ function SettingsStage() {
 // pulls up the camera". The sidecar owns the device and serves multipart JPEG;
 // an <img> renders that natively, so there is no decoding to do here and no
 // second consumer fighting for the webcam.
+// ---------------------------------------------------------------- brief
+
+// The brief, and the market picture, on screen while they are spoken. A
+// brief read aloud at 07:30 is gone by 07:31; the written form already
+// existed for his phone (sections of one-line bullets) and never reached the
+// HUD. The gauges row is the market as numbers, coloured by direction; the
+// sections are the same words the phone gets.
+function BriefStage() {
+  const brief = useStore((s) => s.brief);
+  const state = useStore((s) => s.state);
+  if (!brief) return null;
+  const when = new Date(brief.ts ? brief.ts * 1000 : Date.now());
+  const hh = String(when.getHours()).padStart(2, "0");
+  const mm = String(when.getMinutes()).padStart(2, "0");
+  return (
+    <>
+      <StageHeader
+        eyebrow={brief.eyebrow || "THE BRIEF"}
+        word={brief.title.toUpperCase()}
+        meta={`${hh}:${mm}`}
+        live={state === "speaking"}
+      />
+      <div className="brief__body">
+        {brief.gauges && brief.gauges.length > 0 && (
+          <div className="brief__gauges">
+            {brief.gauges.map((g) => {
+              const p = Number(g.percent ?? 0);
+              const way = p > 0.05 ? "up" : p < -0.05 ? "down" : "flat";
+              return (
+                <div key={g.name} className={`gauge gauge--${way}`}>
+                  <span className="gauge__name">{g.name}</span>
+                  <span className="gauge__pct">{way === "flat" ? "flat" : `${p > 0 ? "+" : ""}${p.toFixed(2)}%`}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="brief__sections">
+          {brief.sections.map((sec) => (
+            <section key={sec.title} className="brief__section">
+              <h4 className="brief__title mono-sub">{sec.title.toUpperCase()}</h4>
+              <ul className="brief__lines">
+                {sec.lines.map((line, i) => (
+                  <li key={i} className="brief__line">{line}</li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function CameraStage() {
   const [src, setSrc] = useState("");
   const [status, setStatus] = useState<any>(null);
@@ -830,6 +884,7 @@ export function Stage() {
     case "folder": return <FolderStage />;
     case "camera": return <CameraStage />;
     case "holo": return <HoloStage />;
+    case "brief": return <BriefStage />;
     case "render": return <RenderStage />;
     case "settings": return <SettingsStage />;
     default: return null;

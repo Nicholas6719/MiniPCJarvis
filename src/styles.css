@@ -1041,3 +1041,47 @@ body.compact .holo__cam { display: block; }
   /* Still says "working", without the movement. */
   .renderprev__scan { animation: none; top: 50%; opacity: .6; }
 }
+
+/* the brief and the market picture, on screen while they are spoken */
+.brief__body {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  gap: calc(26px * var(--s));
+  padding: calc(28px * var(--s)) 0 calc(12px * var(--s));
+  overflow: hidden;
+}
+.brief__gauges { display: flex; gap: calc(14px * var(--s)); flex-wrap: wrap; }
+.gauge {
+  display: flex; flex-direction: column; gap: calc(6px * var(--s));
+  min-width: calc(150px * var(--s));
+  padding: calc(12px * var(--s)) calc(16px * var(--s));
+  border: 1px solid color-mix(in srgb, var(--rim) 26%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--rim) 5%, transparent);
+}
+.gauge__name { font: 400 calc(11px * var(--s))/1 "Share Tech Mono", monospace; letter-spacing: .14em; color: var(--text-dim); text-transform: uppercase; }
+.gauge__pct { font: 600 calc(28px * var(--s))/1 Rajdhani, sans-serif; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.gauge--up .gauge__pct { color: #59e0a5; }
+.gauge--down .gauge__pct { color: #ff7a6b; }
+.gauge--up { border-color: rgba(89,224,165,.32); }
+.gauge--down { border-color: rgba(255,122,107,.32); }
+.brief__sections {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(340px * var(--s)), 1fr));
+  gap: calc(22px * var(--s)) calc(40px * var(--s));
+  min-height: 0; overflow: hidden;
+}
+.brief__section { display: flex; flex-direction: column; gap: calc(10px * var(--s)); min-width: 0; }
+.brief__title { color: var(--rim); letter-spacing: .2em; }
+.brief__lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: calc(8px * var(--s)); }
+.brief__line {
+  position: relative;
+  padding-left: calc(18px * var(--s));
+  font: 500 calc(20px * var(--s))/1.35 Rajdhani, sans-serif;
+  color: var(--text-body);
+  text-wrap: pretty;
+}
+.brief__line::before {
+  content: ""; position: absolute; left: 0; top: calc(11px * var(--s));
+  width: calc(7px * var(--s)); height: calc(7px * var(--s));
+  border: 1px solid var(--rim); transform: rotate(45deg);
+}
