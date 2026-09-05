@@ -32,7 +32,8 @@ from events import bus
 
 log = logging.getLogger("jarvis.nightschool")
 
-AUDIT_GAP_H = 72          # roughly twice a week
+AUDIT_GAP_H = 24          # nightly (was 72: the router learned from the day's
+                          # model-routed turns twice a week; now every night)
 FACT_BUDGET = 40          # per night
 CURIOSITY_BUDGET = 5      # researched questions per night
 DISTILL_BUDGET = 8        # new routing examples per night

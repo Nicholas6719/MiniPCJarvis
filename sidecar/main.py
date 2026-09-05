@@ -748,7 +748,10 @@ async def debug_ledger(limit: int = 50, x_jarvis_token: str | None = Header(None
     if os.environ.get("JARVIS_DEBUG") != "1":
         raise HTTPException(403, "debug endpoints disabled")
     from delivery import delivery
-    rows = list(delivery.ledger)[-max(1, min(200, int(limit))):]
+    import time as _t
+    # through entries(), which loads the last day from the database first -
+    # a fresh process's list is empty until then, and "empty" would be a lie
+    rows = delivery.entries(_t.time() - 24 * 3600)[-max(1, min(200, int(limit))):]
     return {"count": len(rows), "muted": delivery.mute_until, "ledger": rows}
 
 

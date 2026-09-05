@@ -3820,6 +3820,13 @@ last spoke" to a process that has never heard him. Gated in test_persona
 (which now has its own JARVIS_DB - it writes). Next: the wake greeting's
 "while you were away" as a HUD brief stage (Reached you / Held back).
 
+### 15:10 — "While you were away" on the stage (release 38)
+`persona.briefing_sections(entries)` -> Reached you / Held back;
+`_wake_ack_line` emits it as a `brief` stage after hours away. Release 37's
+first run failed on the persona gate because the build's gates share one
+database and the persisted ledger loaded other gates' rows: the gate now
+judges what it added, not the total.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
