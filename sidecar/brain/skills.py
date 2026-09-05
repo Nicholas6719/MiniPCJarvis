@@ -1830,6 +1830,24 @@ from brain import mathskill as _mathskill   # noqa: E402  (pure text, no cycle)
 from brain import protocols as _protocols   # noqa: E402  (pure text, no cycle)
 
 
+def _say_briefing() -> str:
+    """Since he last spoke to JARVIS after a long gap — or the last twelve
+    hours — from the delivery ledger."""
+    import time as _t
+    from brain import persona
+    try:
+        from delivery import delivery
+        from brain.router import brain          # noqa: F401  (import order guard)
+        import orchestrator as _o
+        orch = getattr(_o, "orchestrator", None)
+        since = getattr(orch, "_away_since", 0.0) or (_t.time() - 12 * 3600)
+        entries = [e for e in delivery.ledger if e.get("ts", 0) >= since]
+    except Exception:
+        entries = []
+    line = persona.briefing(entries)
+    return line or "Nothing while you were away, sir. All quiet."
+
+
 def _say_protocols() -> str:
     from brain.router import brain           # lazy: router imports this module
     return _protocols.list_line(_protocols.taught(brain))
@@ -2721,6 +2739,14 @@ SKILLS: list[Skill] = [
     # "What protocols do I have" — the film's word for the routines he teaches
     # ("when I say lockdown protocol, lock the pc and mute"). Running one is
     # handled in brain.router.match_command; this is only the listing.
+    # "What did I miss" — the delivery ledger, spoken as a report. The films'
+    # JARVIS briefs; he does not wait to be asked twice.
+    Skill("briefing", None, [
+        "what did i miss", "anything while i was away", "catch me up",
+        "anything happen while i was gone", "what happened overnight",
+        "any messages while i was out", "did anything come in while i was away",
+        "what did you do while i was gone", "anything i should know about"],
+        slots=lambda t: {}, speak=lambda s, r: _say_briefing()),
     Skill("protocols", None, [
         "what protocols do i have", "list my protocols", "which protocols have i set up",
         "show me my protocols", "tell me my protocols", "what protocols are there",

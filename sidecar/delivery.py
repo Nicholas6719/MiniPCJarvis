@@ -139,6 +139,11 @@ class Delivery:
         # timestamps of everything actually sent, for the hourly ceiling
         self._sent: list[float] = []
         self._capped_at = 0.0
+        # WHAT HAPPENED WHILE HE WAS AWAY. Every proactive outcome — spoken,
+        # sent to the phone, held back, budget — with its subject, so the
+        # first word after hours away can be "two things reached your phone,
+        # sir" rather than nothing. In memory, this session, capped.
+        self.ledger: list[dict] = []
 
     def _key_for(self, key: str, text: str) -> str:
         """A cooldown key for every message, whether the caller supplied one or not.
@@ -236,6 +241,21 @@ class Delivery:
     async def deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
                       subject: str = "", written: str = "",
                       image: str = "") -> dict:
+        """Say it, send it, or hold it — and remember what was done (ledger)."""
+        r = await self._deliver(text, tier, key=key, subject=subject,
+                                written=written, image=image)
+        outcome = str(r.get("delivered") or "nothing")
+        if outcome != "nothing" or r.get("why") not in ("empty", "said recently"):
+            self.ledger.append({"ts": time.time(), "tier": r.get("tier", tier),
+                                "outcome": outcome, "why": r.get("why", ""),
+                                "subject": (subject or key or "").strip(),
+                                "text": (text or "").strip()[:160]})
+            del self.ledger[:-200]
+        return r
+
+    async def _deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
+                       subject: str = "", written: str = "",
+                       image: str = "") -> dict:
         """Say it, send it, or hold it. Returns what was actually done.
 
         `image` is a picture to send WITH the message when it goes to his phone —

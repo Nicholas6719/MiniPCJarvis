@@ -39,6 +39,47 @@ def main() -> int:
     check("the first wake of a session greets", P.wake_ack(float("inf"), 9) == "Good morning, sir.")
     check("five hours is not away", P.wake_ack(5 * 3600, 9) == "Yes?")
 
+    print("\n-- while you were away --")
+    check("nothing happened: no briefing", P.briefing([]) == "")
+    one = [{"ts": 1, "outcome": "telegram", "subject": "the market brief", "text": "..."}]
+    b = P.briefing(one)
+    check("one message: says so, names it", b.startswith("While you were away: One thing reached you")
+          and "the market brief" in b, b)
+    many = one + [{"ts": 2, "outcome": "spoken", "subject": "", "text": "Your dentist is at 4 tomorrow."},
+                  {"ts": 3, "outcome": "held", "subject": "cpu", "text": "..."},
+                  {"ts": 4, "outcome": "held for the next brief", "subject": "", "text": "Rain later today."}]
+    b = P.briefing(many)
+    check("counts, then subjects", "2 things reached you" in b and "2 things I held back" in b, b)
+    check("a task without a subject is named by its text",
+          "Your dentist is at 4 tomorrow" in b, b)
+    check("...and never the whole mail", len(b) < 220, len(b))
+    check("nothing-outcomes are not reported",
+          P.briefing([{"ts": 1, "outcome": "nothing", "why": "empty"}]) == "")
+    check("the greeting carries it after time away",
+          P.wake_line(8 * 3600, 9, None, one).startswith("Good morning, sir. While you were away"),
+          P.wake_line(8 * 3600, 9, None, one))
+    check("...but not on an ordinary wake", P.wake_line(30, 9, None, one) == "Yes?")
+
+    print("\n-- the ledger fills --")
+    import asyncio
+    import delivery as dv
+    d = dv.Delivery()
+    real_present = dv.is_present
+    dv.is_present = lambda: True
+
+    async def spoke(text, interrupt):
+        return True
+    d._speak = spoke
+    try:
+        asyncio.run(d.deliver("The disk is nearly full, sir.", dv.ALERT, key="disk", subject="disk space"))
+        asyncio.run(d.deliver("", dv.ALERT))
+    finally:
+        dv.is_present = real_present
+    check("a spoken alert is in the ledger",
+          d.ledger and d.ledger[-1]["outcome"] == "spoken" and d.ledger[-1]["subject"] == "disk space",
+          d.ledger)
+    check("...and an empty message is not", len(d.ledger) == 1, len(d.ledger))
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

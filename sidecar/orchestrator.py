@@ -532,10 +532,23 @@ class Orchestrator:
         from brain import persona
         prev = getattr(self, "_prev_turn_at", 0.0)
         gap = (time.time() - prev) if prev else float("inf")
-        line = persona.wake_ack(gap, time.localtime().tm_hour,
-                                getattr(self, "_last_wake_ack", None))
-        self._last_wake_ack = line
-        return line
+        entries: list[dict] = []
+        if gap >= persona.AWAY_S:
+            # What JARVIS did on his own while he was away, from the delivery
+            # ledger — since he last spoke, or the last twelve hours when this
+            # is the first wake of the session.
+            try:
+                from delivery import delivery
+                since = prev if prev else time.time() - 12 * 3600
+                entries = [e for e in delivery.ledger if e.get("ts", 0) >= since]
+                self._away_since = since
+            except Exception:
+                log.debug("no delivery ledger for the briefing", exc_info=True)
+        ack = persona.wake_line(gap, time.localtime().tm_hour,
+                                getattr(self, "_last_wake_ack", None), entries)
+        self._last_wake_ack = persona.wake_ack(gap, time.localtime().tm_hour,
+                                               getattr(self, "_last_wake_ack", None))
+        return ack
 
     def _newer_turn_started(self) -> None:
         """Something newer took over (a barge-in, a fresh capture) without being

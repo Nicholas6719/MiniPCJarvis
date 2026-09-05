@@ -3494,14 +3494,25 @@ torn and skewed from the side. So it is the DETAILED render, never the default:
   six hours away the first word is a greeting by the time of day.
 * Speech timing lines in the log ("speak: first chunk of … after N ms" /
   "… to the speaker after N ms") to attribute the 0.6-0.9 s reflex floor.
+* **"While you were away."** `delivery.deliver` now records every proactive
+  outcome (spoken / telegram / held / budget, subject, text) in
+  `delivery.ledger`; `persona.briefing()` turns the entries since he last
+  spoke into one reporting sentence ("While you were away: 2 things reached
+  you — the market brief, Your dentist is at 4 tomorrow; one thing I held
+  back."), the greeting after six hours away carries it, and "what did I
+  miss" / "catch me up" / "anything while I was gone" is a reflex (skill
+  `briefing`). Gated in `test_persona`.
 
 ### Not done / open
 * voice_ux_e2e T2 ("CONVERSATION WINDOW") is FLAKY, not fixed: PASS in
-  release 13, FAIL in 16 and 17 and in a direct run ("heard: []" — the
-  follow-up injected 0.8 s after idle was never captured; T1's wake scored
-  0.63, a hair over the 0.60 threshold). Non-fatal. Not investigated beyond
-  confirming the turn-generation guard still arms the window in
-  `_run_turn`'s finally.
+  release 13 and in a standalone run at 00:36 on the 5th ("heard: ['And
+  what day of the week is it?']"), FAIL inside the suite runs of 16-23 and in
+  one standalone run at 19:11 ("heard: []"). T1's wake scores 0.63, a hair
+  over the 0.60 threshold, every time. The armed-window path itself
+  (`follow-up speech (conversation window)` → `_listen_flag.set()`) is
+  sound; whatever it is depends on timing or on what the previous suite
+  left behind. Non-fatal; next step is the sidecar log between T1 and T2 of
+  a failing SUITE run.
 * The HUD's clarify chips / dictation pill were verified by tsc and hud_e2e
   only — he stopped the preview pane, so they were not seen rendered.
 * Dictation/press_keys not landing in the hands_e2e harness — the keys.py
