@@ -59,8 +59,34 @@ class ToolShortlist:
     # ~100 tokens when the prefix holds. So a tool once offered stays offered,
     # in first-seen order, and new ones are APPENDED — the previous block is a
     # literal prefix of the next and the model only reads what is new. Past
-    # MAX_STICKY the least recently wanted go, and that one turn pays.
-    MAX_STICKY = 48
+    # MAX_STICKY the least recently wanted go, down to LOW_WATER in one cut,
+    # and that one turn pays.
+    #
+    # WITH HYSTERESIS, OR IT NEVER HOLDS. The first cap was 48 with no low
+    # water: each new question brings up to thirty tools, so the block went
+    # over the cap on the second distinct question and evicted on nearly every
+    # turn after — and an eviction breaks the prefix at the first missing
+    # tool. Measured on release 17: "who wrote hamlet" twice hit the cache
+    # (733 then 128 tokens), "who painted the mona lisa" right after re-read
+    # 4,506. Seventy-two tools is ~5k tokens, paid once and cached.
+    #
+    # AND THEN NO CAP AT ALL. Release 18 (72 / 48) still trimmed on nearly
+    # every distinct question — the log shows "tool block trimmed" once a
+    # minute — because a question brings up to thirty tools and the gap from
+    # 48 to 72 is one question wide. Every trim was a 15-20 s re-read. The
+    # whole registry is ~8.5k tokens, paid ONCE per session and then a pure
+    # prefix; an eviction is never worth it. The cap stays as a mechanism (the
+    # gate exercises it) but is set where it never fires.
+    MAX_STICKY = 10_000
+    LOW_WATER = 10_000
+
+    def warm_block(self, registry) -> list[dict]:
+        """The block a fresh session starts with, for the boot-time prompt warm:
+        the always-offered tools in their sticky order, so the first real turn
+        extends a cached prefix instead of paying for the whole prompt."""
+        names = {n for n in ALWAYS if n in registry._tools}
+        return [registry._tools[n].openai_schema() for n in self.stable_order(names)
+                if n in registry._tools]
 
     def __init__(self) -> None:
         self._names: list[str] = []
@@ -78,9 +104,11 @@ class ToolShortlist:
             if n not in self._sticky:
                 self._sticky.append(n)
         if len(self._sticky) > self.MAX_STICKY:
-            keep = set(sorted(self._sticky, key=lambda n: -self._last_wanted.get(n, 0))
-                       [:self.MAX_STICKY])
+            low = min(self.LOW_WATER, self.MAX_STICKY)
+            keep = set(sorted(self._sticky, key=lambda n: -self._last_wanted.get(n, 0))[:low])
+            keep |= wanted                     # never drop what this turn asked for
             self._sticky = [n for n in self._sticky if n in keep]
+            log.info("tool block trimmed to %d (cache re-read this turn)", len(self._sticky))
         return list(self._sticky)
 
     async def build(self, registry) -> None:

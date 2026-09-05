@@ -68,6 +68,11 @@ async def main() -> int:
 
     sizes, missed = [], []
     for utterance, want in CASES:
+        # A COLD TURN each time. The block is sticky within a session on
+        # purpose (tools once offered stay, so the prompt prefix — and the
+        # KV cache — holds; see test_shortlist_sticky); what this gate
+        # measures is what a fresh session's first turn reads.
+        shortlist._sticky, shortlist._last_wanted = [], {}
         picked = {t["function"]["name"] for t in await shortlist.pick(registry, utterance)}
         sizes.append(len(picked))
         if want not in picked:

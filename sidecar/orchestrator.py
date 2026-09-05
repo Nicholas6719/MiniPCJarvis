@@ -820,7 +820,10 @@ class Orchestrator:
         background at boot, so the user's first real question isn't the slow one (~12 s)."""
         sysmsg = {"role": "system", "content": system_prompt()}
         user = {"role": "user", "content": turn_context("") + chr(10) + "hi"}
-        for tools in (registry.schemas(), None):
+        # The tools variant warms the block a session actually STARTS with
+        # (the always-offered set in sticky order), not the full registry in
+        # registry order — a prefix nothing would ever extend.
+        for tools in (shortlist.warm_block(registry), None):
             try:
                 async for _ in local_llm.stream([sysmsg, user], tools=tools, max_tokens=1):
                     pass

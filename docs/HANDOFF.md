@@ -3374,8 +3374,27 @@ the worker: imported inside the request coroutine it stalled the loop for good
   the WHOLE prompt, every time, because the cache is per slot. The handoff's
   "2.5-4.5 s on cached prefix" had quietly become 15 s at some llama.cpp
   upgrade. Fix: `-np 1` in both GPU model arg lists (mirrored into his config
-  on load). Together with the sticky shortlist the prefix should now hold;
-  measure with the bench after release 17.
+  on load).
+  Release 17 measured (idle): `n_slots = 1` confirmed; math reflex 2.4 s
+  (was 17.6 s); but "who directed jaws" / "octopuses" still 16-17 s, prompt
+  eval 4,217 / 4,594 tokens. Then the tell: "who wrote hamlet" twice → 733
+  then 128 tokens (cache HIT), "who painted the mona lisa" right after →
+  4,506 (MISS). The sticky block was capped at 48 with no low-water mark, a
+  new question brings up to 30 tools, so it evicted on nearly every distinct
+  question and every eviction broke the prefix. Release 18: cap 72, one cut
+  to 48, never dropping what the turn asked for (`test_shortlist_sticky`
+  gates the hysteresis).
+  Release 18 measured: STILL trimming ("tool block trimmed to 48" once a
+  minute in the real log — a question brings up to thirty tools, so 48→72 is
+  one question wide) and the trimmed turns re-read 4,217-5,899 tokens
+  (15-21 s); turns without a trim hit (peru 2.7 s, hamlet 4.4 s, octopuses
+  8.2 s). Release 19: NO eviction in practice (cap 10,000), the boot warm
+  primes the exact block a session starts with (`shortlist.warm_block`), and
+  gpt-oss-20b gets a 20,480 context for headroom. Expect every LLM turn after
+  the first to extend a cached prefix; measure again.
+  Reflex first-audio is 0.75-2.2 s and is mostly the TOOL (cpu sampling,
+  weather fetch); the pure-reflex floor with Pocket is ~0.8 s and is the next
+  thing to look at (worker request + speaker start).
 
 ### Not done / open
 * voice_ux_e2e T2 ("CONVERSATION WINDOW") is FLAKY, not fixed: PASS in

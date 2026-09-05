@@ -43,9 +43,19 @@ def main() -> int:
     d = s.stable_order(set(b) | {"take_screenshot"})
     check("many turns later the prefix still holds", d[:len(c)] == c and d[-1] == "take_screenshot")
 
-    print("\n-- the cap --")
+    print("\n-- the default never evicts --")
+    # Release 18 trimmed once a minute at 72/48 and every trim was a 15-20 s
+    # re-read. The whole registry is ~8.5k tokens once; no cut is worth it.
+    s = ToolShortlist()
+    check("the default cap is beyond any registry", s.MAX_STICKY >= 1000, s.MAX_STICKY)
+    for i in range(1, 200):
+        block = s.stable_order({f"tool{i}", f"tool{i + 1}"})
+    check("two hundred distinct picks and nothing was dropped", len(block) == 200, len(block))
+
+    print("\n-- the cap (kept as a mechanism) --")
     s = ToolShortlist()
     s.MAX_STICKY = 6
+    s.LOW_WATER = 6
     first = s.stable_order({"t1", "t2", "t3", "t4"})
     s.stable_order({"t5", "t6"})            # t1-t4 now older than t5-t6
     over = s.stable_order({"t7", "t8"})     # 8 > 6: the least recently wanted go
@@ -59,6 +69,23 @@ def main() -> int:
           [t for t in over if t in first] == [t for t in first if t in over], over)
     again = s.stable_order({"t8"})
     check("after an eviction the block is stable again", again == over, (over, again))
+
+    print("\n-- hysteresis: one cut, then quiet --")
+    # Without a low-water mark the block sat AT the cap and every new question
+    # evicted again: the prefix broke on nearly every turn (measured: 4,506
+    # tokens re-read on the turn after two cache hits).
+    s = ToolShortlist()
+    s.MAX_STICKY = 10
+    s.LOW_WATER = 6
+    for i in range(1, 11):
+        s.stable_order({f"t{i}"})
+    cut = s.stable_order({"t11"})            # 11 > 10: one cut, down to 6 (+ wanted)
+    check("cut down to the low-water mark", len(cut) <= 7, cut)
+    check("...keeping what this turn asked for", "t11" in cut, cut)
+    n = len(cut)
+    steady = [s.stable_order({f"u{k}"}) for k in range(1, 4)]
+    check("the next few turns only append", all(len(b) == n + k for k, b in enumerate(steady, 1))
+          and all(b[:n] == cut for b in steady), [len(b) for b in steady])
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
