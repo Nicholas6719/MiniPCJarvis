@@ -3410,8 +3410,15 @@ the worker: imported inside the request coroutine it stalled the loop for good
   cache. Release 21: the no-tools shape runs on slot 1, the tools shape on
   slot 0; each keeps its own prefix.
   The boot warm primes each shape on its own slot the same way.
-  Still open after this: the pure-reflex first-audio floor (~0.6-0.9 s with
-  Pocket; needs timing inside `PocketTTS.synthesize_stream` to attribute).
+  Release 21 measured (idle, six knowledge questions in a row): hamlet 4.3 s,
+  mona lisa 3.6, peru 2.4, jaws 3.0, jupiter 2.4, matrix 2.5 — EVERY model
+  turn hits. The bench's very first no-tools turn after the suites (11.3 s)
+  is the one re-read the side calls on slot 1 can still cause; a third slot
+  would remove it at the cost of another 16k of context.
+  Where the evening started: 16-24 s to the first spoken word of any model
+  answer. Where it ends: 2.4-4.3 s, with arithmetic at 2.4 s as a reflex.
+  Still open: the pure-reflex first-audio floor (~0.6-0.9 s with Pocket;
+  needs timing inside `PocketTTS.synthesize_stream` to attribute).
   Reflex first-audio is 0.75-2.2 s and is mostly the TOOL (cpu sampling,
   weather fetch); the pure-reflex floor with Pocket is ~0.8 s and is the next
   thing to look at (worker request + speaker start).
