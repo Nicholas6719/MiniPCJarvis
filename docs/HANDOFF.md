@@ -3911,6 +3911,26 @@ is recorded in the wake loop. Also `slots_stats`: "how much disk space is
 left" answers with the disk. The second variety pass on release 43 was
 clean (`.agent/logs/variety_run2.log`).
 
+### 12:40 — the ledger as the test set (release 45)
+`/debug/ledger` for the last day, mute rows removed: nine real deliveries.
+Two briefs (20:00 with the news, 07:30 opening with weather) and the
+retainer reminder were right. Four alerts were not, all off LOCAL desks
+that syndicate the wire: "A fire in Congo's capital" (Boston.com, near by
+provenance, "a death nearby, still unfolding"), "Rap and hip-hop pioneer
+dead at 64" (MassLive), "2 killed when small plane crashes in Ludlow"
+(WHDH, over), "Multiple people shot at house party in Taunton" (WCVB,
+"no threat to the public"). Fixes in significance.py: FOREIGN overrides
+provenance in `is_local`; NATURAL_DEATH/PUBLIC_FIGURE know "dead at NN",
+"RIP", "pioneer"; `_ongoing` is STILL_ACTIVE (now with trapped/rescue/
+missing) minus NOT_ACTIVE ("no threat to the public", in custody,
+contained), plus travelling hazards and catastrophes - a count of the
+dead is not "still happening"; POINT_HAZARD (crash, derailment, collapse)
+is over unless ongoing; MANY needs own-town or ongoing. All four gated
+silent, with their live shapes (a search on, a suspect at large) still
+reaching him. The two variety passes and his own transcript are in
+`.agent/logs/variety_run*.log` and the memory note "a guard is not an
+outcome" carries the barge-in lesson.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
