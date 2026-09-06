@@ -3942,6 +3942,50 @@ Still unverified today because they take the screen: hands_e2e (verified
 manually on the 5th), sleep_e2e, wake_guard_e2e, telegram_e2e. They run
 in the next non-silent release, when he is at the PC.
 
+### 15:30 — his ground is twenty miles; "ok" is not a turn (release 47)
+His message: a news alert on Telegram, he replied "ok", and JARVIS told
+him the time; still non-local news, some not emergencies; "I live in
+Framingham MA, I want news from say a 15-20 mile radius, use your best
+judgement."
+
+**The radius.** Measured from Framingham with Open-Meteo's geocoder.
+`significance.NEAR_SURE` (names nobody else uses: Natick, Wellesley,
+Hopkinton, Woburn, Waltham, Somerville...) counts on sight; `NEAR_ALSO`
+(Berlin, Lincoln, Canton, Concord, Lexington, Burlington, Milford...)
+needs his desk or the state to vouch; Boston/Cambridge/Newton keep the
+older "his unless it reads as England" test. `FAR_MA` is the far end of
+the state (Worcester at 19.8 mi is out - a city of its own; Taunton,
+Ludlow, Brockton, Lynn, Lowell, Lawrence, Springfield, Plymouth, the
+Cape...). `is_local` is now: a near town named; or his desk with nothing
+far, foreign or far-Mass. in the text; or the state said plainly with no
+town at all (statewide by nature - an earthquake felt across
+Massachusetts). `HOME_REGION` lost the city names. One door for the far
+end of the state, `in_his_state`: a hazard loose and still moving with
+an evacuation on (a nuclear leak in Plymouth) is an ALERT; a shooting in
+Taunton with the suspect at large is not his. `.agent/scripts` has no
+replay tool - the one-off is in the scratchpad - but `/debug/ledger`
+replayed through the new classifier: all seven news alerts of 09-05/06
+silent, including the 13:13 URGENT court story ("arraigned"). Tests moved
+with the radius: Taunton→Wellesley, Worcester→Marlborough, Lawrence→
+Waltham; a new block of five far-Mass. silent, five near loud, Berlin
+without a desk is Germany, Lexington, Kentucky is not Lexington.
+
+**"ok".** `remote_telegram.ACK_ONLY`: a bare acknowledgement (ok, thanks,
+got it, a thumbs-up) returns after `acknowledge_all` and never becomes a
+turn. Yes/no are deliberately NOT in it - they may answer a clarifying
+question. It needed `import re`, which the module did not have: compiled
+fine, would have raised NameError on his first "ok". test_remote gates
+it now (three acks silent, "yes" runs, "ok what time is it" runs).
+
+**"The a chess pawn is ready, sir."** From the ledger at 10:57.
+`render_tools._label` had a no-op article check; it strips the article
+now, the caller says "The".
+
+The 23 "polling as @?" lines on the 5th are sidecar starts (one per
+hotswap), not bridge trouble; the name is fetched before it is logged now.
+Telegram inbound text is not logged (by design), so his "ok" itself is
+not in the log - the fix is by shape.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
