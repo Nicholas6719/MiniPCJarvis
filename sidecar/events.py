@@ -41,6 +41,8 @@ class EventBus:
         # slow turn from a wedged one, and time-in-state cannot: both look
         # identical. A working turn emits constantly; a wedged one is silent.
         self.last_event_at = time.time()
+        global _main_loop
+        _main_loop = asyncio.get_running_loop()
         evt = {
             "id": uuid.uuid4().hex[:12],
             "ts": time.time(),
@@ -85,6 +87,9 @@ bus = EventBus()
 # because nothing errors. Anything spawned outside a request's own lifetime goes
 # through here.
 _background: set = set()
+# The loop the app runs on, recorded by every emit(), so a sync tool in the
+# executor can still hand a coroutine home (see spawn).
+_main_loop: "asyncio.AbstractEventLoop | None" = None
 
 
 def spawn(coro, name: str | None = None):
@@ -101,6 +106,18 @@ def spawn(coro, name: str | None = None):
     line in the log, immediately, with its name on it.
     """
     import asyncio
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # FROM A WORKER THREAD. Sync tools (focus_window, close_application)
+        # run in the tool executor, and a create_task there raises - so
+        # "focus on the helmet" handed to the hologram from focus_window
+        # went nowhere and said "no window" (release 50, 2026-09-06). The
+        # coroutine goes to the main loop, which every emit() records.
+        if _main_loop is None or _main_loop.is_closed():
+            coro.close()
+            raise RuntimeError("no event loop to hand this to")
+        return asyncio.run_coroutine_threadsafe(coro, _main_loop)
     task = asyncio.create_task(coro, name=name)
     _background.add(task)
 

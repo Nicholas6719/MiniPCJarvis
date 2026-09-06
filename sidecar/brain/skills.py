@@ -2235,6 +2235,8 @@ SKILLS: list[Skill] = [
         "make me a keychain from this logo", "generate a 3d model of it",
         "print me a model of a gear", "design me a bracket",
         "make a 3d version of that",
+        # the film's "vacuform a digital wireframe"
+        "wireframe that", "give me a wireframe of that", "make a wireframe of this picture",
         # the possessive, and "now render me": "Render me Spiderman's mask"
         # fell to the model on 2026-09-06 and was answered with the arc reactor
         "render me spider man's mask", "render me iron man's helmet",
@@ -2436,8 +2438,19 @@ SKILLS: list[Skill] = [
         "put it up as a hologram", "show me the hologram",
         "bring up the hologram", "open the hologram",
         "let me see it in 3d", "show me a 3d view of it",
-        "project the bracket", "put the part up in 3d"],
+        "project the bracket", "put the part up in 3d",
+        # the film's "throw it up"
+        "throw it up", "throw that up on the stage", "put it up on the stage"],
         slots=slots_holo_show, speak=say_holo_show),
+    # "FABRICATE IT." The slicer had no voice path at all: bare "slice it"
+    # is the clarify question (a cross-section or the printer?), and these
+    # are the sentences that can only mean the printer. No path: the model
+    # on the stage.
+    Skill("holo_slice", "slice_part", [
+        "fabricate it", "get it ready for the printer", "prepare it for printing",
+        "slice it for the printer", "generate the g-code for it",
+        "slice the model for printing", "get the print file ready"],
+        fixed_args={"stl_path": ""}, speak=None),
     Skill("holo_hide", "hide_hologram", [
         "hide the hologram", "take the hologram down", "close the hologram",
         "put the hologram away", "get rid of the hologram",

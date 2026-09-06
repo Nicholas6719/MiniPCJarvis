@@ -240,6 +240,10 @@ CASES = [
     ("jarvis are you up", "wakeack"),
     ("show me the before and after", "holo_move"),
     ("what did it look like before", "holo_move"),
+    ("throw it up", "holo_show"),
+    ("wireframe that", "holo_make"),
+    ("fabricate it", "holo_slice"),
+    ("get it ready for the printer", "holo_slice"),
     ("cut it in half", "holo_move"),
     ("show me the layers", "holo_move"),
     # Scrubbing the toolpath. The number is the hazard: _CANON erases plain

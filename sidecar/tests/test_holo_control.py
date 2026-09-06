@@ -372,6 +372,26 @@ async def main() -> int:
           (got.get("applied") or {}).get("action") == "rotate", got)
     check("'part' is a control like any other", "part" in H._ACTIONS)
 
+    # "FOCUS ON THE HELMET" arrives at focus_window - a SYNC tool, run in
+    # the executor thread - and must still reach the hologram. Release 50's
+    # live suite found it saying "no window": create_task from a thread.
+    import threading
+    from tools import windows_tools as WTOOLS
+    import events as _events
+    await _events.bus.emit("noop")          # records the loop, as the app does
+    outcome: dict = {}
+
+    def _from_thread():
+        outcome["r"] = WTOOLS.focus_window("the helmet")
+    th = threading.Thread(target=_from_thread)
+    th.start()
+    th.join(5)
+    await asyncio.sleep(0.2)                # let the handed-over coroutine run
+    check("focus_window from a worker thread hands the part to the hologram",
+          outcome.get("r", {}).get("focused_part") == "helmet", outcome.get("r"))
+    check("...and the stage heard it", sent[-1][1].get("action") == "part"
+          and sent[-1][1].get("part") == "helmet", sent[-1])
+
     # ------------------------------------------- before and after (2026-09-06)
     # edit_part keeps `<name>.prev.stl`; the stage draws it in amber over the
     # new one. With no earlier version the answer is a sentence, not a ghost.

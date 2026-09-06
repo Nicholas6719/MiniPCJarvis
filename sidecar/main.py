@@ -788,6 +788,38 @@ async def debug_workfile(body: dict, x_jarvis_token: str | None = Header(None)):
     return {"ok": True, "path": str(p)}
 
 
+@app.post("/debug/hands")
+async def debug_hands(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only: feed synthetic landmark frames into the LIVE tracker.
+
+    Nobody is in front of the camera during a silent release, so nothing
+    could prove that a pinch-and-drag ends as rotate events on the HUD's
+    socket. This runs the frames through the same GestureTracker and the
+    same `_apply` a camera frame would - everything after MediaPipe.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    from hand_control import control
+    frames = body.get("frames") or []
+    if not isinstance(frames, list) or len(frames) > 200:
+        raise HTTPException(400, "frames: a list of up to 200")
+    emitted = []
+    control._tracker.reset()
+    for f in frames:
+        hands = f.get("hands") or []
+        for h in hands:
+            lm = h.get("landmarks") or []
+            if len(lm) != 21:
+                raise HTTPException(400, "each hand needs 21 landmarks")
+            h["landmarks"] = [tuple(float(x) for x in p) for p in lm]
+        for ev in control._tracker.update(hands, float(f.get("t") or 0.0)):
+            await control._apply(ev)
+            emitted.append(ev)
+    control._tracker.reset()
+    return {"ok": True, "emitted": len(emitted), "events": emitted}
+
+
 @app.get("/debug/desktop")
 async def debug_desktop(x_jarvis_token: str | None = Header(None)):
     """Where THIS process's keystrokes would go. A sidecar on a different

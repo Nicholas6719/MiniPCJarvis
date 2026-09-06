@@ -174,6 +174,58 @@ def main() -> int:
     check("'focus on the helmet' through the app switch reaches the hologram",
           r.get("focused_part") == "helmet", r)
 
+    # ------------------------------------------------- the gesture path, live
+    # Nobody is in front of the camera, so this cannot prove MediaPipe reads
+    # a hand. It proves everything after that: synthetic landmark frames go
+    # into the LIVE tracker, the same gesture rules run, and the rotate
+    # events reach the WebSocket the HUD listens on - the whole path a
+    # pinch-and-drag takes, minus the camera.
+    print("\n-- hands, without a person --")
+    import asyncio
+    import websockets
+
+    def hand(px, py, pinch=True, side="right"):
+        lm = [[0.5, 0.9, 0.0]] * 21
+        lm = [list(v) for v in lm]
+        lm[0] = [0.5, 0.9, 0.0]          # wrist
+        lm[9] = [0.5, 0.7, 0.0]          # middle MCP: hand size 0.2
+        gap = 0.02 if pinch else 0.18
+        lm[4] = [px - gap / 2, py, 0.0]  # thumb tip
+        lm[8] = [px + gap / 2, py, 0.0]  # index tip
+        for tip in (12, 16, 20):
+            lm[tip] = [0.5, 0.85, 0.0]
+        return {"hand": side, "landmarks": lm}
+
+    frames = [{"t": 0.0, "hands": [hand(0.5, 0.5)]},
+              {"t": 0.1, "hands": [hand(0.44, 0.5)]},
+              {"t": 0.2, "hands": [hand(0.38, 0.5)]},
+              {"t": 0.3, "hands": [hand(0.38, 0.5, pinch=False)]}]
+
+    async def drive():
+        seen = []
+        async with websockets.connect(f"ws://127.0.0.1:{P}/ws?token={T}", max_size=8_000_000) as ws:
+            r = httpx.post(f"{BASE}/debug/hands", headers=H, timeout=30, json={"frames": frames}).json()
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=1.0))
+                except asyncio.TimeoutError:
+                    continue
+                if msg.get("kind") in ("hands", "holo_control"):
+                    seen.append(msg)
+                if any(m.get("kind") == "hands" and m.get("action") == "release" for m in seen):
+                    break
+        return r, seen
+    r, seen = asyncio.run(drive())
+    acts = [(m.get("kind"), m.get("action")) for m in seen]
+    check("a pinch takes hold on the live tracker", ("hands", "grab") in acts, acts)
+    rot = [m for m in seen if m.get("kind") == "holo_control" and m.get("action") == "rotate"]
+    check("...a drag becomes rotate events on the HUD's socket", len(rot) >= 1, acts)
+    check("...about his vertical axis, his right turning it positively",
+          all(m.get("axis") == "z" and (m.get("degrees") or 0) > 0 for m in rot), rot)
+    check("...and letting go releases", ("hands", "release") in acts, acts)
+    check("the endpoint reports the same events", r.get("emitted", 0) >= 3, r)
+
     # ------------------------------------------------------- the project file
     print("\n-- the project file --")
     r = tool("start_project", name="e2e project", about="a live test", confirmed=True)

@@ -825,8 +825,19 @@ def mesh_warning_for(stl_path: str) -> str | None:
             " — so the slicer will repair it its own way")
 
 
-async def slice_part(stl_path: str) -> dict:
-    """PrusaSlicer, headless, with the real time and filament estimates."""
+async def slice_part(stl_path: str = "") -> dict:
+    """PrusaSlicer, headless, with the real time and filament estimates.
+
+    With no path, the model on the stage: "fabricate it" (2026-09-06) had
+    no way to say which file, and the film's sentence names none."""
+    if not str(stl_path or "").strip():
+        try:
+            from tools.holo_tools import current
+            stl_path = str((current() or {}).get("path") or "")
+        except Exception:
+            stl_path = ""
+        if not stl_path:
+            return {"error": "which model, sir? There's nothing on the stage."}
     stl = Path(str(stl_path or "")).expanduser()
     if not stl.exists() or stl.suffix.lower() != ".stl":
         return {"error": f"no STL at {stl_path}"}
@@ -901,9 +912,10 @@ def register_all() -> None:
     registry.register(Tool(
         name="slice_part",
         description="Slice an STL into G-code and report the real print time and filament "
-                    "estimate from the slicer.",
+                    "estimate from the slicer. With no path, the model on the stage "
+                    "('fabricate it', 'get it ready for the printer').",
         parameters={"type": "object", "properties": {
-            "stl_path": {"type": "string"}}, "required": ["stl_path"]},
+            "stl_path": {"type": "string"}}, "required": []},
         risk=Risk.LOW, handler=slice_part, timeout=SLICE_TIMEOUT_S + 30))
     registry.register(Tool(
         name="printer_status",
