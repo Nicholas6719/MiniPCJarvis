@@ -4188,8 +4188,34 @@ Not a bug: "will it print" said the bracket wants supports - the LLM's
 OpenSCAD had a downward face off the bed; printcheck was right.
 test_brain 290/290.
 
-Next: rerun the variety pass on release 52; then the persona's counsel
-register for long renders, and watching him do one real pinch.
+Release 52 green at 19:15, pushed. The variety pass rerun on it
+(`.agent/logs/workbench_variety_2.log`): all 22 asks right, including
+"index as test bench" -> "I'll call it test bench, sir. Shall I open it?"
+-> "yes" -> open; "file it under the project" -> "Filed under test
+bench, sir."; "fabricate it" -> "Sliced, sir — 12m 27s of printing and 2
+grams of filament."; "remove the render" -> "Taking it down, sir."
+
+### 19:25 — pan, and two names (release 53)
+- **Carried across the stage.** The surveys' one missing gesture: two
+  pinches moving together, span unchanged, is a pan (`hand_gestures`,
+  `_mid`); it can zoom in the same frame. By voice, `holo_control` `pan`:
+  "move it to the left a bit" / "nudge it up" / "shift it to the right",
+  a fixed nudge (0.15 of the frame; "a bit" 0.07, "right over" 0.3);
+  `holo_angles.parse_action` returns "pan" for move/shift/nudge/slide +
+  a direction, never for "move the hole over" (an edit). The stage
+  (`HOME.px/py`, lerped in the tick) scales the fraction by the model
+  and holds it within a stage width; reset brings it home. The live
+  suite drives a two-hand carry through `/debug/hands` and expects the
+  pan on the socket. Store `cmd.dx/dy`.
+- The render label stops at the specification ("the bracket", not "the
+  bracket 30 by 20 by 5 millimetres with two 4 mil"), never mid-word.
+- The edit's project note reads back as a sentence ("Make the holes 6
+  millimetres — the bracket"), not a file slug.
+test_brain 292/292; hand_control, holo_control, canon erasure, intent,
+seed_collisions green; tsc clean.
+
+Still to watch him do once: one real pinch in front of the camera (the
+gesture path is proved from the landmarks onward, not before).
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
