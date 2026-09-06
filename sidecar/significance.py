@@ -118,7 +118,7 @@ HAZARD = re.compile(
     r"toxic (?:gas|fumes?|smoke|spill|leak|cloud|chemical|water|air|waste)|"
     r"evacuat\w+|shelter in place|lockdown|"
     r"terror(?:ist)? attack|terror plot|bombing|bomb threat|"
-    r"plane crash|derail\w+|"
+    r"plane crash\w*|helicopter crash\w*|derail\w+|"
     r"(?:building|bridge|roof|structure|balcony|crane|deck|wall) collapse|"
     r"collapsed? (?:building|bridge|roof|structure)|"
     r"nuclear (?:plant|reactor|meltdown|accident|leak|spill|emergency|"
@@ -172,7 +172,21 @@ STILL_ACTIVE = re.compile(
     r"\b(?:manhunt|at large|on the loose|active shooter|lockdown|"
     r"shelter in place|evacuat\w+|ongoing|unfolding|still burning|"
     r"no suspect in custody|police are searching|search continues|"
-    r"remains? at large)\b", re.I)
+    r"searching for|crews are searching|remains? at large|"
+    r"traps?|trapped|rescue\w*|rescuers|still missing|unaccounted for)\b", re.I)
+
+# ...and the words that say it is OVER, which outrank everything above.
+NOT_ACTIVE = re.compile(
+    r"\b(?:no (?:ongoing |further |longer a )?threat to the public|no threat to the public|"
+    r"no danger to the public|(?<!no )(?<!without a )(?:suspect|gunman|driver|man|woman) (?:is |was )?"
+    r"(?:in custody|arrested|taken into custody)|contained|under control|has been extinguished|"
+    r"investigation is ongoing)\b", re.I)
+
+# A hazard that happened AT A POINT and is over once it has happened. A gas
+# leak or a chemical cloud travels; a crashed plane does not.
+# (an explosion is not here: what blew up may still be burning or leaking)
+POINT_HAZARD = re.compile(
+    r"\b(?:plane crash\w*|helicopter crash\w*|crash\w*|derail\w+|collapse\w*)\b", re.I)
 
 # Someone died. Not every death is his business — a fatal crash in Oregon is
 # not — but a death near home is never a footnote, and "fatal" on its own was
@@ -387,8 +401,8 @@ NATURAL_DEATH = re.compile(
     r"(?:brief\s+|long\s+|short\s+)?(?:illness|cancer|complications|disease)"
     r"|\b(?:cancer|leukemia|natural causes|old age|pneumonia|alzheimer\w*|"
     r"parkinson\w*|dementia|heart failure|long illness|hospice)\b"
-    r"|\bpassed away\b|\b(?:dies?|died)\s+at\s+(?:the\s+age\s+of\s+)?\d{2}\b"
-    r"|\bobituar\w+|\bin memoriam\b", re.I)
+    r"|\bpassed away\b|\b(?:dies?|died|dead)\s+at\s+(?:the\s+age\s+of\s+)?\d{2}\b"
+    r"|\bobituar\w+|\bin memoriam\b|\brip\b|\brest in peace\b|\btributes? pour\w*\b", re.I)
 
 # Someone whose death is an obituary rather than an emergency, wherever it
 # happened. "Levi Herman, an outlaw country musician, died on Monday" names no
@@ -398,7 +412,8 @@ PUBLIC_FIGURE = re.compile(
     r"actress|comedian|author|novelist|poet|artist|painter|director|producer|"
     r"broadcaster|journalist|athlete|quarterback|pitcher|boxer|wrestler|coach|"
     r"senator|congressman|congresswoman|governor|mayor|ambassador|"
-    r"laureate|icon|legend|star|hall of fame)\b", re.I)
+    r"laureate|icon|legend|star|hall of fame|pioneer|founder|frontman|"
+    r"chef|designer|philanthropist|billionaire|executive|ceo)\b", re.I)
 
 # ...unless something HAPPENED to them. These are the deaths that stay
 # emergencies no matter who died: a crash is a crash.
@@ -431,15 +446,29 @@ def _ongoing(text: str) -> bool:
     cyclist killed in a collision are finished - terrible, and nothing he can do
     at nine in the morning.
     """
-    if HAZARD.search(text) or STILL_ACTIVE.search(text):
-        return True                      # a hazard is unfolding by definition
+    # OVER IS OVER. "No threat to the public", a suspect in custody, a fire
+    # contained: whatever else the sentence says, it is finished.
+    if NOT_ACTIVE.search(text):
+        return False
+    if STILL_ACTIVE.search(text):
+        return True
+    # A hazard that TRAVELS (gas, chemicals, radiation, fire, water) is
+    # unfolding by definition. A hazard that happened at a point - a plane
+    # crash, an explosion, a derailment - is over unless the text says
+    # otherwise: "2 killed when small plane crashes in Ludlow" reached him
+    # at 08:30 on 2026-09-06 as "still unfolding", and it was not.
+    if HAZARD.search(text) and not POINT_HAZARD.search(text):
+        return True
     if WEATHER_EVENT.search(text):
         return True                      # flooding and storms are still moving
     # More than one person. "Death toll rises to 12 in Massachusetts flooding"
     # is an emergency however finished it sounds; "one dead after a crash" is
     # the case this whole rule exists to quieten.
-    return bool(MULTI_DEATH.search(text) or MANY.search(text)
-                or CATASTROPHE.search(text))
+    # A COUNT OF THE DEAD IS NOT "STILL HAPPENING". "Multiple people shot at a
+    # house party in Taunton" reached him at 05:32 as "still happening, and in
+    # his state"; the party was over and police said there was no threat.
+    # A catastrophe (hundreds, a city levelled) is still unfolding by its size.
+    return bool(CATASTROPHE.search(text))
 
 
 def _is_obituary(text: str) -> bool:
@@ -482,7 +511,10 @@ def is_local(story: dict) -> tuple[bool, bool]:
     # Provenance is good evidence, not proof. If the story names nothing of his
     # and does name somewhere clearly else, the desk it came from stops counting
     # - otherwise every wire story a local outlet reprints is "close to home".
-    if from_his_desk and FAR_PLACE.search(t) and not (
+    # A local desk syndicates the wire: a far place OR a foreign one in the
+    # text, with nothing tying it to Massachusetts, is not local whatever the
+    # desk ("A fire in Congo's capital" off Boston.com reached him, 2026-09-05).
+    if from_his_desk and (FAR_PLACE.search(t) or FOREIGN.search(t)) and not (
             anchored or TOWN_RE.search(t) or REGION_RE.search(t)):
         from_his_desk = False
 
@@ -586,7 +618,10 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
     # forty minutes away, and it reached him as URGENT with escalating pings that
     # kept asking until he tapped "Got it". He could do nothing with it at 6 a.m.
     # That is how an alarm teaches you to ignore it.
-    if hazard and near:
+    # ...a hazard that TRAVELS. A crashed plane in Ludlow (08:30, 2026-09-06)
+    # is a point that is over; it takes the finished-incident path below.
+    moving = hazard and not POINT_HAZARD.search(text)
+    if moving and near:
         return URGENT, "something dangerous close to home"
     # Violence in the state, but not his town, and ALREADY OVER. On 2026-09-01
     # he was sent a drowning in Falmouth and a cyclist killed in Lynn - both
@@ -600,12 +635,20 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
     # Distant, but big enough that distance stops mattering. MANY or CATASTROPHE
     # rather than `scale`, which contains the fatality words and so promoted
     # every distant death to something worth waking him for.
-    if danger and (MANY.search(text) or CATASTROPHE.search(text)):
+    # "Multiple" alone is not the bar: a house-party shooting forty minutes
+    # away with no threat to the public is his news, not his emergency
+    # (2026-09-06 05:32). Many dead AND still unfolding, or in his own town,
+    # or a catastrophe by size - those are.
+    if danger and (CATASTROPHE.search(text)
+                   or (MANY.search(text) and (own_town or _ongoing(text)))):
         return URGENT, "a serious incident, wherever it is"
     # A hazard is still unfolding and does not care who you are, so distance
     # does not excuse it: this is his gas leak at an Ohio facility.
-    if hazard:
+    if moving or (hazard and _ongoing(text)):
         return ALERT, "something still unfolding, wherever it is"
+    if hazard:
+        # a crash, a derailment, a collapse with nobody trapped - happened, and over
+        return NOTABLE, "an incident, but over and not his town"
     # Violence far away, one person, already over. A tragedy — and not his
     # emergency. Waking him for it is how he learns to ignore the alerts.
     if violence:

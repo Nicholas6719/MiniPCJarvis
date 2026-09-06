@@ -129,6 +129,37 @@ def main() -> int:
     check("weighty national news near him waits for the brief under emergencies-only",
           classify_news(weighty_local)[0] == NONE, classify_news(weighty_local))
 
+    # THE LEDGER OF 2026-09-05/06: four alerts that reached his phone and should
+    # not have, each off a LOCAL desk that syndicates the wire.
+    ledger = [
+        ({"headline": "A fire in Congo's capital kills dozens at a wedding party",
+          "summary": "A fire broke out at a wedding party in a building in Lingwala, Kinshasa, "
+                     "killing at least 30 people.", "source": "Boston.com", "_local_feed": True},
+         "a fire in Kinshasa off Boston.com is not near him"),
+        ({"headline": "Rap and hip-hop pioneer dead at 64: 'RIP my brother'",
+          "summary": "The rapper died Saturday; tributes poured in.", "source": "MassLive", "_local_feed": True},
+         "an obituary off MassLive"),
+        ({"headline": "2 killed when small plane crashes in Ludlow",
+          "summary": "Two people died when a small plane crashed in Ludlow on Saturday evening, "
+                     "officials said.", "source": "WHDH", "_local_feed": True},
+         "a plane crash an hour away, over"),
+        ({"headline": "Multiple people shot at house party in Taunton",
+          "summary": "Multiple people were shot at a house party on Weir and Sumner streets in Taunton "
+                     "early Sunday. Police said there is no threat to the public.",
+          "source": "WCVB Boston", "_local_feed": True},
+         "a shooting forty minutes away, over, no threat"),
+    ]
+    for story, why in ledger:
+        check(f"silent: {why}", classify_news(story)[0] == NONE, classify_news(story))
+    # ...and the same shapes when they ARE his emergency
+    check("a plane crash in Framingham with a search on wakes him",
+          classify_news({"headline": "Small plane crashes in Framingham; crews searching for survivors",
+                         "summary": "", "source": "WCVB Boston", "_local_feed": True})[0] == URGENT)
+    check("a shooting with the suspect at large in his state is an alert",
+          classify_news({"headline": "Multiple people shot in Taunton; suspect at large",
+                         "summary": "Police are searching for the gunman.",
+                         "source": "WCVB Boston", "_local_feed": True})[0] in (ALERT, URGENT))
+
     # --- somebody else's country is not "the country" -------------------------
     # On 2026-08-31 at 1:42pm he was sent "Nepal rescuers blast hillside in search
     # of hydropower workers" and then chased about it twice. The BBC summary said
