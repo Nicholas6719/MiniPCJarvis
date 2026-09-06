@@ -623,8 +623,10 @@ def slots_switch(t: str) -> dict | None:
     # screen; it came here at 1.00 confidence and sent JARVIS looking for a
     # window called "number 6". Nobody names a window after a bare number, so
     # declining lets the picture-picking skill have it instead.
+    # ...and dictation writes the number as a WORD: "focus on image eight" went
+    # looking for a window called "image eight" (2026-09-06).
     if re.fullmatch(r"(?:the\s+)?(?:image|picture|photo|pic|number|no\.?|#)?\s*"
-                    r"(?:number\s*)?\d{1,2}\s*(?:one|image|picture|photo|pic)?",
+                    rf"(?:number\s*)?(?:\d{{1,2}}|{_CARD})\s*(?:one|image|picture|photo|pic)?",
                     name, re.I):
         return None
     return {"title": name} if 1 < len(name) <= 40 else None
@@ -1278,6 +1280,8 @@ def slots_holo_move(t: str) -> dict | None:
         out.update(sec)
     elif act == "layer":
         out.update(holo_angles.parse_layer(t) or {"layer": -1})
+    elif act == "view":
+        out["view"] = holo_angles.parse_view(t) or "front"
     return out
 
 
@@ -1318,9 +1322,30 @@ def _holo_name(t: str) -> str:
         return ""
 
 
-def slots_holo_show(t: str) -> dict:
+_SHOW_AS = re.compile(
+    r"\b(?:show|project|put|bring)\s+(?:me\s+|up\s+)?(.+?)\s+(?:up\s+)?"
+    r"(?:as an? (?:3\s*d |three\s*d )?(?:hologram|model)|in (?:3\s*d|three\s*d))\b", re.I)
+_POINTER_WORDS = re.compile(
+    r"(?:it|that|this|that one|this one|the (?:hologram|model|part|render|thing|design|file))")
+
+
+def slots_holo_show(t: str) -> dict | None:
+    """Show an EXISTING model. "Show me spider-man as a hologram" names a
+    thing that does not exist yet - that is a make, and the seeds for "show me
+    THAT as a hologram" sit close enough to steal it (0.877 to holo_make's
+    0.860, 2026-09-06). A named subject that is not a part on disk is refused
+    here, and the router hands the sentence to the next skill."""
     n = _holo_name(t)
-    return {"name": n} if n else {}
+    if n:
+        return {"name": n}
+    m = _SHOW_AS.search(t or "")
+    if m:
+        subject = re.sub(r"\s+", " ", m.group(1)).strip(" .,").lower()
+        # "the bracket" is a thing he has; "spider-man" / "a dragon" is a thing
+        # he wants made. The definite article is the difference.
+        if subject and not _POINTER_WORDS.fullmatch(subject) and not subject.startswith("the "):
+            return None
+    return {}
 
 
 def say_holo_show(slots: dict, res: dict) -> str:
@@ -1388,8 +1413,13 @@ def slots_holo_make(t: str) -> dict:
     detailed = bool(_DETAILED.search(said))
     bare = re.sub(r"\s{2,}", " ", _DETAILED.sub(" ", said)).strip(" .,")
     desc = _MAKE_STRIP.sub("", bare).strip(" .,")
-    # "Render a duck, please." is a duck, not a "duck, please"
+    # "Render a duck, please." is a duck, not a "duck, please"; "spider-man as
+    # a hologram" is spider-man, the format is not part of the object's name
     desc = re.sub(r"[,\s]*\b(?:please|thanks|thank you|sir)\b[.!]*$", "", desc, flags=re.I).strip(" .,")
+    desc = re.sub(r"\s+(?:as|in)\s+(?:a\s+|an\s+)?(?:3\s*d|three\s*d)?\s*(?:hologram|holographic|model|"
+                  r"version|render(?:ing)?|3\s*d|three\s*d)\s*$", "", desc, flags=re.I).strip(" .,")
+    # "make that one 3d" -> "that one", which is a pointer the tool resolves
+    desc = re.sub(r"\s+(?:3\s*d|three\s*d)\s*$", "", desc, flags=re.I).strip(" .,")
     # "Render it" / "make that one 3D" pass the pointer through: make_hologram
     # resolves it to the pictures on screen (render_tools._POINTER).
     out = {"description": desc or said}
@@ -2108,7 +2138,11 @@ SKILLS: list[Skill] = [
         # said and missed on 2026-09-04: the parser already knew "still" and
         # "spin" (holo_tools), the router had never heard the words
         "center it", "centre it", "put it in the middle", "stop spinning",
-        "stop it from spinning", "hold it still", "spin it", "keep it turning"],
+        "stop it from spinning", "hold it still", "spin it", "keep it turning",
+        # named views: "show me the top" re-showed the model with its size
+        # (2026-09-06); now it is a control like any other
+        "show me the top", "show me the front", "let me see the back",
+        "show me it from the side", "top view", "what does it look like from below"],
         slots=slots_holo_move, speak=say_holo_move),
     # MAKING one, as against showing one he already has. Every seed here names
     # the act of creation — "make", "create", "turn that into" — because
@@ -2121,6 +2155,10 @@ SKILLS: list[Skill] = [
         "make me a keychain from this logo", "generate a 3d model of it",
         "print me a model of a gear", "design me a bracket",
         "make a 3d version of that",
+        # the possessive, and "now render me": "Render me Spiderman's mask"
+        # fell to the model on 2026-09-06 and was answered with the arc reactor
+        "render me spider man's mask", "render me iron man's helmet",
+        "now render me a dragon", "render me the arc reactor",
         # Requests that name the OBJECT and not the format. He does not always
         # say "3d model"; "design me a stand" is the same ask, and without these
         # it sat at 0.69 and fell through to the model.

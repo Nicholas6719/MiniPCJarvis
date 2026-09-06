@@ -307,6 +307,8 @@ _ACTIONS = ("rotate", "flip", "scale", "section", "explode", "colour", "hologram
             # Holding still, and drifting again. Without these "stop spinning"
             # reached the skill router and cancelled a render.
             "still", "spin",
+            # a named view: top, bottom, front, back, left, right, side
+            "view",
             "layers", "solid", "layer")
 
 
@@ -328,7 +330,7 @@ _AXIS_SAID = {"x": "forwards", "y": "sideways", "z": "round"}
 async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
                        factor: float = 0.0, at: float = 0.5,
                        layer: int = -1, delta: int = 0,
-                       phrase: str = "") -> dict:
+                       phrase: str = "", view: str = "") -> dict:
     """Move the model that is already on the stage.
 
     NOTHING HERE CHANGES THE MODEL. Rotation, scale and the section cut are all
@@ -381,6 +383,15 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
             holo_angles.parse_section(said) or {"axis": "z", "at": 0.5}
         payload.update(sec)
         spoken = "Cutting it open, sir."
+    elif act == "view":
+        import holo_angles
+        view = str(view or holo_angles.parse_view(said) or "front")
+        await bus.emit("holo_control", action="view", view=view)
+        names = {"top": "From the top", "bottom": "From underneath", "front": "Face on",
+                 "back": "From behind", "left": "The left side", "right": "The right side",
+                 "side": "Side on"}
+        return {"ok": True, "action": "view", "view": view,
+                "spoken": f"{names.get(view, 'There')}, sir."}
     elif act in ("still", "spin"):
         on = (act == "spin")
         await bus.emit("holo_control", action="spin", on=on)
@@ -566,6 +577,8 @@ def register_all() -> None:
             "axis": {"type": "string", "enum": ["x", "y", "z"],
                      "description": "z is vertical, the axis it stands on the bed on"},
             "degrees": {"type": "number", "description": "for rotate; negative turns back"},
+            "view": {"type": "string", "enum": ["top", "bottom", "front", "back", "left", "right", "side"],
+                     "description": "for view: which side of it he wants to see"},
             "factor": {"type": "number", "description": "for scale; 1.5 is closer"},
             "at": {"type": "number", "description": "for section; 0-1 along the axis"},
             "phrase": {"type": "string",

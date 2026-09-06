@@ -107,20 +107,30 @@ async def find_3d_model(description: str = "", confirmed: bool = False) -> dict:
     top = locked[0] if locked else cands[0]
     if not locked:
         why = (f"I found {len(cands)} repositories, sir, but nothing in them is "
-               f"actually {desc} — I'd be handing you somebody's robot kit. "
-               f"I can build you one instead.")
-        note = ("NOTHING matched. Do not claim a site needs an account — these "
-                "were GitHub and it hands over anything it has. Offer to BUILD "
-                "one, which is what make_hologram does when tier 5 finds "
-                "nothing.")
+               f"actually {desc} — I'd be handing you somebody's robot kit.")
     else:
         why = (f"I found {len(cands)} of them, sir — the best looks like "
                f"{top['title'][:70]} on {top['host']}, and that site wants an "
-               f"account before it will hand the file over. I can open it for "
-               f"you, or build you one instead.")
-        note = ("Offer the page OR to build one. Do NOT claim to have the file.")
-    return {"candidates": cands[:4], "fetchable": False,
-            "spoken": why, "instruction": note}
+               f"account before it will hand the file over.")
+    # THE OFFER IS A QUESTION, NOT PROSE. "I can build you one instead" was
+    # handed to the model, which read a link aloud and left him to say "do
+    # it" into a conversation that had no question open (2026-09-06: "he
+    # said I had to download it, and then I told him to do it, and then we
+    # were back to the regular conversation"). A cost question through the
+    # clarify flow is what "do it", "go for it" and "build it" answer.
+    import render_estimates as est
+    t = create3d.choose_tier(desc, "")
+    if t in (3, 4) and not create3d.available().get(t):
+        return {"candidates": cands[:4], "fetchable": False,
+                "spoken": why + " I can't build one on this machine, sir.",
+                "instruction": "Say so plainly; do not read a link aloud."}
+    secs = est.estimate(t)
+    return {"_ask": {
+        "subject": desc,
+        "question": f"{why} Shall I build one instead — {est.spoken(secs)}?",
+        "tool": "make_hologram",
+        "args": {"description": desc, "tier": t, "name": desc, "confirmed": True},
+    }, "candidates": cands[:4], "fetchable": False}
 
 
 def register_all() -> None:

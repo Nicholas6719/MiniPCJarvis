@@ -138,7 +138,7 @@ export interface HoloState {
   // payloads would otherwise be indistinguishable from no new command at all.
   cmd?: {
     seq: number; action: string;
-    axis?: string; degrees?: number; factor?: number; at?: number; on?: boolean;
+    axis?: string; degrees?: number; factor?: number; at?: number; on?: boolean; view?: string;
     // Scrubbing the sliced toolpath: an absolute layer (-1 = the whole print)
     // or a step from wherever he is.
     layer?: number; delta?: number;
@@ -814,7 +814,7 @@ export const useStore = create<Store>((set, get) => ({
                         : evt.action === "layer" ? true : st.holo.showLayers,
                       cmd: { seq: (st.holo.cmd?.seq ?? 0) + 1, action: evt.action,
                              axis: evt.axis, degrees: evt.degrees, factor: evt.factor,
-                             at: evt.at, on: evt.on,
+                             at: evt.at, on: evt.on, view: evt.view,
                              layer: evt.layer, delta: evt.delta } } }
           : {}));
         break;

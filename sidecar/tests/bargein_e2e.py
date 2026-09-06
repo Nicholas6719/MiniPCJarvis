@@ -53,9 +53,34 @@ async def main():
                 elif k == "turn_done":
                     break
             ok = interrupted is not None and deltas_after == 0
+            # AND HE MUST HEAR WHAT COMES NEXT. On 2026-09-06 the barge-in stopped
+            # him and then left him in LISTENING for 35 s hearing nothing - "he
+            # got stuck on listening mode... I tried everything to wake him".
+            # Stopping is half the job; the other half is the sentence after.
+            heard, replied = None, ""
+            if interrupted is not None:
+                await asyncio.sleep(1.0)
+                httpx.post(BASE + "/debug/inject_audio", headers=H, timeout=30,
+                           json={"audio_b64": base64.b64encode(say("What time is it?").tobytes()).decode()})
+                t1 = time.time()
+                while time.time() - t1 < 25:
+                    try:
+                        e = json.loads(await asyncio.wait_for(ws.recv(), timeout=25))
+                    except asyncio.TimeoutError:
+                        break
+                    k = e.get("kind")
+                    if k == "transcript" and e.get("role") == "user":
+                        heard = e.get("text")
+                    elif k == "assistant_delta":
+                        replied += e.get("text") or ""
+                    elif k == "turn_done" and heard:
+                        break
+            followed = bool(heard) and "time" in (heard or "").lower()
+            ok = ok and followed
             ok_all &= ok
             print(f"  round {i+1}: {'PASS' if ok else 'FAIL'} spoke_after={spoke_at and round(spoke_at - t0, 1)}s "
-                  f"interrupted_after_inject={interrupted}s deltas_after={deltas_after} total_deltas={total_deltas}")
+                  f"interrupted_after_inject={interrupted}s deltas_after={deltas_after} total_deltas={total_deltas} "
+                  f"| after the barge-in heard={heard!r} reply={replied[:40]!r}")
     print("BARGE-IN:", "PASS" if ok_all else "FAIL")
     return 0 if ok_all else 1
 

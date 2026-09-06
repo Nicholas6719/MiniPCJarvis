@@ -31,6 +31,11 @@ import re
 # the slicer, the overhang maths — is Z-up, and that conversion belongs in the
 # one place that draws, not in the language.
 _AXIS_WORDS = [
+    # "turn it ninety degrees UP" / "turn it down" tip it, they do not yaw it:
+    # the direction outranks the verb ("turn" alone is a yaw). 2026-09-06:
+    # both were answered "turning it 90 degrees round".
+    (r"\b(?:up|upwards|down|downwards|forward|forwards|backward|backwards)\b"
+     r"(?!\s*(?:side|to the|towards))", "x"),
     # the vertical axis: how a thing sits on the bed
     (r"\b(?:spin|turn|rotate|yaw|swing)\b", "z"),
     (r"\b(?:vertical(?:ly)?|upright)\b", "z"),
@@ -106,7 +111,8 @@ def parse_degrees(text: str) -> float:
         m = re.search(r"(-?\d+(?:\.\d+)?)", t)
         deg = float(m.group(1)) if m else DEFAULT_DEGREES
 
-    if re.search(r"\b(?:back|backwards|anticlockwise|counter[- ]?clockwise|the other way|left)\b", t):
+    if re.search(r"\b(?:back|backwards|anticlockwise|counter[- ]?clockwise|the other way|left|"
+                 r"(?<!upside )(?<!upside-)down|downwards)\b", t):
         deg = -abs(deg)
     return deg
 
@@ -171,6 +177,35 @@ def parse_layer(text: str) -> dict | None:
     return None
 
 
+_VIEWS = (
+    ("top", r"\b(?:the top|top view|from (?:the )?top|from above|bird'?s[- ]eye|look(?:ing)? down on it)\b"),
+    ("bottom", r"\b(?:the bottom|bottom view|from (?:the )?bottom|from below|from underneath|underneath|the underside)\b"),
+    ("front", r"\b(?:the front|front view|from the front|head[- ]on|face[- ]on)\b"),
+    ("back", r"\b(?:the back|back view|from the back|from behind|the rear|rear view)\b"),
+    # "the left" alone is a direction ("turn it a bit to the left" is a
+    # rotation); a SIDE is a view
+    ("left", r"\b(?:the left side|left side|from the left|left view)\b"),
+    ("right", r"\b(?:the right side|right side|from the right|right view)\b"),
+    ("side", r"\b(?:the side|side view|from the side|side on)\b"),
+)
+# no "turn": turning is rotating, whatever it ends up facing
+_VIEW_LEAD = re.compile(r"\b(?:show|see|look|view|face|give|let|what)\b", re.I)
+
+
+def parse_view(text: str) -> str | None:
+    """'show me the top' -> 'top'. Only with a viewing verb in the sentence, so
+    'the top layer' (a layer command) and 'cut the top off' stay their own."""
+    t = (text or "").lower()
+    if re.search(r"\blayer\b|\bcut\b|\bslice\b|\bsection\b|\bhalf\b", t):
+        return None
+    if not _VIEW_LEAD.search(t) and not re.search(r"\bview\b|\bfrom\b", t):
+        return None
+    for name, pat in _VIEWS:
+        if re.search(pat, t):
+            return name
+    return None
+
+
 def parse_action(text: str) -> str | None:
     """Which control he means, or None if the sentence names none of them.
 
@@ -192,6 +227,11 @@ def parse_action(text: str) -> str | None:
                  r"original (?:view|position|angle)|"
                  r"default (?:view|position|angle))\b", t) or t.strip() == "home":
         return "reset"
+    # A NAMED VIEW. "Show me the top" (2026-09-06) had no control to reach and
+    # was answered by re-showing the model with its size. Top, bottom, front,
+    # back, left, right - the six a person asks for by name.
+    if parse_view(t):
+        return "view"
     if re.search(r"\b(?:solid|the model again|hide the layers|back to the model|"
                  r"stop the layers)\b", t):
         return "solid"

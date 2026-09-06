@@ -116,7 +116,13 @@ async def main() -> int:
                        # his own words, 2026-09-04
                        ("center it", "fit"), ("put it in the middle", "fit"),
                        ("stop spinning", "still"), ("stop it from spinning", "still"),
-                       ("keep it turning", "spin")):
+                       ("keep it turning", "spin"),
+                       # named views (2026-09-06: "show me the top" re-showed the model)
+                       ("show me the top", "view"), ("let me see the front", "view"),
+                       ("show me it from the side", "view"), ("top view", "view"),
+                       ("what does it look like from behind", "view"),
+                       # ...but a layer or a cut is not a view
+                       ("show me the top layer", "layer"), ("cut the top off", "section")):
         check(f"{said!r} is {want}", A.parse_action(said) == want, A.parse_action(said))
     for said in ("what is the capital of france", "remind me to call dad",
                  "what's the weather", "open spotify"):

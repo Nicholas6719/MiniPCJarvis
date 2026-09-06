@@ -1230,7 +1230,15 @@ class Orchestrator:
                     except Exception:
                         log.exception("could not hear the answer to a question")
                 continue
-            if self.sm.state in (State.IDLE, State.INTERRUPTED):
+            # LISTENING IS IN THIS LIST. The barge-in handler stops him, sets
+            # the flag and puts the state at LISTENING itself; this loop then
+            # came round, saw a state it did not start from, and slept 50 ms
+            # forever - flag set, nobody capturing, the wake detector not fed
+            # in LISTENING either. Thirty-five seconds of "he can't hear me"
+            # until the deaf watch reset him (2026-09-06 09:50, and again in
+            # the reproduction at 09:58). This loop is the only thing that
+            # captures, so a LISTENING it did not set is still its job.
+            if self.sm.state in (State.IDLE, State.INTERRUPTED, State.LISTENING):
                 self._newer_turn_started()
                 await self.sm.to(State.LISTENING)
                 utterance = await self._capture_utterance()

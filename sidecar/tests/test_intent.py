@@ -62,8 +62,8 @@ STAGE = [
     ("original position", "reset"), ("default view", "reset"),
     ("put it back", "reset"), ("undo that", "reset"),
     # turning it
-    ("turn it around", "rotate"), ("show me the back", "rotate"),
-    ("other side", "rotate"), ("let me see the back of it", "rotate"),
+    ("turn it around", "rotate"), ("show me the back", "view"),
+    ("other side", "rotate"), ("let me see the back of it", "view"),
     ("spin it round", "rotate"), ("rotate ninety degrees", "rotate"),
     ("turn it a bit to the left", "rotate"),
     # size
@@ -251,6 +251,17 @@ def main() -> int:
               bool(again) and again[0].name == "holo_make"
               and again[2] >= hard,
               f"{again and again[0].name}@{again and round(again[2], 2)}")
+
+        # What the model's tool choice must NEVER teach (2026-09-06): "yes." was
+        # learned as holo_again, and "render me spiderman's mask" as holo_show
+        # because the model answered it by showing the arc reactor again.
+        check("a bare yes is never a lesson",
+              not await brain.learn("yes.", "holo_again"))
+        check("a make verb never teaches a show",
+              not await brain.learn("render me spider man's mask", "holo_show"))
+        check("...nor a move", not await brain.learn("make it bigger please", "holo_move"))
+        check("...but he himself may teach anything",
+              await brain.learn("do the thing", "holo_show", source="user"))
 
         # And it GENERALISES - the point of teaching a brain rather than a list.
         near = await brain.decide("make me a dragon", context=empty)

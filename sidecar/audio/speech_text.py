@@ -16,6 +16,12 @@ _BS = chr(92)
 _WIN_PATH = re.compile("[A-Za-z]:" + _BS + _BS + "[^" + _BS + _BS + " ,;:'\"]+(?:" + _BS + _BS + "[^" + _BS + _BS + " ,;:'\"]+)*")
 _UNIX_PATH = re.compile(r"(?<![\w/])/(?:[\w.-]+/)+[\w.-]*")
 _URL = re.compile(r"https?://([^/\s]+)[^\s]*")
+# A link with no scheme: "thingiverse.com/en/tags/spiderman+mask" was read
+# aloud as "com en tags spiderman plus mask" (2026-09-06). The host is all a
+# person would say.
+_BARE_URL = re.compile(
+    r"\b((?:[\w-]+\.)+(?:com|org|net|io|gov|edu|co|uk|de|fr|ca|us|tv|ai|app|dev))"
+    r"(?:/[^\s,;)]*)?", re.I)
 _YEAR = re.compile(r"\b(1[1-9]\d{2}|20\d{2})\b")
 _SLASH = re.compile(r"(?<=\w)/(?=\w)")
 # Kokoro simply does not voice "." between digits: "1.7 terabytes" comes out as
@@ -92,6 +98,7 @@ def clean_for_speech(text: str) -> str:
     t = _MD_HEADER.sub("", t)
     t = _MD_BULLET.sub("", t)
     t = _URL.sub(r"\1", t)                      # "example.com" instead of the URL
+    t = _BARE_URL.sub(r"\1", t)                 # ...and the same for a link with no scheme
     t = _WIN_PATH.sub(lambda m: "the saved location" + ("." if m.group(0).endswith(".") else ""), t)
     t = _UNIX_PATH.sub("the saved location", t)
     t = _SLASH.sub(" ", t)                        # and/or -> and or, km/h -> km h

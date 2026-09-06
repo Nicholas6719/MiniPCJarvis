@@ -200,7 +200,10 @@ CASES = [
     # start a 3D render.
     ("show me spider-man", "images"),
     ("show me pictures of a bracket", "images"),
-    ("show me spider-man as a hologram", "holo_show"),
+    # a NAMED thing that does not exist yet is a make (2026-09-06: routed to
+    # holo_show with no name, it re-showed whatever was up - the arc reactor)
+    ("show me spider-man as a hologram", "holo_make"),
+    ("render me spider man's mask", "holo_make"), ("now render me spider man's mask", "holo_make"),
     ("show me that as a hologram", "holo_show"),
     ("project the bracket as a hologram", "holo_show"),
     ("let me see it in 3d", "holo_show"),

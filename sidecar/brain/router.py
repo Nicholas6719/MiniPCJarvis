@@ -232,6 +232,21 @@ def _ticker_to_company(t: str) -> str:
     return _TICKER_TOK.sub(one, t, count=1)
 
 
+# What the online learner must never learn from the model's tool choice.
+_ANSWER_ONLY = re.compile(
+    r"(?:yes|yeah|yep|yup|no|nope|nah|ok|okay|sure|please|thanks|thank you|"
+    r"go ahead|do it|go for it|yes please|no thanks|fine|alright|right)[.!?]?")
+_MAKE_VERB = re.compile(r"\b(?:render|make|build|create|generate|print|design|model)\b")
+# judged by the TOOL a skill runs, so a renamed skill cannot slip out of this
+_CREATION_TOOLS = {"make_hologram", "another_design", "edit_part", "generate_part",
+                   "find_model", "slice_part"}
+
+
+def _creates(skill: str) -> bool:
+    sk = SKILL_BY_NAME.get(skill)
+    return bool(sk) and str(getattr(sk, "tool", "") or "") in _CREATION_TOOLS
+
+
 def _norm(t: str) -> str:
     """Canonical intent form used for embeddings (objects -> placeholders)."""
     import re
@@ -313,6 +328,23 @@ EDIT_TARGET_BONUS = 0.10
 
 def _lexical_delta(skill: str, text: str) -> float:
     """Word-level evidence, as opposed to the state of the screen."""
+    if skill == "holo_make":
+        # "show me spider-man as a hologram" NAMES a thing that does not exist
+        # yet; the embedding cannot tell it from "show me that as a hologram"
+        # (0.877 holo_show to 0.860 holo_make, contested to 0.75 and lost,
+        # 2026-09-06). The words can: a subject after the verb that is neither
+        # a pointer nor "the ..." is a request to make.
+        try:
+            from brain.skills import _POINTER_WORDS, _SHOW_AS
+        except Exception:
+            return 0.0
+        m = _SHOW_AS.search(text or "")
+        if not m:
+            return 0.0
+        subject = re.sub(r"\s+", " ", m.group(1)).strip(" .,").lower()
+        if subject and not _POINTER_WORDS.fullmatch(subject) and not subject.startswith("the "):
+            return EDIT_TARGET_BONUS
+        return 0.0
     if skill != "holo_edit":
         return 0.0
     try:
@@ -516,11 +548,12 @@ class Brain:
             sims = sims + self._context_vector(context)
         # Cheap enough to do per turn: one regex over one sentence, and only
         # the examples of a single skill move.
-        lex = _lexical_delta("holo_edit", text)
-        if lex:
-            sims = sims + np.array(
-                [lex if sk == "holo_edit" else 0.0 for sk in self._skills],
-                dtype=np.float32)
+        for nudged in ("holo_edit", "holo_make"):
+            lex = _lexical_delta(nudged, text)
+            if lex:
+                sims = sims + np.array(
+                    [lex if sk == nudged else 0.0 for sk in self._skills],
+                    dtype=np.float32)
         # STILL TALKING ABOUT THE SAME THING. "What about now" means nothing on
         # its own; next to a question about fingers it plainly means fingers.
         last = (context or {}).get("last_skill")
@@ -614,6 +647,19 @@ class Brain:
         if not t or skill not in SKILL_BY_NAME or len(t.split()) > 14:
             return False
         if source != "user":
+            # AN ANSWER IS NOT A REQUEST. "yes." was learned as holo_again on
+            # 2026-09-06 because the model's next tool call happened to be one:
+            # every later "yes" would have re-rendered something.
+            if _ANSWER_ONLY.fullmatch(t):
+                return False
+            # A MAKE VERB NEVER TEACHES A SHOW. "render me spiderman's mask" was
+            # answered by the model with show_hologram (the arc reactor already
+            # up), and that was learned - so the very next "now render me
+            # spider man's mask" was a reflex that showed the arc reactor again.
+            # The model's wrong tool is not a lesson; a creation verb may only
+            # teach a skill that creates.
+            if _MAKE_VERB.search(t) and not _creates(skill):
+                return False
             if not self._executable(text, skill):
                 return False  # the LLM used a tool the skill couldn't run from this phrasing
             best, conf = await self.classify(text)

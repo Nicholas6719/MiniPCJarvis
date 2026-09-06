@@ -624,6 +624,21 @@ export function HoloStage() {
         case "fit":
           target.scale = 1;
           break;
+        case "view": {
+          // A named view, from HOME. His z is the renderer's y (see rotate):
+          // yaw is ry, pitch is rx. "Top" tips it so the top faces him.
+          const q = Math.PI / 2;
+          const v = String(c.view ?? "front");
+          Object.assign(target, { rx: HOME.rx, ry: HOME.ry, rz: HOME.rz });
+          if (v === "top") target.rx = HOME.rx + q;
+          else if (v === "bottom") target.rx = HOME.rx - q;
+          else if (v === "back") target.ry = HOME.ry + Math.PI;
+          else if (v === "left") target.ry = HOME.ry + q;
+          else if (v === "right" || v === "side") target.ry = HOME.ry - q;
+          else target.ry = 0;        // front: square on, no idle yaw
+          spin = false;
+          break;
+        }
         case "reset":
           Object.assign(target, HOME);
           clearClip();
