@@ -341,6 +341,16 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
     part he is about to spend an hour printing.
     """
     if not _current:
+        # "Show me the top" two seconds after "go for it": the model is still
+        # building. Say that, rather than "nothing on the stage".
+        try:
+            from render_queue import queue as _q
+            st = _q.status() or {}
+            if st.get("busy"):
+                what = str(st.get("label") or st.get("current") or "the model")
+                return {"error": f"{what} is still building, sir — a few seconds more"}
+        except Exception:
+            pass
         return {"error": "there's nothing on the stage to move, sir"}
 
     act = (action or "").strip().lower()

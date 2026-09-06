@@ -383,7 +383,9 @@ async def cancel_render() -> dict:
     r = queue.cancel()
     if not r.get("cancelled"):
         return {**r, "spoken": "Nothing was running, sir."}
-    return {**r, "spoken": f"Stopped the {r['label']}, sir."}
+    # "Stopped the a lighthouse, sir" - the label carries his article
+    label = re.sub(r"^(?:a|an|the)\s+", "", str(r.get("label") or "render"), flags=re.I)
+    return {**r, "spoken": f"Stopped the {label}, sir."}
 
 
 def register_all() -> None:

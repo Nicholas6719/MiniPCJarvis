@@ -1969,6 +1969,17 @@ def say_go_ahead(_s: dict, _r: dict) -> str:
                        "I'm listening, sir."])
 
 
+def slots_story_time(t: str) -> dict | None:
+    """'When was that reported' is this skill; 'and what year was it released'
+    is a knowledge question about the thing just discussed (2026-09-06: a
+    film's release year was answered "I don't have a time on that one").
+    A dated FACT is refused here and goes to the model with the history."""
+    if re.search(r"\b(?:year|released?|release|born|died|founded|invented|built|written|"
+                 r"published|premiered|made|opened|discovered|launched)\b", t or "", re.I):
+        return None
+    return {}
+
+
 def say_story_time(_s: dict, _r: dict) -> str:
     """"When was that?" about the thing he was just told.
 
@@ -2044,7 +2055,7 @@ SKILLS: list[Skill] = [
         "how long ago was that", "when was this", "what time did that happen",
         "how recent is that", "when did that come out", "how old is that story",
         "when was that reported"],
-        speak=say_story_time),
+        slots=slots_story_time, speak=say_story_time),
     Skill("provenance", None, [
         "how do you know that", "what's your source", "where did you get that",
         "says who", "where did that come from", "what is your source for that",
@@ -2796,6 +2807,9 @@ SKILLS: list[Skill] = [
         # sir" — the WINDOW controls took it. slots_ui always handled the words;
         # nothing here claimed them, so the embedding sent it elsewhere.
         "make that image bigger", "make that picture bigger", "enlarge that image",
+        # his numbering, as dictation writes it ("focus on image eight", 2026-09-06)
+        "focus on image eight", "focus on image five", "focus on picture two",
+        "enlarge image seven", "show me image four",
         "back to the grid",
         # PICKING A PICTURE BY NUMBER. "focus on number 6" went to the WINDOW
         # switcher at 1.00 and went looking for a window called "number 6" —

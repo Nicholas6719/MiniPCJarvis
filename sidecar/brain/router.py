@@ -114,7 +114,13 @@ _CANON = [
     # and the words that said which VERSION he meant were already gone. Same
     # shape as camera and hologram: the noun after the verb is sometimes a
     # subsystem rather than an argument.
-    (r"(?!.*\b(?:version|edit|revision)\b)\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
+    # ...but not "focus on image three" / "focus on number 8": a picture on
+    # screen, not a window. The rewrite made it "switch to APP" at 1.00, the
+    # switch guard refused it, and the retry landed on open_app (2026-09-06).
+    (r"(?!.*\b(?:version|edit|revision)\b)\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+"
+     r"(?!(?:on\s+)?(?:the\s+)?(?:image|picture|photo|pic|number|no\.?|#)\s*(?:number\s*)?"
+     r"(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b)"
+     r"(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
     (r"\b(?:open|show|browse|go to|list|look at|pull up|what's (?:in|on))\b.*\b(?:desktop|documents|docs|downloads|pictures|photos)\b(?!\s+(?:of|from)\b).*", "open my FOLDER folder"),
     (r"\b(?:find|look for|locate|where is|where's)\b.*\b(?:file|folder|document|resume|screenshot|invoice|report|notes?|photo|picture)s?\b(?!\s+(?:of|from)\b).*", "find the file called NAME"),
     (r".*\b(?:file|folder|document)s?\s+(?:called|named|with|containing)\b.*", "find the file called NAME"),
@@ -359,7 +365,12 @@ def _skill_context_delta(skill: str, ctx: dict) -> float:
     """How much the current state argues for or against this skill."""
     d = 0.0
     if skill in _STAGE_SKILLS:
-        d += CONTEXT_BONUS if ctx.get("stage") else -CONTEXT_PENALTY
+        # A model that is still BUILDING is a stage he is already talking to:
+        # "show me the top" two seconds after "go for it" fell to the model
+        # and became a 25 s web search (2026-09-06). Not penalised while a
+        # render is in flight; the control tool says "still building".
+        d += (CONTEXT_BONUS if ctx.get("stage")
+              else 0.0 if ctx.get("render") else -CONTEXT_PENALTY)
     if skill in _RENDER_SKILLS:
         d += CONTEXT_BONUS if ctx.get("render") else -CONTEXT_PENALTY
     if skill in _PROJECT_SKILLS:

@@ -140,6 +140,9 @@ CASES = [
     ("what are the systems", "stats"), ("systems check", "stats"),
     ("set my volume to fifty percent", "volume_set"),
     ("what's ten plus ten", "math"), ("what is five times six", "math"),
+    # from the variety pass of 2026-09-06
+    ("focus on image three", "ui"), ("focus on image eight", "ui"),
+    ("and what year was it released", None),   # a fact about the thing just discussed, not a story's date
     ("what's in the news", "news"), ("tell me the tech news", "news"),
     ("any breaking news", "breaking"),
     # The camera is a subsystem, not an executable. Both halves are gated
