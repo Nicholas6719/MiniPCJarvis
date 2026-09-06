@@ -4131,11 +4131,36 @@ heredoc.
 - `project_status` says the last note without its date stamp.
 - suites.ps1 runs `workbench_e2e.py` before hud_e2e. test_brain 283/283.
 
-Next: prove the gesture path end to end without a person - a debug
-endpoint that feeds synthetic landmark frames into the live tracker and a
-WS listener that expects the rotate events; "throw it up" / "wireframe
-that" / "fabricate it" seeds; hud_e2e checks for the part and compare
-commands.
+### Release 50 FAILED (18:00) on one check, and release 51 (18:2x) is the fix
+`workbench_e2e` was green on everything but "'focus on the helmet'
+through the app switch": `focus_window` said "no window". The hand-off
+was written, and it raised: sync tools run in the tool executor thread,
+and `asyncio.create_task` from a thread has no loop. `events.spawn` now
+records the main loop on every `emit()` and, from a thread, hands the
+coroutine home with `run_coroutine_threadsafe`; test_holo_control calls
+`focus_window` from a real `threading.Thread` and expects the part event.
+The same fix covers `close_application("the project file")`.
+
+Release 51 also carries:
+- **`/debug/hands`** (JARVIS_DEBUG only): synthetic landmark frames into
+  the LIVE `GestureTracker` and the same `_apply` a camera frame takes.
+  The suite drives a pinch, a drag to his right and a release, and reads
+  `hands/grab`, `holo_control/rotate` (axis z, positive degrees) and
+  `hands/release` off the HUD's own `/ws`. That is the whole gesture path
+  minus MediaPipe, proved on the installed build with nobody in the room.
+  What it still cannot prove: that MediaPipe reads HIS hand; that stays
+  a thing to watch him do once.
+- `slice_part()` with no path is the model on the stage; skill
+  `holo_slice` ("fabricate it", "get it ready for the printer",
+  "generate the g-code") - the slicer had no voice path at all before
+  this; bare "slice it" remains the clarify question.
+- Seeds "throw it up" (holo_show), "wireframe that" (holo_make).
+  test_brain 287/287.
+
+Next: hud_e2e checks for the `part` and `compare` commands at the store
+level; a look at what the HUD draws for a focused part on a real
+assembly once he is at the PC (the ghost/centre/frame is only type-
+checked); the greeting/counsel register in the persona for long renders.
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
