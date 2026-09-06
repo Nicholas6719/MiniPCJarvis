@@ -26,6 +26,7 @@ Run: python tests/test_hand_control.py
 import asyncio
 import os
 import sys
+import time
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -297,6 +298,37 @@ def main() -> int:
     check("...and reads at a modest rate", hand_control.TARGET_FPS <= 20,
           f"{hand_control.TARGET_FPS} fps")
     holo_tools._current.clear()
+
+    # -- "I can see your hands" must mean a hand, not a detector run (2026-09-06)
+    # The soak receipt was frames 383 / detects 383 in an empty room, and
+    # hand_status read `detects` as hands seen.
+    hc = hand_control.HandControl()
+    st = hc.status()
+    check("status carries seen/seeing/detect_ms", {"seen", "seeing", "detect_ms"} <= set(st), st)
+    check("nothing seen in a fresh tracker", st["seen"] == 0 and st["seeing"] is False, st)
+    hc.armed = True
+    hc._last_hand_at = time.time()
+    check("a hand a moment ago is 'seeing'", hc.status()["seeing"] is True)
+    hc._last_hand_at = time.time() - 10
+    check("...and ten seconds ago is not", hc.status()["seeing"] is False)
+    hc._detect_ms.extend([31.0, 29.0, 35.0])
+    check("the landmarker's clock is kept as a median", hc.status()["detect_ms"] == 31.0,
+          hc.status()["detect_ms"])
+    hc.armed = False
+    told = []
+
+    async def _cap(kind, **kw):
+        told.append((kind, kw))
+    real_emit = hand_control.bus.emit
+    hand_control.bus.emit = _cap
+    try:
+        hc.disarm("test")
+        # `spawn` schedules the emit; with nothing armed there must be nothing
+        # to schedule at all
+        check("disarming an idle tracker tells the HUD nothing",
+              not told and not hc.status()["armed"], told)
+    finally:
+        hand_control.bus.emit = real_emit
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

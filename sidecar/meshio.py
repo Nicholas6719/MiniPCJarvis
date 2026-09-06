@@ -480,6 +480,10 @@ def assembly_payload(parts, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
                    for _, t in loaded]
     edges = (np.concatenate([e for e in edge_chunks if len(e)], axis=0)
              if any(len(e) for e in edge_chunks) else np.empty((0, 2, 3), np.float32))
+    # How many edge segments belong to each part, in order - the stage draws
+    # ONE part on its own ("focus on the helmet") by draw range, and the
+    # edges are concatenated in part order exactly like the triangles.
+    edge_counts = [int(len(e)) for e in edge_chunks]
 
     d = {
         "path": str(parts[0][1]) if parts else "",
@@ -513,6 +517,10 @@ def assembly_payload(parts, angle_deg: float = FEATURE_ANGLE_DEG) -> dict:
     # rather than whatever happened to be disconnected.
     d["bodies"] = lab.astype(int).tolist()
     d["body_centres"] = [m["centre"] for m in meta]
+    # Triangles per part AS SENT (after any thinning) and edges per part, so
+    # the stage can isolate one part by draw range without a second payload.
+    d["part_tri_counts"] = np.bincount(lab, minlength=len(meta)).astype(int).tolist()
+    d["edge_counts"] = edge_counts
     # WHAT COLOUR EACH PART ACTUALLY IS, when anything knows. Sent alongside the
     # geometry so the stage can paint it on request without asking again.
     known = _part_colours(str(parts[0][1]) if parts else "")

@@ -358,7 +358,7 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                             exc_info=True)
         return r
 
-    sub = queue.submit(t, label, job)
+    sub = queue.submit(t, label, job, estimate_key=est_key)
     if sub.get("error"):
         return sub
     behind = sub.get("queued_behind") or 0

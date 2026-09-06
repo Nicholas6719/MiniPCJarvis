@@ -132,12 +132,17 @@ class RenderQueue:
                 "queued": len(self._jobs)}
 
     # ---- putting work in -------------------------------------------------
-    def submit(self, tier: int, label: str, run) -> dict:
+    def submit(self, tier: int, label: str, run, estimate_key: int | None = None) -> dict:
         """Queue a render. Returns immediately — that is the entire point."""
         if len(self._jobs) >= MAX_QUEUED:
             return {"error": "I've got too much queued already, sir"}
         job = Job(id=uuid.uuid4().hex[:8], tier=int(tier), label=label, run=run,
-                  estimate_s=est.estimate(tier))
+                  # The clock the QUESTION used. A detailed render is asked
+                  # about under key 8 (minutes) and was submitted under tier
+                  # 3 (150 s): "starting now - a couple of minutes" right
+                  # after he agreed to seven, and an overrun notice at 170 s
+                  # of a 420 s job (2026-09-06).
+                  estimate_s=est.estimate(estimate_key if estimate_key is not None else tier))
         self._jobs.append(job)
         spawn(self._announce("queued", job), name=f"render:queued:{job.id}")
         self._ensure_pump()

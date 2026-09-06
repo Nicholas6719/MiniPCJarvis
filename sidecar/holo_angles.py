@@ -232,6 +232,18 @@ def parse_action(text: str) -> str | None:
     # back, left, right - the six a person asks for by name.
     if parse_view(t):
         return "view"
+    # ONE PART OF IT, or all of them back. The names come from the model's
+    # manifest at runtime, so this only recognises the SHAPE of the request;
+    # `holo_control` matches the name. ("Zoom in on the gauntlet" reads as
+    # a zoom here and is caught by the part check in the tool, which runs
+    # first whenever a part is named.)
+    if re.search(r"\b(?:highlight|isolate|single out|pick out|closer on|just the|"
+                 r"only the|on its own|by itself|out of view|"
+                 r"how (?:big|large|wide|tall|long|thick) is the|"
+                 r"all (?:the |of the )?(?:parts|pieces)|every part|"
+                 r"the whole (?:thing|model|assembly)|show everything|unhide|"
+                 r"bring (?:it|them|everything) back|back together)\b", t):
+        return "part"
     if re.search(r"\b(?:solid|the model again|hide the layers|back to the model|"
                  r"stop the layers)\b", t):
         return "solid"

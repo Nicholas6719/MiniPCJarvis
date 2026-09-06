@@ -220,6 +220,21 @@ CASES = [
     ("open spotify", "open_app"),          # ...and the exclusion breaks nothing
     ("rotate it 90 degrees", "holo_move"),
     ("turn it upside down", "holo_move"),
+    # one part of it, and the film's "lose the footpaths" (2026-09-06)
+    ("highlight the helmet", "holo_move"),
+    ("zoom in on the gauntlet", "holo_move"),
+    ("show me the chest plate on its own", "holo_move"),
+    ("put all the parts back", "holo_move"),
+    # additive edits to the REAL part
+    ("add a lid to it", "holo_edit"),
+    ("add a handle on the side", "holo_edit"),
+    ("hollow it out", "holo_edit"),
+    ("get rid of the handle", "holo_edit"),
+    # the project file: how it is going, and closing it
+    ("how's the spider-man suit going", "project_status"),
+    ("where are we with the arc reactor project", "project_status"),
+    ("close the project file", "project_close"),
+    ("archive the spider-man suit project", "project_close"),
     ("cut it in half", "holo_move"),
     ("show me the layers", "holo_move"),
     # Scrubbing the toolpath. The number is the hazard: _CANON erases plain

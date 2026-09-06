@@ -142,6 +142,9 @@ export interface HoloState {
     // Scrubbing the sliced toolpath: an absolute layer (-1 = the whole print)
     // or a step from wherever he is.
     layer?: number; delta?: number;
+    // One named part on its own ("focus"), put out of view ("hide"), or
+    // everything back ("all" / empty part).
+    part?: string; mode?: string;
   };
 }
 
@@ -815,7 +818,8 @@ export const useStore = create<Store>((set, get) => ({
                       cmd: { seq: (st.holo.cmd?.seq ?? 0) + 1, action: evt.action,
                              axis: evt.axis, degrees: evt.degrees, factor: evt.factor,
                              at: evt.at, on: evt.on, view: evt.view,
-                             layer: evt.layer, delta: evt.delta } } }
+                             layer: evt.layer, delta: evt.delta,
+                             part: evt.part, mode: evt.mode } } }
           : {}));
         break;
       case "reflex":

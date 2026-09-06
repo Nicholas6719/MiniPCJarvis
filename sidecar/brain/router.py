@@ -161,7 +161,9 @@ _CANON = [
     # they name a SUBSYSTEM, not an executable. "open the hologram" became
     # "open APP" and went looking for a program called hologram to run.
     (r"\b(?:open|launch|start|run|fire up|bring up|put on)\s+(?:up\s+)?(?!(?:the\s+|my\s+|that\s+|this\s+|some\s+|a\s+|an\s+)?(?:sound|audio|volume|music|tunes|camera|webcam|hologram|holo|pod bay|desktop|documents|docs|downloads|pictures|photos|along|away|off|over|back|ahead|again|yourself|himself|article|articles|story|link|links|source|page)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "open APP"),
-    (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+)?(?:sound|audio|volume|music|camera|webcam|hologram|holo|speakers|pc|computer)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
+    # ...and "close the project file" is the workspace, not a program: folded
+    # onto "close APP" it was byte-identical to "close spotify" (2026-09-06).
+    (r"\b(?:close|quit|exit|kill)\s+(?!(?:the\s+|my\s+|this\s+|that\s+)?(?:sound|audio|volume|music|camera|webcam|hologram|holo|speakers|pc|computer|projects?)\b)(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}", "close APP"),
     # "3d" must survive the digit rule below. It is the word that distinguishes
     # "create a 3D image of that" — which builds a mesh in the background — from
     # any other kind of image, and "Nd" is not a word anything can route on.

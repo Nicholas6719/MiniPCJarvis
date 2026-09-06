@@ -1139,10 +1139,17 @@ async def holo_geometry(x_jarvis_token: str | None = Header(None)):
         # splitting its modules, or a fetch that pulled a whole part set — so
         # the stage does not need to know or care which one it was.
         import assembly
+        from tools.holo_tools import remember_geometry
         named = assembly.read_manifest(cur["path"])
         if len(named) >= 2:
-            return await asyncio.to_thread(meshio.assembly_payload, named)
-        return await asyncio.to_thread(meshio.to_payload, cur["path"])
+            payload = await asyncio.to_thread(meshio.assembly_payload, named)
+        else:
+            payload = await asyncio.to_thread(meshio.to_payload, cur["path"])
+        # What the stage now knows (per-part sizes, whether it has colours)
+        # goes back to the tool side, so "how big is the gauntlet" and "in
+        # colour" answer from the same facts the stage is drawing.
+        remember_geometry(payload)
+        return payload
     except meshio.BadMesh as e:
         return {"error": str(e)}
 

@@ -317,6 +317,63 @@ async def main() -> int:
     check("'hide everything' still does", _norm("hide everything") == "hide everything")
     check("plain numbers are still erased", "N" in _norm("set the volume to 40"))
 
+    # ------------------------------------------- one part of it (2026-09-06)
+    # "Zoom in on the helmet to see the helmet specs" - his sentence, and
+    # until now no action could act on a named part. The parts and their
+    # sizes arrive with the geometry the stage fetched; the tool remembers
+    # them, and "focus on the helmet" / "hide the gauntlet" / "everything
+    # back" are view controls like any other.
+    sent = []
+
+    async def _cap(kind, **kw):
+        sent.append((kind, kw))
+    _real_emit = H.bus.emit
+    H.bus.emit = _cap
+    H._current.clear()
+    H._current.update({"name": "suit", "path": "suit.stl", "body_count": 1})
+    H.remember_geometry({"path": "suit.stl", "assembly": True, "body_count": 3,
+                         "has_colour": True,
+                         "parts": [{"name": "helmet", "size_mm": [120.0, 90.5, 100.2],
+                                    "colour": "#ff0000"},
+                                   {"name": "left_gauntlet", "size_mm": [60, 40, 80]},
+                                   {"name": "power_core_2", "size_mm": [30, 30, 10]}]})
+    check("the stage's facts reach the tool", H.current().get("has_colour") is True
+          and len(H.current().get("parts") or []) == 3, H.current().get("parts"))
+    got = await H.holo_control(phrase="focus on the helmet")
+    check("'focus on the helmet' is the helmet on its own",
+          got.get("action") == "part" and got.get("part") == "helmet"
+          and got.get("mode") == "focus", got)
+    check("...and it says how big the helmet is",
+          "120 by 90 by 100 millimetres" in got.get("spoken", ""), got.get("spoken"))
+    check("...as a view-only event", sent[-1][1].get("action") == "part"
+          and sent[-1][1].get("part") == "helmet" and sent[-1][1].get("mode") == "focus",
+          sent[-1])
+    got = await H.holo_control(phrase="hide the left gauntlet")
+    check("'hide the left gauntlet' puts THAT PART out of view, not the hologram",
+          got.get("action") == "part" and got.get("part") == "left_gauntlet"
+          and got.get("mode") == "hide" and H.current().get("path"), got)
+    got = await H.holo_control(phrase="lose the power core")
+    check("a numbered part answers to its bare name",
+          got.get("part") == "power_core_2" and got.get("mode") == "hide", got)
+    got = await H.holo_control(phrase="put all the parts back")
+    check("'put all the parts back' is everything", got.get("action") == "part"
+          and got.get("part") == "" and sent[-1][1].get("mode") == "all", got)
+    got = await H.holo_control(action="part", part="helmet")
+    check("the model can name the part directly", got.get("part") == "helmet"
+          and got.get("mode") == "focus", got)
+    got = await H.holo_control(action="part", part="visor")
+    check("an unknown part is refused by name, with the names it has",
+          "visor" in got.get("error", "") and "helmet" in got.get("error", ""), got)
+    got = await H.holo_control(phrase="in colour")
+    check("'in colour' no longer contradicts the stage on a coloured model",
+          got.get("ok") and not got.get("no_colour"), got)
+    got = await H.holo_control(phrase="turn it ninety degrees")
+    check("ordinary controls are untouched with parts remembered",
+          (got.get("applied") or {}).get("action") == "rotate", got)
+    check("'part' is a control like any other", "part" in H._ACTIONS)
+    H._current.clear()
+    H.bus.emit = _real_emit
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

@@ -297,6 +297,20 @@ def close_application(name: str) -> dict:
     from tools.windows_tools import _visible_windows
 
     key = name.strip().lower().removesuffix(".exe")
+    # "CLOSE THE PROJECT FILE" is the workspace, not a program. The router's
+    # close rule leaves "project" alone now, but the model may still call
+    # this with it; hand it on rather than hunt for project.exe.
+    if re.search(r"\bprojects?\b", key):
+        try:
+            from events import spawn
+            from tools.workspace_tools import active, close_project
+            if active():
+                spawn(close_project(), name="close-project")
+                return {"closing_project": active(),
+                        "spoken": f"Closing {active()}, sir."}
+            return {"error": "no project is open, sir"}
+        except Exception:
+            log.debug("could not hand a close to the workspace", exc_info=True)
     for junk in (" browser", " app", " application", " window", "the "):
         key = key.replace(junk, "").strip()
     exe = _APP_ALIASES.get(key, key + ".exe").removesuffix(".exe") + ".exe"

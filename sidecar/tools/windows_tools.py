@@ -167,6 +167,21 @@ def bring_to_front(hwnd: int) -> bool:
 def focus_window(title: str) -> dict:
     hit = _find_window(title)
     if not hit:
+        # "FOCUS ON THE HELMET" is a part of the hologram, not a window. The
+        # router folds every "focus on X" onto the app switch (it cannot know
+        # the part names; they come from the manifest at runtime), so the
+        # switch is where the sentence lands - and it can hand it on.
+        try:
+            from tools.holo_tools import _find_part, current, holo_control
+            if current().get("parts"):
+                found, _meta = _find_part(title)
+                if found:
+                    from events import spawn
+                    spawn(holo_control(action="part", part=found), name="holo-part-focus")
+                    return {"focused_part": found,
+                            "spoken": f"The {found.replace('_', ' ')}, sir."}
+        except Exception:
+            log.debug("could not hand a focus request to the hologram", exc_info=True)
         return {"error": f"no window matching '{title}'"}
     hwnd, wt = hit
     try:

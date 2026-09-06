@@ -1493,7 +1493,13 @@ _EDIT_TARGET = re.compile(
     r"\b(?:hole|holes|wall|walls|base|corner|corners|edge|edges|rim|lip|slot|"
     r"eye|eyes|lens|lenses|line|lines|mask|helmet|gauntlet|boot|plate|"
     r"thickness|diameter|radius|width|height|depth|"
-    r"fillet|chamfer|part|model)\b", re.I)
+    r"fillet|chamfer|part|model|"
+    # ADDITIVE and SUBTRACTIVE changes (2026-09-06). "Add a lid" named
+    # nothing in this list and fell through to the general model; the
+    # film's own vocabulary is "lose the footpaths", "get rid of them".
+    r"lid|handle|hook|mount|bracket|tab|tabs|notch|groove|cutout|cut-out|"
+    r"pocket|boss|rib|ribs|logo|lettering|text|hollow|solid|shell|"
+    r"add|remove|lose|delete|drop|get rid of)\b", re.I)
 _EDIT_MEASURE = re.compile(
     r"\b\d+(?:\.\d+)?\s*(?:mm|millimet\w*|cm|centimet\w*|inch|inches|\")", re.I)
 # Shape words cannot describe a view: a view has no height or thickness of its
@@ -2188,6 +2194,17 @@ SKILLS: list[Skill] = [
         "put it back the way it was", "reset the model", "straighten it up",
         "show me the layers", "show me the toolpath", "show me how it prints",
         "back to the model", "hide the layers",
+        # ONE PART OF IT - "zoom in on the helmet to see the helmet specs",
+        # his own words; and the film's "lose the footpaths".
+        # (NOT "focus on the helmet": the router folds every "focus on X"
+        # onto the app switch, and `focus_window` hands a part name on to
+        # the hologram itself. Nor "hide the helmet": that is the UI's
+        # hide-all canon; `holo_control` reads it once it arrives.)
+        "zoom in on the gauntlet", "highlight the helmet",
+        "just the helmet", "show me the chest plate on its own",
+        "isolate the left boot", "how big is the gauntlet",
+        "lose the base plate", "take the gauntlet out of view",
+        "put all the parts back", "show me the whole thing again",
         # Scrubbing the toolpath. Deliberately seeded separately from "show me
         # the layers": one turns the preview on, the other moves through it, and
         # the parser tells them apart by whether he named a layer.
@@ -2359,6 +2376,28 @@ SKILLS: list[Skill] = [
         "list my projects",
         "what's in the workspace"],
         speak=None),
+    # "How's the suit going" is a PROJECT question, not a render-status one:
+    # the render is a job of minutes, the project is a folder of weeks.
+    Skill("project_status", "project_status", [
+        "how's the spider-man suit going",
+        "how is the arc reactor project going",
+        "where are we with the mark two project",
+        "where are we with the arc reactor project",
+        "what's the status of the suit project",
+        "how far along is the arc reactor",
+        "how far along is the suit project",
+        "give me a status on the project",
+        "how's the project coming along"],
+        speak=None),
+    # The film's "close the project file". Never deletes: archive moves it.
+    Skill("project_close", "close_project", [
+        "close the project",
+        "close the project file",
+        "we're done with this project for now",
+        "put the arc reactor project away",
+        "archive the spider-man suit project",
+        "shelve the mark two project"],
+        speak=None),
     Skill("render_stop", "cancel_render", [
         "stop the render", "cancel the model", "stop making that",
         "cancel that render", "don't bother making it",
@@ -2415,7 +2454,13 @@ SKILLS: list[Skill] = [
         "make the wall thicker", "round off the corners",
         "add a fillet to the edges", "move the hole over",
         "change the hole to 5 millimetres", "make the base wider",
-        "give it a chamfer"],
+        "give it a chamfer",
+        # additive and subtractive, the way he actually talks to it
+        "add a lid to it", "add a handle on the side", "put a hook on the back",
+        # (not "mounting TABS": "tab" is the HUD's panel canon)
+        "add mounting lugs", "cut a slot in the base", "hollow it out",
+        "get rid of the handle", "lose the holes", "remove the lid",
+        "take the rim off", "add a second hole next to the first"],
         slots=slots_holo_edit, speak=say_holo_edit),
     # "Return home" was reaching holo_revert@0.87 - undoing an EDIT rather than
     # resetting the VIEW. His own words, so they belong here.

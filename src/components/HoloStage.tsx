@@ -66,9 +66,13 @@ type Geometry = {
   // "there is nothing to explode".
   body_count?: number;
   has_colour?: boolean;
-  parts?: { name: string; colour?: string }[];
+  parts?: { name: string; colour?: string; size_mm?: number[] }[];
   bodies?: number[];
   body_centres?: number[][];
+  // Triangles and edge segments per part, in part order, so one part can be
+  // drawn on its own by draw range ("focus on the helmet").
+  part_tri_counts?: number[];
+  edge_counts?: number[];
   error?: string;
 };
 
@@ -239,6 +243,21 @@ export function HoloStage() {
     };
     let faceGeom: BufferGeometry | null = null;
     let lastSize: number[] | null = null;   // millimetres, for the cut plane
+    // ONE PART OF IT. Parts arrive concatenated in manifest order, triangles
+    // and edges alike, so a part is a draw range on each buffer; the rest of
+    // the model stays as a ghost so he keeps his bearings. Hidden parts have
+    // their vertices collapsed to the origin (a degenerate triangle draws
+    // nothing), which survives the exploded view because applyExplode
+    // re-applies it after it rewrites positions.
+    let edgeGeom: BufferGeometry | null = null;
+    let edgeBase: Float32Array | null = null;
+    let partTris: number[] = [];
+    let edgeCounts: number[] = [];
+    let partNames: string[] = [];
+    let partSizes: number[][] = [];
+    let focused = -1;
+    const hidden = new Set<number>();
+    let ghost: Group | null = null;
     // The sliced toolpath, and how far up it he is looking. Layers are laid into
     // ONE buffer in order, so scrubbing is a `setDrawRange` — one draw call and
     // instant — rather than a hundred meshes toggled on and off.
@@ -298,6 +317,18 @@ export function HoloStage() {
       bodyDir = geo.body_centres ?? [];
       explode = 0;
       explodeTarget = 0;
+      // A new mesh forgets which part was singled out and puts the model
+      // back in the middle; the counts come with the geometry.
+      partTris = geo.part_tri_counts ?? [];
+      edgeCounts = geo.edge_counts ?? [];
+      partNames = (geo.parts ?? []).map((p) => p.name);
+      partSizes = (geo.parts ?? []).map((p) => p.size_mm ?? []);
+      focused = -1;
+      hidden.clear();
+      ghost = null;
+      edgeGeom = null;
+      edgeBase = null;
+      orient.position.set(0, 0, 0);
       // THE REAL COLOURS, when the model has any. One attribute over the buffer
       // that is already there — the per-vertex part label exists for the
       // exploded view — so this costs no extra draw call and nothing at all on
@@ -342,6 +373,8 @@ export function HoloStage() {
         shell.add(halo);
         shell.add(new LineSegments(lines, edgeMat));
         clipped.push(haloMat, edgeMat);
+        edgeGeom = lines;
+        edgeBase = edgePositions.slice();
       }
 
       // Frame it: the model is already centred by the sidecar, so this only has
@@ -515,6 +548,112 @@ export function HoloStage() {
         arr[i + 2] = basePos[i + 2] + d[2] * t;
       }
       attr.needsUpdate = true;
+      applyHidden();
+      settled = false;
+    }
+
+    /** Where part `i` sits in the face and edge buffers (floats, not points). */
+    function partRange(i: number) {
+      let t0 = 0;
+      let e0 = 0;
+      for (let k = 0; k < i; k++) {
+        t0 += partTris[k] ?? 0;
+        e0 += edgeCounts[k] ?? 0;
+      }
+      return {
+        v0: t0 * 9, vn: (partTris[i] ?? 0) * 9,        // 3 vertices × 3 floats
+        e0: e0 * 6, en: (edgeCounts[i] ?? 0) * 6,      // 2 points × 3 floats
+      };
+    }
+
+    /** Collapse every hidden part to the origin, faces and edges alike. */
+    function applyHidden() {
+      if (edgeGeom && edgeBase) {
+        const ea = edgeGeom.getAttribute("position") as { array: Float32Array; needsUpdate: boolean };
+        ea.array.set(edgeBase);
+        for (const i of hidden) {
+          const r = partRange(i);
+          ea.array.fill(0, r.e0, r.e0 + r.en);
+        }
+        ea.needsUpdate = true;
+      }
+      if (!faceGeom || !hidden.size) return;
+      const attr = faceGeom.getAttribute("position") as { array: Float32Array; needsUpdate: boolean };
+      for (const i of hidden) {
+        const r = partRange(i);
+        attr.array.fill(0, r.v0, r.v0 + r.vn);
+      }
+      attr.needsUpdate = true;
+    }
+
+    /** One part on its own: draw ranges on the real buffers, a ghost of the
+     *  whole for bearings, the part brought to the middle and framed. */
+    function focusOn(i: number) {
+      if (!faceGeom || i < 0 || i >= partTris.length) return;
+      const r = partRange(i);
+      faceGeom.setDrawRange(r.v0 / 3, r.vn / 3);
+      edgeGeom?.setDrawRange(r.e0 / 3, r.en / 3);
+      if (!ghost) {
+        // The rest of the model, faint. Same attributes, new geometries, so
+        // the draw range above does not apply to them.
+        ghost = new Group();
+        const g = new BufferGeometry();
+        g.setAttribute("position", faceGeom.getAttribute("position"));
+        ghost.add(new Mesh(g, new MeshBasicMaterial({
+          color: CYAN, transparent: true, opacity: 0.025, side: DoubleSide, depthWrite: false,
+        })));
+        if (edgeGeom) {
+          const eg = new BufferGeometry();
+          eg.setAttribute("position", edgeGeom.getAttribute("position"));
+          ghost.add(new LineSegments(eg, new LineBasicMaterial({
+            color: CYAN, transparent: true, opacity: 0.07,
+          })));
+        }
+        shell.add(ghost);
+      }
+      // The part's centre, in STL coordinates relative to the model's centre.
+      // `orient` turns Z-up into Y-up, so its position is set in the parent's
+      // frame: (x, y, z) -> (x, z, -y).
+      const c = bodyDir[i] ?? [0, 0, 0];
+      orient.position.set(-c[0], -c[2], c[1]);
+      const whole = Math.max(...(lastSize ?? [1])) || 1;
+      const part = Math.max(...(partSizes[i]?.length ? partSizes[i] : [whole])) || whole;
+      target.scale = Math.max(1, Math.min(6, (whole / part) * 0.8));
+      spin = false;
+      focused = i;
+      if (label.current && partSizes[i]?.length === 3) {
+        const [w, h, d] = partSizes[i];
+        label.current.textContent =
+          `${partNames[i]?.replace(/_/g, " ") ?? "part"} · ${Math.round(w)} × ${Math.round(h)} × ${Math.round(d)} mm`;
+      }
+      settled = false;
+    }
+
+    /** Everything back: all parts drawn, nothing hidden, model in the middle. */
+    function focusAll() {
+      faceGeom?.setDrawRange(0, Infinity);
+      edgeGeom?.setDrawRange(0, Infinity);
+      if (ghost) {
+        // the ghost geometries share their attributes with the real ones, so
+        // only the geometry objects and materials are disposed, not the data
+        for (const ch of ghost.children) {
+          const any = ch as unknown as { geometry?: BufferGeometry; material?: Material };
+          any.geometry?.deleteAttribute?.("position");
+          any.geometry?.dispose();
+          any.material?.dispose();
+        }
+        shell.remove(ghost);
+        ghost = null;
+      }
+      hidden.clear();
+      applyExplode(explode * (Math.max(...(lastSize ?? [10])) * 0.45));
+      orient.position.set(0, 0, 0);
+      if (focused >= 0) target.scale = 1;
+      focused = -1;
+      if (label.current && lastSize) {
+        const [w, h, d] = lastSize;
+        label.current.textContent = `${Math.round(w)} × ${Math.round(h)} × ${Math.round(d)} mm`;
+      }
       settled = false;
     }
 
@@ -639,11 +778,26 @@ export function HoloStage() {
           spin = false;
           break;
         }
+        case "part": {
+          const i = c.part ? partNames.indexOf(c.part) : -1;
+          if (c.mode === "all" || i < 0) focusAll();
+          else if (c.mode === "hide") {
+            hidden.add(i);
+            if (focused === i) focusAll();
+            else applyExplode(explode * (Math.max(...(lastSize ?? [10])) * 0.45));
+          } else {
+            hidden.delete(i);
+            applyExplode(explode * (Math.max(...(lastSize ?? [10])) * 0.45));
+            focusOn(i);
+          }
+          break;
+        }
         case "reset":
           Object.assign(target, HOME);
           clearClip();
           explodeTarget = 0;
           spin = true;
+          focusAll();
           break;
         case "layers":
           void applyCheck.current?.(!!c.on);

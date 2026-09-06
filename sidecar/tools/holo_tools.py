@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -213,6 +214,66 @@ async def show_hologram(path: str = "", name: str = "") -> dict:
     return out
 
 
+def remember_geometry(payload: dict) -> None:
+    """What `/holo/geometry` worked out, kept on the tool side.
+
+    `_current` came from `meshio.describe`, which never sets `has_colour` or
+    per-part sizes; the assembly payload does both. Until this, the stage
+    painted the model in its real colours while the reply said "I don't have
+    colours for that one" in the same turn (2026-09-06), and "how big is the
+    gauntlet" had nothing to answer from.
+    """
+    if not isinstance(payload, dict) or payload.get("error"):
+        return
+    if not _current.get("path") or payload.get("path") and \
+            os.path.normcase(str(payload.get("path"))) != os.path.normcase(str(_current.get("path"))) \
+            and not payload.get("assembly"):
+        return
+    if "has_colour" in payload:
+        _current["has_colour"] = bool(payload.get("has_colour"))
+    parts = payload.get("parts")
+    if isinstance(parts, list) and parts and isinstance(parts[0], dict):
+        _current["parts"] = [{"name": str(p.get("name", "")),
+                              "size_mm": list(p.get("size_mm") or []),
+                              "colour": p.get("colour")} for p in parts]
+    if payload.get("body_count"):
+        _current["body_count"] = int(payload["body_count"])
+
+
+def _find_part(phrase: str) -> tuple[str, dict | None]:
+    """(the part name he said, its meta) or ("", None).
+
+    Matches on the manifest's own names, spoken with underscores as spaces,
+    longest first, so "the left gauntlet" beats "gauntlet"."""
+    parts = _current.get("parts") or []
+    t = " " + re.sub(r"[_\-]+", " ", (phrase or "").lower()) + " "
+    best = ("", None)
+    for p in sorted(parts, key=lambda p: -len(p.get("name", ""))):
+        name = re.sub(r"[_\-]+", " ", p.get("name", "").lower()).strip()
+        if not name:
+            continue
+        # a numbered part ("power core 2") is matched with or without its number
+        bare = re.sub(r"\s+\d+$", "", name)
+        if f" {name} " in t or (bare != name and f" {bare} " in t and not best[0]):
+            best = (p["name"], p)
+            if f" {name} " in t:
+                return best
+    return best
+
+
+_FOCUS = re.compile(
+    r"\b(?:focus on|zoom in on|zoom into|highlight|isolate|just the|only the|"
+    r"on its own|by itself|single out|pick out|look at the|let'?s see the|"
+    r"show me the|closer on)\b", re.I)
+_PART_HIDE = re.compile(r"\b(?:hide|lose|remove|get rid of|drop|without|take away|"
+                        r"take off|dismiss)\b", re.I)
+_UNFOCUS = re.compile(
+    r"\b(?:everything back|all (?:the )?parts|the whole (?:thing|model|assembly)|"
+    r"whole (?:thing|model)|all of it|put it (?:all )?back together|"
+    r"back together|show everything|unhide|bring (?:it|them|everything) back|"
+    r"all the pieces)\b", re.I)
+
+
 def _spoken_list(names: list) -> str:
     """"a, b and c" — said, not printed."""
     if not names:
@@ -309,7 +370,9 @@ _ACTIONS = ("rotate", "flip", "scale", "section", "explode", "colour", "hologram
             "still", "spin",
             # a named view: top, bottom, front, back, left, right, side
             "view",
-            "layers", "solid", "layer")
+            "layers", "solid", "layer",
+            # one named part on its own, or put out of view; "" is all of it
+            "part")
 
 
 def _sliced(name: str) -> bool:
@@ -330,7 +393,7 @@ _AXIS_SAID = {"x": "forwards", "y": "sideways", "z": "round"}
 async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
                        factor: float = 0.0, at: float = 0.5,
                        layer: int = -1, delta: int = 0,
-                       phrase: str = "", view: str = "") -> dict:
+                       phrase: str = "", view: str = "", part: str = "") -> dict:
     """Move the model that is already on the stage.
 
     NOTHING HERE CHANGES THE MODEL. Rotation, scale and the section cut are all
@@ -355,6 +418,41 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
 
     act = (action or "").strip().lower()
     said = phrase or ""
+
+    # ONE PART OF IT. "Zoom in on the helmet to see the helmet specs" is his
+    # own sentence for what this stage is for, and until 2026-09-06 there was
+    # no action that could act on a named part - `explode` was the nearest.
+    # Checked BEFORE the sentence parser: "hide the gauntlet" is a part put
+    # out of view, not the hologram closed. Parts come from the manifest,
+    # remembered when the stage fetched its geometry.
+    if _current.get("parts") and (act == "part" or (act not in _ACTIONS and said)):
+        found, meta = _find_part(part or said)
+        wants_all = bool(_UNFOCUS.search(said or "")) and not found
+        if act == "part" or found or wants_all:
+            if wants_all or (act == "part" and not found and not (part or "").strip()):
+                await bus.emit("holo_control", action="part", part="", mode="all")
+                return {"ok": True, "action": "part", "part": "",
+                        "spoken": "All of it, sir.", "note": "view only"}
+            if not found:
+                names = [p["name"].replace("_", " ") for p in _current["parts"]]
+                return {"error": f"I don't have a part called {part or 'that'}, sir — "
+                                 f"it has {_spoken_list(names)}"}
+            mode = ("hide" if _PART_HIDE.search(said or "") and not _FOCUS.search(said or "")
+                    else "focus")
+            await bus.emit("holo_control", action="part", part=found, mode=mode)
+            size = list((meta or {}).get("size_mm") or [])
+            said_size = (f"{round(size[0])} by {round(size[1])} by {round(size[2])} millimetres"
+                         if len(size) == 3 else "")
+            nice = found.replace("_", " ")
+            return {"ok": True, "action": "part", "part": found, "mode": mode,
+                    "size_mm": size, "spoken_size": said_size,
+                    "spoken": (f"Without the {nice}, sir." if mode == "hide" else
+                               f"The {nice}, sir{' — ' + said_size if said_size else ''}."),
+                    "note": "view only — the model on disk is unchanged"}
+
+    if act == "part" and not _current.get("parts"):
+        return {"error": "it's a single piece, sir — there are no parts to pick out"}
+
     if act not in _ACTIONS:
         # The model may hand us the sentence instead of an action; the skills
         # parse it too, and both paths land on the same parser rather than on
@@ -368,6 +466,12 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
             # branch, so this said: I'm not sure what to do with 'that', sir.
             what = action.strip() if action else "that"
             return {"error": f"I'm not sure what to do with {what}, sir"}
+        if act == "part":
+            # the sentence had the SHAPE of a part request; the block above
+            # matches the name, and it only runs when parts are remembered
+            if not _current.get("parts"):
+                return {"error": "it's a single piece, sir — there are no parts to pick out"}
+            return await holo_control(action="part", part=part, phrase=said)
 
     payload: dict = {"action": act}
     spoken = "Done, sir."
@@ -531,10 +635,13 @@ async def hand_status() -> dict:
     st = control.status()
     if not st.get("armed"):
         return {**st, "spoken": "I'm not watching your hands, sir."}
-    seen = st.get("detects", 0)
+    # `seeing` is a hand in frame within the last two seconds - not "the
+    # detector ran", which is what this used to read and would have claimed
+    # hands in an empty room (soak receipt: frames 383, detects 383).
     return {**st, "spoken": ("I'm watching, sir — I can see your hands."
-                             if seen else "I'm watching, sir, but I can't see "
-                                          "your hands at the moment.")}
+                             if st.get("seeing") else
+                             "I'm watching, sir, but I can't see your hands "
+                             "at the moment.")}
 
 
 async def hide_hologram() -> dict:
@@ -591,6 +698,13 @@ def register_all() -> None:
                      "description": "for view: which side of it he wants to see"},
             "factor": {"type": "number", "description": "for scale; 1.5 is closer"},
             "at": {"type": "number", "description": "for section; 0-1 along the axis"},
+            "part": {"type": "string",
+                     "description": "for part: the named part to show on its own "
+                                    "('helmet'); empty puts everything back"},
+            "layer": {"type": "integer", "description": "for layer: which layer to show "
+                                                        "(-1 is the top, 0 the first)"},
+            "delta": {"type": "integer", "description": "for layer: +1 / -1 from the "
+                                                        "layer shown"},
             "phrase": {"type": "string",
                        "description": "what he said, if the action is not obvious"}},
             "required": []},

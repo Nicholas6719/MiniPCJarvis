@@ -5,7 +5,8 @@ import datetime
 import platform
 
 
-def turn_context(memory_context: str = "", honorific: bool | None = None) -> str:
+def turn_context(memory_context: str = "", honorific: bool | None = None,
+                 project: str = "") -> str:
     """Per-turn facts. Kept OUT of the system prompt so the large, tool-laden
     prompt prefix stays byte-identical across turns and llama.cpp reuses its
     KV cache — this alone cuts first-token latency from ~12 s to ~2-3 s."""
@@ -13,6 +14,11 @@ def turn_context(memory_context: str = "", honorific: bool | None = None) -> str
     mem = ""
     if memory_context:
         mem = "\nRelevant things you remember about Nicholas:\n" + memory_context
+    # The open project file. Without it the model composing a reply had no
+    # idea which project the work was going into (2026-09-06), so "what are
+    # we working on" was a guess.
+    if project:
+        mem += f"\nThe open project is \"{project}\": new models are filed there."
     # The honorific's frequency is decided for us (brain.skills.want_honorific) and
     # stated per turn, because the model cannot pace it itself — see system_prompt.
     hint = ""

@@ -142,6 +142,15 @@ SENTENCE_END = re.compile(r"([.!?…]+[\"')\]]*)(?=\s)")
 # Something the voice can say. A reply of "." after a tool failed was queued
 # and "spoken" (2026-09-06 12:46); it counts as an empty round instead.
 SPEAKABLE = re.compile(r"\w")
+
+
+def _open_project() -> str:
+    """The active project's name for the per-turn context, or ""."""
+    try:
+        from tools.workspace_tools import active
+        return active()
+    except Exception:
+        return ""
 # A bare "Sir." arrives when the model writes the honorific as its own sentence. It is
 # already too late to attach it to the line before (that one has been spoken), so speak
 # nothing rather than a clipped one-word clip.
@@ -1773,7 +1782,8 @@ class Orchestrator:
         if len(self._history) - self._hist_base > 16:
             self._hist_base = len(self._history) - 8
         messages += self._history[self._hist_base:]
-        messages.append({"role": "user", "content": turn_context(mem_ctx, want_honorific()) + chr(10)
+        messages.append({"role": "user", "content": turn_context(mem_ctx, want_honorific(),
+                                                                 project=_open_project()) + chr(10)
                          + (general_hint + chr(10) if general_hint else "") + text})
 
         if reflex:

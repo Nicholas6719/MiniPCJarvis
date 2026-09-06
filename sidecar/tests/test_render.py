@@ -1159,6 +1159,23 @@ async def main() -> int:
           "openscad, prusaslicer and the reconstructor all go through here")
 
 
+    # -- the queue keeps the clock the QUESTION used (2026-09-06) -------------
+    # A detailed render is asked about under key 8 (minutes) and was
+    # submitted under tier 3 (150 s): "starting now, a couple of minutes"
+    # right after he agreed to seven, and an overrun notice a third of the
+    # way through.
+    import render_estimates as _est
+    qk = RenderQueue()
+    subk = qk.submit(3, "a detailed mug", lambda: {"ok": True}, estimate_key=8)
+    check("the estimate follows the key it was asked under",
+          abs(subk.get("estimate_s", 0) - _est.estimate(8)) < 1e-6
+          and subk.get("estimate_s", 0) > _est.estimate(3),
+          (subk.get("estimate_s"), _est.estimate(8), _est.estimate(3)))
+    check("...and the tool passes it", "estimate_key=est_key" in
+          open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "tools", "render_tools.py"), encoding="utf-8").read())
+    await asyncio.sleep(0.2)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}"
           f"{f' ({len(skips)} skipped)' if skips else ''}")
     return 1 if fails else 0

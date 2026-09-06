@@ -56,6 +56,19 @@ def set_active(name: str) -> None:
         log.warning("could not record the active project", exc_info=True)
 
 
+async def _announce(action: str, project: str, path: str = "") -> None:
+    """Tell the HUD which project is open. Only `start_project` used to say
+    so: "pull up the suit" a week later left the chip on the last thing he
+    STARTED, and closing one left it lit (2026-09-06)."""
+    import workspace
+    try:
+        from events import bus
+        await bus.emit("workspace", action=action, project=project or None,
+                       path=path, projects=workspace.projects())
+    except Exception:
+        log.debug("could not announce the project to the HUD", exc_info=True)
+
+
 async def start_project(name: str = "", about: str = "",
                         confirmed: bool = False) -> dict:
     """Open a project folder, once he has agreed to what it will be called."""
@@ -95,7 +108,9 @@ async def start_project(name: str = "", about: str = "",
     r = workspace.create(said, about=about)
     if r.get("error"):
         return r
-    set_active(said)
+    # The FOLDER name, not what he said: the index below is filed under the
+    # folder name, and "Mark 3: the good one" made two rows otherwise.
+    set_active(r["name"])
 
     # The index too, so "how's the suit going" and the completion estimate have
     # something to work from. Creating it here rather than on first progress
@@ -112,12 +127,7 @@ async def start_project(name: str = "", about: str = "",
     # ON SCREEN, not just spoken. His words: "he can show it to me inside of his
     # OS like he's supposed to" — a folder he has agreed to should be visible
     # afterwards, the same way the stage opens when a model is ready.
-    try:
-        from events import bus
-        await bus.emit("workspace", action="open", project=r["name"],
-                       path=r["path"], projects=workspace.projects())
-    except Exception:
-        log.debug("could not announce the project to the HUD", exc_info=True)
+    await _announce("open", r["name"], r["path"])
 
     return {"project": r["name"], "path": r["path"], "reopened": already,
             "spoken": (f"Reopened {r['name']}, sir." if already
@@ -170,7 +180,8 @@ async def recall_project(name: str = "") -> dict:
         return {"error": f"I don't have a project called {said}, sir"}
 
     m = workspace.meta(said)
-    set_active(said)
+    set_active(m["name"])
+    await _announce("open", m["name"], m.get("path", ""))
     models = [f for f in m["models"] if f.lower().endswith((".stl", ".obj"))]
     return {
         "project": m["name"], "started": m.get("started", ""),
@@ -215,7 +226,109 @@ async def list_workspace() -> dict:
                        + ", ".join(p["name"] for p in got[:4]) + ".")}
 
 
+async def close_project(name: str = "", archive: bool = False) -> dict:
+    """Put the project down (or away). Nothing is ever deleted.
+
+    "Close the project file" clears the active pointer so new work stops
+    being filed there; "archive the arc reactor" moves the folder into
+    `_archive/`, from where `workspace.resolve` no longer finds it. The
+    folder and everything in it survive both.
+    """
+    import workspace
+
+    said = (name or "").strip() or active()
+    if not said:
+        return {"error": "nothing is open, sir"}
+    got, near = workspace.resolve(said)
+    if not got:
+        if near:
+            return {"error": f"I have {len(near)} that could be that, sir: "
+                             + ", ".join(near[:4]), "candidates": near}
+        return {"error": f"I don't have a project called {said}, sir"}
+    was_active = active().lower() == got.lower()
+    if archive:
+        r = workspace.archive(got)
+        if r.get("error"):
+            return r
+    if was_active:
+        set_active("")
+        await _announce("close", "", "")
+    return {"project": got, "archived": bool(archive), "was_active": was_active,
+            "spoken": (f"{got} is archived, sir — it's in the archive folder if "
+                       f"you want it back." if archive else
+                       f"{got} is closed, sir. New work won't be filed there.")}
+
+
+async def project_status(name: str = "") -> dict:
+    """How is it going: what exists, when it last moved, and the last note.
+
+    The completion estimate in `tools/projects.py` wants percentages nobody
+    ever says out loud; this answers from what is actually in the folder.
+    """
+    import datetime
+    import workspace
+
+    said = (name or "").strip() or active()
+    if not said:
+        return {"error": "which project, sir? Nothing is open."}
+    got, near = workspace.resolve(said)
+    if not got:
+        if near:
+            return {"error": f"I have {len(near)} that could be that, sir: "
+                             + ", ".join(near[:4]), "candidates": near}
+        return {"error": f"I don't have a project called {said}, sir"}
+    m = workspace.meta(got)
+    models = [f for f in m["models"] if f.lower().endswith((".stl", ".obj"))]
+    notes = (m.get("notes") or "").strip()
+    # the last dated entry in the log, if any
+    last_line = ""
+    for line in reversed(notes.splitlines()):
+        line = line.strip()
+        if line and not line.startswith("#"):
+            last_line = line
+            break
+    started = m.get("started", "")
+    days = ""
+    try:
+        d0 = datetime.datetime.fromisoformat(started[:19])
+        n = (datetime.datetime.now() - d0).days
+        days = "today" if n == 0 else ("yesterday" if n == 1 else f"{n} days ago")
+    except (TypeError, ValueError):
+        pass
+    parts = [f"{len(models)} model{'s' if len(models) != 1 else ''}"]
+    if m.get("references"):
+        parts.append(f"{len(m['references'])} reference"
+                     f"{'s' if len(m['references']) != 1 else ''}")
+    spoken = f"{m['name']}, sir — started {days + ', ' if days else ''}{', '.join(parts)}."
+    if last_line:
+        spoken += f" The last note says: {last_line[:160]}"
+    return {"project": m["name"], "started": started, "models": models,
+            "model_count": len(models), "references": len(m.get("references") or []),
+            "last_note": last_line, "active": active().lower() == m["name"].lower(),
+            "spoken": spoken,
+            "instruction": "Answer from this; do not invent progress percentages."}
+
+
 def register_all() -> None:
+    registry.register(Tool(
+        name="close_project",
+        description="Close the open project (new work stops being filed "
+                    "there), or archive a project by name. Never deletes.",
+        parameters={"type": "object", "properties": {
+            "name": {"type": "string"},
+            "archive": {"type": "boolean", "description": "move it to the "
+                                                          "archive folder"}}},
+        risk=Risk.LOW, handler=close_project, timeout=30))
+
+    registry.register(Tool(
+        name="project_status",
+        description="How a project is going: what has been made, when it "
+                    "started, and the last note. Use for 'how's the suit "
+                    "going', 'where are we with the arc reactor'.",
+        parameters={"type": "object", "properties": {
+            "name": {"type": "string"}}},
+        risk=Risk.SAFE, handler=project_status, timeout=30))
+
     registry.register(Tool(
         name="start_project",
         description="Open a new project folder for a piece of work he is "

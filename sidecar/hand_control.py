@@ -54,10 +54,20 @@ class HandControl:
         self._last_hand_at = 0.0
         self.frames = 0
         self.detects = 0
+        # Frames in which a hand was actually there. `detects` counts detector
+        # RUNS, and hand_status read it as "I can see your hands" - the soak
+        # receipt was frames 383 / detects 383 in an empty room (2026-09-06).
+        self.seen = 0
+        # The landmarker's own clock, kept rather than thrown away, so the
+        # cost is observable at runtime and not only in a comment.
+        self._detect_ms: list[float] = []
 
     def status(self) -> dict:
+        ms = sorted(self._detect_ms)
         return {"armed": self.armed, "frames": self.frames,
-                "detects": self.detects}
+                "detects": self.detects, "seen": self.seen,
+                "seeing": bool(self.armed and time.time() - self._last_hand_at < 2.0),
+                "detect_ms": (ms[len(ms) // 2] if ms else None)}
 
     # ---- arming ---------------------------------------------------------
     def arm(self) -> dict:
@@ -100,10 +110,14 @@ class HandControl:
         # Tell the HUD from here too: set_camera's off path stands the tracker
         # down through this and never emitted, so the badge lied. A sync method,
         # so the event is spawned rather than awaited.
-        try:
-            spawn(bus.emit("hands", action="off", why=why), name="hands-off")
-        except Exception:
-            log.debug("could not announce the hands standing down", exc_info=True)
+        # ...but only when something WAS armed. Unconditional, this told the
+        # HUD "hands off" (which it reads as camera off) every time the
+        # hologram was hidden while the camera was on for something else.
+        if was:
+            try:
+                spawn(bus.emit("hands", action="off", why=why), name="hands-off")
+            except Exception:
+                log.debug("could not announce the hands standing down", exc_info=True)
         return {"armed": False, "was": was, "why": why}
 
     # ---- the loop -------------------------------------------------------
@@ -144,8 +158,16 @@ class HandControl:
                 if not res or res.get("error"):
                     continue
                 self.detects += 1
+                try:
+                    ms = float(res.get("detect_ms") or 0.0)
+                    if ms > 0:
+                        self._detect_ms.append(ms)
+                        del self._detect_ms[:-50]
+                except (TypeError, ValueError):
+                    pass
                 hands = res.get("hands") or []
                 if hands:
+                    self.seen += 1
                     self._last_hand_at = time.time()
                 for ev in self._tracker.update(hands, time.time()):
                     await self._apply(ev)

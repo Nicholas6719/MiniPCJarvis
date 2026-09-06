@@ -245,6 +245,58 @@ async def main() -> int:
               "webs go on last" in log and "second note" in log)
 
 
+    # -- the project file: opened, recalled, reported on, closed (2026-09-06) --
+    # The HUD chip only ever heard about `start_project`; "pull up the suit"
+    # a week later left it on the last thing STARTED, and there was no way to
+    # put a project down, nor to ask how it was going without a percentage.
+    print("\n-- the project file --")
+    told = []
+
+    async def _cap(kind, **kw):
+        told.append((kind, kw))
+    import events
+    real_emit = events.bus.emit
+    events.bus.emit = _cap
+    try:
+        r = await WT.start_project("Mark 3: the good one", about="a test suit", confirmed=True)
+        check("the active pointer is the FOLDER name",
+              WT.active() == r["project"] and ":" not in WT.active(), WT.active())
+        check("opening it tells the HUD", told and told[-1][0] == "workspace"
+              and told[-1][1].get("action") == "open"
+              and told[-1][1].get("project") == r["project"], told[-1:])
+        await WT.start_project("Arc Reactor", confirmed=True)
+        told.clear()
+        r = await WT.recall_project("the good one")
+        check("recalling one makes it the open project", WT.active() == r["project"]
+              and "Mark 3" in r["project"], (WT.active(), r.get("project")))
+        check("...and tells the HUD", told and told[-1][1].get("action") == "open"
+              and told[-1][1].get("project") == r["project"], told[-1:])
+        workspace.note(r["project"], "the ring ended up 76 mm")
+        s = await WT.project_status("the good one")
+        check("status answers from the folder", s.get("project") == r["project"]
+              and s.get("model_count") == 0 and "76 mm" in s.get("last_note", ""), s)
+        check("...and says so out loud without inventing a percentage",
+              "76 mm" in s.get("spoken", "") and "%" not in s.get("spoken", ""), s.get("spoken"))
+        check("status of nothing in particular is the open project",
+              (await WT.project_status()).get("project") == r["project"])
+        told.clear()
+        c = await WT.close_project()
+        check("closing the open project clears the pointer", c.get("was_active")
+              and WT.active() == "" and not c.get("archived"), (c, WT.active()))
+        check("...tells the HUD there is none", told and told[-1][1].get("action") == "close"
+              and told[-1][1].get("project") is None, told[-1:])
+        check("...and the folder is still there", workspace.exists(r["project"]))
+        c = await WT.close_project("arc reactor", archive=True)
+        check("archiving moves it, never deletes it", c.get("archived")
+              and not workspace.exists("Arc Reactor")
+              and os.path.isdir(os.path.join(root, workspace.ARCHIVE)), c)
+        check("closing nothing says so", "nothing" in (await WT.close_project()).get("error", ""))
+        WT.register_all()
+        check("the tools are registered",
+              all(WT.registry.get(n) is not None for n in ("close_project", "project_status")))
+    finally:
+        events.bus.emit = real_emit
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 
