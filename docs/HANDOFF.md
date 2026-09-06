@@ -4101,12 +4101,41 @@ the project code. The defects they found, all fixed in release 49:
   were intact afterwards and the log shows no database error. ALWAYS set
   `JARVIS_DB` for ad-hoc imports.
 
-Next: `workbench_e2e.py` (a real tier-1 plate made, moved, checked,
-edited, reverted; a two-part assembly focused/hidden/restored; the
-project file opened, filed, reported, closed; all silent, all cleaned
-up) runs against release 49 and joins suites.ps1. Then the before/after
-compare on an edit, the film's completion lines, "index as" project
-seeds and the "are you up" reflex.
+### Release 50 (17:5x, silent) — before and after, the film's lines, the workbench proved live
+`workbench_e2e.py` ran against release 49 first: the real tier-1 plate
+(40x30x6 with a hole, from his words) came out at the millimetres asked,
+six spoken controls moved it, "will it print" answered, the edit to an
+8 mm hole ran and reverted. The two-part step failed for a reason worth
+recording: **the shell the suites run from sees a VIRTUALISED AppData**
+(the memory note "agent shell AppData is virtualized" was right) - a file
+written beside the sidecar's models is not there for the sidecar, and the
+same is why an earlier snippet's database "repair" touched a mirror and
+not his real database. So `/debug/workfile` (JARVIS_DEBUG only, work
+folder only, a plain name, 2 MB, base64) lets the sidecar write the test
+model itself, and the suite cleans up through it too. Also: a heredoc
+turned `\\0` into a real NUL byte inside the suite file (the "heredocs
+eat backslashes" trap, new form) - patched with a script file, never a
+heredoc.
+- `edit_part` keeps `<name>.prev.stl`; `revert_part` swaps it and
+  restores it if the rebuild fails. `holo_control` **`compare`** draws the
+  old mesh in amber over the new one (`/holo/geometry?version=prev`, the
+  on-stage model's own sibling only); "show me the before and after" /
+  "what did it look like before" on, "just the new one" off; nothing to
+  compare with is a sentence. `reset` clears it.
+- `render_queue._announce`: four shapes of "the render is complete",
+  picked by job id so a burst of renders does not repeat one line.
+- `wakeack`: "JARVIS, are you up?" - "For you, sir, always."; the plainer
+  sentences keep "At your service."
+- `project_start` seeds "open a new project file, index as mark two";
+  the open canon leaves "new project"/"project" alone.
+- `project_status` says the last note without its date stamp.
+- suites.ps1 runs `workbench_e2e.py` before hud_e2e. test_brain 283/283.
+
+Next: prove the gesture path end to end without a person - a debug
+endpoint that feeds synthetic landmark frames into the live tracker and a
+WS listener that expects the rotate events; "throw it up" / "wireframe
+that" / "fabricate it" seeds; hud_e2e checks for the part and compare
+commands.
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
