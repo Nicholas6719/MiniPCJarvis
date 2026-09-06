@@ -3986,6 +3986,32 @@ hotswap), not bridge trouble; the name is fetched before it is logged now.
 Telegram inbound text is not logged (by design), so his "ok" itself is
 not in the log - the fix is by shape.
 
+Release 47 green at 15:52 (78 ALL PASS, suites green, screen suites
+skipped as before), pushed.
+
+### 16:10 — the rest of the log audit (release 48)
+Three more from the same day's log, none reported by him:
+- **A URL spoken as three lines.** 10:57: "Here's a ready-to-print STL:
+  www" / "printables." / "com model 804407-chess-pawn." `SENTENCE_END`
+  split at ANY full stop while the reply was still streaming, so "www."
+  was a sentence before "printables" arrived and `clean_for_speech`
+  never saw a URL. It now needs whitespace after the punctuation
+  (`(?=\s)`); the tail flush at end-of-stream is unchanged.
+- **A "." spoken.** 12:46: `get_weather` hit a 10 s ReadTimeout on
+  Open-Meteo, the model answered "." and it went to the speaker.
+  `SPEAKABLE = \w` now decides what is a sentence, what is an empty
+  round (nudged once) and what is a reply at all (else the "I lost
+  that" fallback).
+- **fetch_page crashing in trafilatura's rescue path.** FileNotFoundError
+  on `_internal\justext\stoplists`: the bundle never had justext's data.
+  `collect_all("justext")` in the spec (107 files).
+Gated in test_speech_pipeline. Also seen and NOT bugs: the five "empty
+LLM round - retrying with a nudge" at ~40 min spacing are my variety
+runs (the nudge recovered every one); the three "stuck in listening"
+errors are 09:51-10:00, his Sunday test, before release 42; the audio
+writer-thread warnings at 01:54/02:47/09:45 all recovered by the pool
+replacement.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
