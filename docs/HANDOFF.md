@@ -3885,6 +3885,20 @@ then we were back to the regular conversation".
   question to answer. Scheme-less links are cut to their host for speech,
   and the not-fetchable result is now a cost question to BUILD one.
 
+### 11:10 — the variety pass on release 42 (release 43)
+`.agent/scripts/variety_run.py`: 48 natural asks, muted, reply and route
+printed (`.agent/logs/variety_run.log`). Right: manners, memory, reminders,
+weather, market, earnings, stock context, news, systems, files, pictures,
+the whole hologram flow with the new views, "make that one 3d" from the
+picture panel. Wrong, and fixed: "and what year was it released" was taken
+by `story_time` (a dated fact now refuses there); "focus on image three"
+was rewritten to "switch to APP" at 1.00 and fell through to the model
+(rewrite skips picture numbers; number words seeded; test_brain 262/262);
+"show me the top" during a render fell to a 25 s search (stage skills are
+not penalised while a render is in flight; holo_control says "still
+building"); "Stopped the a lighthouse". Release 42's own suites proved the
+barge-in fix live: after the interruption he heard and answered, twice.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
