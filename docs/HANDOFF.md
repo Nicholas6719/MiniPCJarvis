@@ -3850,6 +3850,41 @@ endpoints answer 202 with an anomaly challenge to httpx, so the browser
 stays; its flat 1200 ms wait before checking the results selector is gone
 (selector first, 250 ms settle, the old wait only when it never shows).
 
+## 2026-09-06 — his Sunday test, from the log (release 42)
+
+His report, in his words: "he got stuck on listening mode... I tried
+everything to wake him", "it thought I was still talking about the arc
+reactor", "he said I had to download it, and then I told him to do it, and
+then we were back to the regular conversation".
+
+* BARGE-IN FREEZE (the one he said was "fixed" before and was not). Log:
+  09:50:58 "barge-in detected", then nothing for 38 s, then the deaf watch.
+  Reproduced with the extended `bargein_e2e` (follow-up injected after the
+  interruption: heard=None) and a py-spy dump: EVERY thread idle. The
+  handler forced the state to LISTENING; `_listen_loop` only captured from
+  IDLE or INTERRUPTED and otherwise slept 50 ms - forever. LISTENING is in
+  its list now. The suite demands the sentence after the interruption be
+  heard, and runs in every release (suites.ps1).
+* "Render me Spiderman's mask": no reflex (possessive); the model called
+  show_hologram with no name, which re-showed the arc reactor; the router
+  LEARNED "render me spiderman's mask -> holo_show", so the retry was a
+  reflex doing the same thing; then "yes." was learned as holo_again.
+  Guards in `Brain.learn`: never a bare answer, never a make verb to a skill
+  whose tool does not create (`_creates`). Seeds for the possessive. A named
+  subject in "show me X as a hologram" is a make: `slots_holo_show` refuses
+  it and `_lexical_delta("holo_make")` nudges the router (the contest
+  penalty had sunk both skills below threshold). test_brain 259/259.
+* "Focus on image eight": the window-switch guard only knew digits.
+* "Show me the top": no view command existed. `parse_view` + action "view"
+  (top/bottom/front/back/left/right/side) through holo_control to the HUD
+  (`case "view"` from HOME). "Turn it ninety degrees up/down" tipped as
+  "round": the direction now outranks the verb in `parse_axis`, and "down"
+  is a negative angle (not in "upside down").
+* "Find a different design": the site needed an account, the model read the
+  link aloud ("com en tags spiderman plus mask"), and "do it" had no
+  question to answer. Scheme-less links are cut to their host for speech,
+  and the not-fetchable result is now a cost question to BUILD one.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
