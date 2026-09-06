@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets as pysecrets
 import time
 from pathlib import Path
@@ -71,6 +72,14 @@ def _health_payload(text: str) -> bool:
     except Exception:
         log.debug("health payload sniff failed", exc_info=True)
         return False
+
+# A reply that only acknowledges what he was sent. Not a request; not a turn.
+ACK_ONLY = re.compile(
+    # (no yes/no here: those may answer a clarifying question and must run)
+    r"(?:ok|okay|k|kk|got it|noted|thanks|thank you|thx|ty|cheers|cool|alright|"
+    r"all right|good|great|nice|fine|understood|roger|copy|"
+    r"👍|👌|🙏|✅)[.!\s]*")
+
 
 class TelegramBridge:
     def __init__(self) -> None:
@@ -228,10 +237,10 @@ class TelegramBridge:
         # httpx logs the full request URL at INFO — and the bot token lives IN that
         # URL, so every poll was writing the token into sidecar.log in plaintext.
         logging.getLogger("httpx").setLevel(logging.WARNING)
-        log.info("telegram bridge polling as @%s", self.bot_username or "?")
         me = await self._api("getMe")
         if me:
             self.bot_username = me.get("username", "")
+        log.info("telegram bridge polling as @%s", self.bot_username or "?")
         while True:
             try:
                 # `timeout` must be a BODY parameter for Telegram to hold the
@@ -395,6 +404,13 @@ class TelegramBridge:
             return
         self.acknowledge_all()        # he is looking at his phone; stop chasing
         if self._answers_pending(text):
+            return
+        # "OK" TO A MESSAGE IS NOT A REQUEST. He was sent the news, typed "ok",
+        # and was told the time (2026-09-06): a bare acknowledgement with no
+        # question open ran as a turn. It is an acknowledgement, and it is
+        # answered with silence - the way a person's "ok" is.
+        if ACK_ONLY.fullmatch(text.strip().lower()):
+            log.info("telegram: %r acknowledged, not a turn", text[:20])
             return
         await self._remote_turn(text)
 

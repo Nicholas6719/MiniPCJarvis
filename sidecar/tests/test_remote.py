@@ -75,10 +75,23 @@ async def main() -> int:
     check("stranger message -> zero API calls", not calls and not turns)
     await b._handle_update(msg(111, "what time is it"))
     check("owner message runs a turn", turns == ["what time is it"])
+    # 2026-09-06: JARVIS sent him news, he replied "ok", and "ok" ran as a
+    # turn - the model, given nothing to do, told him the time. A bare
+    # acknowledgement is not a request. (Yes/no are NOT acknowledgements:
+    # they may answer a clarifying question and must still run.)
+    for ack in ("ok", "Ok.", "okay", "thanks", "got it", "👍", "Thank you!"):
+        await b._handle_update(msg(111, ack))
+    check("a bare acknowledgement is not a turn", turns == ["what time is it"], turns)
+    await b._handle_update(msg(111, "yes"))
+    check("...but a yes still runs (it may answer a question)",
+          turns == ["what time is it", "yes"], turns)
+    await b._handle_update(msg(111, "ok what time is it"))
+    check("...and an acknowledgement with a request after it runs",
+          turns[-1] == "ok what time is it", turns)
     # a forwarded message with a different sender in the owner chat still counts
     # only when the SENDER is the owner
     await b._handle_update(msg(111, "rm everything", sender=333))
-    check("owner chat + foreign sender rejected", turns == ["what time is it"])
+    check("owner chat + foreign sender rejected", "rm everything" not in turns)
 
     # --- confirmation buttons -----------------------------------------------
     from tools.registry import registry

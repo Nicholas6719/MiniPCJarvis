@@ -151,14 +151,84 @@ def main() -> int:
     ]
     for story, why in ledger:
         check(f"silent: {why}", classify_news(story)[0] == NONE, classify_news(story))
+    # THE NAMED-PLACE SEARCH FEEDS, 2026-09-06 afternoon: three URGENTs that
+    # were the aftermath of deaths, and one that was the state's abbreviation.
+    aftermath = [
+        ({"headline": "Man held without bail after woman found dead in Framingham, Massachusetts home",
+          "summary": "", "source": "WCVB"}, "a court story about a Framingham death"),
+        ({"headline": "Framingham MA man allegedly told police he 'accidentally' killed woman",
+          "summary": "", "source": "MetroWest Daily News"}, "the police work after a Framingham death"),
+        ({"headline": "Family identifies Sudbury boy, 8, killed in Wayland tree accident",
+          "summary": "", "source": "MetroWest Daily News"}, "a family identifying a Sudbury boy days later"),
+        ({"headline": "Family Identifies 8-Year-Old Boy Who Died After Being Struck by a Falling Tree at Mass. Camp",
+          "summary": "", "source": "People.com"}, "'Mass.' is the state, not a massacre"),
+    ]
+    for story, why in aftermath:
+        check(f"silent: {why}", classify_news(story)[0] == NONE, classify_news(story))
+    check("...but a death in his town that is NOT over still wakes him",
+          classify_news({"headline": "Framingham man killed in Route 9 crash; road closed, driver fled",
+                         "summary": "Police are searching for the driver.", "source": "WCVB"})[0] == URGENT,
+          classify_news({"headline": "Framingham man killed in Route 9 crash; road closed, driver fled",
+                         "summary": "Police are searching for the driver.", "source": "WCVB"}))
+
     # ...and the same shapes when they ARE his emergency
     check("a plane crash in Framingham with a search on wakes him",
           classify_news({"headline": "Small plane crashes in Framingham; crews searching for survivors",
                          "summary": "", "source": "WCVB Boston", "_local_feed": True})[0] == URGENT)
-    check("a shooting with the suspect at large in his state is an alert",
-          classify_news({"headline": "Multiple people shot in Taunton; suspect at large",
+    check("a shooting with the suspect at large near him is an alert",
+          classify_news({"headline": "Multiple people shot in Wellesley; suspect at large",
                          "summary": "Police are searching for the gunman.",
                          "source": "WCVB Boston", "_local_feed": True})[0] in (ALERT, URGENT))
+
+    # --- HIS GROUND IS TWENTY MILES (2026-09-06) -----------------------------
+    # "I live in Framingham MA, I want news from say a 15-20 mile radius, use
+    # your best judgement." Taunton, Ludlow, Brockton, Lynn and Worcester are
+    # all Massachusetts, all off his desks, and all none of his business.
+    for far_ma in ("Multiple people shot in Taunton; suspect at large",
+                   "Building collapse traps workers in Worcester",
+                   "Two people shot in Brockton overnight, police searching for gunman",
+                   "Police respond to active shooter report in Lowell",
+                   "House fire displaces family in Springfield, crews still on scene"):
+        got, why = classify_news({"headline": far_ma, "source": "WCVB Boston",
+                                  "_local_feed": True})
+        check(f"beyond his twenty miles: {far_ma[:34]!r}", got == NONE, f"{got} ({why})")
+    for near in ("Police respond to active shooter report in Wellesley",
+                 "Gas leak forces evacuation of Woburn apartment building",
+                 "Crews battle three-alarm fire in Hopkinton, evacuations under way",
+                 "Chemical spill closes Route 9 in Southborough",
+                 "Active shooter reported at Natick Mall"):
+        got, why = classify_news({"headline": near, "source": "WCVB Boston",
+                                  "_local_feed": True})
+        check(f"inside his twenty miles: {near[:34]!r}", got in (URGENT, ALERT),
+              f"{got} ({why})")
+    # A shared name needs the desk or the state to vouch for it...
+    check("Berlin without a desk is Germany",
+          not significance.is_local({"headline": "Explosion rocks Berlin apartment block"})[0])
+    check("...Berlin off WCVB is Berlin, Mass.",
+          significance.is_local({"headline": "Explosion rocks Berlin apartment block",
+                                 "_local_feed": True})[0])
+    check("Lexington, Kentucky is not Lexington, Mass.",
+          not significance.is_local({"headline": "Tornado tears through Lexington, Kentucky"})[0])
+    # ...an unshared one does not
+    check("Natick counts on sight",
+          significance.is_local({"headline": "Water main break floods Natick center"}) == (True, True))
+    check("Wellesley counts on sight",
+          significance.is_local({"headline": "Gas leak at Wellesley College"}) == (True, False))
+    # ...and the far end of the state is silent even off his desk, with one
+    # exception: a hazard that is loose and still moving.
+    check("a Ludlow crash off WHDH is not near him",
+          not significance.is_local({"headline": "2 killed when small plane crashes in Ludlow",
+                                     "_local_feed": True})[0])
+    check("a nuclear leak in Plymouth still reaches him",
+          classify_news({"headline": "Nuclear plant leak prompts evacuation in Plymouth",
+                         "_local_feed": True})[0] in (URGENT, ALERT),
+          classify_news({"headline": "Nuclear plant leak prompts evacuation in Plymouth",
+                         "_local_feed": True}))
+    check("a chemical fire in Lowell with an evacuation on still reaches him",
+          classify_news({"headline": "Chemical fire forces evacuation of Lowell neighborhood, crews on scene",
+                         "_local_feed": True})[0] in (URGENT, ALERT),
+          classify_news({"headline": "Chemical fire forces evacuation of Lowell neighborhood, crews on scene",
+                         "_local_feed": True}))
 
     # --- somebody else's country is not "the country" -------------------------
     # On 2026-08-31 at 1:42pm he was sent "Nepal rescuers blast hillside in search
@@ -197,9 +267,11 @@ def main() -> int:
     from_desk = {"headline": "Fatal crash closes Route 9", "_local_feed": True}
     check("an emergency from his own desk is local", classify_news(from_desk)[0] != NONE,
           classify_news(from_desk))
+    # (2026-09-06: locality is asserted here; the story itself is a court
+    # story - "held without bail" - and no longer reaches him as an alert)
     check("an explicit Massachusetts is local too",
-          tier("Man held without bail after woman found dead in Mass. home")
-          in (URGENT, ALERT))
+          significance.is_local({"headline": "Man held without bail after woman found dead in Mass. home"})[0]
+          and tier("Man held without bail after woman found dead in Mass. home") == NONE)
     check("and his towns still are",
           tier("Fatal crash closes Route 9 in Natick") == URGENT)
 
@@ -232,9 +304,13 @@ def main() -> int:
     check("a Boston hazmat call still reaches him",
           tier("Boston hazmat team responds to chemical exposure at Mass General")
           in (URGENT, ALERT))
-    check("a death in a Mass. home still reaches him",
-          tier("Man held without bail after woman found dead in Mass. home")
-          in (URGENT, ALERT))
+    # 2026-09-06: "held without bail" is the aftermath of a death, a court
+    # story; it waits for the brief. The fresh death itself still reaches him.
+    check("the aftermath of a death in a Mass. home does not reach him",
+          tier("Man held without bail after woman found dead in Mass. home") == NONE)
+    check("...but the death itself, fresh, does",
+          tier("Woman found dead in Natick home; police searching for suspect") in (URGENT, ALERT),
+          tier("Woman found dead in Natick home; police searching for suspect"))
     # SUPERSEDED 2026-09-01. This once asserted the opposite. He was sent a
     # drowning in Falmouth and a cyclist killed in Lynn on the same morning and
     # said: *"why am I still getting this kind of news?"* A single death
@@ -451,7 +527,7 @@ def main() -> int:
 
     # ...and the ones that must still get through, each for its own reason
     for live, why_it_matters in (
-            ("3 injured in shooting near Lawrence school, no suspect in custody",
+            ("3 injured in shooting near Waltham school, no suspect in custody",
              "the suspect is still out there"),
             ("Gas leak forces evacuation of Woburn apartment building",
              "a hazard travels"),
@@ -480,7 +556,7 @@ def main() -> int:
     # ...and the real thing is untouched
     for real_hazard in ("Nuclear plant leak prompts evacuation in Plymouth",
                         "Toxic gas leak at Framingham plant",
-                        "Building collapse traps workers in Worcester",
+                        "Building collapse traps workers in Marlborough",
                         "Bomb threat forces evacuation of Marlborough school",
                         "Boston hazmat team responds to chemical exposure at Mass General"):
         got, _ = classify_news({"headline": real_hazard, "_local_feed": True})

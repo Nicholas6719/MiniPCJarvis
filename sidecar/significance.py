@@ -45,8 +45,61 @@ NONE = ""
 # Middlesex County, Massachusetts. The five towns he named come first; the state
 # is still local, and Boston is close enough to matter to him.
 HOME_TOWNS = ("framingham", "sudbury", "marlborough", "marlboro", "maynard", "natick")
-HOME_REGION = ("massachusetts", "middlesex", "mass.", "boston", "metrowest",
-               "worcester", "cambridge", "somerville", "newton", "waltham")
+# The STATE, said plainly. Since 2026-09-06 this is not "near" on its own (see
+# NEAR_TOWNS): it is the fallback for a story that names the state and no town,
+# which is by its nature statewide - an earthquake felt across Massachusetts,
+# a Mass. grant programme - and so may well include him.
+HOME_REGION = ("massachusetts", "middlesex", "mass.", "metrowest", "bay state")
+
+# HIS GROUND IS A RADIUS, NOT THE STATE. His words, 2026-09-06: "I live in
+# Framingham MA, I want news from say a 15-20 mile radius, use your best
+# judgement." Measured from Framingham (42.2793, -71.4162) with Open-Meteo's
+# geocoder that afternoon: everything here is within twenty miles as the crow
+# flies (Boston at 19.0 is kept - it is the hub; Worcester at 19.8 is not - a
+# city of its own with its own troubles). The state alone is no longer
+# "near": Taunton, Ludlow, Brockton and Lynn are all Massachusetts and all
+# reached his phone for things that were none of his business.
+# Names nobody else uses: these count on sight, whatever wire they rode in on.
+NEAR_SURE = (
+    "natick", "sherborn", "holliston", "southborough", "southboro", "wellesley",
+    "hopkinton", "millis", "medfield", "needham", "westborough", "westboro", "maynard",
+    "westwood", "northborough", "northboro", "hopedale", "watertown", "bellingham",
+    "mendon", "shrewsbury", "wrentham", "brookline", "boxborough", "boylston",
+    "foxborough", "foxboro", "carlisle", "uxbridge", "somerville", "millbury",
+    "blackstone", "stoughton", "woburn", "waltham", "northbridge", "metrowest",
+    "mass pike", "mass. pike")
+# Names that are ALSO somewhere else - Berlin, Lincoln, Canton, Burlington,
+# Lexington, Arlington, Concord, Dover, Milford, Medford, Hudson, Franklin -
+# and so count only when the story is corroborated: it came off one of his
+# desks, or says Massachusetts somewhere. ("Mass casualty incident in Berlin"
+# is Germany.) Boston, Cambridge and Newton get the older, gentler test
+# below: his unless the story reads as England.
+NEAR_ALSO = (
+    "sudbury", "marlborough", "wayland", "weston", "medway", "hudson", "milford",
+    "newton", "stow", "norfolk", "upton", "norwood", "walpole", "concord", "dedham",
+    "acton", "bolton", "belmont", "grafton", "sharon", "arlington", "cambridge",
+    "harvard", "milton", "medford", "boston", "ashland", "lincoln", "dover",
+    "lexington", "bedford", "burlington", "franklin", "berlin", "littleton",
+    "canton", "clinton", "lancaster", "route 9", "the pike")
+NEAR_TOWNS = NEAR_SURE + NEAR_ALSO
+_alt = lambda names: "|".join(r"\b" + re.escape(t) + r"\b" for t in names)  # noqa: E731
+NEAR_SURE_RE = re.compile(_alt(NEAR_SURE), re.I)
+NEAR_ALSO_RE = re.compile(_alt(NEAR_ALSO), re.I)
+BIG_CITY_RE = re.compile(r"\b(?:boston|cambridge|newton)\b", re.I)
+
+# Massachusetts, but not his ground: beyond ~20 miles, or the big cities of
+# their own regions. A story off a local desk that names one of these, and
+# none of his, is that town's news, not his. (No "Reading", "Beverly",
+# "Douglas", "Sterling" - those are ordinary words and names before they are
+# towns, and a false far-place would silence a real one of his.)
+FAR_MA = re.compile(
+    r"\b(?:worcester|taunton|brockton|lynn|lowell|lawrence|springfield|ludlow|falmouth|"
+    r"plymouth|attleboro|quincy|braintree|weymouth|randolph|malden|everett|chelsea|revere|"
+    r"billerica|westford|chelmsford|wilmington|leominster|fitchburg|"
+    r"new bedford|fall river|haverhill|pittsfield|northampton|amherst|holyoke|chicopee|"
+    r"westfield|gloucester|salem|peabody|danvers|newburyport|hyannis|cape cod|"
+    r"nantucket|martha'?s vineyard|the berkshires|barnstable|yarmouth|"
+    r"greenfield|marlborough, ct)\b", re.I)
 
 # "mass." was written " mass." with a leading space, to keep "mass shooting" and
 # "mass casualty" from reading as Massachusetts. It also meant a headline that
@@ -163,7 +216,16 @@ ADJUDICATED = re.compile(
     r"\b(?:jury|jurors?|verdict|convict\w+|acquit\w+|sentenc\w+|"
     r"pleads? guilty|pleaded guilty|plea deal|found guilty|on trial|retrial|"
     r"indict\w+|arraign\w+|grand jury|lawsuit|settlement|appeals? court|"
-    r"parole|extradit\w+|testifie[sd]|takes the stand|courtroom)\b", re.I)
+    r"parole|extradit\w+|testifie[sd]|takes the stand|courtroom|"
+    # ...and the aftermath, which is the same thing: the police work and the
+    # mourning that follow a death that has already happened. "Man held
+    # without bail after woman found dead in Framingham" and "Family
+    # identifies Sudbury boy, 8, killed by falling tree" both reached him as
+    # "somebody died in one of his towns" (2026-09-06).
+    r"held without bail|allegedly|charged with|charges of|accused of|"
+    r"pleaded|pleads|family identifies|identified as|identifies|"
+    r"tributes?|remembered|mourn\w*|vigil|funeral|memorial|"
+    r"told police|police say|police said)\b", re.I)
 
 # ...unless the thing is still out there. An active manhunt is an emergency even
 # when the same sentence is full of courtroom words, so this outranks the guard
@@ -200,7 +262,11 @@ FATALITY = re.compile(
     r"house fire|structure fire|building fire)\b", re.I)
 
 # Many. What makes a distant tragedy national news.
-MANY = re.compile(r"\b(?:thousands|hundreds|dozens|mass|multiple|several)\b", re.I)
+# "Mass." is the state, not a massacre: "boy who died... at Mass. camp" read
+# as "many people have died" (2026-09-06). The word counts only as a scale
+# when it modifies casualties.
+MANY = re.compile(r"\b(?:thousands|hundreds|dozens|multiple|several|"
+                  r"mass (?:casualt\w+|shooting|killing|grave|death))\b", re.I)
 
 # ...and what makes a distant event enormous regardless of the count. Kept apart
 # from MAJOR_SCALE below ON PURPOSE: that list contains the fatality words, so
@@ -507,28 +573,50 @@ def is_local(story: dict) -> tuple[bool, bool]:
     t = _text_of(story)
     from_his_desk = bool(story.get("_local_feed"))
     anchored = bool(ANCHOR_RE.search(t))
-
-    # Provenance is good evidence, not proof. If the story names nothing of his
-    # and does name somewhere clearly else, the desk it came from stops counting
-    # - otherwise every wire story a local outlet reprints is "close to home".
-    # A local desk syndicates the wire: a far place OR a foreign one in the
-    # text, with nothing tying it to Massachusetts, is not local whatever the
-    # desk ("A fire in Congo's capital" off Boston.com reached him, 2026-09-05).
-    if from_his_desk and (FAR_PLACE.search(t) or FOREIGN.search(t)) and not (
-            anchored or TOWN_RE.search(t) or REGION_RE.search(t)):
-        from_his_desk = False
+    elsewhere = bool(ELSEWHERE_RE.search(t))
+    # somewhere clearly not his: another state, another country, or the far
+    # end of this one (Taunton, Ludlow, Worcester - 2026-09-06)
+    far = bool(FAR_PLACE.search(t) or FOREIGN.search(t))
+    far_ma = bool(FAR_MA.search(t))
 
     town = bool(TOWN_RE.search(t))
     if town and AMBIGUOUS_TOWN_RE.search(t) and not (anchored or from_his_desk):
         town = False            # "Marlboro maker Altria" is a cigarette company
 
-    if town or from_his_desk or anchored:
+    # 1. A town inside his twenty miles, named. A name nobody else uses counts
+    #    on sight; a shared one needs the desk or the state to vouch for it;
+    #    Boston/Cambridge/Newton are his unless the story reads as England.
+    near_named = (
+        town
+        or (bool(NEAR_SURE_RE.search(t)) and not elsewhere)
+        or (bool(NEAR_ALSO_RE.search(t)) and (from_his_desk or anchored) and not elsewhere)
+        or (bool(BIG_CITY_RE.search(t)) and not elsewhere and not far))
+    if near_named:
         return True, town
-    # A bare "Boston"/"Cambridge"/"Worcester" is his until the story says
-    # otherwise - England has all three, and the national wire is BBC and Sky.
-    if REGION_RE.search(t) and not ELSEWHERE_RE.search(t):
+    # 2. Provenance, with nothing against it. His desks syndicate the wire
+    #    and cover the whole state: a far place, a foreign one, or the far
+    #    end of Massachusetts in the text means the desk stops counting.
+    #    ("A fire in Congo's capital" off Boston.com, 2026-09-05; a Taunton
+    #    house party off WCVB, 2026-09-06.)
+    if from_his_desk and not (far or far_ma):
+        return True, False
+    # 3. The state, said plainly, and no town at all: statewide by nature
+    #    (an earthquake felt across Massachusetts), so it may include him.
+    if (anchored or REGION_RE.search(t)) and not (far or far_ma or elsewhere):
         return True, False
     return False, False
+
+
+def in_his_state(story: dict) -> bool:
+    """Massachusetts, near him or not. The one thing this decides: a hazard
+    that is loose and still moving at the far end of his state (a nuclear
+    plant leak in Plymouth with an evacuation on) is not silenced by the
+    twenty-mile rule - it is the only kind of far-end story that is."""
+    t = _text_of(story)
+    if FAR_PLACE.search(t) or FOREIGN.search(t) or ELSEWHERE_RE.search(t):
+        return False
+    return bool(FAR_MA.search(t) or ANCHOR_RE.search(t) or REGION_RE.search(t)
+                or story.get("_local_feed"))
 
 
 def local_only() -> bool:
@@ -588,7 +676,13 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
         # that is nearly all of it - stops here.
         if national_emergency(text, headline=str(story.get("headline") or "")):
             return URGENT, "the whole country needs to know this"
-        return NONE, "not local, and not something the country needs to know"
+        # ...and one more, narrower still: a hazard loose and still moving
+        # at the far end of his own state. Not a shooting, not a crash that
+        # is over - a leak, a fire, a flood with an evacuation on.
+        if (in_his_state(story) and HAZARD.search(text)
+                and not POINT_HAZARD.search(text) and _ongoing(text)):
+            return ALERT, "a hazard loose in his state, beyond his twenty miles"
+        return NONE, "not within his twenty miles, and not the country's business"
     # The national door stands whatever the scope: with the whole wire in
     # play, a national emergency is still the one thing that must not be
     # left to the "weighty" rules below (which emergencies-only silences).
@@ -663,6 +757,8 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
         if _is_obituary(text):
             return NOTABLE, "a death, but not an emergency"
         if own_town:
+            # a fresh death in his own town is his emergency; the AFTERMATH of
+            # one (held without bail, family identifies) was caught above
             return URGENT, "somebody died in one of his towns"
         # A death elsewhere in the state that is already over is news, not an
         # emergency - see the Falmouth and Lynn cases above. If it is still

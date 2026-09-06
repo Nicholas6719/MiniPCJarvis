@@ -82,7 +82,9 @@ def _label(description: str, image_path: str, tier: int) -> str:
     d = (description or "").strip().strip(".")
     if d:
         d = d[:48]
-        return d if d.lower().startswith(("a ", "an ", "the ")) else d
+        # The caller says "The {label} is ready": an article of its own
+        # made "The a chess pawn is ready, sir" (ledger, 2026-09-06 10:57).
+        return re.sub(r"^(?:a|an|the)\s+", "", d, flags=re.I) or d
     if image_path:
         return "model from that picture"
     return f"tier {tier} model"
