@@ -2971,6 +2971,35 @@ CONFIRM_AS = {
 }
 
 
+_FILLER_WORDS = re.compile(r"\b(?:um+|uh+|er+|erm|hmm+|mm+|ah+|oh|yeah|yep|okay|ok|so|and|but|like|"
+                           r"well|you know|i mean|i think|i guess|just)\b", re.I)
+_FUNCTION_WORDS = {"im", "its", "is", "are", "was", "be", "to", "the", "that", "this", "of", "in",
+                   "on", "at", "do", "dont", "not", "no", "yes", "it", "me", "my", "we", "he",
+                   "she", "they", "an", "or", "if", "as", "up", "for", "with", "can", "you"}
+_MARGINAL_WAKE = 0.85
+
+
+def not_for_me(text: str, wake_score: float | None) -> bool:
+    """A marginal wake followed by a fragment is the television, not him.
+
+    2026-09-05, three times in an evening: the wake fired at 0.70-0.73 on
+    background audio, the transcript was "Um", "Uh" or "I think I'm just",
+    and JARVIS said "Let me see... Just take it easy" and "Sure thing, sir"
+    to an empty room - one of them into a barge-in freeze. A clear wake
+    (0.85 and up) is always his; below that, what follows has to carry a
+    real word or it is dismissed without a sound. A bare wake word (empty
+    text) is not judged here: that is the acknowledgement's job.
+    """
+    t = (text or "").strip()
+    if not t or wake_score is None or wake_score >= _MARGINAL_WAKE:
+        return False
+    core = re.sub(r"[^a-z0-9 ]+", " ", _FILLER_WORDS.sub(" ", t.lower()))
+    # what is left once the fillers and the function words are gone: "I think
+    # I'm just" -> nothing; "turn it off" -> turn, off; "lights" -> lights
+    words = [w for w in core.split() if len(w) >= 2 and w not in _FUNCTION_WORDS]
+    return not words
+
+
 _CORE_STRIP = re.compile(r"[^a-z0-9 ]+|\bsir\b")
 
 

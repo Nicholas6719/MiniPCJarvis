@@ -88,6 +88,15 @@ def main() -> int:
           strip_repeat("Lima is in Peru.", "Lima.") == ("Lima is in Peru.", False))
     check("no previous answer, nothing to strip", strip_repeat("Lima.", "") == ("Lima.", False))
 
+    print("\n-- the television is not talking to him --")
+    from brain.skills import not_for_me
+    for frag in ("Um", "Uh", "I think I'm just", "yeah so", "okay"):
+        check(f"a marginal wake and {frag!r} is dismissed", not_for_me(frag, 0.73))
+    for real in ("what time is it", "Um, what's the weather", "turn it off", "jarvis lights"):
+        check(f"...but {real!r} is his", not not_for_me(real, 0.73))
+    check("a clear wake is always his, fragment or not", not not_for_me("Um", 0.96))
+    check("a bare wake word is the acknowledgement's job, not this gate's", not not_for_me("", 0.7))
+
     print("\n-- a question about the disk is answered with the disk --")
     from brain.skills import say_stats, slots_stats
     res = {"disk_c_free_gb": 1700.0, "cpu_percent": 18.0, "ram_percent": 81.0}

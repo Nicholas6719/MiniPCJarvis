@@ -1120,6 +1120,7 @@ class Orchestrator:
                 if score >= wake.threshold and time.time() - last_fire > 2.0:
                     last_fire = time.time()
                     log.info("wake word detected (%.2f)", score)
+                    self._last_wake_score = float(score)   # for the not-for-me gate
                     # SNAPSHOT FIRST, SURFACE SECOND. The pre-roll used to be
                     # taken AFTER the window was brought forward — EnumWindows,
                     # an ALT tap, SetForegroundWindow, a display check — and the
@@ -1574,6 +1575,16 @@ class Orchestrator:
         await bus.emit("transcript", role="user", text=text,
                        stt_ms=int((time.time() - t_start) * 1000),
                        silence_ms=int(waited * 1000), budget_ms=int(budget * 1000))
+        # THE TELEVISION IS NOT TALKING TO HIM. A marginal wake and a fragment
+        # ("Um", "I think I'm just") is dismissed without a word - see
+        # brain.skills.not_for_me for the evening that taught this.
+        from brain.skills import not_for_me
+        if not_for_me(text, getattr(self, "_last_wake_score", None)):
+            log.info("dismissed %r after a marginal wake (%.2f): probably not for me",
+                     text[:40], getattr(self, "_last_wake_score", 0.0))
+            await bus.emit("wake_suppressed", reason="fragment", text=text[:60])
+            await self._settle_idle(State.ERROR, State.STARTING)
+            return
         if not text:
             # just the wake word — acknowledge and open the window. Not always
             # "Yes?": the films' JARVIS varies it, and greets him by the time
