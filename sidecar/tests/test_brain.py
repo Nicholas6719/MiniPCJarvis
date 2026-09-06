@@ -142,6 +142,8 @@ CASES = [
     ("what's ten plus ten", "math"), ("what is five times six", "math"),
     # from the variety pass of 2026-09-06
     ("focus on image three", "ui"), ("focus on image eight", "ui"),
+    ("good morning", "greeting"), ("how are you today", "greeting"), ("hello jarvis", "greeting"),
+    ("what can you do", "capabilities"), ("what are you able to do", "capabilities"),
     ("and what year was it released", None),   # a fact about the thing just discussed, not a story's date
     ("what's in the news", "news"), ("tell me the tech news", "news"),
     ("any breaking news", "breaking"),

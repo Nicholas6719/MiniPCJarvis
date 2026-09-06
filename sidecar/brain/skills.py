@@ -1746,6 +1746,33 @@ def say_remember(slots: dict, res: dict) -> str:
     return "Noted." if "error" not in res else "I couldn't save that."
 
 
+def say_greeting(slots: dict, _r: dict) -> str:
+    """"Good morning" and "how are you" went to the model (3-4 s) on
+    2026-09-06; a greeting is a reflex, the way a butler's is."""
+    import time as _t
+    from brain import persona
+    t = (slots or {}).get("said", "")
+    if re.search(r"\bhow(?:'s| is| are)\b.*\b(?:you|it going|things)\b", t):
+        return "Very well, sir. And yourself?"
+    return persona.greeting(_t.localtime().tm_hour)
+
+
+def slots_greeting(t: str) -> dict:
+    return {"said": (t or "").lower()}
+
+
+CAPABILITIES = (
+    "I run your PC - apps, windows, volume, files and folders - and I read and "
+    "search the web. I keep your reminders and remember what you tell me. I follow "
+    "the markets and the news and brief you four times a day. I make 3D models you "
+    "can turn in the air and print, and I can watch the room through the camera. "
+    "Ask me for anything specific, sir.")
+
+
+def say_capabilities(_s: dict, _r: dict) -> str:
+    return CAPABILITIES
+
+
 def slots_stats(t: str) -> dict:
     """What part of the machine he asked about, so the answer leads with it.
     "How much disk space is left" was answered "CPU is at 18 percent, memory
@@ -2844,6 +2871,16 @@ SKILLS: list[Skill] = [
         # ...and a range of them
         "just give me 1 through 4", "only show 2 to 5", "give me 1-4"],
         slots=slots_ui, speak=say_ui),
+    Skill("greeting", None, [
+        "good morning", "good afternoon", "good evening", "hello", "hello jarvis",
+        "hi jarvis", "hey jarvis how are you", "how are you", "how are you today",
+        "how's it going", "how are things", "how are you doing"],
+        slots=slots_greeting, speak=say_greeting),
+    Skill("capabilities", None, [
+        "what can you do", "what are you able to do", "what do you do",
+        "what are your capabilities", "what can i ask you", "what can you help me with",
+        "tell me what you can do", "what are you capable of"],
+        speak=say_capabilities),
     Skill("wakeack", None, [
         # "wake up" embeds near the sleep cluster — without its own skill the guard in
         # slots_sleep sends it to the LLM, which answers a wake request with whatever

@@ -161,6 +161,7 @@ class Briefing:
                 if self.enabled:
                     await self._maybe_brief()
                     await self._maybe_watch()
+                    await self._maybe_warm_market()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -170,6 +171,20 @@ class Briefing:
             # 12:30 brief being noticed at all.
             now_t = time.time()
             await asyncio.sleep(max(5.0, TICK_S - (now_t % TICK_S)))
+
+    async def _maybe_warm_market(self) -> None:
+        """Keep the market story warm by day, so "what's the market doing" is
+        never the 16-second first call. Every half hour outside quiet hours;
+        the story's own cache (35 min) makes the ask itself instant."""
+        now = time.time()
+        if now - getattr(self, "_last_story_warm", 0.0) < 1800 or _in_quiet_hours():
+            return
+        self._last_story_warm = now
+        try:
+            from market_intel import intel
+            await intel.story()
+        except Exception:
+            log.debug("market story warm failed", exc_info=True)
 
     async def _maybe_brief(self) -> None:
         """Has a brief come due since the last look?

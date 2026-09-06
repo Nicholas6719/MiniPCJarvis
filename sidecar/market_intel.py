@@ -96,7 +96,10 @@ BIG_NAMES: dict[str, str] = {
 
 MAX_AGE_MIN = 18 * 60          # overnight is still today's story; last week is not
 STORY_HEADLINES = 8            # what the model is shown
-CACHE_S = 600.0                # the story does not change by the minute
+CACHE_S = 35 * 60.0            # the story does not change by the minute; the
+                               # briefing loop refreshes it every half hour so
+                               # "what's the market doing" is never the 16 s
+                               # first call (measured 2026-09-06)
 
 STORY_PROMPT = (
     "You are the market desk editor for a short spoken briefing. From the "
