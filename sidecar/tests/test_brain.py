@@ -244,6 +244,10 @@ CASES = [
     ("wireframe that", "holo_make"),
     ("fabricate it", "holo_slice"),
     ("get it ready for the printer", "holo_slice"),
+    # from the workbench variety pass of 2026-09-06 18:38
+    ("file it under the project", "project_file"),
+    ("save it to the project", "project_file"),
+    ("remove the render", "holo_hide"),
     ("cut it in half", "holo_move"),
     ("show me the layers", "holo_move"),
     # Scrubbing the toolpath. The number is the hazard: _CANON erases plain

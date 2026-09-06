@@ -1523,7 +1523,8 @@ class Orchestrator:
         self._unsure = {"skill": name, "args": u.get("args") or {},
                         "text": text}
         memory.log_turn("assistant", line)
-        await bus.emit("assistant_delta", text=line)
+        # speak_line emits the assistant_delta itself; emitting it here too
+        # put "Did you mean …, sir?" on the HUD twice (2026-09-06 18:38).
         try:
             await self.speak_line(line)
         except Exception:

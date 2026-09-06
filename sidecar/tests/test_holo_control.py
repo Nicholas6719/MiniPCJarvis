@@ -392,6 +392,24 @@ async def main() -> int:
     check("...and the stage heard it", sent[-1][1].get("action") == "part"
           and sent[-1][1].get("part") == "helmet", sent[-1])
 
+    # ---------------------------------- the variety pass of 18:38 (2026-09-06)
+    from brain.skills import ask_allowed, slots_holo_edit, slots_project_start
+    check("a bare 'yes' is never a near-miss question", not ask_allowed("yes", "holo_again")
+          and not ask_allowed("Okay.", "sleep") and ask_allowed("turn it a bit", "holo_move"))
+    check("'index as test bench' names the project",
+          slots_project_start("open a new project file, index as test bench") == {"name": "test bench"},
+          slots_project_start("open a new project file, index as test bench"))
+    check("'index as Mark II' too",
+          slots_project_start("I'd like to open a new project file, index as Mark II") == {"name": "Mark II"})
+    check("'for the arc reactor' names it",
+          slots_project_start("create a new project folder for the arc reactor") == {"name": "arc reactor"})
+    check("no name in the sentence leaves the tool to ask",
+          slots_project_start("we're starting a new project") == {}
+          and slots_project_start("start a new project for this") == {})
+    check("'remove the render' is not an edit", slots_holo_edit("remove the render") is None)
+    check("...'get rid of the handle' still is",
+          slots_holo_edit("get rid of the handle") == {"change": "get rid of the handle"})
+
     # ------------------------------------------- before and after (2026-09-06)
     # edit_part keeps `<name>.prev.stl`; the stage draws it in amber over the
     # new one. With no earlier version the answer is a sentence, not a ghost.

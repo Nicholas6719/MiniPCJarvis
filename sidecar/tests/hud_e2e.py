@@ -73,6 +73,26 @@ CHECKS_JS = """
     && S.getState().stage?.settingsSection === "history";
   ev({kind:"confirmation_required", id:"c1", confirm_id:"x", tool:"t", args:{}, risk:"medium", ts:11});
   out.gate = S.getState().confirmation?.confirmId === "x";
+  // THE WORKBENCH (2026-09-06): a model opens the stage pinned; a part
+  // command and a compare command reach the renderer's queue with their
+  // fields; the project chip follows open AND close.
+  ev({kind:"hologram", action:"show", name:"suit", triangles:24, size_mm:[36,10,10], ts:12});
+  out.holo_stage = S.getState().stage?.kind === "holo" && S.getState().stage?.pinned === true
+    && S.getState().holo?.name === "suit";
+  ev({kind:"holo_control", action:"part", part:"helmet", mode:"focus", name:"suit"});
+  const c1 = S.getState().holo?.cmd;
+  out.part_command = c1?.action === "part" && c1?.part === "helmet" && c1?.mode === "focus";
+  ev({kind:"holo_control", action:"part", part:"", mode:"all", name:"suit"});
+  const c2 = S.getState().holo?.cmd;
+  out.part_all_command = c2?.action === "part" && c2?.mode === "all" && c2.seq === (c1?.seq ?? 0) + 1;
+  ev({kind:"holo_control", action:"compare", on:true, name:"suit"});
+  out.compare_command = S.getState().holo?.cmd?.action === "compare" && S.getState().holo?.cmd?.on === true;
+  ev({kind:"workspace", action:"open", project:"Mark II", path:"C:/x", projects:[]});
+  out.project_chip = S.getState().project === "Mark II";
+  ev({kind:"workspace", action:"close", project:null, path:"", projects:[]});
+  out.project_chip_clears = !S.getState().project;
+  ev({kind:"hologram", action:"hide"});
+  out.holo_down = !S.getState().holo && S.getState().stage?.kind !== "holo";
   S.getState().clearConfirmation();
   S.getState().pinStage(false); S.getState().dismissStage();
   // stale-data guard: a fresh turn clears the last turn's sources

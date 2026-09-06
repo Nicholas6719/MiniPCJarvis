@@ -92,7 +92,8 @@ _CANON = [
     # the camera does. Rewritten to "hide everything" it dismissed the whole
     # stage through the UI skill, and hide_hologram — the tool that actually
     # takes a model down — never saw the sentence that was about it.
-    (r"^(?:hide|dismiss|clear)\b(?!\s+(?:yourself|himself|jarvis))(?!.*\b(?:camera|webcam|hologram|holo|layers|toolpath)\b)\b.*", "hide everything"),
+    # ...and "the render" is the hologram by his own name for it (2026-09-06).
+    (r"^(?:hide|dismiss|clear)\b(?!\s+(?:yourself|himself|jarvis))(?!.*\b(?:camera|webcam|hologram|holo|layers|toolpath|render|rendering)\b)\b.*", "hide everything"),
     (r"^(?:pin|unpin)\b.*", "pin that"),
     # "what does cpu stand for" / "what is a cpu" are questions ABOUT a thing, not requests
     # to measure it — without this they land within 0.05 of the "what's the cpu at" seed

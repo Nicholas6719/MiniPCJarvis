@@ -1497,9 +1497,12 @@ _EDIT_TARGET = re.compile(
     # ADDITIVE and SUBTRACTIVE changes (2026-09-06). "Add a lid" named
     # nothing in this list and fell through to the general model; the
     # film's own vocabulary is "lose the footpaths", "get rid of them".
-    r"lid|handle|hook|mount|bracket|tab|tabs|notch|groove|cutout|cut-out|"
-    r"pocket|boss|rib|ribs|logo|lettering|text|hollow|solid|shell|"
-    r"add|remove|lose|delete|drop|get rid of)\b", re.I)
+    r"lid|handle|hook|mount|bracket|notch|groove|cutout|cut-out|"
+    r"pocket|boss|rib|ribs|logo|lettering|text|hollow|shell)\b", re.I)
+# A verb of change on its own is NOT in the list: "remove the render" matched
+# `remove` here and ran a nine-second edit that changed nothing (2026-09-06
+# 18:40). An edit has to name a FEATURE; "add a lid" is the lid, "get rid of
+# the handle" is the handle, and "remove the render" names nothing to edit.
 _EDIT_MEASURE = re.compile(
     r"\b\d+(?:\.\d+)?\s*(?:mm|millimet\w*|cm|centimet\w*|inch|inches|\")", re.I)
 # Shape words cannot describe a view: a view has no height or thickness of its
@@ -1507,6 +1510,42 @@ _EDIT_MEASURE = re.compile(
 _EDIT_SHAPE = re.compile(
     r"\b(?:taller|shorter|thicker|thinner|wider|narrower|deeper|shallower|"
     r"rounder|flatter|chamfer\w*|fillet\w*)\b", re.I)
+
+
+_NAME_TAIL = r"\s+(?P<name>[a-z0-9][a-z0-9 .'-]{1,60}?)\s*(?:project|file)?\s*[.!?]*$"
+# IN ORDER OF SPECIFICITY, tried one at a time: a single alternation picks
+# the LEFTMOST match, and "open a new project file, index as test bench"
+# gave "index as test bench" as the name (2026-09-06).
+_PROJECT_NAME = [re.compile(p + _NAME_TAIL, re.I) for p in (
+    r"\bindex(?:ed)?(?: it| this)? as",
+    r"\bcalled",
+    r"\bnamed",
+    r"\bcall it",
+    r"\bfor the",
+    r"\bfor",
+    r"\bproject file[:,]?",
+)]
+
+
+def slots_project_start(t: str) -> dict:
+    """The project's name, when the sentence carries one.
+
+    "Open a new project file, index as Mark II" -> Mark II; "create a new
+    project folder for the arc reactor" -> arc reactor. A sentence with no
+    name gives the tool nothing, and the tool asks - which is right."""
+    s = (t or "").strip()
+    m = None
+    for rx in _PROJECT_NAME:
+        m = rx.search(s)
+        if m:
+            break
+    if not m:
+        return {}
+    name = m.group("name").strip(" .,'\"")
+    # "for this" / "for it" name nothing
+    if not name or re.fullmatch(r"(?:this|that|it|one|the|a|an|new project)", name, re.I):
+        return {}
+    return {"name": name}
 
 
 def slots_holo_edit(t: str) -> dict | None:
@@ -1542,6 +1581,10 @@ def say_holo_edit(slots: dict, res: dict) -> str:
                  for a, b in zip(was, res["size_mm"]) if abs(a - b) > 0.05]
         if len(moved) == 1:
             return f"Done, sir — that was {moved[0][0]} millimetres, it's {moved[0][1]} now."
+        if not moved:
+            # A hole resized inside the same outline: "it's 30 by 20 by 5
+            # now" read as though nothing happened (2026-09-06 18:39).
+            return f"Done, sir — the change is in; the outside is still {size}."
     return (f"Done, sir — it's {size} now." if size
             else "Done, sir — that's the part changed.")
 
@@ -2353,12 +2396,17 @@ SKILLS: list[Skill] = [
         "set this up as a new project",
         "create a new project folder for the arc reactor",
         "i want a new project for the spider-man suit",
-        "file this under a new project",
+        "start a new project for this",
         # the film's own line: "I'd like to open a new project file, index as
         # Mark II" (the open canon leaves "project" alone for this)
         "open a new project file, index as mark two",
         "new project file, index as arc reactor",
         "index this as a new project called the spider-man suit"],
+        # THE NAME HE GAVE. Without this the reflex called the tool with no
+        # name and "index as test bench" was answered "what should I call it,
+        # sir?" (2026-09-06 18:38). No name in the sentence is still fine:
+        # the tool asks.
+        slots=slots_project_start,
         speak=None),
     # "PULL UP X" IS THE SENTENCE THAT HAS TO WORK, and it sits next to "show me
     # X", which must keep reaching the images panel. What separates them is that
@@ -2381,6 +2429,14 @@ SKILLS: list[Skill] = [
         "write that down for the project",
         "add that to the project notes",
         "put that in the project log"],
+        speak=None),
+    # FILING the model on the stage into the open project. "File it under
+    # the project" reached project_start (whose seed said "file this under a
+    # NEW project") and asked for a name (2026-09-06 18:40).
+    Skill("project_file", "file_in_project", [
+        "file it under the project", "file that in the project",
+        "put that in the project folder", "save it to the project",
+        "keep that one in the project", "file the model in the project"],
         speak=None),
     Skill("project_list", "list_workspace", [
         "what projects do we have",
@@ -2454,6 +2510,10 @@ SKILLS: list[Skill] = [
     Skill("holo_hide", "hide_hologram", [
         "hide the hologram", "take the hologram down", "close the hologram",
         "put the hologram away", "get rid of the hologram",
+        # his own words for it; without them "remove the render" was
+        # render_stop at 0.90 - cancelling a job that had finished
+        "remove the render", "remove the rendering", "take the render down",
+        "clear the render off the stage",
         "turn the hologram off", "stop projecting that"],
         speak=lambda s, r: "Taking it down, sir."),
     Skill("holo_check", "inspect_part", [
@@ -3169,6 +3229,13 @@ def ask_allowed(text: str, skill: str) -> bool:
     Not when the sentence is a question and the skill is an action. "How many
     milliliters in a US cup" ranked holo_make at 0.68 and he was asked whether
     he meant a 3D render - a wrong answer that also needs a reply."""
+    # A BARE YES OR NO IS NEVER A NEAR-MISS. With nothing pending, "yes"
+    # embedded near holo_again and he was asked "Did you mean find a
+    # different design, sir?" (2026-09-06 18:38). An answer with no question
+    # is the model's to deal with, not a guess to confirm.
+    if re.fullmatch(r"\W*(?:yes|yeah|yep|yup|no|nope|ok|okay|sure|go ahead|do it|"
+                    r"please|go for it|fine|right)\W*", text or "", re.I):
+        return False
     return not (QUESTION_LEAD.match(text or "") and skill not in QUERY_SKILLS)
 
 

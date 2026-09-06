@@ -874,7 +874,17 @@ async def slice_part(stl_path: str = "") -> dict:
         return {"gcode": str(gcode),
                 "warning": "sliced, but no estimate was reported",
                 **({"mesh_warning": mesh_warning} if mesh_warning else {})}
-    return {"gcode": str(gcode), **est,
+    # SAID, not just returned: "fabricate it" came back as a bare "Done."
+    # (2026-09-06). The numbers are the point of slicing.
+    bits = []
+    if est.get("print_time"):
+        bits.append(f"{est['print_time']} of printing")
+    if est.get("filament_g"):
+        bits.append(f"{est['filament_g']:.0f} grams of filament")
+    spoken = "Sliced, sir" + (" — " + " and ".join(bits) if bits else "") + "."
+    if mesh_warning:
+        spoken += f" Though {mesh_warning}."
+    return {"gcode": str(gcode), **est, "spoken": spoken,
             **({"mesh_warning": mesh_warning} if mesh_warning else {})}
 
 
