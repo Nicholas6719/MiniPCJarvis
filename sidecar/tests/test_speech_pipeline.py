@@ -132,6 +132,40 @@ def main() -> int:
     check("a single sentence is not delayed by the lookahead",
           elapsed1 < SYNTH_S + PLAY_S + 0.25, f"{elapsed1:.2f}s")
 
+    # --- where a sentence ends, one token at a time (2026-09-06) --------------
+    # The reply streams; "www." used to be a finished sentence before
+    # "printables" arrived, and he heard a URL as three lines. A sentence ends
+    # at punctuation followed by whitespace; the tail is flushed at the end.
+    import orchestrator as omod
+
+    def flush(tokens):
+        pending, out = "", []
+        for tok in tokens:
+            pending += tok
+            while True:
+                m = omod.SENTENCE_END.search(pending)
+                if not m:
+                    break
+                s = pending[: m.end()].strip()
+                pending = pending[m.end():]
+                if s and omod.SPEAKABLE.search(s):
+                    out.append(s)
+        if pending.strip() and omod.SPEAKABLE.search(pending):
+            out.append(pending.strip())
+        return out
+
+    got = flush(["Here", "'s the STL: www", ".", "printables", ".", "com/model/8", "-pawn",
+                 ". It", "'s 3", ".", "5 mm thick", "."])
+    check("a URL is not split at its dots",
+          got == ["Here's the STL: www.printables.com/model/8-pawn.", "It's 3.5 mm thick."], got)
+    got = flush(["One", ". ", "Two", "!", " Three", "?", " Four"])
+    check("ordinary sentences still flush at each boundary",
+          got == ["One.", "Two!", "Three?", "Four"], got)
+    check("a lone period is not something to say", flush([".", " ", "."]) == [],
+          flush([".", " ", "."]))
+    check("...nor is an empty round",
+          not omod.SPEAKABLE.search(" . \n") and omod.SPEAKABLE.search("It is 3."))
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

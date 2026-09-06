@@ -6,6 +6,11 @@ datas, binaries, hiddenimports = [], [], []
 
 for pkg in ["faster_whisper", "piper", "fastembed", "onnxruntime", "tokenizers",
             "openwakeword", "trafilatura", "pycaw", "comtypes",
+            # justext is trafilatura's rescue extractor and reads its
+            # stoplists/ directory at first use; without them every page that
+            # reached the rescue path raised FileNotFoundError inside
+            # fetch_page (2026-09-06 10:57, the chess-pawn search).
+            "justext",
             "kokoro_onnx", "playwright", "mcp",
             "espeakng_loader", "phonemizer", "num2words", "cssselect", "lxml",
             "onnx_asr", "winocr",

@@ -132,7 +132,16 @@ CREATIVE_INTENT = re.compile(
 CREATIVE_TEMPERATURE = 0.85
 
 STOP_WORDS = re.compile(r"^\s*(stop|cancel|never\s*mind|nevermind|shut\s*up|quiet|that's\s+enough)\W*$", re.I)
-SENTENCE_END = re.compile(r"([.!?…]+[\s\"')\]]*)")
+# A sentence ends at punctuation FOLLOWED BY WHITESPACE. It used to end at any
+# full stop, and the reply streams a token at a time, so "www." was a finished
+# sentence before "printables" had arrived: he heard "www", "printables",
+# "com model 804407-chess-pawn" as three lines (2026-09-06 10:57), and the URL
+# cleaner never saw a URL. Waiting for the space costs one token of latency;
+# the tail is flushed when the stream ends, so a reply ending in "." is safe.
+SENTENCE_END = re.compile(r"([.!?…]+[\"')\]]*)(?=\s)")
+# Something the voice can say. A reply of "." after a tool failed was queued
+# and "spoken" (2026-09-06 12:46); it counts as an empty round instead.
+SPEAKABLE = re.compile(r"\w")
 # A bare "Sir." arrives when the model writes the honorific as its own sentence. It is
 # already too late to attach it to the line before (that one has been spoken), so speak
 # nothing rather than a clipped one-word clip.
@@ -2556,7 +2565,8 @@ class Orchestrator:
                             break
                         sentence = pending[: m.end()].strip()
                         pending = pending[m.end():]
-                        if sentence and not BARE_HONORIFIC.match(sentence):
+                        if (sentence and SPEAKABLE.search(sentence)
+                                and not BARE_HONORIFIC.match(sentence)):
                             # A FOLLOW-UP NEVER REPEATS THE LAST ANSWER. "And
                             # Chile?" came back "Lima. Santiago." (measured
                             # 2026-09-05, and a prompt rule changed nothing):
@@ -2584,7 +2594,7 @@ class Orchestrator:
             if cancelled:
                 return full_text
             tail = pending.strip()
-            if tail and not BARE_HONORIFIC.match(tail):
+            if tail and SPEAKABLE.search(tail) and not BARE_HONORIFIC.match(tail):
                 if held_repeat is not None:
                     log.info("dropped a repeated first sentence: %r", held_repeat)
                     dropped_repeat = held_repeat
@@ -2607,7 +2617,7 @@ class Orchestrator:
                 full_text = full_text.replace(lead_cut[0], lead_cut[1], 1)
 
             if not tool_calls:
-                if not round_text.strip() and empty_retries < 1:
+                if not SPEAKABLE.search(round_text) and empty_retries < 1:
                     # empty round (reasoning ate the budget) — nudge once
                     empty_retries += 1
                     log.warning("empty LLM round — retrying with a nudge")
@@ -2615,8 +2625,8 @@ class Orchestrator:
                                      "(Continue: finish the task or answer now, "
                                      "in one or two spoken sentences.)"})
                     continue
-                if not full_text.strip():
-                    # never end a turn in silence
+                if not SPEAKABLE.search(full_text):
+                    # never end a turn in silence (a "." is silence)
                     fallback = "I'm afraid I lost that. Would you say it again?"
                     await bus.emit("assistant_delta", text=fallback)
                     await speak_queue.put(clean_for_speech(fallback))
