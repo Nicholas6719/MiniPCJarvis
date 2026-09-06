@@ -3931,6 +3931,17 @@ reaching him. The two variety passes and his own transcript are in
 `.agent/logs/variety_run*.log` and the memory note "a guard is not an
 outcome" carries the barge-in lesson.
 
+### 13:10 — reflexes for a greeting and "what can you do"; the market story warm (release 46)
+`greeting` (time-of-day line, "Very well, sir. And yourself?" for how-are-
+you) and `capabilities` (one fixed spoken summary) are reflexes; test_brain
+267/267. `market_intel.CACHE_S` is 35 min and `briefing._maybe_warm_market`
+refreshes the story every half hour outside quiet hours. No warnings in
+the log since release 45.
+
+Still unverified today because they take the screen: hands_e2e (verified
+manually on the 5th), sleep_e2e, wake_guard_e2e, telegram_e2e. They run
+in the next non-silent release, when he is at the PC.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
