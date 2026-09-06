@@ -1746,10 +1746,31 @@ def say_remember(slots: dict, res: dict) -> str:
     return "Noted." if "error" not in res else "I couldn't save that."
 
 
-def say_stats(_: dict, res: dict) -> str:
+def slots_stats(t: str) -> dict:
+    """What part of the machine he asked about, so the answer leads with it.
+    "How much disk space is left" was answered "CPU is at 18 percent, memory
+    at 81 percent, with about 1.7 terabytes free" (2026-09-06)."""
+    s = (t or "").lower()
+    if re.search(r"\b(?:disk|drive|storage|space|room)\b", s):
+        return {"focus": "disk"}
+    if re.search(r"\b(?:memory|ram)\b", s):
+        return {"focus": "memory"}
+    if re.search(r"\b(?:cpu|processor|load)\b", s):
+        return {"focus": "cpu"}
+    return {}
+
+
+def say_stats(slots: dict, res: dict) -> str:
     free = float(res.get("disk_c_free_gb", 0) or 0)
     space = f"{free / 1000:.1f} terabytes" if free >= 1000 else f"{round(free)} gigabytes"
     cpu = float(res.get("cpu_percent", 0) or 0)
+    focus = (slots or {}).get("focus")
+    if focus == "disk":
+        return f"About {space} free on the C drive."
+    if focus == "memory":
+        return f"Memory is at {round(res.get('ram_percent', 0))} percent."
+    if focus == "cpu":
+        return "CPU is idle." if cpu < 1 else f"CPU is at {round(cpu)} percent."
     # "CPU is at 0 percent" is true of an idle machine and sounds like a
     # broken sensor. Say what it means.
     load = "CPU is idle" if cpu < 1 else f"CPU is at {round(cpu)} percent"
@@ -2558,7 +2579,7 @@ SKILLS: list[Skill] = [
         # the film's phrasing, his on 2026-09-04
         "what are the systems", "systems check", "how are the systems",
         "systems status"],
-        speak=say_stats),
+        slots=slots_stats, speak=say_stats),
     Skill("windows", "list_windows", [
         "what windows are open", "what do i have open", "list my open windows",
         "what apps are running", "which windows are open right now", "what's open",

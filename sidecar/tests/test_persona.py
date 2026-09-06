@@ -88,6 +88,15 @@ def main() -> int:
           strip_repeat("Lima is in Peru.", "Lima.") == ("Lima is in Peru.", False))
     check("no previous answer, nothing to strip", strip_repeat("Lima.", "") == ("Lima.", False))
 
+    print("\n-- a question about the disk is answered with the disk --")
+    from brain.skills import say_stats, slots_stats
+    res = {"disk_c_free_gb": 1700.0, "cpu_percent": 18.0, "ram_percent": 81.0}
+    check("disk", say_stats(slots_stats("how much disk space is left"), res) == "About 1.7 terabytes free on the C drive.")
+    check("memory", say_stats(slots_stats("how much ram am i using"), res) == "Memory is at 81 percent.")
+    check("cpu", say_stats(slots_stats("what's the cpu at"), res) == "CPU is at 18 percent.")
+    check("the whole picture when nothing is named",
+          say_stats(slots_stats("how's the system doing"), res).startswith("CPU is at 18 percent, memory at 81 percent"))
+
     print("\n-- the ledger fills --")
     import asyncio
     import delivery as dv
