@@ -81,7 +81,15 @@ def _label(description: str, image_path: str, tier: int) -> str:
     """What it gets called in "the dragon is ready, sir"."""
     d = (description or "").strip().strip(".")
     if d:
-        d = d[:48]
+        # THE THING, not its specification. "The bracket 30 by 20 by 5
+        # millimetres with two 4 mil has about 15 seconds to go" (2026-09-06
+        # 19:18): the label is what it is called in a sentence, so it stops
+        # at the first number, and never mid-word.
+        head = re.split(r"\s+(?=\d)", d, maxsplit=1)[0].strip(" ,;:-")
+        if len(head) >= 3:
+            d = head
+        if len(d) > 48:
+            d = d[:48].rsplit(" ", 1)[0]
         # The caller says "The {label} is ready": an article of its own
         # made "The a chess pawn is ready, sir" (ledger, 2026-09-06 10:57).
         return re.sub(r"^(?:a|an|the)\s+", "", d, flags=re.I) or d

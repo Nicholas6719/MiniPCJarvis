@@ -1159,6 +1159,16 @@ async def main() -> int:
           "openscad, prusaslicer and the reconstructor all go through here")
 
 
+    # -- what a thing is CALLED in a sentence (2026-09-06 19:18) --------------
+    from tools.render_tools import _label
+    check("the label stops at the specification",
+          _label("a bracket 30 by 20 by 5 millimetres with two 4 millimetre holes", "", 1) == "bracket",
+          _label("a bracket 30 by 20 by 5 millimetres with two 4 millimetre holes", "", 1))
+    check("...and drops its own article", _label("a chess pawn", "", 1) == "chess pawn")
+    check("...and never ends mid-word",
+          not _label("an " + "extraordinarily " * 5 + "long description of a thing", "", 1).endswith("extraordinar"))
+    check("a plain name is left alone", _label("arc reactor", "", 5) == "arc reactor")
+
     # -- the queue keeps the clock the QUESTION used (2026-09-06) -------------
     # A detailed render is asked about under key 8 (minutes) and was
     # submitted under tier 3 (150 s): "starting now, a couple of minutes"

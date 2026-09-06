@@ -724,7 +724,11 @@ async def edit_part(change: str, name: str = "") -> dict:
         if active():
             was = out_d.get("was_size_mm")
             now = out_d.get("size_mm")
-            said = f"{base}: {want}"
+            # Said the way it is read back: the change first, the part by a
+            # speakable name, not "bracket-30-by-20-by-5-millimetres-with-
+            # two-4-mil: make the holes 6 millimetres" (2026-09-06 19:19).
+            part_said = re.split(r"-(?=\d)", base, maxsplit=1)[0].replace("-", " ").strip()
+            said = f"{want[0].upper() + want[1:]} — the {part_said or base}"
             if was and now and was != now:
                 said += (f" (was {was[0]:.0f}x{was[1]:.0f}x{was[2]:.0f}, "
                          f"now {now[0]:.0f}x{now[1]:.0f}x{now[2]:.0f} mm)")
