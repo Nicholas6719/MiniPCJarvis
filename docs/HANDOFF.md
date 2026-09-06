@@ -4157,10 +4157,39 @@ Release 51 also carries:
 - Seeds "throw it up" (holo_show), "wireframe that" (holo_make).
   test_brain 287/287.
 
-Next: hud_e2e checks for the `part` and `compare` commands at the store
-level; a look at what the HUD draws for a focused part on a real
-assembly once he is at the PC (the ghost/centre/frame is only type-
-checked); the greeting/counsel register in the persona for long renders.
+Release 51 green at 18:34 (workbench suite 38/38 incl. the gesture path),
+pushed. hud_e2e now 26/26 with the part / compare / project-chip checks.
+
+### 18:38 — the variety pass, and release 52
+`.agent/scripts/workbench_variety.py` (log in `.agent/logs/
+workbench_variety_1.log`): 22 natural asks through /text, muted, the
+way he would say them. What worked first time: "jarvis are you up" ->
+"For you, sir, always."; the bracket made from his sentence in 20 s with
+the cost question and "go ahead"; "throw it up"; top / cut in half /
+will it print; the hole edit (9.9 s); before-and-after on and off;
+revert; layers on and off. Seven did not, all fixed in release 52:
+1. "open a new project file, index as test bench" -> "what should I
+   call it, sir?" (the reflex passed no name). `slots_project_start`.
+2. "yes" with nothing pending -> "Did you mean find a different design,
+   sir?" TWICE. `ask_allowed` refuses a bare yes/no/ok; the line was
+   emitted directly AND inside `speak_line`.
+3. "file it under the project" -> project_start asking for a name.
+   Skill `project_file` -> file_in_project.
+4. "fabricate it" -> "Done." `slice_part` says the time and filament.
+5. "remove the render" -> holo_edit (9.7 s, "that would leave it exactly
+   as it is"): the verbs came out of `_EDIT_TARGET`; the sentence is a
+   holo_hide seed; the hide canon leaves "render" alone (it had been
+   render_stop at 0.90 in between - "forget that model").
+6. "make the holes 6 millimetres" -> "it's 30 by 20 by 5 now": says the
+   change is in and the outside is unchanged.
+7. "how's the test bench project going" went to the model (0.78) - fine
+   once the project exists; the model chose project_status.
+Not a bug: "will it print" said the bracket wants supports - the LLM's
+OpenSCAD had a downward face off the bed; printcheck was right.
+test_brain 290/290.
+
+Next: rerun the variety pass on release 52; then the persona's counsel
+register for long renders, and watching him do one real pinch.
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
