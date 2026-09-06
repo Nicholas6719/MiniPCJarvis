@@ -687,6 +687,11 @@ async def edit_part(change: str, name: str = "") -> dict:
 
     try:
         prev.write_text(source, encoding="utf-8")
+        # THE OLD MESH IS KEPT TOO, as `<name>.prev.stl`: it is what "show
+        # me the before and after" puts up as a ghost beside the new one.
+        # The source alone would need a re-render to compare (2026-09-06).
+        if stl.exists():
+            stl.replace(d / f"{base}.prev.stl")
         tmp_scad.replace(scad)
         tmp_stl.replace(stl)
     except OSError as e:
@@ -767,10 +772,20 @@ async def revert_part(name: str = "") -> dict:
     # Swap, rather than overwrite: undoing an undo is the next thing he asks for.
     current_src = scad.read_text(encoding="utf-8") if scad.exists() else ""
     scad.write_text(prev.read_text(encoding="utf-8"), encoding="utf-8")
+    # ...and the mesh swaps with it, so "before and after" stays truthful
+    # after an undo: the ghost is the version he just left.
+    prev_stl = d / f"{base}.prev.stl"
+    try:
+        if stl.exists():
+            stl.replace(prev_stl)
+    except OSError:
+        log.debug("could not keep the mesh being reverted", exc_info=True)
     rc, out, err = await _run([exe, "-o", str(stl), str(scad)], GEN_TIMEOUT_S)
     if rc != 0:
         if current_src:
             scad.write_text(current_src, encoding="utf-8")
+        if prev_stl.exists() and not stl.exists():
+            prev_stl.replace(stl)          # the mesh he had is still the mesh he has
         return {"error": f"the earlier version wouldn't build: {(err or out or '').strip()[:200]}"}
     if current_src:
         prev.write_text(current_src, encoding="utf-8")

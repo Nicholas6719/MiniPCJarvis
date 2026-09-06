@@ -295,9 +295,17 @@ class RenderQueue:
         if what == "done":
             took = time.time() - job.started
             r = job.result or {}
-            line = f"The {job.label} is ready, sir — {est.spoken(took)}."
-            if r.get("spoken_size"):
-                line = f"The {job.label} is ready, sir — {r['spoken_size']}."
+            # THE RENDER IS COMPLETE. Said the way the films say it, and not
+            # the same way twice running: the shape is picked by the job id,
+            # so a burst of renders does not read as one sentence on repeat.
+            fact = r.get("spoken_size") or est.spoken(took)
+            shapes = (
+                f"The render is complete, sir — the {job.label}, {fact}.",
+                f"The {job.label} is ready, sir — {fact}.",
+                f"Done, sir. The {job.label} is on the stage — {fact}.",
+                f"Render complete, sir. {fact[:1].upper() + fact[1:]}, for the {job.label}.",
+            )
+            line = shapes[sum(map(ord, str(job.id))) % len(shapes)]
             # A part that came out wrong must say so in the SAME breath as
             # "ready" — and so must a number we chose for him. The background
             # path is the one he actually hears, and announcing a 0.4 mm sliver

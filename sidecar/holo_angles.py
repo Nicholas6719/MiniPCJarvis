@@ -232,6 +232,16 @@ def parse_action(text: str) -> str | None:
     # back, left, right - the six a person asks for by name.
     if parse_view(t):
         return "view"
+    # BEFORE AND AFTER an edit: the previous mesh as a ghost. "The old one"
+    # here is a comparison; "put the old version back" is holo_revert's,
+    # and the switch canon already keeps "previous version" out of the app
+    # switch.
+    if re.search(r"\b(?:before and after|compare|comparison|side by side|"
+                 r"what did it look like before|how it looked before|"
+                 r"show me the old one|the old one (?:too|as well|next to|over)|"
+                 r"against the old one|just the new one|only the new one|"
+                 r"stop comparing|hide the old one|lose the old one)\b", t):
+        return "compare"
     # ONE PART OF IT, or all of them back. The names come from the model's
     # manifest at runtime, so this only recognises the SHAPE of the request;
     # `holo_control` matches the name. ("Zoom in on the gauntlet" reads as

@@ -235,6 +235,11 @@ CASES = [
     ("where are we with the arc reactor project", "project_status"),
     ("close the project file", "project_close"),
     ("archive the spider-man suit project", "project_close"),
+    # the film's own lines
+    ("open a new project file, index as mark two", "project_start"),
+    ("jarvis are you up", "wakeack"),
+    ("show me the before and after", "holo_move"),
+    ("what did it look like before", "holo_move"),
     ("cut it in half", "holo_move"),
     ("show me the layers", "holo_move"),
     # Scrubbing the toolpath. The number is the hazard: _CANON erases plain

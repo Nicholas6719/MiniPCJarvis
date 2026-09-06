@@ -372,7 +372,9 @@ _ACTIONS = ("rotate", "flip", "scale", "section", "explode", "colour", "hologram
             "view",
             "layers", "solid", "layer",
             # one named part on its own, or put out of view; "" is all of it
-            "part")
+            "part",
+            # the version before the last edit, as a ghost beside this one
+            "compare")
 
 
 def _sliced(name: str) -> bool:
@@ -530,6 +532,24 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
         return {"ok": True, "action": act,
                 "spoken": ("In colour, sir." if act == "colour"
                            else "Back to the hologram, sir.")}
+    elif act == "compare":
+        # BEFORE AND AFTER. `edit_part` keeps the previous mesh as
+        # `<name>.prev.stl`; the stage draws it as an amber ghost over the
+        # new one. Nothing to compare with is said, not shown.
+        on = True
+        if said and re.search(r"\b(?:just the new|only the new|hide the old|lose the old|"
+                              r"stop comparing|without the old|drop the old|"
+                              r"new one only|take the old one away)\b", said, re.I):
+            on = False
+        p = Path(str(_current.get("path") or ""))
+        prev = p.with_name(f"{p.stem}.prev.stl") if p.name else None
+        if on and not (prev and prev.exists()):
+            return {"error": "there's no earlier version of that to compare with, sir"}
+        await bus.emit("holo_control", action="compare", on=on)
+        return {"ok": True, "action": "compare", "on": on,
+                "spoken": ("The old one in amber, sir — the new one over it."
+                           if on else "Just the new one, sir."),
+                "note": "view only — the model on disk is unchanged"}
     elif act == "explode":
         # An exploded view of one solid body is one solid body, moved. Saying
         # "separating it" and then showing him nothing move is worse than saying

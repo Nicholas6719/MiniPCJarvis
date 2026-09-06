@@ -281,12 +281,16 @@ async def project_status(name: str = "") -> dict:
     models = [f for f in m["models"] if f.lower().endswith((".stl", ".obj"))]
     notes = (m.get("notes") or "").strip()
     # the last dated entry in the log, if any
+    import re
     last_line = ""
     for line in reversed(notes.splitlines()):
         line = line.strip()
         if line and not line.startswith("#"):
-            last_line = line
-            break
+            # the log writes "*2026-09-06 17:23* — the note": say the note
+            last_line = re.sub(r"^\*?\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?\*?\s*[—–-]?\s*", "", line)
+            last_line = re.sub(r"^Opened \d{4}-\d{2}-\d{2}.*$", "", last_line).strip()
+            if last_line:
+                break
     started = m.get("started", "")
     days = ""
     try:

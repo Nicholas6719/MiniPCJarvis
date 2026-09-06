@@ -69,6 +69,10 @@ foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py
                  "bargein_e2e.py",
                  "endpoint_e2e.py", "wake_guard_e2e.py", "hands_e2e.py", "clarify_e2e.py", "market_e2e.py",
                  "telegram_e2e.py",
+                 # the workbench: a real part made, moved, checked, edited,
+                 # reverted; a two-part model focused; the project file.
+                 # Silent, nothing on the screen, cleans up after itself.
+                 "workbench_e2e.py",
                  "hud_e2e.py", "sleep_e2e.py", "soak_e2e.py")) {
     # wait for quiet: a suite that starts mid-sentence reads the previous answer
     $deadline = (Get-Date).AddSeconds(90)

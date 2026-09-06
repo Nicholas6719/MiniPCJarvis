@@ -4012,6 +4012,102 @@ errors are 09:51-10:00, his Sunday test, before release 42; the audio
 writer-thread warnings at 01:54/02:47/09:45 all recovered by the pool
 replacement.
 
+## 2026-09-06 evening — the workbench: "make him Tony's assistant"
+His brief: *"Perfect the 3d modeling, hand controls, Jarvis working with
+me, project creation etc. I need the mcu Jarvis Tony's assistant feeling.
+Do research if you need to. Test everything to ensure accuracy and
+performance."* He is away (state: sleeping), so everything is silent and
+nothing takes the screen.
+
+### The research, in one paragraph
+The films' workbench vocabulary (Iron Man 1 Mark II/III design, Iron Man 2
+Expo diorama; Perception's design notes are behind a blocked host): "open
+a new project file, index as Mark II"; "throw it up"; "vacuform a digital
+wireframe, I need a manipulatable projection"; "highlight the unisphere";
+"lose the footpaths, get rid of them"; "structure the protons and
+neutrons using the pavilions as a framework"; and JARVIS's side: "The
+render is complete", "Shall I render using proposed specifications?",
+"Commencing automated assembly, estimated completion time five hours",
+"Am I to include the Belgian waffle stands?" (a clarifying question with
+a dry edge), "Sir, there are still terabytes of calculations needed..."
+(counsel, then compliance). The pattern: short verbs on named pieces, a
+project file as the frame, status reported precisely, questions only
+when they cost him nothing.
+
+### Three surveys first (Explore agents, ~250 k tokens, read-only)
+Full engineering maps of the hologram pipeline, the hand controls and
+the project code. The defects they found, all fixed in release 49:
+- **No action could act on a named part** - his own sentence "zoom in on
+  the helmet to see the helmet specs" is quoted in four docstrings and
+  had nothing behind it. Per-part sizes were computed, sent, and dropped
+  by the HUD's type.
+- **`has_colour` never reached the tool**: the stage painted the model in
+  colour while JARVIS said "it came without any", same turn.
+- **The detailed render's clock**: asked under key 8 (420 s), submitted
+  under tier 3 (150 s) - "starting now, a couple of minutes" after he
+  agreed to seven, overrun notice at 170 s.
+- **`holo_control`'s schema omitted `layer`/`delta`** while the action
+  list advertised them.
+- **Hands**: `detects` counted detector RUNS and hand_status read it as
+  "I can see your hands" (soak receipt: frames 383 / detects 383 in an
+  empty room); `detect_ms` measured and discarded; `disarm()` told the
+  HUD "hands off" (read as camera off) even when nothing was armed. No
+  pan gesture, no third axis - left as is: rules 1-3 of phase E stand.
+  Nobody has ever proved a real pinch moves the model; still true.
+- **Projects**: the HUD chip only heard `start_project` (recall a week
+  later left it on the last thing STARTED); the active pointer was the
+  raw said string while the index used the folder name (two rows);
+  nothing could close or archive a project by voice; "how's the suit
+  going" had no path (the SQLite estimate wants percentages nobody says);
+  the model never knew which project was open; "add a lid" named nothing
+  in `_EDIT_TARGET` and fell to the general model.
+
+### Release 49 (built 17:0x, silent)
+- `holo_control` action **`part`**: focus / hide / all. Names from the
+  manifest (`remember_geometry` stores per-part sizes and `has_colour`
+  when `/holo/geometry` computes them), longest match first, numbered
+  parts by bare name ("the power core" -> power_core_2). The stage draws
+  one part by draw range on the face and edge buffers (`part_tri_counts`,
+  `edge_counts` in the assembly payload), ghosts the rest at 0.025/0.07,
+  moves `orient.position` so the part is centred, frames it by size,
+  writes the part's millimetres into the header. Hidden parts collapse
+  to the origin and `applyExplode` re-applies that. `reset` puts it all
+  back. `holo_angles.parse_action` returns "part" for the SHAPE of a
+  request (highlight / isolate / on its own / how big is the / all the
+  parts / back together); "focus on X" is folded onto the app switch by
+  `_CANON`, so `focus_window` hands a part name on to the hologram; "hide
+  the X" is the UI hide-all canon in the router but `holo_control` reads
+  the part first when one is named.
+- `render_queue.submit(..., estimate_key=)`; `render_tools` passes
+  `est_key`.
+- Projects: `_announce()` on start/recall/close; `close_project` (archive
+  moves, never deletes) and `project_status` (models, references,
+  started N days ago, last note; no percentages); skills `project_close`,
+  `project_status`; the close canon leaves `project(s)` alone;
+  `close_application("the project file")` hands on; `turn_context(project=)`
+  carries the open project. `_EDIT_TARGET` grew lid/handle/hook/mount/
+  bracket/notch/groove/pocket/boss/rib/logo/text/hollow/shell + add/
+  remove/lose/delete/drop/get rid of; seeds for both.
+- Hands: `seen`, `seeing` (a hand within 2 s), `detect_ms` median of the
+  last 50; `hand_status` says "I can see your hands" only when seeing.
+- Seed lessons: "focus on the helmet" -> "switch to APP" and "hide the
+  helmet" -> "hide everything" at 1.00, "close the project" ->
+  "close APP" (fixed in the canon), "add mounting TABS" -> "show the
+  VIEW tab" (seed changed to lugs). seed_collisions, test_canon_erasure
+  and test_brain 279/279 green.
+- A scratch snippet imported `brain.router` WITHOUT `JARVIS_DB` and the
+  sidecar's own repair ran on the database this shell sees (mirror or
+  not - see the memory note). The live sidecar's ledger and transcript
+  were intact afterwards and the log shows no database error. ALWAYS set
+  `JARVIS_DB` for ad-hoc imports.
+
+Next: `workbench_e2e.py` (a real tier-1 plate made, moved, checked,
+edited, reverted; a two-part assembly focused/hidden/restored; the
+project file opened, filed, reported, closed; all silent, all cleaned
+up) runs against release 49 and joins suites.ps1. Then the before/after
+compare on an edit, the film's completion lines, "index as" project
+seeds and the "are you up" reflex.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

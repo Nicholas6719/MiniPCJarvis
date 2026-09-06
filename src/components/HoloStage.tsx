@@ -258,6 +258,12 @@ export function HoloStage() {
     let focused = -1;
     const hidden = new Set<number>();
     let ghost: Group | null = null;
+    // BEFORE AND AFTER: the mesh from before the last edit, drawn in amber
+    // over the new one. Fetched only when asked for, dropped with the model.
+    const before = new Group();
+    before.visible = false;
+    orient.add(before);
+    let beforeLoaded = false;
     // The sliced toolpath, and how far up it he is looking. Layers are laid into
     // ONE buffer in order, so scrubbing is a `setDrawRange` — one draw call and
     // instant — rather than a hundred meshes toggled on and off.
@@ -284,7 +290,7 @@ export function HoloStage() {
     }
     // ...and the grabber brackets, which were rebuilt per model and never
     // disposed — sixteen models in a session is sixteen sets of leaked lines.
-    const clear = () => [shell, marks, path, bed, grabber].forEach(empty);
+    const clear = () => [shell, marks, path, bed, grabber, before].forEach(empty);
 
     async function load() {
       let geo: Geometry;
@@ -329,6 +335,8 @@ export function HoloStage() {
       edgeGeom = null;
       edgeBase = null;
       orient.position.set(0, 0, 0);
+      beforeLoaded = false;
+      before.visible = false;
       // THE REAL COLOURS, when the model has any. One attribute over the buffer
       // that is already there — the per-vertex part label exists for the
       // exploded view — so this costs no extra draw call and nothing at all on
@@ -677,6 +685,42 @@ export function HoloStage() {
       settled = false;
     }
 
+    /** The mesh from before the last edit, in amber, over the new one. */
+    async function showBefore(on: boolean) {
+      if (!on) {
+        before.visible = false;
+        settled = false;
+        return;
+      }
+      if (!beforeLoaded) {
+        let geo: Geometry;
+        try {
+          geo = await api("/holo/geometry?version=prev");
+        } catch {
+          return;
+        }
+        if (geo.error || !geo.positions_b64) return;
+        empty(before);
+        const positions = f32(geo.positions_b64);
+        const faces = new BufferGeometry();
+        faces.setAttribute("position", new Float32BufferAttribute(positions, 3));
+        before.add(new Mesh(faces, new MeshBasicMaterial({
+          color: AMBER, transparent: true, opacity: 0.05, side: DoubleSide, depthWrite: false,
+        })));
+        const edgePositions = f32(geo.edge_positions_b64);
+        if (edgePositions.length) {
+          const lines = new BufferGeometry();
+          lines.setAttribute("position", new Float32BufferAttribute(edgePositions, 3));
+          before.add(new LineSegments(lines, new LineBasicMaterial({
+            color: AMBER, transparent: true, opacity: 0.55,
+          })));
+        }
+        beforeLoaded = true;
+      }
+      before.visible = true;
+      settled = false;
+    }
+
     function buildGrabber(bx: number, by: number, bz: number) {
       empty(grabber);
       const [x, y, z] = [bx / 2, by / 2, bz / 2];
@@ -792,12 +836,16 @@ export function HoloStage() {
           }
           break;
         }
+        case "compare":
+          void showBefore(c.on ?? !before.visible);
+          break;
         case "reset":
           Object.assign(target, HOME);
           clearClip();
           explodeTarget = 0;
           spin = true;
           focusAll();
+          before.visible = false;
           break;
         case "layers":
           void applyCheck.current?.(!!c.on);

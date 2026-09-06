@@ -371,6 +371,29 @@ async def main() -> int:
     check("ordinary controls are untouched with parts remembered",
           (got.get("applied") or {}).get("action") == "rotate", got)
     check("'part' is a control like any other", "part" in H._ACTIONS)
+
+    # ------------------------------------------- before and after (2026-09-06)
+    # edit_part keeps `<name>.prev.stl`; the stage draws it in amber over the
+    # new one. With no earlier version the answer is a sentence, not a ghost.
+    import tempfile
+    td = tempfile.mkdtemp()
+    stl = os.path.join(td, "plate.stl")
+    open(stl, "wb").write(b"\0" * 84)
+    H._current.clear()
+    H._current.update({"name": "plate", "path": stl, "body_count": 1})
+    got = await H.holo_control(phrase="show me the before and after")
+    check("no earlier version is said, not shown",
+          "no earlier version" in got.get("error", ""), got)
+    open(os.path.join(td, "plate.prev.stl"), "wb").write(b"\0" * 84)
+    got = await H.holo_control(phrase="show me the before and after")
+    check("with one kept, the ghost goes up", got.get("action") == "compare" and got.get("on") is True
+          and sent[-1][1] == {"action": "compare", "on": True}, (got, sent[-1]))
+    got = await H.holo_control(phrase="just the new one")
+    check("...and comes down again", got.get("on") is False and sent[-1][1].get("on") is False, got)
+    from holo_angles import parse_action as _pa
+    check("'what did it look like before' is a comparison", _pa("what did it look like before") == "compare")
+    check("'put the old version back' is NOT (that is revert's)", _pa("put the old version back") != "compare",
+          _pa("put the old version back"))
     H._current.clear()
     H.bus.emit = _real_emit
 

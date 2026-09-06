@@ -2205,6 +2205,10 @@ SKILLS: list[Skill] = [
         "isolate the left boot", "how big is the gauntlet",
         "lose the base plate", "take the gauntlet out of view",
         "put all the parts back", "show me the whole thing again",
+        # before and after an edit: the previous mesh as a ghost
+        "show me the before and after", "compare it with the old one",
+        "what did it look like before", "show me the old one over it",
+        "just the new one", "stop comparing",
         # Scrubbing the toolpath. Deliberately seeded separately from "show me
         # the layers": one turns the preview on, the other moves through it, and
         # the parser tells them apart by whether he named a layer.
@@ -2347,7 +2351,12 @@ SKILLS: list[Skill] = [
         "set this up as a new project",
         "create a new project folder for the arc reactor",
         "i want a new project for the spider-man suit",
-        "file this under a new project"],
+        "file this under a new project",
+        # the film's own line: "I'd like to open a new project file, index as
+        # Mark II" (the open canon leaves "project" alone for this)
+        "open a new project file, index as mark two",
+        "new project file, index as arc reactor",
+        "index this as a new project called the spider-man suit"],
         speak=None),
     # "PULL UP X" IS THE SENTENCE THAT HAS TO WORK, and it sits next to "show me
     # X", which must keep reaching the images panel. What separates them is that
@@ -2932,10 +2941,17 @@ SKILLS: list[Skill] = [
         # the history suggests. /text and the wake word already woke him; just answer.
         "wake up", "wake up jarvis", "are you awake", "you up", "good morning jarvis",
         "morning jarvis", "rise and shine", "time to wake up", "you there",
-        "are you there jarvis"],
+        "are you there jarvis", "jarvis are you up", "are you up", "you online",
+        "are you online", "are you running"],
         # "wake ME up at 7" is an alarm for the USER, not a greeting for him
-        slots=lambda t: None if re.search(r"\bwake\s+(?:me|us)\b", t) else {},
-        speak=lambda _s, _r: "At your service."),
+        slots=lambda t: None if re.search(r"\bwake\s+(?:me|us)\b", t) else {"said": t},
+        # "JARVIS, are you up?" - "For you, sir, always." The film's own
+        # exchange, for the sentence that IS that exchange; the rest keep
+        # the plainer line.
+        speak=lambda s, _r: ("For you, sir, always."
+                             if re.search(r"\b(?:you|jarvis)\s+(?:up|awake|online|running|there)\b",
+                                          (s or {}).get("said", ""), re.I)
+                             else "At your service.")),
     Skill("sleep", "enter_sleep_mode", [
         # He gets dismissed in a lot of different moods, so the seeds cover the clusters:
         # explicit sleep, "we're finished", military stand-down, goodbyes, and get-lost.

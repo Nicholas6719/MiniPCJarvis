@@ -755,6 +755,39 @@ async def debug_ledger(limit: int = 50, x_jarvis_token: str | None = Header(None
     return {"count": len(rows), "muted": delivery.mute_until, "ledger": rows}
 
 
+@app.post("/debug/workfile")
+async def debug_workfile(body: dict, x_jarvis_token: str | None = Header(None)):
+    """Dev/test only: put a small file INTO the work folder, or remove one.
+
+    The live workbench suite needs a two-part model to prove part focus, and
+    the shell the suites run from sees a virtualised AppData - a file it
+    writes beside the sidecar's models is not there for the sidecar. So the
+    sidecar writes it. Confined to the work folder by name (no separators),
+    capped at 2 MB, base64 in, and only under JARVIS_DEBUG.
+    """
+    _auth(x_jarvis_token)
+    if os.environ.get("JARVIS_DEBUG") != "1":
+        raise HTTPException(403, "debug endpoints disabled")
+    import base64
+    import re as _re
+    from tools.fabrication import work_dir
+    name = str(body.get("name") or "")
+    if not _re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", name) or name.startswith("."):
+        raise HTTPException(400, "a plain file name, nothing else")
+    p = work_dir() / name
+    if body.get("delete"):
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        return {"ok": True, "deleted": str(p)}
+    raw = base64.b64decode(str(body.get("content_b64") or ""), validate=True)
+    if len(raw) > 2_000_000:
+        raise HTTPException(413, "too big for a test file")
+    await asyncio.to_thread(p.write_bytes, raw)
+    return {"ok": True, "path": str(p)}
+
+
 @app.get("/debug/desktop")
 async def debug_desktop(x_jarvis_token: str | None = Header(None)):
     """Where THIS process's keystrokes would go. A sidecar on a different
@@ -1114,7 +1147,7 @@ async def transcript(limit: int = 30, x_jarvis_token: str | None = Header(None))
 
 
 @app.get("/holo/geometry")
-async def holo_geometry(x_jarvis_token: str | None = Header(None)):
+async def holo_geometry(version: str = "", x_jarvis_token: str | None = Header(None)):
     """The mesh currently on the stage, as flat float lists.
 
     A separate endpoint rather than a tool result on purpose: this is a few
@@ -1128,6 +1161,19 @@ async def holo_geometry(x_jarvis_token: str | None = Header(None)):
     if not cur.get("path"):
         return {"error": "nothing is on the stage"}
     import meshio
+    if version == "prev":
+        # The mesh from before the last edit (`<name>.prev.stl`, kept by
+        # edit_part), for the before-and-after ghost. Still only ever the
+        # model that is on the stage - a sibling of it, by construction.
+        from pathlib import Path as _P
+        p = _P(str(cur["path"]))
+        prev = p.with_name(f"{p.stem}.prev.stl")
+        if not prev.exists():
+            return {"error": "no earlier version"}
+        try:
+            return await asyncio.to_thread(meshio.to_payload, str(prev))
+        except meshio.BadMesh as e:
+            return {"error": str(e)}
     try:
         # OFF THE EVENT LOOP. This is 0.48 s of numpy on a 38k-triangle mesh from
         # tier 3 — parse, weld, feature edges, centring — and it was running
