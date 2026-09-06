@@ -3899,6 +3899,18 @@ not penalised while a render is in flight; holo_control says "still
 building"); "Stopped the a lighthouse". Release 42's own suites proved the
 barge-in fix live: after the interruption he heard and answered, twice.
 
+### 12:00 — the television, and the disk (release 44)
+The 19:44-19:49 stretch of the 5th: wakes at 0.70-0.73 on background
+audio, transcripts "Um" / "Uh" / "I think I'm just", and replies to an
+empty room ("Sure thing, sir", "Just take it easy") - one into the
+barge-in freeze. `skills.not_for_me(text, wake_score)`: below 0.85, a
+transcript with no substantive word left after fillers and function words
+is dismissed silently (`wake_suppressed reason=fragment`); a clear wake is
+always his; the bare name still gets the acknowledgement. `_last_wake_score`
+is recorded in the wake loop. Also `slots_stats`: "how much disk space is
+left" answers with the disk. The second variety pass on release 43 was
+clean (`.agent/logs/variety_run2.log`).
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
