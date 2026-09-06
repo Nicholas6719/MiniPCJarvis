@@ -4214,6 +4214,20 @@ grams of filament."; "remove the render" -> "Taking it down, sir."
 test_brain 292/292; hand_control, holo_control, canon erasure, intent,
 seed_collisions green; tsc clean.
 
+Release 53: RELEASE FAILED (19:53) on ONE suite, bargein_e2e round 2,
+and the real log (copied by a one-shot schtasks - both agent shells now
+see a stale virtual copy of `%APPDATA%\JARVIS\logs`, Sep 3 in
+PowerShell, 14:42 in bash) shows why: real speech in the room during the
+round ("Logs going off.", "I almost had a what's it called? Mental
+conundrum? Tantrum?", "Okay." x3) - somebody talking near the C920 while
+the suite injected its clip. Environmental, and reproduced by a manual
+rerun for the same reason. Everything else green: workbench 39/39 incl.
+the two-hand carry, HUD 26/26. The build IS installed (hotswap precedes
+the suites) and `/debug/hands` on it returns `pan`. Pushed as is; the
+barge-in suite is to be rerun when the room is quiet. No more audio or
+stage tests were run after this - the camera had been on for 9,035
+frames and the state went idle, which may mean he is at the PC.
+
 Still to watch him do once: one real pinch in front of the camera (the
 gesture path is proved from the landmarks onward, not before).
 
