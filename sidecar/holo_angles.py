@@ -232,6 +232,13 @@ def parse_action(text: str) -> str | None:
     # back, left, right - the six a person asks for by name.
     if parse_view(t):
         return "view"
+    # CARRIED ACROSS THE STAGE: "move it left a bit", "nudge it up", "shift
+    # it to the right". Not "move the hole over" - that is an edit, and it
+    # never reaches this parser. Before the rotate rule, which owns "turn".
+    if re.search(r"\b(?:move|shift|nudge|slide|scoot|push|bring|drag)\b[\w\s]{0,20}?"
+                 r"\b(?:left|right|up|down|upwards|downwards|higher|lower)\b", t) \
+            and not re.search(r"\b(?:hole|holes|wall|edge|part|slot)\b", t):
+        return "pan"
     # BEFORE AND AFTER an edit: the previous mesh as a ghost. "The old one"
     # here is a comparison; "put the old version back" is holo_revert's,
     # and the switch canon already keeps "previous version" out of the app

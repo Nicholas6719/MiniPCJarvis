@@ -274,6 +274,32 @@ _UNFOCUS = re.compile(
     r"all the pieces)\b", re.I)
 
 
+_PAN_WAY = re.compile(r"\b(?P<way>left|right|up|down|upwards|downwards|higher|lower)\b", re.I)
+_PAN_AMOUNT_SMALL = re.compile(r"\b(?:a (?:bit|little|touch|tad|smidge)|slightly|a little bit)\b", re.I)
+_PAN_AMOUNT_BIG = re.compile(r"\b(?:a lot|right over|all the way|much further|way over)\b", re.I)
+
+
+def _parse_pan(said: str) -> tuple[float, float] | None:
+    """"Move it left a bit" -> (-0.07, 0). Fractions of the frame, the same
+    unit the two-hand carry sends; the stage scales them by the model."""
+    m = _PAN_WAY.search(said or "")
+    if not m:
+        return None
+    step = 0.15
+    if _PAN_AMOUNT_SMALL.search(said or ""):
+        step = 0.07
+    elif _PAN_AMOUNT_BIG.search(said or ""):
+        step = 0.3
+    way = m.group("way").lower()
+    if way == "left":
+        return (-step, 0.0)
+    if way == "right":
+        return (step, 0.0)
+    if way in ("up", "upwards", "higher"):
+        return (0.0, -step)
+    return (0.0, step)
+
+
 def _spoken_list(names: list) -> str:
     """"a, b and c" — said, not printed."""
     if not names:
@@ -374,7 +400,9 @@ _ACTIONS = ("rotate", "flip", "scale", "section", "explode", "colour", "hologram
             # one named part on its own, or put out of view; "" is all of it
             "part",
             # the version before the last edit, as a ghost beside this one
-            "compare")
+            "compare",
+            # carried across the stage: by both hands, or "move it left a bit"
+            "pan")
 
 
 def _sliced(name: str) -> bool:
@@ -395,7 +423,8 @@ _AXIS_SAID = {"x": "forwards", "y": "sideways", "z": "round"}
 async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
                        factor: float = 0.0, at: float = 0.5,
                        layer: int = -1, delta: int = 0,
-                       phrase: str = "", view: str = "", part: str = "") -> dict:
+                       phrase: str = "", view: str = "", part: str = "",
+                       dx: float = 0.0, dy: float = 0.0) -> dict:
     """Move the model that is already on the stage.
 
     NOTHING HERE CHANGES THE MODEL. Rotation, scale and the section cut are all
@@ -532,6 +561,20 @@ async def holo_control(action: str = "", axis: str = "", degrees: float = 0.0,
         return {"ok": True, "action": act,
                 "spoken": ("In colour, sir." if act == "colour"
                            else "Back to the hologram, sir.")}
+    elif act == "pan":
+        # CARRIED ACROSS THE STAGE. By hand the tracker sends the fraction
+        # of the frame both pinches moved; by voice a direction is a fixed
+        # nudge. "A bit" halves it, "a lot" / "right over" doubles it.
+        import holo_angles
+        ddx, ddy = float(dx or 0.0), float(dy or 0.0)
+        if not (ddx or ddy):
+            got = _parse_pan(said)
+            if not got:
+                return {"error": "which way, sir — left, right, up or down?"}
+            ddx, ddy = got
+        payload.update({"action": "pan", "dx": ddx, "dy": ddy})
+        way = ("left" if ddx < 0 else "right") if abs(ddx) >= abs(ddy) else ("up" if ddy < 0 else "down")
+        spoken = f"Moving it {way}, sir."
     elif act == "compare":
         # BEFORE AND AFTER. `edit_part` keeps the previous mesh as
         # `<name>.prev.stl`; the stage draws it as an amber ghost over the
@@ -721,6 +764,10 @@ def register_all() -> None:
             "part": {"type": "string",
                      "description": "for part: the named part to show on its own "
                                     "('helmet'); empty puts everything back"},
+            "dx": {"type": "number", "description": "for pan: fraction of the stage to "
+                                                    "move it sideways (right is positive)"},
+            "dy": {"type": "number", "description": "for pan: fraction of the stage to "
+                                                    "move it vertically (down is positive)"},
             "layer": {"type": "integer", "description": "for layer: which layer to show "
                                                         "(-1 is the top, 0 the first)"},
             "delta": {"type": "integer", "description": "for layer: +1 / -1 from the "

@@ -2248,6 +2248,9 @@ SKILLS: list[Skill] = [
         "isolate the left boot", "how big is the gauntlet",
         "lose the base plate", "take the gauntlet out of view",
         "put all the parts back", "show me the whole thing again",
+        # carried across the stage
+        "move it to the left a bit", "shift it to the right", "nudge it up a little",
+        "move it down", "slide it over to the left",
         # before and after an edit: the previous mesh as a ghost
         "show me the before and after", "compare it with the old one",
         "what did it look like before", "show me the old one over it",

@@ -144,6 +144,11 @@ class GestureTracker:
         # once per camera frame. Reset with everything else on release.
         self._vel: tuple[float, float] = (0.0, 0.0)
         self._two: float | None = None
+        # Where the two pinches sit between them: moving that together is a
+        # PAN - the model carried across the stage, the way he would carry a
+        # thing held in both hands. Added 2026-09-06; there was no way to move
+        # the model at all, by hand or by voice.
+        self._mid: tuple[float, float] | None = None
         self._seen_at = 0.0
 
     def reset(self) -> None:
@@ -152,6 +157,7 @@ class GestureTracker:
         self._last = None
         self._vel = (0.0, 0.0)
         self._two = None
+        self._mid = None
 
     def _pinch_state(self, key: str, lm) -> bool:
         """Pinched, with hysteresis so the boundary does not chatter."""
@@ -196,8 +202,10 @@ class GestureTracker:
             a = grip_point(pinched[0]["landmarks"], self.mirrored)
             b = grip_point(pinched[1]["landmarks"], self.mirrored)
             span = math.hypot(a[0] - b[0], a[1] - b[1])
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
             if self._two is None:
                 self._two = span
+                self._mid = mid
                 self.engaged = True
                 out.append({"action": "grab", "hands": 2})
             elif span > 1e-6:
@@ -207,9 +215,19 @@ class GestureTracker:
                     self._two = span
                     out.append({"action": "scale",
                                 "factor": round(max(0.5, min(2.0, factor)), 3)})
+                # BOTH HANDS MOVING TOGETHER carry the model: a pan, in
+                # fractions of the frame, and it can happen in the same
+                # frame as a zoom (the both-axes rule, again).
+                if self._mid is not None:
+                    mdx, mdy = mid[0] - self._mid[0], mid[1] - self._mid[1]
+                    if abs(mdx) > DEADZONE or abs(mdy) > DEADZONE:
+                        self._mid = mid
+                        out.append({"action": "pan", "dx": round(mdx, 4),
+                                    "dy": round(mdy, 4)})
             self._last = None
             return out
         self._two = None
+        self._mid = None
 
         if len(pinched) == 1:
             p = grip_point(pinched[0]["landmarks"], self.mirrored)

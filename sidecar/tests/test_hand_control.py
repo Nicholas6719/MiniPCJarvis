@@ -299,6 +299,27 @@ def main() -> int:
           f"{hand_control.TARGET_FPS} fps")
     holo_tools._current.clear()
 
+    # -- both hands carry it: a pan (2026-09-06) ------------------------------
+    # There was no way to MOVE the model, by hand or by voice. Two pinches
+    # moving together, span unchanged, is the model carried across the stage;
+    # the same frame may still zoom if the span changed too.
+    t = G.GestureTracker()
+    t.update([hand(0.4, 0.5, side="left"), hand(0.6, 0.5, side="right")], 0.0)
+    evs = t.update([hand(0.5, 0.5, side="left"), hand(0.7, 0.5, side="right")], 0.1)
+    pans = [e for e in evs if e["action"] == "pan"]
+    check("both hands moving together is a pan", len(pans) == 1, evs)
+    check("...to his right (raw x up is screen left, mirrored back)",
+          pans and pans[0]["dx"] < 0, pans)
+    check("...with no zoom when the span did not change",
+          not any(e["action"] == "scale" for e in evs), evs)
+    evs = t.update([hand(0.45, 0.4, side="left"), hand(0.8, 0.4, side="right")], 0.2)
+    check("spread AND move in one frame is a zoom and a pan",
+          {e["action"] for e in evs} == {"scale", "pan"}, evs)
+    check("still nothing outside the control vocabulary",
+          all(e["action"] in ("grab", "release", "rotate", "scale", "pan") for e in evs))
+    from tools import holo_tools
+    check("...and 'pan' is one of the stage's own actions", "pan" in holo_tools._ACTIONS)
+
     # -- "I can see your hands" must mean a hand, not a detector run (2026-09-06)
     # The soak receipt was frames 383 / detects 383 in an empty room, and
     # hand_status read `detects` as hands seen.

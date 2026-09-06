@@ -145,6 +145,9 @@ export interface HoloState {
     // One named part on its own ("focus"), put out of view ("hide"), or
     // everything back ("all" / empty part).
     part?: string; mode?: string;
+    // Carried across the stage, in fractions of the frame (right and down
+    // positive), by both hands or by "move it left a bit".
+    dx?: number; dy?: number;
   };
 }
 
@@ -819,7 +822,8 @@ export const useStore = create<Store>((set, get) => ({
                              axis: evt.axis, degrees: evt.degrees, factor: evt.factor,
                              at: evt.at, on: evt.on, view: evt.view,
                              layer: evt.layer, delta: evt.delta,
-                             part: evt.part, mode: evt.mode } } }
+                             part: evt.part, mode: evt.mode,
+                             dx: evt.dx, dy: evt.dy } } }
           : {}));
         break;
       case "reflex":

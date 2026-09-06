@@ -202,7 +202,9 @@ export function HoloStage() {
     // Rotation is held per axis rather than as the two the idle spin uses, so a
     // spoken "tip it forward thirty degrees" and the ambient turn do not fight
     // over the same number.
-    const HOME = { rx: -0.2, ry: 0.6, rz: 0, scale: 1 };
+    // px/py: where the model sits on the stage, in world units - a pan by
+    // both hands or by "move it left a bit" (2026-09-06).
+    const HOME = { rx: -0.2, ry: 0.6, rz: 0, scale: 1, px: 0, py: 0 };
     const target = { ...HOME };
     const current = { ...HOME };
 
@@ -836,6 +838,18 @@ export function HoloStage() {
           }
           break;
         }
+        case "pan": {
+          // Fractions of the frame -> world units, scaled by the model so a
+          // 6 mm spacer and a 200 mm frame both cross the stage in the same
+          // gesture. Screen y is down; world y is up. Held within a stage
+          // width either way so it can never be carried out of view.
+          const span = Math.max(...(lastSize ?? [10])) || 10;
+          const limit = span * 2.5;
+          target.px = Math.max(-limit, Math.min(limit, target.px + (c.dx ?? 0) * span * 2.2));
+          target.py = Math.max(-limit, Math.min(limit, target.py - (c.dy ?? 0) * span * 2.2));
+          spin = false;
+          break;
+        }
         case "compare":
           void showBefore(c.on ?? !before.visible);
           break;
@@ -894,15 +908,20 @@ export function HoloStage() {
       const drz = target.rz - current.rz;
       const ds = target.scale - current.scale;
       const dx = explodeTarget - explode;
+      const dpx = target.px - current.px;
+      const dpy = target.py - current.py;
       const moving = spin
         || Math.abs(dry) > 1e-4 || Math.abs(drx) > 1e-4 || Math.abs(drz) > 1e-4
-        || Math.abs(ds) > 1e-4 || Math.abs(dx) > 1e-3;
+        || Math.abs(ds) > 1e-4 || Math.abs(dx) > 1e-3
+        || Math.abs(dpx) > 1e-3 || Math.abs(dpy) > 1e-3;
       // Settle, like the orb. An unmoving scene is not re-rendered.
       if (!moving && settled) return;
       current.ry += dry * 0.1;
       current.rx += drx * 0.1;
       current.rz += drz * 0.1;
       current.scale += ds * 0.1;
+      current.px += dpx * 0.1;
+      current.py += dpy * 0.1;
       if (Math.abs(dx) > 1e-3) {
         explode += dx * 0.1;
         // Pushed by a fraction of the model's own size, so a 6 mm bracket and a
@@ -912,7 +931,8 @@ export function HoloStage() {
       bob += 0.012;
       group.rotation.set(current.rx, current.ry, current.rz);
       group.scale.setScalar(current.scale);
-      group.position.y = Math.sin(bob) * 1.4;
+      group.position.x = current.px;
+      group.position.y = current.py + Math.sin(bob) * 1.4;
       bed.rotation.y = current.ry;
       renderer.render(scene, camera);
       settled = !moving;

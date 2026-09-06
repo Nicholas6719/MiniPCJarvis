@@ -248,6 +248,8 @@ CASES = [
     ("file it under the project", "project_file"),
     ("save it to the project", "project_file"),
     ("remove the render", "holo_hide"),
+    ("move it to the left a bit", "holo_move"),
+    ("nudge it up a little", "holo_move"),
     ("cut it in half", "holo_move"),
     ("show me the layers", "holo_move"),
     # Scrubbing the toolpath. The number is the hazard: _CANON erases plain

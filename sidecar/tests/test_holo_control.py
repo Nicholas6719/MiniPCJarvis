@@ -407,6 +407,22 @@ async def main() -> int:
           slots_project_start("we're starting a new project") == {}
           and slots_project_start("start a new project for this") == {})
     check("'remove the render' is not an edit", slots_holo_edit("remove the render") is None)
+    # carried across the stage, by voice
+    from holo_angles import parse_action as _pa2
+    check("'move it to the left a bit' is a pan", _pa2("move it to the left a bit") == "pan")
+    check("...'move the hole over' is not (an edit)", _pa2("move the hole over") != "pan")
+    check("...'turn it left' is still a rotation", _pa2("turn it left") == "rotate")
+    H._current.update({"name": "gate", "path": "x.stl", "body_count": 1})
+    got = await H.holo_control(phrase="move it to the left a bit")
+    check("a small nudge left", (got.get("applied") or {}).get("action") == "pan"
+          and abs((got.get("applied") or {}).get("dx", 0) + 0.07) < 1e-6, got)
+    got = await H.holo_control(phrase="nudge it up")
+    check("up is negative dy", (got.get("applied") or {}).get("dy", 0) < 0, got)
+    got = await H.holo_control(action="pan", dx=0.2)
+    check("the model can pan by number", (got.get("applied") or {}).get("dx") == 0.2, got)
+    got = await H.holo_control(action="pan", phrase="move it somewhere")
+    check("no direction is a question", "which way" in got.get("error", ""), got)
+    H._current.clear()
     check("...'get rid of the handle' still is",
           slots_holo_edit("get rid of the handle") == {"change": "get rid of the handle"})
 

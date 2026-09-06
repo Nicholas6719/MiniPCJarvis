@@ -225,6 +225,15 @@ def main() -> int:
           all(m.get("axis") == "z" and (m.get("degrees") or 0) > 0 for m in rot), rot)
     check("...and letting go releases", ("hands", "release") in acts, acts)
     check("the endpoint reports the same events", r.get("emitted", 0) >= 3, r)
+    # both hands, moving together: the model carried across the stage
+    frames = [{"t": 0.0, "hands": [hand(0.4, 0.5, side="left"), hand(0.6, 0.5, side="right")]},
+              {"t": 0.1, "hands": [hand(0.5, 0.5, side="left"), hand(0.7, 0.5, side="right")]},
+              {"t": 0.2, "hands": [hand(0.5, 0.5, pinch=False, side="left"),
+                                   hand(0.7, 0.5, pinch=False, side="right")]}]
+    r, seen = asyncio.run(drive())
+    pans = [m for m in seen if m.get("kind") == "holo_control" and m.get("action") == "pan"]
+    check("both hands moving together carry it (a pan on the socket)",
+          len(pans) >= 1 and all(abs(m.get("dx") or 0) > 0 for m in pans), [(m.get("dx"), m.get("dy")) for m in pans])
 
     # ------------------------------------------------------- the project file
     print("\n-- the project file --")
