@@ -1575,6 +1575,7 @@ class Orchestrator:
             self._begin_turn()
             await self.sm.to(State.PROCESSING, force=True)
             self.metrics.begin()
+            self._voice_heard()
             await bus.emit("transcript", role="user", text=spoken)
             try:
                 await self._converse(spoken, time.time())
@@ -1591,6 +1592,7 @@ class Orchestrator:
         self.metrics.mark("stt_ms")
         text = WAKE_PHRASE.sub("", text or "", count=1).strip()
         waited, budget = self._end_silence
+        self._voice_heard()
         await bus.emit("transcript", role="user", text=text,
                        stt_ms=int((time.time() - t_start) * 1000),
                        silence_ms=int(waited * 1000), budget_ms=int(budget * 1000))
@@ -2339,6 +2341,30 @@ class Orchestrator:
     async def confirmation_answered(self) -> None:
         if self.sm.state == State.WAITING:
             await self.sm.to(State.EXECUTING, force=True)
+
+    # When he last spoke to JARVIS by VOICE (not /text, not a test). The
+    # release script and the ad-hoc scripts read it from /health and refuse
+    # to run while he is using him.
+    last_voice_ts: float = 0.0
+
+    def _voice_heard(self) -> None:
+        """His voice lifts any test mute, and is remembered.
+
+        On 2026-09-06 19:45 he talked to JARVIS for two minutes and heard
+        nothing: a variety script had muted the speaker for an hour, and
+        the release's own -Silent mute is an hour too. JARVIS answered
+        every question into a muted speaker. A test never has a reason to
+        mute a man who is asking; the moment he speaks, the mute is over.
+        """
+        self.last_voice_ts = time.time()
+        try:
+            if speaker.silent_until > time.time():
+                speaker.silent_until = 0.0
+                from delivery import delivery
+                delivery.mute_until = 0.0
+                log.warning("test mute lifted: he is speaking to me")
+        except Exception:
+            log.debug("could not lift the test mute", exc_info=True)
 
     async def speak_line(self, line: str) -> None:
         """Speak one line immediately (outside the normal turn queue)."""

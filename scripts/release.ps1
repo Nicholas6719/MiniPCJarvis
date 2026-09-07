@@ -42,6 +42,28 @@ if (-not $SkipBuild) {
     if ((Get-Date) - $setup.LastWriteTime -gt [TimeSpan]::FromMinutes(15)) { & $log "installer is stale ($($setup.LastWriteTime))"; exit 1 }
 }
 
+# NOT WHILE HE IS USING HIM. The install restarts the sidecar under him and
+# the suites then talk to it for forty minutes. On 2026-09-06 19:45 he sat
+# down, asked JARVIS four things and heard nothing - a test mute - while
+# the market suite asked him "the company or the stock, sir?". The running
+# app says when he last spoke by voice (/health.last_voice_s, release 54+);
+# wait for a quarter of an hour of quiet, up to half an hour, then give up.
+$running = Get-CimInstance Win32_Process -Filter "name='jarvis-sidecar.exe'" -ErrorAction SilentlyContinue
+if ($running) {
+    $rp = (Get-NetTCPConnection -State Listen -OwningProcess $running.ProcessId -ErrorAction SilentlyContinue | Select-Object -First 1).LocalPort
+    if ($rp) {
+        $waited = 0
+        while ($true) {
+            $lv = $null
+            try { $lv = (Invoke-RestMethod "http://127.0.0.1:$rp/health" -TimeoutSec 5).last_voice_s } catch {}
+            if ($null -eq $lv -or $lv -ge 900) { break }
+            if ($waited -ge 1800) { & $log "HE IS USING JARVIS (spoke $([int]$lv)s ago) - not installing over him. Run again later."; exit 1 }
+            if ($waited -eq 0) { & $log "he spoke $([int]$lv)s ago - waiting for quiet before installing" }
+            Start-Sleep 60; $waited += 60
+        }
+    }
+}
+
 & $log "install via real-session scheduled task"
 $installLog = "C:\Users\nicho\Documents\Coding_Projects\JARVIS\.agent\logs\install.log"
 if (Test-Path $installLog) { Clear-Content $installLog }
@@ -133,6 +155,17 @@ try {
 } finally {
     Remove-Item Env:\JARVIS_TELEGRAM_E2E -ErrorAction SilentlyContinue
     Remove-Item Env:\JARVIS_QUIET_SCREEN -ErrorAction SilentlyContinue
+    # THE MUTE ENDS WITH THE RUN, not an hour later. The deadline was the
+    # safety net; it left him unable to hear JARVIS for twenty minutes
+    # after a green release (2026-09-06 19:45 - 20:09).
+    if ($port -and $Silent) {
+        try {
+            Invoke-RestMethod "http://127.0.0.1:$port/debug/silence" -Method Post `
+                -Headers @{'X-Jarvis-Token'=$tok} -ContentType 'application/json' `
+                -Body (@{ seconds = 0 } | ConvertTo-Json) -TimeoutSec 15 | Out-Null
+            & $log "speaker unmuted"
+        } catch { & $log "COULD NOT UNMUTE: $($_.Exception.Message) - the mute ends on its own deadline" }
+    }
 }
 & $log ("RELEASE " + $(if ($failed -eq 0) { "OK" } else { "FAILED ($failed suites)" }))
 exit $failed

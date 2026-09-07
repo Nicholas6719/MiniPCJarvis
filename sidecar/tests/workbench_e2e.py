@@ -72,8 +72,34 @@ def wait_render(max_s: float) -> dict:
 
 
 def main() -> int:
+    # NOT WHILE HE IS USING HIM, and the mute ends with the run (2026-09-06
+    # 19:45: twenty minutes of a JARVIS he could not hear, after a test).
+    before = 0.0
+    try:
+        h = httpx.get(f"{BASE}/health", headers=H, timeout=10).json()
+        lv = h.get("last_voice_s")
+        if lv is not None and lv < 900:
+            print(f"  SKIPPED - he spoke to JARVIS {int(lv)} s ago; not running over him")
+            return 0
+        before = float(h.get("muted_s") or 0.0)
+    except Exception:
+        pass
     httpx.post(f"{BASE}/debug/silence", headers=H, json={"seconds": 900}, timeout=10)
     print(f"sidecar on {P}, speech muted for the run")
+    t_run = time.time()
+    try:
+        return _main()
+    finally:
+        # Put the mute back the way it was: a release's own mute covers the
+        # suites after this one, and clearing it would make them noisy.
+        try:
+            left = max(0.0, before - (time.time() - t_run))
+            httpx.post(f"{BASE}/debug/silence", headers=H, json={"seconds": left}, timeout=10)
+        except Exception:
+            pass
+
+
+def _main() -> int:
 
     # ---------------------------------------------------------- a real part
     print("\n-- a part he described, made for real --")

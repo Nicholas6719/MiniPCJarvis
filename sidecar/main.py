@@ -208,7 +208,16 @@ def _auth(token: str | None) -> None:
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "state": orchestrator.sm.state.value}
+    """State, plus the two facts a test needs before it may touch him:
+    whether a test mute is on, and how long since he last spoke by voice.
+    Scripts refuse to run (or to mute) while he is using him."""
+    import time as _t
+    from audio.io import speaker
+    now = _t.time()
+    lv = float(getattr(orchestrator, "last_voice_ts", 0.0) or 0.0)
+    return {"ok": True, "state": orchestrator.sm.state.value,
+            "muted_s": max(0.0, round(speaker.silent_until - now, 1)),
+            "last_voice_s": (round(now - lv, 1) if lv else None)}
 
 
 # Mirrors credentials::KNOWN_SECRETS in the Rust core — the only names it ever pushes.
