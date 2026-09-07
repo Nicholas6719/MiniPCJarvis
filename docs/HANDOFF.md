@@ -4261,6 +4261,26 @@ device path (the "writer thread stuck in the driver" warnings at 01:54,
 02:47 and 09:45 are display-sleep stalls the pool recovered from) - look
 at `audio/io.py` `_DEAF_OUTPUT_S` and the device watch first.
 
+Release 54 installed 20:39 (his "install it now"); bargein_e2e failed
+again on room speech ("99%" heard mid-round), workbench_e2e SKIPPED
+itself because he had spoken 98 s earlier - the new guard working.
+Unmuted at 20:53.
+
+## 2026-09-07 — the voice note that got the list (release 55)
+His phone at 06:13: "Set a reminder every day for seven PM to make sure I
+take my supplements." JARVIS: "One reminder: wear my retainers, at
+21:00." Two faults, both in `brain/skills.py`:
+- `slots_reminder` read only DIGIT hours; Whisper wrote "seven"; the skill
+  stepped aside and the LIST skill, with no guard, took the sentence.
+  Hours as words now (seven / seven thirty / nine fifteen), AM/PM in any
+  case, o'clock; "make sure I …" stripped from the text.
+- `slots_reminders` (the list) steps aside from an order to set one.
+- `say_reminders`: second person, 12-hour clock, the repeat: "wear your
+  retainers, every day at 9 PM."
+The reminder he asked for was set by hand on the live build (id 278,
+"take my supplements", 19:00 daily) so tonight's goes off regardless of
+the release. test_reminders extended; test_brain 295/295.
+
 Still to watch him do once: one real pinch in front of the camera (the
 gesture path is proved from the landmarks onward, not before).
 
