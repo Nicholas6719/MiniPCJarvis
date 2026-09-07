@@ -4228,6 +4228,39 @@ barge-in suite is to be rerun when the room is quiet. No more audio or
 stage tests were run after this - the camera had been on for 9,035
 frames and the state went idle, which may mean he is at the PC.
 
+### 20:10 — "I can't hear him", and it was me (release 54, pending)
+His report: display asleep, wake word wakes it, JARVIS works, no sound.
+The real log (schtasks copy): 19:45-19:47 he asked four things by voice
+("Yeah when I was asking", "what's the weather", "when did I cool you")
+and JARVIS answered all of them into a MUTED speaker - the workbench
+variety script had set `/debug/silence` for 3,600 s at ~19:17, and the
+release-53 suites (also an hour's mute) were running on top of him: the
+market suite's "The company or the stock, sir?" and its Tesla/Apple
+prices went past him at 19:46. His 20:08 wake landed a minute before I
+cleared the mute by hand. Not the display.
+
+Fixed, gated in `test_quiet.py` (in build_sidecar.cmd):
+- `orchestrator._voice_heard()`: a voice turn records `last_voice_ts` and
+  LIFTS any test mute (speaker + delivery) then and there, with a warning
+  in the log. A test never has a reason to mute a man who is asking.
+- `/health` carries `muted_s` and `last_voice_s`.
+- `release.ps1` waits for 15 min of voice quiet before the install (up to
+  30 min, then refuses: "HE IS USING JARVIS"), and unmutes when the
+  suites end (the hour deadline was the safety net, and it left him deaf
+  for twenty minutes after a green release).
+- variety scripts: refuse within 15 min of his voice, mute 600 s re-armed
+  per ask, stop dead if he starts talking, clear at the end;
+  `workbench_e2e` skips over him and restores the mute it found.
+- `.agent/scripts/release_when_away.ps1`: waits until the state has been
+  "sleeping" for 15 minutes, then runs the release - because build 53
+  cannot report his voice yet, and he was at the PC at 20:08. Running in
+  the background at 20:2x.
+
+If it recurs on a display wake with no test running, it is the audio
+device path (the "writer thread stuck in the driver" warnings at 01:54,
+02:47 and 09:45 are display-sleep stalls the pool recovered from) - look
+at `audio/io.py` `_DEAF_OUTPUT_S` and the device watch first.
+
 Still to watch him do once: one real pinch in front of the camera (the
 gesture path is proved from the landmarks onward, not before).
 
