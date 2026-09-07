@@ -958,6 +958,11 @@ class Orchestrator:
         except Exception as e:
             log.error("microphone unavailable: %s", e)
             await bus.emit("boot", summary="microphone unavailable")
+        # never two of either: a second wake loop feeds the same model beside
+        # the first (see audio/wake.py, 2026-09-07)
+        for old in (self._loop_task, self._wake_task):
+            if old is not None and not old.done():
+                old.cancel()
         self._loop_task = asyncio.create_task(self._listen_loop())
         self._wake_task = asyncio.create_task(self._wake_loop())
         await bus.emit("boot", summary="ears ready")
@@ -2838,7 +2843,14 @@ class Orchestrator:
         ends. First-audio latency is unchanged — nothing can be prefetched
         before the first sentence exists — but the gaps between sentences close.
         """
-        barge_task = asyncio.create_task(self._barge_in_watch())
+        # ONE watcher, ever. A previous one still alive (a reply cut short
+        # somewhere its finally never ran) would feed the wake model beside
+        # this one; five of them did, on 2026-09-07, and the sidecar burned
+        # 2.3 cores while idle.
+        prev = getattr(self, "_barge_task", None)
+        if prev is not None and not prev.done():
+            prev.cancel()
+        barge_task = self._barge_task = asyncio.create_task(self._barge_in_watch())
         spoke = False
         tts.idle.clear()      # hold off the background phrase warm until he has finished
         # (sentence, chunk, is_first) — is_first marks a sentence boundary for the

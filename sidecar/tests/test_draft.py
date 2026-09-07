@@ -93,9 +93,10 @@ def main() -> int:
     check("the provider streams from whichever server it is given",
           "srv = server or llama" in prov and "srv.base_url" in prov)
     m = config.get("llm", "models", default={}).get("gemma-3-4b", {})
-    check("the draft model runs on the CPU, one slot, short context",
-          "--device" in (m.get("args") or []) and "-np" in (m.get("args") or [])
-          and int(m.get("context") or 0) <= 8192, m)
+    args = m.get("args") or []
+    check("the draft model runs on the GPU with few CPU threads, one slot, short context",
+          "-ngl" in args and "-np" in args and int(m.get("context") or 0) <= 8192
+          and "-t" in args and int(args[args.index("-t") + 1]) <= 2, m)
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

@@ -5,6 +5,7 @@ Measured on this machine: ~1.8 ms per 80 ms chunk (~2% of one core).
 from __future__ import annotations
 
 import logging
+import threading
 
 import numpy as np
 
@@ -47,18 +48,37 @@ class WakeWord:
                 # already happened twice — it must never be silent as well.
                 log.debug("wake model reset failed", exc_info=True)
 
+    # ONE FEEDER AT A TIME. The wake loop and the barge-in watcher both feed
+    # this model from worker threads; on 2026-09-07 five threads were inside
+    # `predict` at once, each call slower than the last as the model's own
+    # streaming buffer grew under them, and the sidecar burned 2.3 cores while
+    # "sleeping". A feeder that finds the model busy DROPS its block - 80 ms
+    # of audio nobody will miss - rather than queueing behind it.
+    _lock = threading.Lock()
+    dropped = 0
+
     def feed(self, audio_f32: np.ndarray) -> float:
         """Feed float32 [-1,1] 16 kHz audio; returns max hey_jarvis score seen."""
-        model = self._ensure()
-        self._buf = np.concatenate([self._buf, audio_f32.ravel()])
-        best = 0.0
-        while len(self._buf) >= CHUNK:
-            frame = self._buf[:CHUNK]
-            self._buf = self._buf[CHUNK:]
-            int16 = (np.clip(frame, -1, 1) * 32767).astype(np.int16)
-            scores = model.predict(int16)
-            best = max(best, float(scores.get("hey_jarvis", 0.0)))
-        return best
+        if not self._lock.acquire(blocking=False):
+            self.dropped += 1
+            return 0.0
+        try:
+            model = self._ensure()
+            self._buf = np.concatenate([self._buf, audio_f32.ravel()])
+            # A feeder that fell behind must not replay seconds of stale
+            # audio: keep the newest quarter second and let the rest go.
+            if len(self._buf) > 4 * CHUNK:
+                self._buf = self._buf[-3 * CHUNK:]
+            best = 0.0
+            while len(self._buf) >= CHUNK:
+                frame = self._buf[:CHUNK]
+                self._buf = self._buf[CHUNK:]
+                int16 = (np.clip(frame, -1, 1) * 32767).astype(np.int16)
+                scores = model.predict(int16)
+                best = max(best, float(scores.get("hey_jarvis", 0.0)))
+            return best
+        finally:
+            self._lock.release()
 
 
 wake = WakeWord()

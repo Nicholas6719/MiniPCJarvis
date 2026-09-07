@@ -39,11 +39,11 @@ DEFAULTS: dict[str, Any] = {
         # THE DRAFT MODEL: a second, small server for plain knowledge
         # questions. Measured 2026-09-07 beside the running gpt-oss: gemma-3-4b
         # first token ~0.5 s on the GPU, ~0.6 s on the CPU at ~20 tok/s, against
-        # 2-4 s for the big model. CPU on purpose (--device none): the 780M and
-        # its 17.4 GB heap stay the big model's. It answers ONLY what
-        # llm.draft.eligible() lets through — it invented a weather forecast
-        # when asked, so the sidecar decides, never the model. Empty string
-        # disables it.
+        # 2-4 s for the big model. On the GPU (see the model entry: the CPU
+        # variant starved the wake detector and the big model on 2026-09-07).
+        # It answers ONLY what llm.draft.eligible() lets through — it invented
+        # a weather forecast when asked, so the sidecar decides, never the
+        # model. Empty string disables it.
         "draft_model": "gemma-3-4b",
         # Sampling was never sent, so llama-server's chat defaults applied (temp 0.8,
         # top_p 0.95) -- creative-writing sampling on an assistant whose job is mostly to
@@ -117,9 +117,15 @@ DEFAULTS: dict[str, Any] = {
             # The draft model (see llm.draft_model). One slot, a short
             # context: its prompt is a paragraph of persona and the last few
             # turns, never the tool block.
+            # ON THE GPU, not the CPU. Release 56 ran it on the CPU with six
+            # threads beside gpt-oss's eight, on eight cores, and the first
+            # afternoon crawled: research answers at 465 s, the wake detector
+            # falling behind, stuck-state recoveries. The 780M has the room
+            # (gpt-oss ~9.6 GB + this ~2.6 GB in a 17.4 GB heap) and the
+            # bench put its first word at 504 ms there. Two CPU threads.
             "gemma-3-4b": {
                 "path": r"C:\AI\models\gemma-3-4b-it-q4_0.gguf",
-                "args": ["--device", "none", "-ngl", "0", "-t", "6", "--jinja", "-np", "1"],
+                "args": ["-ngl", "999", "-fa", "on", "-t", "2", "--jinja", "-np", "1"],
                 "context": 4096,
                 "sampling": {"temperature": 0.0, "repeat_penalty": 1.05},
             },
