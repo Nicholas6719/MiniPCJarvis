@@ -104,11 +104,15 @@ def _parent_alive(pid: int | None) -> bool:
 
 
 class LlamaServer:
-    def __init__(self) -> None:
+    def __init__(self, adopt: bool = True) -> None:
         import secrets as _secrets
         import socket
         self.proc: subprocess.Popen | None = None
         self.model_name: str | None = None
+        # The draft server never adopts a shared one: Houston's :8080 serves
+        # the BIG model, and "adopting" it for the small role would route
+        # every quick question straight back to the slow path.
+        self.adopt = adopt
         # dynamic port per session — a fixed port let an orphaned server from a
         # previous session answer our health checks with the wrong API key
         with socket.socket() as s:
@@ -141,7 +145,7 @@ class LlamaServer:
         """This machine runs other assistants (Houston on :8080) that may already
         be serving the exact same GGUF. Reuse instead of loading a duplicate 11GB."""
         mcfg = config.get("llm", "models", default={}).get(model_name)
-        if not mcfg:
+        if not mcfg or not self.adopt:
             return False
         want = str(mcfg["path"]).lower()
         for port in config.get("llm", "adopt_ports", default=[8080]):
@@ -290,3 +294,6 @@ class LlamaServer:
 
 
 llama = LlamaServer()
+# The small, quick one (llm.draft_model). Its own port and process; started
+# after the big model, stopped with it, never adopted from another app.
+draft = LlamaServer(adopt=False)

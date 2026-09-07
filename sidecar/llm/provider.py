@@ -40,6 +40,7 @@ class LocalLLM:
         tool_choice: str | None = None,
         sampling: dict | None = None,
         slot: int = 2,
+        server=None,
     ) -> AsyncIterator[Chunk]:
         """`slot` 0 is the CONVERSATION with tools and its cached prefix, 1 the
         conversation without tools; anything else is a side call (fact
@@ -47,7 +48,10 @@ class LocalLLM:
         and goes to the LAST slot the server has, so it cannot evict either
         conversation cache. On a two-slot server that is slot 1 again; on a
         one-slot server the field is omitted."""
-        model_name = llama.model_name or config.get("llm", "active_model")
+        # `server` picks the process: the big conversation server (default)
+        # or the draft (llm.draft_model) for plain knowledge questions.
+        srv = server or llama
+        model_name = srv.model_name or config.get("llm", "active_model")
         mcfg = config.get("llm", "models", default={}).get(model_name, {})
         body: dict[str, Any] = {
             "messages": messages,
@@ -69,7 +73,7 @@ class LocalLLM:
             body["tools"] = tools
             if tool_choice:
                 body["tool_choice"] = tool_choice
-        n_slots = max(1, int(getattr(llama, "n_slots", 1) or 1))
+        n_slots = max(1, int(getattr(srv, "n_slots", 1) or 1))
         if n_slots > 1:
             body["id_slot"] = 0 if slot == 0 else min(int(slot), n_slots - 1)
 
@@ -88,11 +92,11 @@ class LocalLLM:
         # cause. At 1,600 the same prompt finished in 561 tokens.
         saw_content = False
         reasoned = 0
-        headers = {"Authorization": f"Bearer {llama.api_key}"} if llama.api_key else {}
+        headers = {"Authorization": f"Bearer {srv.api_key}"} if srv.api_key else {}
         async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10),
                                      headers=headers) as c:
             async with c.stream(
-                "POST", f"{llama.base_url}/v1/chat/completions", json=body
+                "POST", f"{srv.base_url}/v1/chat/completions", json=body
             ) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():

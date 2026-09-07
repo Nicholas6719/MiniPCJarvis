@@ -34,7 +34,8 @@ import collections
 import re as _re
 from config import config
 from events import bus, spawn
-from llm.llama_server import llama
+from llm import draft as draftrules
+from llm.llama_server import draft, llama
 from brain.skills import want_honorific
 from llm.prompts import pinned_block, system_prompt, turn_context
 from llm.provider import local_llm
@@ -729,6 +730,11 @@ class Orchestrator:
         audio_boot = asyncio.create_task(self._audio_boot())
         ok = await llama.ensure()
         self._llm_ready = ok
+        # THE DRAFT MODEL, after the big one and never in its way: a second,
+        # small server for plain knowledge questions (llm.draft_model). Its
+        # failure to start costs nothing but the quick path.
+        if ok and draftrules.configured():
+            spawn(self._draft_boot(), name="draft-boot")
         if not ok:
             await self.sm.to(State.ERROR, force=True)
             await bus.emit("boot_error", summary="language model failed to start — retrying")
@@ -1186,6 +1192,10 @@ class Orchestrator:
         mic.stop()
         speaker.close()
         await llama.stop()
+        try:
+            await draft.stop()
+        except Exception:
+            log.debug("draft server did not stop cleanly", exc_info=True)
 
     # ---------- listening control (push-to-talk / toggle) ----------
 
@@ -1368,7 +1378,10 @@ class Orchestrator:
                     and last_speech_t is not None
                     and speech_frames >= MIN_SPEECH_FRAMES
                     and not (woke_by_name and new_speech_frames < MIN_SPEECH_FRAMES)
-                    and quiet_for > 0.30 and buf):
+                    # 0.20 s, not 0.30: the transcription this starts is most
+                    # of the wait after he stops talking (~0.45 s on Parakeet),
+                    # and a tenth sooner is a tenth off every voice turn
+                    and quiet_for > 0.20 and buf):
                 frames_at_decision = speech_frames
                 endpoint_task = self._endpoint_task = asyncio.create_task(
                     endpoint.decide(np.concatenate(buf), stt, brain))
@@ -2366,6 +2379,18 @@ class Orchestrator:
         except Exception:
             log.debug("could not lift the test mute", exc_info=True)
 
+    async def _draft_boot(self) -> None:
+        """Start the draft server; say so in the log either way."""
+        name = draftrules.configured()
+        try:
+            ok = await draft.ensure(name)
+            log.info("draft model %s: %s", name, "ready" if ok else "NOT available - big model only")
+        except Exception:
+            log.warning("draft model %s failed to start", name, exc_info=True)
+
+    def _draft_usable(self) -> bool:
+        return bool(draftrules.configured() and draft.running and draft.model_name)
+
     async def speak_line(self, line: str) -> None:
         """Speak one line immediately (outside the normal turn queue)."""
         cancel = self._speak_cancel if self._speak_cancel is not None else asyncio.Event()
@@ -2553,6 +2578,8 @@ class Orchestrator:
         spoke_any = False
         held_repeat: str | None = None
         dropped_repeat: str | None = None
+        draft_tried = False        # the small model gets one go, in round 0
+        draft_t0 = 0.0
         lead_cut: tuple[str, str] | None = None
         for _round in range(8):
             round_text = ""
@@ -2578,23 +2605,71 @@ class Orchestrator:
             # same-shape turn took 1.5-3.5 s). The no-tools shape lives on the
             # side slot, where it keeps its own prefix.
             self.metrics.mark("llm_sent_ms")
-            async for chunk in local_llm.stream(messages, tools=round_tools, max_tokens=4096,
-                                                tool_choice=None if choice == "none" else choice,
-                                                sampling=sampling,
-                                                slot=0 if round_tools is not None else 1):
+            # THE DRAFT ROUND. A plain knowledge question goes first to the
+            # small server (llm.draft_model, ~0.6 s to the first word against
+            # 2-4 s). Its first sentence is HELD until judged: a hedge, a
+            # refusal or a DEFER is thrown away unspoken and the big model
+            # takes the turn as if nothing happened. Only round 0, only when
+            # `llm.draft.eligible` says so, only with the draft up.
+            use_draft = (_round == 0 and not draft_tried and choice is None
+                         and self._draft_usable()
+                         and draftrules.eligible(raw_user, must_use_tool=must_use_tool,
+                                                 stage=bool(self._screen_context().get("stage")),
+                                                 pictures=bool(self._screen_context().get("render")),
+                                                 pending=registry.has_pending))
+            draft_judged = False
+            draft_defer = False
+            if use_draft:
+                draft_tried = True
+                draft_t0 = time.time()
+                ctx = "[Context - current time: " + \
+                    time.strftime("%A, %B %d, %Y at %I:%M %p") + ".]"
+                stream_call = local_llm.stream(
+                    draftrules.messages_for(self._history, raw_user, ctx),
+                    tools=None, max_tokens=240, sampling=sampling, slot=0, server=draft)
+            else:
+                stream_call = local_llm.stream(messages, tools=round_tools, max_tokens=4096,
+                                               tool_choice=None if choice == "none" else choice,
+                                               sampling=sampling,
+                                               slot=0 if round_tools is not None else 1)
+            async for chunk in stream_call:
                 if self._speak_cancel.is_set():
                     # user interrupted: stop generating AND stop streaming to the UI
                     cancelled = True
                     break
                 if chunk.text:
-                    self.metrics.mark("first_token_ms")
-                    ft = getattr(self, "_first_token", None)
-                    if ft is not None:
-                        ft.set()
-                    pending += chunk.text
-                    round_text += chunk.text
-                    full_text += chunk.text
-                    await bus.emit("assistant_delta", text=chunk.text)
+                    if use_draft and not draft_judged:
+                        # judge on the first sentence, or the first ~60 chars
+                        probe = pending + chunk.text
+                        if SENTENCE_END.search(probe) or len(probe) >= 60 or chunk.done:
+                            if draftrules.deferred(probe):
+                                draft_defer = True
+                                break
+                            draft_judged = True
+                            log.info("draft answered in %d ms: %r",
+                                     int((time.time() - draft_t0) * 1000), probe[:50])
+                            self.metrics.mark("first_token_ms")
+                            ft = getattr(self, "_first_token", None)
+                            if ft is not None:
+                                ft.set()
+                            # the held text goes out now, all at once
+                            await bus.emit("assistant_delta", text=probe)
+                            pending = probe
+                            round_text += probe
+                            full_text += probe
+                            # fall through to the flush below with `pending`
+                        else:
+                            pending += chunk.text     # held, not yet judged
+                            continue
+                    else:
+                        self.metrics.mark("first_token_ms")
+                        ft = getattr(self, "_first_token", None)
+                        if ft is not None:
+                            ft.set()
+                        pending += chunk.text
+                        round_text += chunk.text
+                        full_text += chunk.text
+                        await bus.emit("assistant_delta", text=chunk.text)
                     # flush complete sentences to TTS
                     while True:
                         m = SENTENCE_END.search(pending)
@@ -2628,6 +2703,27 @@ class Orchestrator:
                 if chunk.done:
                     tool_calls = chunk.tool_calls
                     break
+            if use_draft and not cancelled:
+                # a short answer that never reached the judge: judge it now
+                if not draft_judged and not draft_defer:
+                    if pending.strip() and not draftrules.deferred(pending):
+                        draft_judged = True
+                        log.info("draft answered in %d ms: %r",
+                                 int((time.time() - draft_t0) * 1000), pending[:50])
+                        await bus.emit("assistant_delta", text=pending)
+                        round_text += pending
+                        full_text += pending
+                    else:
+                        draft_defer = True
+                if draft_defer:
+                    # nothing of it was spoken or shown; the big model takes
+                    # the turn with the same messages
+                    log.info("draft deferred after %d ms (%r) - the big model answers",
+                             int((time.time() - draft_t0) * 1000), pending[:60])
+                    pending = ""
+                    round_text = ""
+                    tool_calls = None
+                    continue
             if cancelled:
                 return full_text
             tail = pending.strip()
