@@ -1041,11 +1041,24 @@ def slots_reminder(t: str) -> dict | None:
             return None
         out["minutes_from_now"] = n * (60 if m.group(2).startswith(("hour", "hr")) else 1)
     else:
-        m = re.search(r"\b(?:at|for|by)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b", t)
-        if not m:
+        # DIGITS OR WORDS. A Telegram voice note arrives transcribed as
+        # "every day for seven PM" and the digit-only pattern matched
+        # nothing, so this skill stepped aside and the LIST skill answered
+        # "set a reminder..." with the reminders he already had (2026-09-07
+        # 06:13). Whisper writes small numbers as words often enough.
+        m = re.search(r"\b(?:at|for|by)\s+(\d{1,2}|[a-z]+)(?::(\d{2})|\s+(fifteen|thirty|forty[ -]five))?"
+                      r"\s*(am|pm|a\.m\.|p\.m\.|o'?clock)?\b", t, re.I)
+        if not m or (not m.group(1).isdigit() and _number(m.group(1)) is None):
             return None
-        h, mi = int(m.group(1)), int(m.group(2) or 0)
-        ap = (m.group(3) or "").replace(".", "")
+        h = int(m.group(1)) if m.group(1).isdigit() else int(_number(m.group(1)) or 0)
+        if not 0 <= h <= 24:
+            return None
+        mi = int(m.group(2) or 0)
+        if m.group(3):
+            mi = {"fifteen": 15, "thirty": 30}.get(m.group(3), 45)
+        ap = (m.group(4) or "").replace(".", "").lower()
+        if ap == "oclock":
+            ap = ""
         evening = bool(re.search(r"\b(tonight|this evening|this afternoon)\b", t))
         if ap == "pm" and h < 12:
             h += 12
@@ -1074,6 +1087,9 @@ def slots_reminder(t: str) -> dict | None:
     m = re.search(r"\b(?:to|that)\s+(.+?)(?:\s+(?:in|at|for|by)\s+\d\S*.*)?[.!?]*$", t)
     text = m.group(1).strip() if m else ""
     text = re.sub(r"^(?:remind me to|remind me|to)\s+", "", text).strip()
+    # "to make sure I take my supplements" is a reminder to take them
+    text = re.sub(r"^(?:make sure|be sure|ensure|see)\s+(?:that\s+)?(?:i|you)\s+", "", text,
+                  flags=re.I).strip()
     # "every night" belongs to the schedule, not to the thing being remembered
     text = re.sub(r"\b(?:every|each)\s+(?:single\s+)?"
                   r"(?:day|night|evening|morning|afternoon|week|weekday)\b\s*", "",
@@ -1087,6 +1103,21 @@ def slots_reminder(t: str) -> dict | None:
     if rec != "none":
         out["recurrence"] = rec
     return out
+
+
+_SET_REQUEST = re.compile(
+    r"\b(?:set|create|add|make|schedule|put)\b[\w\s]{0,12}?\breminder\b|\bremind me\b", re.I)
+
+
+def slots_reminders(t: str) -> dict | None:
+    """LISTING steps aside from an order to SET one. "Set a reminder every
+    day for seven PM to make sure I take my supplements" was answered with
+    the reminders he already had (2026-09-07 06:13): the set skill could
+    not read "seven" and stepped aside, and this one, with no guard, took
+    the sentence. An instruction is never a question about the list."""
+    if _SET_REQUEST.search(t or "") and re.search(r"\b(?:to|that)\b", t or ""):
+        return None
+    return {}
 
 
 def slots_remember(t: str) -> dict | None:
@@ -1932,14 +1963,39 @@ def say_unremind(slots: dict, res: dict) -> str:
     return f"Done. I've cancelled {n} reminders."
 
 
+def _reminder_said(r: dict) -> str:
+    """"wear your retainers, every day at 9 PM" - not "wear my retainers, at
+    21:00" (his phone, 2026-09-07 06:13). His words in the second person, the
+    clock the way he says it, and the repeat if there is one."""
+    text = _to_second_person(str(r.get("text") or ""))
+    text = text[0].lower() + text[1:] if text else text
+    when = str(r.get("due") or "")[11:16]
+    try:
+        clock = dt.datetime.strptime(when, "%H:%M").strftime("%I:%M %p").lstrip("0")
+        clock = clock.replace(":00 ", " ")
+    except ValueError:
+        clock = when
+    rec = str(r.get("recurrence") or "none")
+    if rec == "daily":
+        return f"{text}, every day at {clock}"
+    if rec == "weekdays":
+        return f"{text}, every weekday at {clock}"
+    if rec == "weekly":
+        try:
+            day = dt.datetime.strptime(str(r.get("due"))[:10], "%Y-%m-%d").strftime("%A")
+            return f"{text}, every {day} at {clock}"
+        except ValueError:
+            return f"{text}, weekly at {clock}"
+    return f"{text} at {clock}"
+
+
 def say_reminders(_s: dict, res: dict) -> str:
     rem = res.get("reminders") or []
     if not rem:
         return "You have no reminders set."
     if len(rem) == 1:
-        r = rem[0]
-        return f"One reminder: {r['text']}, at {r['due'][11:]}."
-    head = "; ".join(f"{r['text']} at {r['due'][11:]}" for r in rem[:3])
+        return f"One reminder: {_reminder_said(rem[0])}."
+    head = "; ".join(_reminder_said(r) for r in rem[:3])
     return f"You have {len(rem)} reminders: {head}."
 
 
@@ -2720,7 +2776,13 @@ SKILLS: list[Skill] = [
         "remind me in an hour to check the oven", "remind me at 9 to take my meds",
         "set a reminder in 20 minutes to drink water", "remind me in two hours to leave",
         "reminder at 3 pm to join the meeting", "remind me in 15 minutes that the laundry is done",
-        "remind me at 7:30 pm to feed the cat"],
+        "remind me at 7:30 pm to feed the cat",
+        # repeating ones, the way they arrive from a phone voice note
+        "set a reminder every day for seven pm to make sure i take my supplements",
+        "remind me every day at 7 pm to take my supplements",
+        "set a daily reminder at 8 am to take my vitamins",
+        "every night at 10 remind me to wear my retainers",
+        "remind me every weekday at 9 to check the calendar"],
         slots=slots_reminder, speak=say_reminder),
     Skill("remember", "remember_fact", [
         "remember that i drink my coffee black", "remember my favorite color is blue",
@@ -2831,7 +2893,7 @@ SKILLS: list[Skill] = [
         "what reminders do i have", "list my reminders", "what am i being reminded about",
         "do i have any reminders", "show me my reminders", "what's on my reminder list",
         "what reminders are set"],
-        speak=say_reminders),
+        slots=slots_reminders, speak=say_reminders),
     Skill("thanks", None, [
         "thank you", "thanks", "thank you jarvis", "thanks jarvis", "cheers",
         "much appreciated", "appreciate it", "thanks a lot", "thank you very much",

@@ -87,6 +87,31 @@ def main() -> int:
     check("...and he says so", say_reminder({}, bad).startswith("I couldn't"),
           say_reminder({}, bad))
 
+    # -- his Telegram voice note (2026-09-07 06:13) ----------------------------
+    # "Set a reminder every day for seven PM to make sure I take my
+    # supplements." Whisper wrote the hour as a word; the digit-only pattern
+    # matched nothing; the skill stepped aside; the LIST skill answered with
+    # the reminder he already had - "wear my retainers, at 21:00".
+    from brain.skills import say_reminders, slots_reminders
+    sl = slots_reminder("Set a reminder every day for seven PM to make sure I take my supplements.")
+    check("an hour said as a word is read", sl and sl.get("at_time") == "19:00", sl)
+    check("...every day is the recurrence", sl and sl.get("recurrence") == "daily", sl)
+    check("...and 'make sure I' is not part of the reminder",
+          sl and sl.get("text") == "take my supplements", sl)
+    sl = slots_reminder("remind me at seven thirty pm to feed the cat")
+    check("'seven thirty' is 19:30", sl and sl.get("at_time") == "19:30", sl)
+    check("'at the' is still not a time", slots_reminder("remind me at the weekend to call") is None)
+    check("the list skill steps aside from an order to set one",
+          slots_reminders("Set a reminder every day for seven PM to make sure I take my supplements.") is None
+          and slots_reminders("what reminders do i have") == {})
+    said = say_reminders({}, {"reminders": [{"text": "wear my retainers",
+                                             "due": "2026-09-07 21:00", "recurrence": "daily"}]})
+    check("the list is read back in his terms",
+          said == "One reminder: wear your retainers, every day at 9 PM.", said)
+    said = say_reminders({}, {"reminders": [{"text": "call mom", "due": "2026-09-07 17:30",
+                                             "recurrence": "none"}]})
+    check("...with the clock the way he says it", "call mom at 5:30 PM" in said, said)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

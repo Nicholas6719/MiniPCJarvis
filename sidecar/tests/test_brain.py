@@ -250,6 +250,10 @@ CASES = [
     ("remove the render", "holo_hide"),
     ("move it to the left a bit", "holo_move"),
     ("nudge it up a little", "holo_move"),
+    # his Telegram voice note of 2026-09-07 06:13 - answered with the LIST
+    ("set a reminder every day for seven pm to make sure i take my supplements", "reminder"),
+    ("every night at 10 remind me to wear my retainers", "reminder"),
+    ("what reminders do i have", "reminders"),
     ("cut it in half", "holo_move"),
     ("show me the layers", "holo_move"),
     # Scrubbing the toolpath. The number is the hazard: _CANON erases plain
