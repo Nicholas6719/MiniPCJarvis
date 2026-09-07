@@ -39,12 +39,16 @@ DEFAULTS: dict[str, Any] = {
         # THE DRAFT MODEL: a second, small server for plain knowledge
         # questions. Measured 2026-09-07 beside the running gpt-oss: gemma-3-4b
         # first token ~0.5 s on the GPU, ~0.6 s on the CPU at ~20 tok/s, against
-        # 2-4 s for the big model. On the GPU (see the model entry: the CPU
-        # variant starved the wake detector and the big model on 2026-09-07).
-        # It answers ONLY what llm.draft.eligible() lets through — it invented
-        # a weather forecast when asked, so the sidecar decides, never the
-        # model. Empty string disables it.
-        "draft_model": "gemma-3-4b",
+        # 2-4 s for the big model. OFF BY DEFAULT since the evening of
+        # 2026-09-07: on the CPU it starved the wake detector and the big model
+        # (release 56, six threads beside gpt-oss's eight); on the GPU it
+        # overflowed the 780M's heap - gpt-oss's three 16k slots leave no room
+        # for a second model - and gpt-oss "exited during startup" on every
+        # recovery until the draft was killed (release 57). It answers ONLY
+        # what llm.draft.eligible() lets through (it invented a weather
+        # forecast when asked). Set to "gemma-3-4b" to try it again, with a
+        # smaller context on the big model or a ~1B draft.
+        "draft_model": "",
         # Sampling was never sent, so llama-server's chat defaults applied (temp 0.8,
         # top_p 0.95) -- creative-writing sampling on an assistant whose job is mostly to
         # state facts. Measured over 20 verifiable questions x 4 runs, word-for-word

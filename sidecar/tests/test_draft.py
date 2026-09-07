@@ -28,8 +28,11 @@ def main() -> int:
     from llm import draft as D
     from config import config
 
-    on = bool(D.configured())
-    check("a draft model is configured by default", on, D.configured())
+    check("the draft is OFF by default (it starved the CPU on release 56 and overflowed "
+          "the GPU heap on release 57)", not D.configured(), D.configured())
+    check("...so nothing is eligible while it is off", not D.eligible("who wrote Dune"))
+    # the rules themselves, as if it were switched on
+    D.configured = lambda: "gemma-3-4b"
 
     print("\n-- what it may answer --")
     for q in ("who wrote Dune", "how far is the moon", "what's the capital of Australia",
