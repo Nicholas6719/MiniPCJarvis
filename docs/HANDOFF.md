@@ -4315,6 +4315,33 @@ deferred". `test_draft.py` gates eligibility, the net, the prompt and the
 wiring (in build_sidecar.cmd). Live check after install: /text "who wrote
 Dune" and read the log line.
 
+### Release 56 crawled, and why (release 57 is the fix)
+Launched ~07:35, the release's first log line is 14:40: the sidecar log
+has 0 lines from 07:00 to 11:00 and the 07:30 brief never fired - the PC
+dozed all morning (no Kernel-Power 42/107; modern standby) and the build
+ran when it woke. Then, from 14:58: "proactive: ram_high" 30 s after the
+draft server came up (4.4 GB RSS on the CPU variant), research answers at
+465 s, and "stuck in thinking/executing for 35 s - recovering" every three
+minutes until I stopped it at 16:2x. py-spy on the live sidecar: FIVE
+worker threads inside openWakeWord's predict() at once (`wake.feed` from
+the wake loop and from barge-in watchers), the sidecar at 2.3 cores while
+"sleeping", the two model servers idle. Chain: the draft on the CPU (six
+threads beside gpt-oss's eight on eight cores) starved the wake detector,
+turns went slow, the stuck watch recovered again and again, watchers
+outlived their replies, and every extra feeder made the shared model's
+streaming buffer grow under the others. Also in the log at 14:58:55:
+"Task was destroyed but it is pending" (TTSRouter.warm_phrases) and two
+"aclose(): asynchronous generator is already running" - the recovery
+cancelling a speaking turn mid-stream; worth a look later.
+Fixes: `audio/wake.py` takes one feeder at a time (non-blocking lock,
+blocks dropped and counted, a backlog trimmed to the newest quarter
+second); one barge-in watcher ever, never two listen/wake loops;
+gemma-3-4b moved to the GPU (`-ngl 999 -fa on -t 2`; 504 ms first word in
+the bench, fits the heap beside gpt-oss). `test_wake_feed.py` gates the
+lock with eight threads on a fake model. The release gate's "quiet" check
+saw `last_voice_s` null (a fresh process) and proceeded - fine today, but
+it means a release right after a restart cannot know he is there.
+
 ### Faster 3: the template library (next, drafted in the scratchpad)
 Four exact shapes the rich-word guard would otherwise send to the model,
 each refusing unless every dimension is in the sentence: a plate with
