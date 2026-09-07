@@ -4281,6 +4281,47 @@ The reminder he asked for was set by hand on the live build (id 278,
 "take my supplements", 19:00 daily) so tonight's goes off regardless of
 the release. test_reminders extended; test_brain 295/295.
 
+## 2026-09-07 morning — "faster, smarter, more useful": the plan he approved
+Asked for more, he chose, in order: FASTER - streaming transcription,
+a two-tier brain, a template library for common parts; SMARTER - episodic
+memory (only as an enhancement), reading the screen on request; USEFUL -
+Telegram replies in his voice, calendar and mail in the brief. Declined:
+cloud escalation, the printer loop (no printer yet), home control.
+
+### Faster 1: already mostly built
+The endpoint judge transcribes during the first pause, so the transcript
+is ready ~0.8 s after he stops (0.30 s pause + ~0.45 s Parakeet). The
+pause is 0.20 s now. The floor is the transcription; the lever is the
+model's first token - item 2.
+
+### Faster 2: the draft model (release 56)
+Bench (`scratchpad/draft_bench.py`, own port, killed after) beside the
+running gpt-oss-20b: gemma-3-4b-it-q4_0 first word 504 ms on the GPU /
+600 ms on the CPU, 23.6 / 20 tok/s, 3.5 / 4.4 GB RSS; gpt-oss is 2-4 s to
+the first word. CPU chosen (`--device none`) so the 780M stays the big
+model's. It INVENTED a forecast for "what's the weather tomorrow" despite
+a DEFER instruction - so `llm/draft.py` is a whitelist of shape (a short
+question, `NEEDS_TOOLS` clean: no clock/weather/news/market/web/machine/
+files/stage/camera/reminders/messages/his own doings/arithmetic) plus a
+second net on the answer (`deferred()`: hedges, refusals, DEFER, empty).
+`llm.draft_model` = "gemma-3-4b"; a second `LlamaServer` (`draft`, never
+adopted from :8080), booted after the big one (`_draft_boot`), stopped
+with it; `LocalLLM.stream(server=)`. In `_llm_with_tools` round 0 of an
+eligible turn streams from the draft with a paragraph of persona and the
+last two exchanges; the first sentence is HELD until judged and then
+flushed as usual; a deferral hands the same messages to the big model and
+nothing of it is spoken. Log lines "draft answered in N ms" / "draft
+deferred". `test_draft.py` gates eligibility, the net, the prompt and the
+wiring (in build_sidecar.cmd). Live check after install: /text "who wrote
+Dune" and read the log line.
+
+### Faster 3: the template library (next, drafted in the scratchpad)
+Four exact shapes the rich-word guard would otherwise send to the model,
+each refusing unless every dimension is in the sentence: a plate with
+four corner holes, an L bracket (legs x width, thickness, optional holes),
+an open box/tray with walls and a floor, a cone. Tried BEFORE the
+`_TOO_RICH` guard. `scratchpad/templates_more.py`; to append with tests.
+
 Still to watch him do once: one real pinch in front of the camera (the
 gesture path is proved from the landmarks onward, not before).
 
