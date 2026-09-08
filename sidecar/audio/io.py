@@ -303,11 +303,57 @@ class Speaker:
         if self._stream is None or self._rate != rate:
             self.close()
             device = config.get("audio", "output_device")
+            t0 = time.time()
             self._stream = sd.OutputStream(
                 samplerate=rate, channels=1, dtype="float32", device=device)
             self._stream.start()
             self._rate = rate
+            # WHAT WAKING THE SPEAKERS COSTS. His are the monitor's, over
+            # DisplayPort, asleep whenever the panel is - and the open is
+            # where that time goes. Unmeasured, it looked like JARVIS
+            # thinking slowly (2026-09-08).
+            took = time.time() - t0
+            if took > 0.25:
+                log.info("output device took %d ms to open", int(took * 1000))
         return self._stream
+
+    def prewarm(self, rate: int) -> None:
+        """Open the output device NOW, off the loop, and never raise.
+
+        Called the moment the wake word fires. The answer is one to four
+        seconds away; the speakers have that long to come up, instead of the
+        first syllable paying for it."""
+        def _open() -> None:
+            try:
+                self._ensure(rate)
+            except Exception:
+                log.debug("prewarming the output device failed", exc_info=True)
+        try:
+            _writer_executor().submit(_open)
+        except Exception:
+            log.debug("could not schedule an output prewarm", exc_info=True)
+
+    def stop_playback(self) -> None:
+        """Stop what is playing and STAY READY. Never closes the stream.
+
+        `abort()` closes it, so after a barge-in the chime and then the reply
+        each paid a fresh Pa_OpenStream against speakers that had just been
+        told to stop - "quiet for a little bit too long, and then the audio
+        kicked on", 2026-09-08. PortAudio can abort a stream and start it
+        again without closing: the buffered audio is dropped, the device
+        stays awake, and the next write goes straight out.
+        """
+        self._epoch += 1          # nothing already in flight may still play
+        stream = self._stream
+        if stream is None:
+            return
+        try:
+            stream.abort()        # drops everything buffered, immediately
+            stream.start()        # ...and it is open and ready for the reply
+        except Exception:
+            log.debug("could not restart the output stream - closing it",
+                      exc_info=True)
+            self._release(stream, "stop_playback")
 
     silent_until: float = 0.0   # self-test mode: synthesize but don't play (no 3 AM chatter)
 
@@ -317,6 +363,12 @@ class Speaker:
     # noticed within a minute.
     _DEAF_OUTPUT_S = 60.0
     _deaf_output_until: float = 0.0
+
+    # Bumped by `stop_playback`. A chunk already on its way to the device when
+    # he cut in belongs to the reply he interrupted: with the stream now kept
+    # OPEN across a barge-in, it would actually be heard. It is dropped by
+    # comparing this against the value captured when the write was queued.
+    _epoch: int = 0
 
     async def play_chunk(self, chunk: np.ndarray, rate: int) -> bool:
         """Play one chunk. NEVER blocks the turn forever: PortAudio's write is a
@@ -342,6 +394,7 @@ class Speaker:
         if time.time() < self._deaf_output_until:
             raise SpeakerStalled("the audio output device is not accepting data")
         secs = len(chunk) / float(rate)
+        epoch = self._epoch          # the playback this chunk belongs to
 
         async def _attempt(budget: float) -> bool:
             """One bounded write. False means the device did not take it in time.
@@ -359,7 +412,10 @@ class Speaker:
                 # seconds — which held the HUD, HTTP and the wake word with it.
                 stream = self._ensure(rate)
                 with self._wlock:
-                    if stream.closed:
+                    # ...and not a chunk of the reply he just interrupted. The
+                    # stream is kept OPEN across a barge-in now, so a stale
+                    # write would actually be heard (2026-09-08).
+                    if stream.closed or epoch != self._epoch:
                         return
                     try:
                         self.last_write_at = time.time()

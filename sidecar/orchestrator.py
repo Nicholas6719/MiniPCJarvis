@@ -377,6 +377,7 @@ class Orchestrator:
         self._watchdog_task: asyncio.Task | None = None
         self._preroll: np.ndarray | None = None     # audio from before the wake word fired
         self._heard_text: str | None = None         # transcript the endpoint check already produced
+        self._barge_capture = False                 # this capture follows a barge-in
         self._last_active: float = time.time()      # when he was last needed, for auto-sleep
         self._clarify: clarify.Pending | None = None  # a question asked, answers already fetching
         # A near-miss we asked him to confirm: {skill, args, text}. One
@@ -1150,6 +1151,12 @@ class Orchestrator:
                     last_fire = time.time()
                     log.info("wake word detected (%.2f)", score)
                     self._last_wake_score = float(score)   # for the not-for-me gate
+                    # WAKE THE SPEAKERS WHILE HE IS STILL TALKING. His are the
+                    # monitor's, over DisplayPort, and asleep whenever the
+                    # panel is; opening that device is most of a second and it
+                    # was being paid by the first syllable of the answer. The
+                    # answer is seconds away - the device has that long.
+                    speaker.prewarm(tts.sample_rate)
                     # SNAPSHOT FIRST, SURFACE SECOND. The pre-roll used to be
                     # taken AFTER the window was brought forward — EnumWindows,
                     # an ALT tap, SetForegroundWindow, a display check — and the
@@ -1345,6 +1352,17 @@ class Orchestrator:
             speech_frames = MIN_SPEECH_FRAMES
             last_speech_t = time.time()
             woke_by_name = True
+        elif getattr(self, "_barge_capture", False):
+            # A BARGE-IN IS A WAKE WITH NOTHING AFTER IT YET. Its pre-roll is
+            # deliberately dropped (it is full of JARVIS's own voice), which
+            # left this loop waiting for speech that may never come: "Jarvis,
+            # stop" held the microphone open for MAX_UTTERANCE_S and the state
+            # machine in LISTENING until the stuck watch recovered it. Treated
+            # as a bare wake, it gets the same grace and the same quiet exit.
+            speech_frames = MIN_SPEECH_FRAMES
+            last_speech_t = time.time()
+            woke_by_name = True
+        self._barge_capture = False
         mic.drain()
         while True:
             if time.time() - t0 > MAX_UTTERANCE_S:
@@ -2970,17 +2988,30 @@ class Orchestrator:
                 if fired:
                     log.info("barge-in detected (%s)", mode)
                     self._speak_cancel.set()
-                    speaker.abort()
+                    # STOP THE SOUND, KEEP THE DEVICE. `abort()` closed the
+                    # output stream, so the chime below and then the reply each
+                    # paid a fresh open against speakers that had just been
+                    # told to stop - the "quiet for a little bit too long, and
+                    # then the audio kicked on" he reported on 2026-09-08.
+                    speaker.stop_playback()
                     wake.reset()
                     await self.sm.to(State.INTERRUPTED, force=True)
                     await bus.emit("interrupted", reason="barge-in")
                     mic.drain()
                     self.vad.reset()
                     self._preroll = None
+                    # ...and the capture that follows is a wake with no words
+                    # after it yet: without this it required speech it might
+                    # never get and held the microphone open for the full
+                    # thirty seconds when he only meant "stop".
+                    self._barge_capture = True
                     self._listen_flag.set()  # capture what the user is saying
                     self._newer_turn_started()
                     await self.sm.to(State.LISTENING, force=True)
-                    await self.play_sound("chime")  # same cue: 'listening now'
+                    # NOT AWAITED. The cue is for him, and the capture has
+                    # already started; waiting on the audio device here put
+                    # the whole barge-in behind it.
+                    spawn(self.play_sound("chime"), name="barge-chime")
                     return
         except asyncio.CancelledError:
             raise
