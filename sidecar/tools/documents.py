@@ -508,7 +508,8 @@ def register_all() -> None:
                     "schedules, lists of anything.",
         parameters={"type": "object", "properties": {
             "name": {"type": "string"},
-            "rows": {"type": "array", "items": {"type": "array"},
+            "rows": {"type": "array",
+                     "items": {"type": "array", "items": {"description": "a cell: text, a number, or a formula beginning with ="}},
                      "description": "rows of cells, the first being the headers"},
             "content": {"type": "string", "description": "or a Markdown table / CSV"},
             "headers": {"type": "array", "items": {"type": "string"}},

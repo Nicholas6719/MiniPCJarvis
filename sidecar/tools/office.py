@@ -412,7 +412,8 @@ def register_all() -> None:
                     "are lists of cells; a leading '=' is a formula. It is "
                     "NOT saved — his Ctrl+Z still works.",
         parameters={"type": "object", "properties": {
-            "values": {"type": "array", "items": {"type": "array"}},
+            "values": {"type": "array",
+                       "items": {"type": "array", "items": {"description": "a cell: text, a number, or a formula beginning with ="}}},
             "text": {"type": "string", "description": "or CSV / tab separated rows"},
             "start": {"type": "string", "description": "e.g. 'B4'; default his selection"},
             "sheet": {"type": "string"}},

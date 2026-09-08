@@ -4543,11 +4543,62 @@ showed it. `scratchpad/fix_backspace.py` also swept every .py in the repo for
 stray control bytes — there were no others. Script files, not heredocs; the
 rule now has a second scar.
 
+### One missing word in a tool schema broke every turn (release 63)
+Release 62's suites finally ran end to end — the guard fixes above worked —
+and three failed: `bargein_e2e`, `clarify_e2e`, `telegram_e2e`. The barge-in
+looked like the same regression for the third time. It was not.
+
+`bargein_e2e` reported `total_deltas=0`: the reply it was supposed to
+interrupt **never streamed a single word**. JARVIS spoke a filler at 0.4 s
+and then said "I hit a problem with that". There was nothing to barge into.
+
+The log said only `httpx.HTTPStatusError: Server error '500'`, 28 times, and
+**none before 2026-09-08**. llama-server's stderr goes to `DEVNULL`, but it
+is also started with `--log-file` in roaming AppData; copied out through a
+real-session task (`.agent/scripts/grab_llama_log.cmd`, new), it said:
+
+```
+While executing If at line 12, column 13 in source:
+...am_spec.type == "array" -%}  {%- if param_spec['items'] -%}
+Error: Function is not a bool value
+```
+
+gpt-oss's chat template asks `param_spec['items']` for every array parameter.
+On a dict with no `"items"` key that does **not** come back undefined — it
+comes back as the dict's own `.items` METHOD, and minja refuses it. The
+server then answers **500 to the entire request**, tools and all.
+
+The two tools added the day before both declared
+`{"type": "array", "items": {"type": "array"}}` — `write_spreadsheet.rows`
+and `set_cells.values`. The outer array says what it holds; the inner one
+says nothing. That is the whole bug, and it broke every tool-using turn in
+the app: the research 500s, the barge-in twice, clarify's first token past
+budget, and "I hit a problem with that" spoken to him at 17:55.
+
+Fixed by giving the cell schema a body — deliberately with no `type`, since a
+cell is text, a number, or a formula and claiming one would be a lie the
+model would act on. `tests/test_tool_schemas.py` walks every registered
+tool's schema (128 of them, including `$defs`, `anyOf` and nested items) and
+fails on any array without an `items` object. It is gated second, right after
+the wiring gate, because a broken schema breaks everything downstream of it.
+
+**And the sidecar now says why.** `provider.py` called `raise_for_status()`
+on a streaming response, which throws the body away unread — and the body
+was the answer the whole time. It reads and logs it first now. Four lines;
+they would have saved a day.
+
+*Still to check on the next run:* `telegram_e2e` failed too and has not been
+looked at; `clarify_e2e`'s one failure was "it starts speaking straight away"
+at 2.85 s, which is very likely the same 500 and should clear with it.
+
 ### Next, in order
-1. **`bargein_e2e` has STILL never run on an installed build.** Release 61
-   installed and both attempts at the suites stopped before reaching it —
-   see the section above for why, and it is fixed. This is the one thing
-   release 62 exists to prove.
+1. **`bargein_e2e` has still never PASSED on an installed build.** It has
+   now run twice (release 62) and failed both times for a reason that was
+   never the barge-in: the reply it interrupts never streamed a word,
+   because every tool-using turn was 500ing on a tool schema. That is fixed
+   in release 63, and this is the one thing release 63 exists to prove. The
+   barge-in code itself has not been shown to be wrong since the
+   two-detector fix — it has never been given a working turn to interrupt.
 2. **The rest of "faster"**: streaming transcription (partly done — the
    0.20 s endpoint trim), the two-tier brain (the draft model is OFF after
    two failed attempts: CPU starved the wake detector, GPU overflowed the

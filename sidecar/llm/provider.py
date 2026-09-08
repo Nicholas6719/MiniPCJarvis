@@ -98,6 +98,16 @@ class LocalLLM:
             async with c.stream(
                 "POST", f"{srv.base_url}/v1/chat/completions", json=body
             ) as resp:
+                if resp.status_code >= 400:
+                    # READ IT BEFORE RAISING. The body is the only place the
+                    # server says what it objected to, and on a streaming
+                    # response raise_for_status() discards it unread.
+                    try:
+                        detail = (await resp.aread()).decode(errors="replace")[:600]
+                    except Exception:
+                        detail = "<body unreadable>"
+                    log.error("llama-server %s refused the request: %s",
+                              resp.status_code, detail.replace(chr(10), " "))
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):

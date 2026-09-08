@@ -28,6 +28,11 @@ def check(name, cond, detail=""):
 
 
 class _Resp:
+    # A real streaming response carries a status code, and the provider reads
+    # it before raising so the server's own explanation reaches the log
+    # (2026-09-08: 28 turns died on a 500 whose body said exactly why).
+    status_code = 200
+
     def raise_for_status(self):
         pass
 
