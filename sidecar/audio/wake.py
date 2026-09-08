@@ -20,6 +20,8 @@ class WakeWord:
     def __init__(self) -> None:
         self._model = None
         self._buf = np.zeros(0, dtype=np.float32)
+        self._lock = threading.Lock()   # per instance: see feed()
+        self.dropped = 0
 
     def _ensure(self):
         if self._model is None:
@@ -48,13 +50,17 @@ class WakeWord:
                 # already happened twice — it must never be silent as well.
                 log.debug("wake model reset failed", exc_info=True)
 
-    # ONE FEEDER AT A TIME. The wake loop and the barge-in watcher both feed
-    # this model from worker threads; on 2026-09-07 five threads were inside
-    # `predict` at once, each call slower than the last as the model's own
-    # streaming buffer grew under them, and the sidecar burned 2.3 cores while
-    # "sleeping". A feeder that finds the model busy DROPS its block - 80 ms
-    # of audio nobody will miss - rather than queueing behind it.
-    _lock = threading.Lock()
+    # ONE FEEDER PER INSTANCE. openWakeWord keeps a streaming buffer inside the
+    # model, so two callers feeding one instance interleave their audio into
+    # each other's window - and on 2026-09-07 five threads were inside
+    # `predict` at once, the sidecar burning 2.3 cores while "sleeping".
+    #
+    # The lock is per-instance and non-blocking: a second feeder DROPS its
+    # 80 ms rather than queueing. That is right when the second feeder is a
+    # duplicate, and wrong when it is a different listener - which is why the
+    # barge-in watcher has its own instance (`barge`) rather than sharing this
+    # one. Sharing cost the barge-in entirely: the wake loop won every block
+    # during speech and the watcher heard nothing (bargein_e2e, 2026-09-08).
     dropped = 0
 
     def feed(self, audio_f32: np.ndarray) -> float:
@@ -82,3 +88,9 @@ class WakeWord:
 
 
 wake = WakeWord()
+# THE BARGE-IN LISTENS ON ITS OWN. It runs at the same time as the loop above,
+# on the same microphone, while JARVIS is speaking - and one shared model
+# meant one of them got every block and the other got none. Two instances,
+# two streaming buffers, no contention. A few megabytes, and the difference
+# between being able to interrupt him and not.
+barge = WakeWord()

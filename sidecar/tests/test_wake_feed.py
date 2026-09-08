@@ -87,6 +87,16 @@ def main() -> int:
     check("only one barge-in watcher at a time", "_barge_task" in src and "prev.cancel()" in src)
     check("only one wake loop at a time", "for old in (self._loop_task, self._wake_task)" in src)
 
+    # ...AND TWO LISTENERS NEVER SHARE ONE. The lock above drops a block when
+    # the model is busy, which is right for a duplicate feeder and fatal for a
+    # different one: the wake loop won every block while JARVIS spoke and the
+    # barge-in never fired (bargein_e2e, 2026-09-08).
+    check("the barge-in has its own detector", W.barge is not W.wake)
+    check("...with its own buffer and its own lock",
+          W.barge._lock is not W.wake._lock and W.barge._buf is not W.wake._buf)
+    check("...and the watcher uses it", "barge.feed" in src and "barge.threshold" in src)
+    check("...and resets it when it fires", "barge.reset()" in src)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

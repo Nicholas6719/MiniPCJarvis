@@ -87,6 +87,19 @@ foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py
     # previous one" (the exact bug documented at the top of this file), revert
     # this to 10 before looking anywhere else.
     Start-Sleep 4   # let the speaker drain and the wake model settle
+    # HIS MACHINE COMES FIRST. A test mute lifts the moment he speaks
+    # (release 55, and correct), which turned a silent run audible: he
+    # spoke, and soak_e2e went on saying "it's 12:50 pm" at him every
+    # five seconds. If he is using JARVIS, the rest of the suites do not
+    # run - and the run says so rather than reporting green.
+    try {
+        $lv = (Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 5).last_voice_s
+        if ($null -ne $lv -and $lv -lt 120) {
+            Write-Host "SUITES STOPPED - he spoke to JARVIS $([int]$lv)s ago; $t and the rest did not run."
+            $failed += "stopped: he is using it"
+            break
+        }
+    } catch { }
     Write-Host "== $t"
     # keep enough of the tail to show WHY, not just that it failed: the last 3 lines
     # once hid the one diagnostic line that explained a suite-only failure

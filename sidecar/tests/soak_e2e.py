@@ -150,6 +150,17 @@ async def main() -> int:
 
         last_diag = last_uia = last_holo = 0.0
         while time.time() - t0 < SECONDS:
+            # ...and stop the moment he starts talking to it. This loop is
+            # five minutes of turns; with the mute lifted by his own voice
+            # they are five minutes of JARVIS talking over him (2026-09-08).
+            try:
+                _h = (await client.get(f"{BASE}/health", headers=H, timeout=5)).json()
+                _lv = _h.get("last_voice_s")
+                if _lv is not None and _lv < 120:
+                    print(f"  STOPPED - he spoke {int(_lv)}s ago; the soak did not finish.")
+                    break
+            except Exception:
+                pass
             rounds += 1
             if not start_rss and time.time() - t0 >= warmup:
                 start_rss = rss_mb(before[0])

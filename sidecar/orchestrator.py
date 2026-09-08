@@ -20,7 +20,7 @@ from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
 from audio import endpoint, output_watch
-from audio.wake import wake
+from audio.wake import barge, wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
 import clarify
@@ -2997,12 +2997,15 @@ class Orchestrator:
                               if any(p >= vad.threshold for p in probs) else 0)
                     fired = consec >= 6
                 else:
-                    score = await asyncio.to_thread(wake.feed, block)
-                    fired = score >= wake.threshold
+                    # ITS OWN DETECTOR. Sharing one with the wake loop meant
+                    # the loop won every block while JARVIS was speaking and
+                    # the barge-in never fired at all (bargein_e2e, 2026-09-08).
+                    score = await asyncio.to_thread(barge.feed, block)
+                    fired = score >= barge.threshold
                     if fired and getattr(self, "_saying_own_name", False):
                         # that was him saying "Jarvis", bleeding from the speakers
                         log.info("ignored own name in speech (score %.2f)", score)
-                        wake.reset()
+                        barge.reset()
                         fired = False
                 if fired:
                     log.info("barge-in detected (%s)", mode)
@@ -3014,6 +3017,7 @@ class Orchestrator:
                     # then the audio kicked on" he reported on 2026-09-08.
                     speaker.stop_playback()
                     wake.reset()
+                    barge.reset()
                     await self.sm.to(State.INTERRUPTED, force=True)
                     await bus.emit("interrupted", reason="barge-in")
                     mic.drain()
