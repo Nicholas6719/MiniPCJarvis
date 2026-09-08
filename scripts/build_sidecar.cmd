@@ -69,6 +69,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_bargein_audio.py || (echo BARGEIN AUDIO TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_documents.py || (echo DOCUMENTS TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_office.py || (echo OFFICE TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_companion.py || (echo COMPANION TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_input.py || (echo INPUT TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_shortlist.py || (echo SHORTLIST TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_endpoint.py || (echo ENDPOINT TEST FAILED & exit /b 1)
