@@ -108,6 +108,15 @@ def resolve_input_device() -> tuple[int | None, str, bool]:
 
 
 class Microphone:
+    # AUDIO A TEST PUSHED IN IS NOT HIM SPEAKING. /debug/inject_audio feeds the
+    # same queue the hardware does — deliberately, so the wake and capture loops
+    # are exercised for real — which left nothing downstream able to tell the
+    # two apart. On 2026-09-08 that cost two suite runs: voice_ux_e2e injected a
+    # wake, /health.last_voice_s said "he spoke 5s ago", and the guard that
+    # exists to keep the suites off his machine stopped them on the suites' own
+    # noise, one line before the barge-in test everything was waiting for.
+    injected_until: float = 0.0
+
     """Continuous 16 kHz mono capture broadcast to any number of subscribers.
 
     Each consumer (utterance capture, wake-word watcher, barge-in watcher) gets

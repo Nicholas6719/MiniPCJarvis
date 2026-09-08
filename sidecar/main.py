@@ -1175,8 +1175,14 @@ async def debug_inject_audio(body: dict, x_jarvis_token: str | None = Header(Non
     if os.environ.get("JARVIS_DEBUG") != "1":
         raise HTTPException(403, "debug endpoints disabled")
     import numpy as np
+    import time as _t
     from audio.io import mic
     audio = np.frombuffer(base64.b64decode(body["audio_b64"]), dtype=np.float32)
+    # SAY THAT THIS IS A TEST'S AUDIO, for as long as it can still be in flight:
+    # the injection itself, the 1.5 s of silence that ends the turn, and the
+    # capture and transcription that follow. Anything that treats his voice as a
+    # reason to stand down (the test mute, /health.last_voice_s) reads this.
+    mic.injected_until = _t.time() + len(audio) / 16000 + 45.0
     # pause the hardware mic so injected audio isn't interleaved with room noise
     mic.stop()
     try:

@@ -3304,7 +3304,8 @@ _FILLER_WORDS = re.compile(r"\b(?:um+|uh+|er+|erm|hmm+|mm+|ah+|oh|yeah|yep|okay|
 _FUNCTION_WORDS = {"im", "its", "is", "are", "was", "be", "to", "the", "that", "this", "of", "in",
                    "on", "at", "do", "dont", "not", "no", "yes", "it", "me", "my", "we", "he",
                    "she", "they", "an", "or", "if", "as", "up", "for", "with", "can", "you"}
-_MARGINAL_WAKE = 0.85
+MARGINAL_WAKE = 0.85          # at or above this, a wake is always his
+_MARGINAL_WAKE = MARGINAL_WAKE
 
 
 def not_for_me(text: str, wake_score: float | None) -> bool:
@@ -3394,6 +3395,50 @@ def ask_allowed(text: str, skill: str) -> bool:
                     r"please|go for it|fine|right)\W*", text or "", re.I):
         return False
     return not (QUESTION_LEAD.match(text or "") and skill not in QUERY_SKILLS)
+
+
+# THE VERBS HE ACTUALLY STARTS ORDERS WITH, taken from the seeds rather than
+# a list I would have to remember to update. Every skill's phrasings are right
+# here; their first words are what an instruction to JARVIS opens with.
+_COMMAND_LEADS = frozenset(
+    w for w in (
+        re.sub(r"[^a-z']", "", (s.split() or [""])[0].lower())
+        for sk in SKILLS for s in sk.seeds
+    ) if len(w) > 1 and w not in _FUNCTION_WORDS
+)
+
+
+def addressed_to_me(text: str) -> bool:
+    """Does this sentence look like it was said TO JARVIS?
+
+    Only ever consulted after a marginal wake that the brain did not
+    recognise — see the orchestrator. A clear wake, or a sentence the brain
+    knows, never reaches this.
+
+    The 2026-09-05 fragment rule (`not_for_me`) turned out to catch nothing:
+    883 wake fires in the log and it never once dismissed anything, because
+    what a television says is not "Um" — it is a whole fluent sentence.
+    "You meat puncher! Got a speeding corvette over 80" woke him at 0.71 on
+    2026-09-08 and went to the model. What his own speech has that the
+    television's does not is shape: he asks a question, gives an order, or
+    says the name.
+    """
+    t = (text or "").strip()
+    if not t:
+        return True             # a bare wake word is the acknowledgement's job
+    low = t.lower()
+    if "jarvis" in low:
+        return True
+    if QUESTION_LEAD.match(t):
+        return True
+    # "<verb> me ..." is him, whatever the verb: "message me on telegram when
+    # it's done", "text me that", "walk me through it". The seeds cannot carry
+    # every verb he will ever use, and a sentence whose second word is "me" is
+    # addressed to somebody.
+    if re.match(r"^[a-z']+\s+(?:me|my|us)\b", low):
+        return True
+    first = re.sub(r"[^a-z']", "", (low.split() or [""])[0])
+    return first in _COMMAND_LEADS
 
 
 def confirm_as(name: str) -> str:

@@ -4496,12 +4496,58 @@ heard nothing. `audio/wake.py` now exports two instances, `wake` and
   400 characters of the router branch and failed the moment the branch grew
   a comment. It now slices the whole branch.
 
+### The false wake, and the four things behind it (release 62)
+Release 61 built and installed cleanly and its suites stopped themselves
+**twice**, both times one line before `bargein_e2e` — the suite the install
+existed to run. `/health.last_voice_s` said he was talking when he was not.
+Four separate causes, one fix each, all gated in `tests/test_wake_guard.py`:
+
+1. **A test's own audio counted as his voice.** `/debug/inject_audio` feeds
+   the same queue the microphone does — deliberately, so the wake and capture
+   loops are exercised for real — and nothing downstream could tell them
+   apart. `voice_ux_e2e` injected a wake, `last_voice_s` said "5 s ago", and
+   the guard meant to keep the suites off his machine stopped them on their
+   own noise. `mic.injected_until` is now set before the first block is fed
+   and covers the capture that follows; `_voice_heard()` returns early while
+   it holds, so neither `last_voice_ts` nor the test-mute lift fires.
+2. **A dismissed utterance still counted.** `_voice_heard()` ran the moment
+   anything was transcribed, before both junk gates. It now runs after them.
+3. **The television, in whole sentences.** At 17:55 a wake fired at 0.71 and
+   the capture was *"You meat puncher! Got a speeding corvette over 80"* —
+   which went to the model as a request. The 2026-09-05 fragment rule
+   (`not_for_me`) was built for "Um" and "I think I'm just", and **in 883 wake
+   fires it had never once dismissed anything**: what a television says is a
+   fluent sentence, not a fragment. New rule, and it sits after the brain has
+   already failed to recognise the sentence: below 0.85, an utterance must
+   look addressed to somebody — it says his name, it is a question, it starts
+   with a verb any skill's seeds start with (277 of them, derived from the
+   seeds so the list cannot fall behind), or its second word is "me"/"my".
+   All five real television lines out of his transcript are dismissed
+   silently; his own phrasings survive.
+   **The cost, stated:** a short unrecognised order after a marginal wake —
+   "lights out", if it were not a taught command — is dismissed without a
+   sound and he has to repeat it. Today it gets "did you mean...?" asked of
+   an empty room instead. The dismissal is logged and raises `wake_suppressed`
+   on the HUD, so it is quiet but not invisible.
+4. **A raise from August that never reached him.** The wake threshold was
+   moved to 0.60 on 2026-08-27 and his saved `config.json` still said 0.45 —
+   defaults only fill what is missing. In his log **every one of the 61 fires
+   between 0.45 and 0.59 was followed by no speech at all**; above 0.60 the
+   wakes are real. Migration v8 lifts a stored value below the default and
+   leaves a higher one he set himself alone.
+
+**The trap, again.** Writing `\b` into a regex through a shell heredoc put a
+literal 0x08 byte in `brain/skills.py`. The pattern compiled, matched
+nothing, and read correctly in every editor. Only `dis` on the code object
+showed it. `scratchpad/fix_backspace.py` also swept every .py in the repo for
+stray control bytes — there were no others. Script files, not heredocs; the
+rule now has a second scar.
+
 ### Next, in order
-1. **Verify release 61 live.** The barge-in fix and the two-detector fix are
-   committed and gated but have never run on the installed build — the run
-   that would have proved it is the one he stopped. `bargein_e2e` is the
-   suite that matters, and it makes JARVIS speak, so it needs a moment when
-   he is not using the machine.
+1. **`bargein_e2e` has STILL never run on an installed build.** Release 61
+   installed and both attempts at the suites stopped before reaching it —
+   see the section above for why, and it is fixed. This is the one thing
+   release 62 exists to prove.
 2. **The rest of "faster"**: streaming transcription (partly done — the
    0.20 s endpoint trim), the two-tier brain (the draft model is OFF after
    two failed attempts: CPU starved the wake detector, GPU overflowed the

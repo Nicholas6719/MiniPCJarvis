@@ -408,7 +408,7 @@ class Config:
 
     # Saved configs snapshot every default, so improved defaults never reach an
     # existing install on their own. Each migration runs once (tracked by version).
-    CONFIG_VERSION = 7
+    CONFIG_VERSION = 8
 
     def _migrate(self) -> bool:
         v = int(self.data.get("config_version", 1) or 1)
@@ -448,6 +448,20 @@ class Config:
             w = self.data.setdefault("weather", {})
             if not str(w.get("home") or "").strip():
                 w["home"] = DEFAULTS["weather"]["home"]
+                changed = True
+        if v < 8:
+            # 2026-09-08: the wake threshold was raised to 0.60 on 2026-08-27
+            # and his saved config still said 0.45, so the raise never reached
+            # the machine it was made for. In his log, all 61 fires between
+            # 0.45 and 0.59 were followed by NO speech at all — every one a
+            # false wake. A value he set higher himself is left alone.
+            w = self.data.setdefault("wake", {})
+            try:
+                if float(w.get("threshold", 0.0) or 0.0) < DEFAULTS["wake"]["threshold"]:
+                    w["threshold"] = DEFAULTS["wake"]["threshold"]
+                    changed = True
+            except (TypeError, ValueError):
+                w["threshold"] = DEFAULTS["wake"]["threshold"]
                 changed = True
         if True:
             # built-in model entries are ours to tune: always mirror DEFAULTS (user-added untouched)

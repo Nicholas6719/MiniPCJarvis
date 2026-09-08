@@ -36,7 +36,7 @@ from config import config
 from events import bus, spawn
 from llm import draft as draftrules
 from llm.llama_server import draft, llama
-from brain.skills import want_honorific
+from brain.skills import MARGINAL_WAKE, addressed_to_me, want_honorific
 from llm.prompts import pinned_block, system_prompt, turn_context
 from llm.provider import local_llm
 from memory.store import memory
@@ -1207,6 +1207,9 @@ class Orchestrator:
                                              "the wake word is required", who or "something")
                                 continue
                         log.info("follow-up speech (conversation window)")
+                        # He is mid-conversation: the window only opens after a
+                        # turn he was given. Nothing marginal about it.
+                        self._wake_score_fresh = None
                         self._preroll = np.concatenate(list(preroll)[-8:])  # ~0.5 s lead-in
                         self._armed_until = 0.0
                         await bus.emit("conversation", armed=False)
@@ -1218,6 +1221,11 @@ class Orchestrator:
                     last_fire = time.time()
                     log.info("wake word detected (%.2f)", score)
                     self._last_wake_score = float(score)   # for the not-for-me gate
+                    # ...and a SEPARATE one that a turn consumes. _last_wake_score
+                    # lives on into the conversation window, where a follow-up
+                    # carries the score of the wake that opened it; the gate in
+                    # _converse must judge this utterance and no other.
+                    self._wake_score_fresh = float(score)
                     # WAKE THE SPEAKERS WHILE HE IS STILL TALKING. His are the
                     # monitor's, over DisplayPort, and asleep whenever the
                     # panel is; opening that device is most of a second and it
@@ -1695,7 +1703,6 @@ class Orchestrator:
         self.metrics.mark("stt_ms")
         text = WAKE_PHRASE.sub("", text or "", count=1).strip()
         waited, budget = self._end_silence
-        self._voice_heard()
         await bus.emit("transcript", role="user", text=text,
                        stt_ms=int((time.time() - t_start) * 1000),
                        silence_ms=int(waited * 1000), budget_ms=int(budget * 1000))
@@ -1709,6 +1716,11 @@ class Orchestrator:
             await bus.emit("wake_suppressed", reason="fragment", text=text[:60])
             await self._settle_idle(State.ERROR, State.STARTING)
             return
+        # ...AND ONLY NOW IS IT HIS VOICE. This used to be recorded the moment
+        # anything was transcribed, before the gate above and before the one in
+        # _converse, so a dismissed television line still told every script
+        # "he is using JARVIS, do not install".
+        self._voice_heard()
         if not text:
             # just the wake word — acknowledge and open the window. Not always
             # "Yes?": the films' JARVIS varies it, and greets him by the time
@@ -1811,6 +1823,20 @@ class Orchestrator:
         if reflex and (not reflex[0].llm_after
                        or (reflex[0].direct_if is not None and reflex[0].direct_if(text))):
             await self._reflex_turn(text, reflex, t_start)
+            return
+        # ---- the television, in whole sentences -------------------------
+        # A wake below 0.85 that the brain does not recognise AND that does not
+        # sound like a request is not for him. Dismissed without a sound: the
+        # near-miss question below would otherwise ask an empty room "did you
+        # mean put that on the stage, sir?", which is exactly what it did at
+        # 12:50 on 2026-09-08.
+        ws, self._wake_score_fresh = getattr(self, "_wake_score_fresh", None), None
+        if (reflex is None and ws is not None and ws < MARGINAL_WAKE
+                and not addressed_to_me(text)):
+            log.info("dismissed %r after a marginal wake (%.2f): not addressed to me",
+                     text[:60], ws)
+            await bus.emit("wake_suppressed", reason="not addressed", text=text[:60])
+            await self._settle_idle(State.ERROR, State.STARTING)
             return
         # ---- it nearly knew: one short question rather than a wrong guess ----
         if reflex is None and await self._ask_if_unsure(text, t_start):
@@ -2474,6 +2500,16 @@ class Orchestrator:
         every question into a muted speaker. A test never has a reason to
         mute a man who is asking; the moment he speaks, the mute is over.
         """
+        try:
+            # A suite's injected audio is not him, and neither is the
+            # television. This is the only writer of last_voice_ts, and the
+            # release script and suites.ps1 both refuse to run while it is
+            # recent — so anything that gets it wrong stops a release.
+            from audio.io import mic
+            if time.time() < getattr(mic, "injected_until", 0.0):
+                return
+        except Exception:
+            log.debug("could not tell injected audio from his voice", exc_info=True)
         self.last_voice_ts = time.time()
         try:
             if speaker.silent_until > time.time():
