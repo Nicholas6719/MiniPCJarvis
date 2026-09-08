@@ -4352,6 +4352,88 @@ an open box/tray with walls and a floor, a cone. Tried BEFORE the
 Still to watch him do once: one real pinch in front of the camera (the
 gesture path is proved from the landmarks onward, not before).
 
+## 2026-09-08 — school starts tomorrow: practical JARVIS (release 60)
+His brief: fix the barge-in (still too quiet for too long), make his context
+and his brain better, let him CREATE documents and work in them, generate
+images, and give him a **"work with me" mode** — *"He minimises the Arc
+Reactor into the bottom left of my screen, so he's working with me... the
+same rules as the rendering stage: same conversation window, same
+everything"* — plus better screen reading.
+
+Three read-only surveys first (HUD/Tauri window, screen+context, documents
++images). What they found is the spine of everything below.
+
+### The barge-in, measured
+The two-second gaps in the log between "barge-in detected" and "microphone
+started" are the SUITE's own `/debug/inject_audio` (it stops the mic to
+inject), not latency — every barge-in in the log was a test. The real cost
+is mechanical: `speaker.abort()` CLOSED the output stream, so the chime and
+then the reply each paid a fresh `Pa_OpenStream` against his monitor's
+DisplayPort speakers, which the file's own comment says "can hold for
+seconds". Fixed: `stop_playback()` aborts and restarts the SAME stream (an
+epoch counter drops anything already in flight), `prewarm()` opens the
+device on the wake word while he is still talking, `_ensure` logs any open
+over 250 ms, the chime is spawned not awaited, and a barge-in capture is
+treated as a bare wake so "Jarvis, stop" no longer holds the microphone for
+MAX_UTTERANCE_S. `tests/test_bargein_audio.py`.
+
+### Documents (tools/documents.py)
+Nothing in the sidecar could write a document: JARVIS composed a letter,
+spoke it, and lost it. python-docx + openpyxl + pypdf (pure Python, bundled;
+`collect_all` for their template XML). The model writes MARKDOWN and gets
+real Word styles — Heading, List Bullet, bold runs, pipe tables. Numbers in
+a sheet are stored as numbers, `=` is a formula, headers bold and frozen.
+`read_document` handles .docx/.xlsx/.pdf/.txt/.md/.csv and finds a file by
+NAME ("read me my essay") with a bounded scan. Everything through
+`file_tools._resolve`; a taken name becomes "Essay (2).docx".
+
+### Working IN what is open (tools/office.py)
+The reason this needed COM: OCR of a maximised spreadsheet hits the
+1,400-character condense cap in the first rows, the vision path sees a
+1024px JPEG in which no cell is legible, and UIA's `_READABLE` is
+`{50004 edit, 50030 document}` — Excel's grid is DataItem, so it returns
+nothing. `GetActiveObject` attaches to the RUNNING Word/Excel and reads the
+object model. `office_status`, `read_open_document` (document, used range,
+or just his selection), `edit_open_document`, `set_cells`. **Never
+`Dispatch`** (it would launch an invisible copy) and **never save** — Ctrl+S
+and Ctrl+Z stay his, and every reply says so.
+
+### Companion mode
+There were NO window commands in Rust and the geometry ACL is read-only, so
+`set_companion` is one atomic command: remember the rectangle, drop the
+940x620 floor, undecorate, skip the taskbar, pin on top, 300px, bottom-left
+of the monitor he is on, physical pixels throughout. Three ways back — the
+spoken command, a double-click on the reactor, and the tray (`show` and
+double-click both call `restore_full_window`). The HUD renders only the
+core, one state word and one line; the panel is a drag region. The sidecar
+holds the flag, widens the conversation window to 40 s exactly as a hologram
+does, and puts `companion` in `_screen_context`.
+
+### Traps hit today
+- **Release 59 died with `'EST' is not recognized`** and SIDECAR BUILD
+  FAILED while every gate said ALL PASS and PyInstaller said Build complete.
+  I had added two gate lines to `build_sidecar.cmd` **while it was running**.
+  cmd reads a batch file by byte offset, so it resumed mid-word. Memory note
+  `never-edit-a-cmd-mid-build`.
+- A heredoc ate `\S` again writing that same file. Script files only.
+- `config.set()` SAVES: a test that used it to point the folders at a temp
+  dir would have rewritten his real config. Patch `file_tools.roots` instead.
+
+### Next, in order
+1. **Context** (patch written, `scratchpad/patch_context.py`, applies after
+   this release): the foreground window in `_screen_context` and in the turn
+   note; `last_seen.note_tool` so the model knows what it just DID and not
+   only what it said; `_last_reflex` set on the LLM path (a follow-up after a
+   model turn was attaching its 0.35 bonus to a stale reflex); "keep going"
+   understood; `_correct` given the follow-up context it was missing;
+   `note_proactive` keeping `_hist_base` straight; and `analyze_screen`
+   returning the real document when Word or Excel is in front.
+2. **Images.** Nothing local exists and `C:\AI` has no generator. The
+   runnable option on the 780M is SD-Turbo/SDXL-Turbo as ONNX under
+   DirectML, installed at `C:\AI\imagegen` with its own env and driven as a
+   subprocess — the same shape as `C:\AI\model3d`. ~2.5 GB download, 1-4
+   steps, seconds per image. To be done after the context work.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page

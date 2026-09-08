@@ -1579,6 +1579,41 @@ def slots_project_start(t: str) -> dict:
     return {"name": name}
 
 
+# DRAWING one, not FINDING one. "Show me a picture of Spider-Man" is the web
+# (the `images` skill); "draw me a picture of Spider-Man" is the generator.
+# The verb is the whole difference, so it is the whole guard.
+_DRAW_VERB = re.compile(
+    r"\b(?:draw|paint|illustrate|sketch|generate|create|make|design|imagine)\b", re.I)
+_DRAW_NOUN = re.compile(
+    r"\b(?:picture|image|drawing|painting|illustration|artwork|art|poster|"
+    r"logo|icon|wallpaper|sketch|diagram|portrait|scene|comic|cartoon|"
+    r"banner|background|render(?:ing)?)\b", re.I)
+# These verbs can only mean drawing, so they need no noun: "paint me the sea".
+# "make" and "generate" cannot - they are how he asks for a 3D model, a
+# document, a reminder and half of everything else.
+_DRAW_ONLY = re.compile(r"\b(?:draw|paint|illustrate|sketch)\b", re.I)
+_FIND_VERB = re.compile(r"\b(?:show|find|search|look up|pull up|get me|bring up|display)\b", re.I)
+_THREE_D = re.compile(r"\b(?:3d|three d|three-d|model|stl|print|hologram)\b", re.I)
+
+
+def slots_image_make(t: str) -> dict | None:
+    """What to draw, in his own words.
+
+    Steps aside rather than guessing: a sentence that asks to FIND a picture
+    belongs to the `images` skill and one that says 3D belongs to holo_make.
+    Drawing something takes twenty seconds of his machine, so it has to be
+    what he actually asked for."""
+    s = (t or "").strip()
+    if not s or _THREE_D.search(s):
+        return None
+    if not (_DRAW_ONLY.search(s) or (_DRAW_VERB.search(s) and _DRAW_NOUN.search(s))):
+        return None
+    # "show me a picture of X" is a search even though it has the noun
+    if _FIND_VERB.search(s) and not _DRAW_ONLY.search(s):
+        return None
+    return {"description": s}
+
+
 def slots_holo_edit(t: str) -> dict | None:
     """The change, in his own words — the model doing the edit reads English.
 
@@ -2753,6 +2788,20 @@ SKILLS: list[Skill] = [
         "look up elden ring in brave", "show me images of mars in brave",
         "find the best mini pc in my browser"],
         slots=slots_browser_search, speak=say_browser_search, speak_first=True),
+    # DRAWING one. Twenty seconds of his own machine, so `generate_image` asks
+    # first, exactly as a render does.
+    Skill("image_make", "generate_image", [
+        "draw me a picture of a lighthouse",
+        "draw a picture of an owl in a storm",
+        "make me a picture of a red sports car",
+        "generate an image of a mountain at sunrise",
+        "create an illustration of a robot",
+        "paint me a picture of the sea",
+        "make me a poster for the science fair",
+        "draw an icon of a paper aeroplane",
+        "generate a wallpaper of a nebula",
+        "sketch me a picture of a castle"],
+        slots=slots_image_make, speak=None),
     Skill("images", "show_images", [
         "show me a picture of spider-man", "show me pictures of a nebula",
         "find me a photo of a golden retriever", "pull up images of the eiffel tower",
