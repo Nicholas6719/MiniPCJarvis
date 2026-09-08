@@ -14,6 +14,10 @@ for pkg in ["faster_whisper", "piper", "fastembed", "onnxruntime", "tokenizers",
             "kokoro_onnx", "playwright", "mcp",
             "espeakng_loader", "phonemizer", "num2words", "cssselect", "lxml",
             "onnx_asr", "winocr",
+            # the documents he hands in: python-docx and openpyxl both read
+            # template XML out of their own package directories, so the DATA
+            # matters as much as the code (2026-09-08).
+            "docx", "openpyxl", "pypdf",
             # courlan (trafilatura's URL cleaner) reads tld/res/*.dat.txt; without
             # the package's data it tries to DOWNLOAD the public suffix list into
             # the bundle on every fetch, cannot, and logs an ERROR each time.

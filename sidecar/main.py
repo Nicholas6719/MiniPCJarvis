@@ -67,6 +67,9 @@ async def lifespan(app: FastAPI):
     browser_tools.register_all()
     handoff.register_all()
     from tools import camera_tools, file_tools, market_tools, news_tools, weather
+    from tools import documents, office
+    documents.register_all()          # write and read Word, Excel, PDF, text
+    office.register_all()             # work IN the document he already has open
     file_tools.register_all()
     weather.register_all()
     camera_tools.register_all()   # the webcam view; the device stays shut until asked

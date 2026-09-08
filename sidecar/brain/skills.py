@@ -2831,6 +2831,28 @@ SKILLS: list[Skill] = [
         "what's on my clipboard", "read my clipboard", "what did i copy", "what's in the clipboard",
         "read me what i just copied", "show me my clipboard"],
         speak=say_clipboard),
+    # WORKING IN THE DOCUMENT HE ALREADY HAS OPEN. Deliberately naming the
+    # document or the sheet: a bare "what does this say" is the SCREEN, and
+    # `look at this` belongs to that skill. These say which thing they mean.
+    Skill("office_read", "read_open_document", [
+        "what does this document say", "read my document",
+        "read what i've got open", "what's in this spreadsheet",
+        "read this sheet to me", "what's in the sheet",
+        "read the document i'm working on", "what have i written so far",
+        "read back what i've written", "what does my essay say so far",
+        "look at what i'm working on"],
+        speak=None),
+    Skill("office_selection", "read_open_document", [
+        "read what i've highlighted", "what have i selected",
+        "read the selection", "what's highlighted", "read this bit",
+        "what does the highlighted part say"],
+        fixed_args={"selection_only": True}, speak=None),
+    Skill("office_what", "office_status", [
+        "what am i working on", "what have i got open in word",
+        "what document is open", "what workbook is open",
+        "what spreadsheet am i in", "which sheet am i on",
+        "am i in word or excel"],
+        speak=None),
     Skill("open_site", "open_url", [
         "open youtube.com", "go to wikipedia.org", "pull up amazon.com", "open the website reddit.com",
         "take me to github.com", "open up netflix.com", "go to the website espn.com", "load bbc.com",

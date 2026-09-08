@@ -45,6 +45,13 @@ trimesh>=4.0
 #     pip install --no-deps mediapipe==1.0.1
 mediapipe>=1.0.1
 
+# The documents he hands in (2026-09-08). All three are pure Python over the
+# standard library, so they bundle cleanly and work offline; Word and Excel
+# themselves are reached over COM, which pywin32 already provides.
+python-docx>=1.2.0
+openpyxl>=3.1.5
+pypdf>=6.0.0
+
 # build-time only (gates, not bundled)
 pyinstaller
 pyflakes
