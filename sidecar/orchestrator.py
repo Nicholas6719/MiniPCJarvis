@@ -296,7 +296,7 @@ def _screen_context() -> dict:
     which is precisely how the brain behaved before it could see anything.
     """
     ctx = {"stage": False, "project": False, "render": False,
-           "last_skill": None}
+           "companion": False, "last_skill": None}
     try:
         from tools.holo_tools import current
         ctx["stage"] = bool((current() or {}).get("name"))
@@ -307,6 +307,12 @@ def _screen_context() -> dict:
         ctx["project"] = bool(active())
     except Exception:
         log.debug("no project context", exc_info=True)
+    try:
+        # In companion mode "this" is his document, not the stage.
+        from tools.office import companion_on
+        ctx["companion"] = companion_on()
+    except Exception:
+        log.debug("no companion context", exc_info=True)
     try:
         from render_queue import queue
         ctx["render"] = bool((queue.status() or {}).get("busy"))
@@ -692,6 +698,19 @@ class Orchestrator:
                 win = float(config.get("conversation", "holo_window_s", default=40))
         except Exception:
             log.debug("could not check the stage for the window length",
+                      exc_info=True)
+        # WORKING IN A DOCUMENT IS A CONVERSATION TOO. His instruction for
+        # companion mode was "the same rules as the rendering stage": he is
+        # looking at his spreadsheet, thinking, and saying the next thing.
+        # Same reasoning as the hologram above - the corner widget on screen
+        # says what the mode is, so an open microphone is not a surprise.
+        try:
+            from tools.office import companion_on
+            if companion_on():
+                win = max(win, float(config.get("conversation",
+                                                "companion_window_s", default=40)))
+        except Exception:
+            log.debug("could not check companion mode for the window length",
                       exc_info=True)
         # PICTURES ARE A STAGE TOO. He asked for eight of them, and eight
         # seconds is gone before he has looked at the third — so saying "the

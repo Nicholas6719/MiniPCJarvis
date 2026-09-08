@@ -280,6 +280,10 @@ _STAGE_SKILLS = frozenset({
 })
 _PROJECT_SKILLS = frozenset({"project_note", "project_recall"})
 _RENDER_SKILLS = frozenset({"render_stop", "render_how"})
+# WORKING IN A DOCUMENT. In companion mode "read this", "what does this say"
+# and "what have I got" mean the Word document or the Excel sheet in front of
+# him — not the screen, not a file on disk. Out of it they usually do not.
+_OFFICE_SKILLS = frozenset({"office_read", "office_selection", "office_what"})
 
 # Sized from the real gaps: the widest one a bonus has to close is 0.122
 # ("make it bigger": ui@1.00 against holo_move@0.88). Big enough to win a
@@ -380,6 +384,11 @@ def _skill_context_delta(skill: str, ctx: dict) -> float:
         d += CONTEXT_BONUS if ctx.get("render") else -CONTEXT_PENALTY
     if skill in _PROJECT_SKILLS:
         d += CONTEXT_BONUS if ctx.get("project") else -CONTEXT_PENALTY
+    if skill in _OFFICE_SKILLS:
+        # Not penalised out of companion mode: he can perfectly well say
+        # "read my document" with the full window up, and Word open. The
+        # bonus only settles it when the sentence is genuinely ambiguous.
+        d += CONTEXT_BONUS if ctx.get("companion") else 0.0
     return d
 
 

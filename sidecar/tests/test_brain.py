@@ -250,6 +250,15 @@ CASES = [
     ("remove the render", "holo_hide"),
     ("move it to the left a bit", "holo_move"),
     ("nudge it up a little", "holo_move"),
+    # working in a document with him (2026-09-08)
+    ("help me with this excel sheet", "companion_on"),
+    ("work with me on this document", "companion_on"),
+    ("come out of the corner", "companion_off"),
+    ("full screen again", "companion_off"),
+    ("what does this document say", "office_read"),
+    ("what's in this spreadsheet", "office_read"),
+    ("read what i've highlighted", "office_selection"),
+    ("what am i working on", "office_what"),
     # his Telegram voice note of 2026-09-07 06:13 - answered with the LIST
     ("set a reminder every day for seven pm to make sure i take my supplements", "reminder"),
     ("every night at 10 remind me to wear my retainers", "reminder"),

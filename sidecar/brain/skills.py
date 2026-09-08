@@ -2847,6 +2847,27 @@ SKILLS: list[Skill] = [
         "read the selection", "what's highlighted", "read this bit",
         "what does the highlighted part say"],
         fixed_args={"selection_only": True}, speak=None),
+    # "WORK WITH ME." The window shrinks to the corner and stays out of his
+    # way while he writes. Deliberately not "hide yourself" (that is the UI's
+    # dismissal) and not "go to sleep" (that stops listening) - companion mode
+    # is the opposite of both: smaller, and MORE attentive.
+    Skill("companion_on", "companion_mode", [
+        "help me with this excel sheet", "help me with this spreadsheet",
+        "help me out on this excel sheet", "i'm working on a word document, help me with this",
+        "work with me on this document", "work with me on this",
+        "work alongside me", "get out of my way but stay with me",
+        "shrink down into the corner", "go into the corner and help me",
+        "minimise into the corner", "companion mode",
+        "i'm writing an essay, work with me", "help me write this"],
+        fixed_args={"on": True}, speak=None),
+    Skill("companion_off", "companion_mode", [
+        # NOT "go back to full screen": the `switch to APP` canon eats every
+        # "go back to X" and this collided head-on with the app switcher.
+        "come out of the corner", "come back to full size",
+        "full screen again", "full window again",
+        "out of companion mode", "take the whole screen again",
+        "you can come back now"],
+        fixed_args={"on": False}, speak=None),
     Skill("office_what", "office_status", [
         "what am i working on", "what have i got open in word",
         "what document is open", "what workbook is open",

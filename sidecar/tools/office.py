@@ -303,7 +303,70 @@ def set_cells(values: list | None = None, start: str = "", text: str = "",
         return {"error": f"I couldn't write into it: {e}"}
 
 
+# --------------------------------------------------------------- work with me
+# His words: *"He minimises the Arc Reactor into the bottom left of my screen,
+# so he's working with me, can talk with me, interact with me."* The window
+# change happens in the HUD (Tauri owns the window); this is the sidecar's
+# half — the flag that makes the conversation window as generous as it is with
+# a hologram up, and that tells the router he is in a document.
+_companion = {"on": False, "since": 0.0}
+
+
+def companion_on() -> bool:
+    return bool(_companion["on"])
+
+
+async def companion_mode(on: bool = True) -> dict:
+    """Shrink to the corner and work alongside him, or come back."""
+    import time
+
+    from events import bus
+    on = bool(on)
+    was = _companion["on"]
+    _companion["on"] = on
+    _companion["since"] = time.time() if on else 0.0
+    try:
+        await bus.emit("ui", action="companion", on=on)
+    except Exception:
+        log.debug("could not tell the HUD about companion mode", exc_info=True)
+    if not on:
+        return {"companion": False, "was": was,
+                "spoken": "Back, sir." if was else "I'm already back, sir."}
+
+    # What he is working in, so the first thing said is useful rather than
+    # ceremonial. Never fatal: Office may not be open at all.
+    st: dict = {}
+    try:
+        st = office_status()
+    except Exception:
+        log.debug("could not read Office while entering companion mode", exc_info=True)
+    where = ""
+    if st.get("excel"):
+        where = f" {st['excel']['workbook']}, the {st['excel']['sheet']} sheet"
+    elif st.get("word"):
+        where = f" {st['word']['document']}"
+    return {"companion": True, "was": was, "office": {k: st.get(k) for k in ("word", "excel")},
+            "spoken": (f"I'm in the corner, sir — working on{where}." if where
+                       else "I'm in the corner, sir. Say the word."),
+            "instruction": ("You are now a small widget in the corner of his screen while he "
+                            "works in a document. Keep every reply to one or two short "
+                            "sentences. If he asks about the document, read it with "
+                            "read_open_document rather than looking at the screen.")}
+
+
 def register_all() -> None:
+    registry.register(Tool(
+        name="companion_mode",
+        description="Shrink JARVIS to a small widget in the corner of his "
+                    "screen so he can work in a document with it beside him "
+                    "('help me with this spreadsheet', 'work with me on this', "
+                    "'get out of my way'), or bring the full window back "
+                    "('come back', 'full screen').",
+        parameters={"type": "object", "properties": {
+            "on": {"type": "boolean", "description": "true to shrink, false to come back"}},
+            "required": []},
+        risk=Risk.LOW, handler=companion_mode, timeout=20))
+
     registry.register(Tool(
         name="office_status",
         description="What he has open in Word and Excel right now: the "

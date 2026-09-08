@@ -214,6 +214,10 @@ interface Store {
   renderPreview: RenderPreview | null;
   holo: HoloState | null;
   project: string | null;
+  // COMPANION MODE. The window shrinks to a small always-on-top widget in the
+  // bottom-left corner and the OS gets out of his way, so he can work in Word
+  // or Excel with JARVIS beside him rather than over him.
+  companion: boolean;
   files: FilesState | null;
   filePreview: FilePreview | null;
   turn: TurnState | null;
@@ -237,6 +241,10 @@ interface Store {
   pinStage: (pinned: boolean, minutes?: number) => void;
   toggleLayers: () => void;
   setSettingsSection: (s: SettingsSection) => void;
+  // Companion mode, from the HUD side (a double-click on the reactor). The
+  // sidecar is told too, so its conversation window and its idea of what he
+  // is doing stay in step with the window's shape.
+  setCompanion: (on: boolean) => void;
 }
 
 // After the answer is spoken the stage holds this long, then the core comes home.
@@ -310,6 +318,7 @@ export const useStore = create<Store>((set, get) => ({
   renderPreview: null,
   holo: null,
   project: null,
+  companion: false,
   files: null,
   filePreview: null,
   turn: null,
@@ -371,6 +380,13 @@ export const useStore = create<Store>((set, get) => ({
         pinUntil: pinned && minutes ? Date.now() + minutes * 60000 : undefined,
       },
     } : {})),
+  setCompanion: (on) => {
+    if (on) get().dismissStage();
+    set({ companion: on });
+    void import("../lib/sidecar").then(({ api }) =>
+      api("/companion", { method: "POST", body: JSON.stringify({ on }) })
+        .catch(() => { /* the window has already changed; the sidecar catches up */ }));
+  },
   setSettingsSection: (s) =>
     set((st) => ({
       stage: {
@@ -935,6 +951,15 @@ export const useStore = create<Store>((set, get) => ({
           else if (view === "files") get().openStage("folder", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
           else if (view === "browser" || view === "research") get().openStage("browser", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
           else if (view === "conversation") get().openStage("prose", { holdUntil: Date.now() + ASKED_FOR_HOLD_MS });
+        } else if (action === "companion") {
+          // WORK WITH ME. The window itself changes shape, so this is the one
+          // UI action that reaches past the stage into Tauri (see set_companion
+          // in src-tauri). The stage is dismissed on the way in: a 300px widget
+          // has no room for one, and leaving it pinned would bring it back the
+          // moment he came out.
+          const on = evt.on !== false;
+          if (on) get().dismissStage();
+          set({ companion: on });
         } else if (action === "pin" || action === "focus" || action === "unpin" || action === "restore" || action === "hide") {
           // These arrive AFTER this turn's transcript already swapped the stage to a
           // fresh prose ("keep it" heard → new turn → prose). The thing being pinned,

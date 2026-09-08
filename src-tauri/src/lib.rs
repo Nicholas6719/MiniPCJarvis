@@ -12,6 +12,113 @@ use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 struct AppState {
     sidecar: Arc<Sidecar>,
+    /// The window as it was before companion mode took it over, so leaving
+    /// puts it back exactly where he had it: (x, y, width, height), physical.
+    full_geometry: std::sync::Mutex<Option<(i32, i32, u32, u32)>>,
+}
+
+/// COMPANION MODE — his words, 2026-09-08: *"He minimises the Arc Reactor into
+/// the bottom left of my screen, so he's working with me."*
+///
+/// One command rather than a handful of window permissions handed to the web
+/// side: entering and leaving have to be atomic. A half-applied change (no
+/// decorations, old size, still in the taskbar) is a window he cannot get rid
+/// of, and the only way back would be to kill the app.
+///
+/// The full-size geometry is remembered here, in Rust, because the web side is
+/// reloaded on every sidecar reconnect and would forget it.
+#[tauri::command]
+fn set_companion(
+    window: tauri::WebviewWindow,
+    state: tauri::State<AppState>,
+    on: bool,
+    size: Option<f64>,
+) -> Result<(), String> {
+    use tauri::{LogicalSize, PhysicalPosition, PhysicalSize};
+
+    if on {
+        // Remember where he had it, once. Entering twice must not overwrite
+        // the real geometry with the widget's.
+        {
+            let mut saved = state.full_geometry.lock().map_err(|e| e.to_string())?;
+            if saved.is_none() {
+                if let (Ok(p), Ok(s)) = (window.outer_position(), window.outer_size()) {
+                    *saved = Some((p.x, p.y, s.width, s.height));
+                }
+            }
+        }
+        // The floor from tauri.conf.json (940x620) would refuse the resize.
+        let _ = window.set_min_size(Some(LogicalSize::new(180.0, 180.0)));
+        let _ = window.set_decorations(false);
+        let _ = window.set_skip_taskbar(true);
+        let _ = window.set_always_on_top(true);
+        let side = size.unwrap_or(300.0);
+        window
+            .set_size(LogicalSize::new(side, side))
+            .map_err(|e| e.to_string())?;
+
+        // BOTTOM LEFT OF THE SCREEN HE IS ON, not of the primary one. Physical
+        // pixels throughout: mixing logical and physical is how a widget ends
+        // up half off a 150% display.
+        if let Ok(Some(mon)) = window.current_monitor() {
+            let scale = mon.scale_factor();
+            let margin = (24.0 * scale) as i32;
+            let mp = mon.position();
+            let ms = mon.size();
+            let w = window.outer_size().unwrap_or(PhysicalSize::new(
+                (side * scale) as u32,
+                (side * scale) as u32,
+            ));
+            let x = mp.x + margin;
+            let y = mp.y + ms.height as i32 - w.height as i32 - margin;
+            let _ = window.set_position(PhysicalPosition::new(x, y));
+        }
+        let _ = window.show();
+    } else {
+        let saved = {
+            let mut g = state.full_geometry.lock().map_err(|e| e.to_string())?;
+            g.take()
+        };
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_skip_taskbar(false);
+        let _ = window.set_decorations(true);
+        let _ = window.set_min_size(Some(LogicalSize::new(940.0, 620.0)));
+        if let Some((x, y, w, h)) = saved {
+            let _ = window.set_size(PhysicalSize::new(w, h));
+            let _ = window.set_position(PhysicalPosition::new(x, y));
+        } else {
+            let _ = window.set_size(LogicalSize::new(1280.0, 800.0));
+            let _ = window.center();
+        }
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
+
+/// Put the window back to a normal, decorated, on-screen one. Called by the
+/// tray, which must ALWAYS be a way out: if companion mode ever fails to
+/// leave by voice or by double-click, this is the last resort that does not
+/// involve killing the app.
+fn restore_full_window(app: &tauri::AppHandle) {
+    use tauri::{LogicalSize, PhysicalPosition, PhysicalSize};
+    if let Some(win) = app.get_webview_window("main") {
+        let saved = app
+            .try_state::<AppState>()
+            .and_then(|st| st.full_geometry.lock().ok().and_then(|mut g| g.take()));
+        let _ = win.set_always_on_top(false);
+        let _ = win.set_skip_taskbar(false);
+        let _ = win.set_decorations(true);
+        let _ = win.set_min_size(Some(LogicalSize::new(940.0, 620.0)));
+        if let Some((x, y, w, h)) = saved {
+            let _ = win.set_size(PhysicalSize::new(w, h));
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+        }
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
 }
 
 #[tauri::command]
@@ -244,8 +351,14 @@ pub fn run() {
         )
         .manage(AppState {
             sidecar: sc_for_state,
+            full_geometry: std::sync::Mutex::new(None),
         })
-        .invoke_handler(tauri::generate_handler![sidecar_info, set_secret, has_secret])
+        .invoke_handler(tauri::generate_handler![
+            sidecar_info,
+            set_secret,
+            has_secret,
+            set_companion
+        ])
         .setup(move |app| {
             // --- system tray ---
             let show = MenuItem::with_id(app, "show", "Open JARVIS", true, None::<&str>)?;
@@ -260,11 +373,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "show" => {
-                        if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.unminimize();
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
+                        restore_full_window(app);
                     }
                     "listen" => {
                         let sc = sc_tray.clone();
@@ -280,11 +389,7 @@ pub fn run() {
                 .on_tray_icon_event(|tray, event| {
                     use tauri::tray::TrayIconEvent;
                     if let TrayIconEvent::DoubleClick { .. } = event {
-                        if let Some(win) = tray.app_handle().get_webview_window("main") {
-                            let _ = win.unminimize();
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
+                        restore_full_window(tray.app_handle());
                     }
                 })
                 .build(app)?;

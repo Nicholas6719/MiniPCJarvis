@@ -8,6 +8,7 @@ import { ConfirmationGate, FaultWedges } from "./components/Wedges";
 import { BootOverlay, FirstRunSetup } from "./components/FirstRun";
 import { useStore, JarvisState, setHoldBase } from "./state/store";
 import { connectEvents, api } from "./lib/sidecar";
+import { invoke } from "@tauri-apps/api/core";
 
 // Radial states (§5): the machine turning to face you. Everything else anchors.
 const RADIAL: Set<JarvisState> = new Set([
@@ -67,11 +68,27 @@ export default function App() {
   const wakeMode = useStore((s) => s.wakeMode);
   const armedUntil = useStore((s) => s.armedUntil);
   const configVersion = useStore((s) => s.configVersion);
+  const companion = useStore((s) => s.companion);
+  const assistantDraft = useStore((s) => s.assistantDraft);
+  const transcript = useStore((s) => s.transcript);
+  const turn = useStore((s) => s.turn);
   const onEvent = useStore((s) => s.onEvent);
   const clock = useClock();
   const { s } = useScale();
 
   useEffect(() => connectEvents(onEvent), [onEvent]);
+
+  // COMPANION MODE drives the WINDOW, not just the layout: one Rust command
+  // resizes it, drops the decorations, pins it on top and puts it in the
+  // bottom-left corner (see set_companion in src-tauri/src/lib.rs). Doing it
+  // there rather than here keeps entering and leaving atomic — a half-applied
+  // change is a window he cannot get rid of.
+  useEffect(() => {
+    document.body.classList.toggle("companion", companion);
+    invoke("set_companion", { on: companion }).catch(() => {
+      // a browser dev session has no Tauri: the layout still changes
+    });
+  }, [companion]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -196,6 +213,35 @@ export default function App() {
   };
 
   const showWedges = gateOpen || faultOpen;
+
+  // ---------------------------------------------------------------- companion
+  // "He minimises the Arc Reactor into the bottom left of my screen, so he's
+  // working with me." A 300px window has room for the core, one word of state
+  // and one line of what was just said — and nothing else. The stage, the
+  // rails, the chrome and the clock are all gone, because they would be
+  // illegible at this size and he is looking at his document, not at this.
+  //
+  // DOUBLE-CLICK COMES BACK, and it is the only way out that does not need his
+  // voice. A widget with no title bar and no way home would be a window he
+  // could not get rid of.
+  if (companion) {
+    const said = [...transcript].reverse().find((t) => t.role === "assistant");
+    const line = (assistantDraft || said?.text || turn?.userText || "").trim();
+    return (
+      <div className="companion" data-tauri-drag-region>
+        <button
+          className="companion__core"
+          onClick={micClick}
+          onDoubleClick={() => useStore.getState().setCompanion(false)}
+          title="Click to listen · double-click to come back"
+        >
+          <ArcReactor state={state} size={168} charge={charge} />
+        </button>
+        <div className="companion__word" style={{ color: rim }}>{radialWord}</div>
+        <div className="companion__line">{line.slice(0, 140)}</div>
+      </div>
+    );
+  }
 
   return (
     <div

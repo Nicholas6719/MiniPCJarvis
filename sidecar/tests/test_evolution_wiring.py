@@ -53,7 +53,8 @@ EXPECTED = [
 
 
 def main() -> int:
-    from tools import (biometric, browser_tools, builtin, camera_tools, fabrication,
+    from tools import (biometric, browser_tools, builtin, camera_tools, documents,
+                       fabrication, office,
                        file_tools, handoff, health, holo_tools, input_tools, location,
                        market_tools, memory_tools, news_tools, projects, render_tools, model_tools,
                        task_tools, uia, vision_analyze, vision_tools, weather,
@@ -65,6 +66,7 @@ def main() -> int:
             camera_tools, market_tools, news_tools, input_tools, uia,
             projects, location, health, vision_analyze, biometric, fabrication,
             holo_tools, render_tools, model_tools,
+            documents, office,
             workspace_tools, market_intel)
     for m in mods:
         m.register_all()

@@ -209,6 +209,17 @@ def _auth(token: str | None) -> None:
         raise HTTPException(401, "bad token")
 
 
+@app.post("/companion")
+async def companion(body: dict, x_jarvis_token: str | None = Header(None)):
+    """The HUD's own way in and out of companion mode — a double-click on the
+    reactor. It goes through the same function the spoken command uses, so the
+    window's shape and the sidecar's idea of what he is doing cannot drift
+    apart (the conversation window depends on it)."""
+    _auth(x_jarvis_token)
+    from tools.office import companion_mode
+    return await companion_mode(on=bool(body.get("on", True)))
+
+
 @app.get("/health")
 async def health():
     """State, plus the two facts a test needs before it may touch him:
