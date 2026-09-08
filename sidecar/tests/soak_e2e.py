@@ -154,7 +154,7 @@ async def main() -> int:
             # five minutes of turns; with the mute lifted by his own voice
             # they are five minutes of JARVIS talking over him (2026-09-08).
             try:
-                _h = (await client.get(f"{BASE}/health", headers=H, timeout=5)).json()
+                _h = (await once("get", f"{BASE}/health", headers=H)).json()
                 _lv = _h.get("last_voice_s")
                 if _lv is not None and _lv < 120:
                     print(f"  STOPPED - he spoke {int(_lv)}s ago; the soak did not finish.")

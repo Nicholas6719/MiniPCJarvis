@@ -76,7 +76,25 @@ async def analyze_screen(question: str = "Describe what is on the screen.",
       ~0.3 s of tool time instead of 20-40 s.
     - vision: the Gemma3 vision model, for visual questions or screens with little text.
     """
-    from tools.windows_tools import list_windows
+    from tools.windows_tools import foreground_app, list_windows
+    # A DOCUMENT IS NOT A PICTURE OF A DOCUMENT. With Word or Excel in front,
+    # OCR of a condensed 1,400-character screen crop and a 1024px JPEG are both
+    # unreadable — the cells are gone and the paragraphs are half there. The
+    # real text is one COM call away (survey, 2026-09-08).
+    if mode != "vision":
+        try:
+            fg_exe = (foreground_app().get("exe") or "")
+            if fg_exe in ("winword.exe", "excel.exe"):
+                from tools.office import read_open_document
+                doc = await asyncio.to_thread(read_open_document)
+                if doc and not doc.get("error") and (doc.get("text") or "").strip():
+                    doc["method"] = "document"
+                    doc["note"] = ("This is the real content of the document he is "
+                                   "working in, not a screenshot. Answer from it.")
+                    return doc
+        except Exception:
+            log.debug("could not read the open document for the screen question",
+                      exc_info=True)
     _hide = {"JARVIS", "Program Manager", "Windows Input Experience", "Settings"}
     titles = [t for t in (await asyncio.to_thread(list_windows)).get("windows", []) if t not in _hide]
     shot = await asyncio.to_thread(take_screenshot, monitor, hide_self=True)

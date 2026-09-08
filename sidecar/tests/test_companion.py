@@ -105,9 +105,16 @@ async def main() -> int:
     router = open(ROOT / "sidecar" / "brain" / "router.py", encoding="utf-8").read()
     check("...and reading the open document is favoured there",
           "_OFFICE_SKILLS" in router and 'ctx.get("companion")' in router)
+    # THE WHOLE BRANCH, not the first 400 characters of it. A fixed window
+    # failed the moment the branch grew a comment (2026-09-08) - which is the
+    # one edit that should never have broken a test about behaviour.
+    _b = router[router.index("if skill in _OFFICE_SKILLS"):]
+    _end = _b.find(chr(10) + "    if ", 10)
+    branch = _b[:_end if _end > 0 else 1200]
     check("...but never penalised outside it, since Word can be open anyway",
-          "else 0.0" in router[router.index("_OFFICE_SKILLS"):][:2000]
-          or "else 0.0" in router[router.index("if skill in _OFFICE_SKILLS"):][:400])
+          "else 0.0" in branch, branch[-120:])
+    check("...and the window in front of him counts as much as companion mode",
+          'ctx.get("office_app")' in branch, branch[-120:])
 
     print("\n-- there is always a way back --")
     lib = open(ROOT / "src-tauri" / "src" / "lib.rs", encoding="utf-8").read()

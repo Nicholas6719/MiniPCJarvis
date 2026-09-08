@@ -6,7 +6,7 @@ import platform
 
 
 def turn_context(memory_context: str = "", honorific: bool | None = None,
-                 project: str = "") -> str:
+                 project: str = "", looking_at: str = "", just_did: str = "") -> str:
     """Per-turn facts. Kept OUT of the system prompt so the large, tool-laden
     prompt prefix stays byte-identical across turns and llama.cpp reuses its
     KV cache — this alone cuts first-token latency from ~12 s to ~2-3 s."""
@@ -19,6 +19,14 @@ def turn_context(memory_context: str = "", honorific: bool | None = None,
     # we working on" was a guess.
     if project:
         mem += f"\nThe open project is \"{project}\": new models are filed there."
+    # WHAT HE IS LOOKING AT, AND WHAT JUST HAPPENED. Neither was ever in the
+    # prompt: the model knew what it had said and nothing about what it had
+    # done or what was in front of him, so "this", "that one" and "keep going"
+    # were guesses (survey, 2026-09-08).
+    if looking_at:
+        mem += f"\nOn his screen right now: {looking_at}."
+    if just_did:
+        mem += f"\nA moment ago you {just_did}"
     # The honorific's frequency is decided for us (brain.skills.want_honorific) and
     # stated per turn, because the model cannot pace it itself — see system_prompt.
     hint = ""

@@ -22,6 +22,8 @@ class LastSeen:
         self.text: str = ""
         self.links: list[dict] = []      # [{title, url, source}]
         self.at: float = 0.0
+        self.tool: str = ""              # the last tool that ran, and its gist
+        self.tool_gist: str = ""
 
     @property
     def stale(self) -> bool:
@@ -67,8 +69,38 @@ class LastSeen:
             for v in node:
                 self._walk(v, out, depth + 1)
 
+    def note_tool(self, name: str, result) -> None:
+        """WHAT HE JUST WATCHED HAPPEN. `_history` carries the words of the
+        conversation and nothing else, so on the next turn the model knew what
+        it had SAID but not what it had DONE — and "what did that say", "keep
+        going", "the other one" had nothing to point at (survey, 2026-09-08).
+        One tool name and one line of gist is enough for a pronoun."""
+        import re as _re
+        self.tool = str(name or "")[:40]
+        gist = ""
+        if isinstance(result, dict):
+            for key in ("spoken", "summary", "answer", "text", "name", "path", "error"):
+                v = result.get(key)
+                if isinstance(v, str) and v.strip():
+                    gist = v.strip()
+                    break
+        elif isinstance(result, str):
+            gist = result
+        self.tool_gist = _re.sub(r"\s+", " ", gist)[:180]
+        self.at = time.time()
+
+    def recent_tool(self) -> str:
+        """"ran read_open_document and got: ..." — or "" when it is stale."""
+        if self.stale or not getattr(self, "tool", ""):
+            return ""
+        out = f"ran {self.tool}"
+        if getattr(self, "tool_gist", ""):
+            out += f" and got: {self.tool_gist}"
+        return out
+
     def clear(self) -> None:
         self.text, self.links, self.at = "", [], 0.0
+        self.tool, self.tool_gist = "", ""
 
 
 last_seen = LastSeen()

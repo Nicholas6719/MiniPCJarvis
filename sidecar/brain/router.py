@@ -385,10 +385,12 @@ def _skill_context_delta(skill: str, ctx: dict) -> float:
     if skill in _PROJECT_SKILLS:
         d += CONTEXT_BONUS if ctx.get("project") else -CONTEXT_PENALTY
     if skill in _OFFICE_SKILLS:
-        # Not penalised out of companion mode: he can perfectly well say
-        # "read my document" with the full window up, and Word open. The
-        # bonus only settles it when the sentence is genuinely ambiguous.
-        d += CONTEXT_BONUS if ctx.get("companion") else 0.0
+        # Not penalised when neither holds: he can perfectly well say "read my
+        # document" with the full window up. The bonus only settles it when
+        # the sentence is genuinely ambiguous — and Word being the window in
+        # front of him is the strongest evidence there is.
+        d += (CONTEXT_BONUS if (ctx.get("companion") or ctx.get("office_app"))
+              else 0.0)
     return d
 
 

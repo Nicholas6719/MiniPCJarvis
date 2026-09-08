@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-09-03.
+Updated: 2026-09-08.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -4352,7 +4352,7 @@ an open box/tray with walls and a floor, a cone. Tried BEFORE the
 Still to watch him do once: one real pinch in front of the camera (the
 gesture path is proved from the landmarks onward, not before).
 
-## 2026-09-08 — school starts tomorrow: practical JARVIS (release 60)
+## 2026-09-08 — school starts tomorrow: practical JARVIS (releases 60-61)
 His brief: fix the barge-in (still too quiet for too long), make his context
 and his brain better, let him CREATE documents and work in them, generate
 images, and give him a **"work with me" mode** — *"He minimises the Arc
@@ -4409,6 +4409,73 @@ core, one state word and one line; the panel is a drag region. The sidecar
 holds the flag, widens the conversation window to 40 s exactly as a hologram
 does, and puts `companion` in `_screen_context`.
 
+### Images, locally (imagegen.py, tools/image_tools.py)
+The survey's ONNX/DirectML plan was wrong on cost: `stable-diffusion.cpp` with
+a Vulkan backend runs on the 780M with no torch, no DirectML and no Python
+dependency at all — one 22 MB exe and a 2.1 GB SD-Turbo safetensors file at
+`C:\AI\imagegen`, driven as a subprocess exactly like `C:\AI\model3d`.
+Measured cold on 2026-09-08: **19.5 s for 512x512**, about 12 s warm at 4
+steps, CFG 1.0. That is over `render_estimates.ask_threshold()`, so it asks
+first — `EST_KEY = 9`, its own seed row, the same cost question a render
+gets, and the same "no" cancels cleanly. Pictures land in his Pictures folder
+and never overwrite. Missing install degrades to one sentence.
+
+**The routing hazard was the whole job.** "Show me a lighthouse" means
+IMAGES — `show_images`, the media panel, a second — and it must never start a
+20-second generation. `image_make` is gated on an explicit drawing verb
+(`_DRAW_VERB`), refuses a finding verb (`_FIND_VERB`), and stands down for
+anything three-dimensional (`_THREE_D`). Both directions are in
+`tests/test_brain.py` and `seed_collisions`.
+
+### Context: what he is looking at, and what JARVIS just did
+The prompt carried what JARVIS had SAID and nothing about what it had DONE
+or what was in front of him, so "this", "that one" and "keep going" were
+guesses. Applied 2026-09-08, `tests/test_context.py` (44 checks):
+- `windows_tools.foreground_app()` — the window in front by title and exe,
+  microseconds, on every turn. It reaches `_screen_context` as `app` /
+  `office_app`, and the per-turn note as "On his screen right now: ...".
+- `last_seen.note_tool(name, result)` at all four tool call sites, and
+  `recent_tool()` into the note as "A moment ago you ...". One name and 180
+  characters of gist is enough for a pronoun.
+- The router's `_OFFICE_SKILLS` bonus now also fires when **Word or Excel is
+  the window in front**, not only in companion mode. Still never a penalty.
+- `_last_reflex` is set on the LLM path too (via `brain.learned_from_tool`),
+  so a follow-up after a model-handled turn stops attaching its +0.35 to a
+  reflex from minutes ago. Guarded with `source: "llm"` so `_correct` can
+  never *unlearn* a seed that was never learned.
+- `CONTINUE_RE`: "keep going", "carry on", "what else", "then what?" now
+  continue the previous answer instead of reaching the model with nothing.
+  Anchored at both ends — "go on youtube" and "continue the render" are not
+  this.
+- `_correct` passes `_with_last_skill`; it was the one `brain.decide` call
+  site without the follow-up context, and "the other one" is exactly the
+  sentence that needs it.
+- `note_proactive` decrements `_hist_base` when it trims, like the two
+  ordinary writers; an announcement on a full history was quietly advancing
+  the prompt's block boundary.
+- **`analyze_screen` returns the real document** when Word or Excel is in
+  front, not a picture of one. The same reasoning as `office.py`: OCR and a
+  1024px JPEG are both unreadable there, and the text is one COM call away.
+
+### "He keeps saying it's 12:50 pm. Stop."
+Release 60 installed at 12:41 and its suites ran — and release 55's fix (his
+voice lifts a test mute, which is right) turned a silent run audible: he
+spoke, the mute lifted, and `soak_e2e` went on saying the time at him every
+five seconds for five minutes. Two checks now, because one is not enough:
+`suites.ps1` abandons the run between suites when `/health.last_voice_s` is
+under 120 and NAMES what did not run, and `soak_e2e` makes the same check
+inside its own loop. His machine comes first; a run that stops says so
+rather than reporting green.
+
+That interruption also exposed a real regression. `bargein_e2e` failed both
+rounds with `interrupted_after_inject=None`: release 57 gave the wake model
+a non-blocking lock so a duplicate feeder drops its 80 ms rather than
+queueing — correct for a duplicate, fatal for a *different* listener. The
+wake loop won every block while JARVIS was speaking and the barge-in watcher
+heard nothing. `audio/wake.py` now exports two instances, `wake` and
+`barge`, with their own buffers and their own locks. Gated in
+`tests/test_wake_feed.py`.
+
 ### Traps hit today
 - **Release 59 died with `'EST' is not recognized`** and SIDECAR BUILD
   FAILED while every gate said ALL PASS and PyInstaller said Build complete.
@@ -4418,21 +4485,33 @@ does, and puts `companion` in `_screen_context`.
 - A heredoc ate `\S` again writing that same file. Script files only.
 - `config.set()` SAVES: a test that used it to point the folders at a temp
   dir would have rewritten his real config. Patch `file_tools.roots` instead.
+- `check_names.py` caught `client` undefined in my own soak-stop check —
+  inside a bare `except Exception: pass`, so it would have silently never
+  fired. A gate that reads the source is worth its runtime.
+- `test_evolution_wiring` went red because `image_tools` was registered in
+  `main.py` and not in the gate's list — the third time that list has
+  drifted. It compares against `main.py`'s own source for exactly this
+  reason; keep both halves in step.
+- A source-string assertion in `test_companion.py` was scoped to the first
+  400 characters of the router branch and failed the moment the branch grew
+  a comment. It now slices the whole branch.
 
 ### Next, in order
-1. **Context** (patch written, `scratchpad/patch_context.py`, applies after
-   this release): the foreground window in `_screen_context` and in the turn
-   note; `last_seen.note_tool` so the model knows what it just DID and not
-   only what it said; `_last_reflex` set on the LLM path (a follow-up after a
-   model turn was attaching its 0.35 bonus to a stale reflex); "keep going"
-   understood; `_correct` given the follow-up context it was missing;
-   `note_proactive` keeping `_hist_base` straight; and `analyze_screen`
-   returning the real document when Word or Excel is in front.
-2. **Images.** Nothing local exists and `C:\AI` has no generator. The
-   runnable option on the 780M is SD-Turbo/SDXL-Turbo as ONNX under
-   DirectML, installed at `C:\AI\imagegen` with its own env and driven as a
-   subprocess — the same shape as `C:\AI\model3d`. ~2.5 GB download, 1-4
-   steps, seconds per image. To be done after the context work.
+1. **Verify release 61 live.** The barge-in fix and the two-detector fix are
+   committed and gated but have never run on the installed build — the run
+   that would have proved it is the one he stopped. `bargein_e2e` is the
+   suite that matters, and it makes JARVIS speak, so it needs a moment when
+   he is not using the machine.
+2. **The rest of "faster"**: streaming transcription (partly done — the
+   0.20 s endpoint trim), the two-tier brain (the draft model is OFF after
+   two failed attempts: CPU starved the wake detector, GPU overflowed the
+   780M heap), and the parametric template library drafted in
+   `scratchpad/templates_more.py`.
+3. **The rest of "useful"**: episodic memory, Telegram voice replies,
+   calendar and mail.
+4. **The iPhone**, which he asked to build WITH him: Shortcuts posting health
+   data every ~5 min and calendar/reminders every ~15-25 min through
+   Telegram, tagged so the intake can route them, plus a way to force a sync.
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en

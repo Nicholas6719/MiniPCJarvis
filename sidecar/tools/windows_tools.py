@@ -857,6 +857,33 @@ def power_action(action: str) -> dict:
     return {"action": action, "note": note}
 
 
+def foreground_app() -> dict:
+    """The window in front, by title and executable.
+
+    Microseconds, and it runs on every turn: without it the brain had no idea
+    what "this" meant. `_screen_context` knew about the hologram stage, an open
+    project and a running render, and nothing at all about the application he
+    was actually looking at (survey, 2026-09-08).
+    """
+    try:
+        import psutil
+        import win32process
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return {}
+        title = (win32gui.GetWindowText(hwnd) or "").strip()
+        exe = ""
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            exe = (psutil.Process(pid).name() or "").lower()
+        except Exception:
+            exe = ""
+        return {"title": title[:120], "exe": exe}
+    except Exception:
+        log.debug("could not read the foreground window", exc_info=True)
+        return {}
+
+
 def register_all() -> None:
     T = Tool
     registry.register(T(

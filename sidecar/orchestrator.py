@@ -144,6 +144,36 @@ SENTENCE_END = re.compile(r"([.!?…]+[\"')\]]*)(?=\s)")
 # and "spoken" (2026-09-06 12:46); it counts as an empty round instead.
 SPEAKABLE = re.compile(r"\w")
 
+# "KEEP GOING." It matched no follow-up pattern, scored below threshold on
+# everything, and reached the model with no idea what it was meant to carry
+# on with (survey, 2026-09-08). Anchored at both ends on purpose: "go on
+# youtube" is not this.
+CONTINUE_RE = re.compile(
+    r"^\s*(?:and\s+|so\s+|ok(?:ay)?,?\s+)?"
+    r"(?:keep going|keep talking|carry on|go on|continue|"
+    r"tell me more|say more|more detail|more please|go deeper|"
+    r"what else|anything else|and then\??|then what\??|finish it|"
+    r"don'?t stop)\s*[.!?]*$", re.I)
+
+
+def _looking_at() -> str:
+    """The window in front, for the per-turn note. Empty when it is JARVIS."""
+    try:
+        from tools.windows_tools import foreground_app
+        title = (foreground_app().get("title") or "").strip()
+        return "" if title in ("", "JARVIS") else title
+    except Exception:
+        return ""
+
+
+def _just_did() -> str:
+    """The last tool and what it returned, while it is still fresh."""
+    try:
+        from lastseen import last_seen
+        return last_seen.recent_tool()
+    except Exception:
+        return ""
+
 
 def _open_project() -> str:
     """The active project's name for the per-turn context, or ""."""
@@ -296,7 +326,8 @@ def _screen_context() -> dict:
     which is precisely how the brain behaved before it could see anything.
     """
     ctx = {"stage": False, "project": False, "render": False,
-           "companion": False, "last_skill": None}
+           "companion": False, "app": "", "office_app": False,
+           "last_skill": None}
     try:
         from tools.holo_tools import current
         ctx["stage"] = bool((current() or {}).get("name"))
@@ -313,6 +344,16 @@ def _screen_context() -> dict:
         ctx["companion"] = companion_on()
     except Exception:
         log.debug("no companion context", exc_info=True)
+    try:
+        # WHAT HE IS ACTUALLY LOOKING AT. "Help me with this" is meaningless
+        # without it, and it is one Win32 call.
+        from tools.windows_tools import foreground_app
+        fg = foreground_app()
+        ctx["app"] = fg.get("title", "")
+        ctx["office_app"] = fg.get("exe", "") in (
+            "winword.exe", "excel.exe", "powerpnt.exe", "onenote.exe")
+    except Exception:
+        log.debug("no foreground context", exc_info=True)
     try:
         from render_queue import queue
         ctx["render"] = bool((queue.status() or {}).get("busy"))
@@ -1032,7 +1073,14 @@ class Orchestrator:
         if not text:
             return
         self._history.append({"role": "assistant", "content": text})
-        self._history = self._history[-20:]
+        # ...and the prompt's block base moves with it. The two ordinary
+        # writers decrement `_hist_base` when they trim; this one did not, so
+        # an announcement arriving on a full history quietly advanced the
+        # window start past the block boundary (survey, 2026-09-08).
+        trimmed = len(self._history) - 20
+        if trimmed > 0:
+            self._history = self._history[-20:]
+            self._hist_base = max(0, self._hist_base - trimmed)
         try:
             from lastseen import last_seen
             last_seen.note_reply(text)
@@ -1794,6 +1842,16 @@ class Orchestrator:
         # brain thinks this is a plain question -> steer the LLM away from needless tool use
         self._no_tools_first = False
         general_hint = ""
+        # ...and "keep going" is not a question at all: it is the previous
+        # answer, continued. Nothing carried that before.
+        if not reflex and CONTINUE_RE.match(text or ""):
+            prev = next((str(m.get("content") or "") for m in reversed(self._history)
+                         if m.get("role") == "assistant"), "")
+            if prev.strip():
+                self._no_tools_first = True
+                general_hint = ("[Note: he is asking you to CONTINUE the answer you just "
+                                "gave. Carry straight on from where you stopped - do not "
+                                "repeat what you already said and do not start again.]")
         if not reflex and config.get("brain", "enabled", default=True) and not SEARCH_INTENT.search(text):
             try:
                 level = await brain.general_level(text)
@@ -1841,7 +1899,9 @@ class Orchestrator:
             self._hist_base = len(self._history) - 8
         messages += self._history[self._hist_base:]
         messages.append({"role": "user", "content": turn_context(mem_ctx, want_honorific(),
-                                                                 project=_open_project()) + chr(10)
+                                                                 project=_open_project(),
+                                                                 looking_at=_looking_at(),
+                                                                 just_did=_just_did()) + chr(10)
                          + (general_hint + chr(10) if general_hint else "") + text})
 
         if reflex:
@@ -1854,6 +1914,7 @@ class Orchestrator:
                              else State.EXECUTING, force=True)
             result = await registry.execute(skill.tool, args)
             last_seen.note_result(result.get("result") if isinstance(result, dict) else result)
+            last_seen.note_tool(skill.tool, result.get("result") if isinstance(result, dict) else result)
             link_ledger.note(result)
             call_id = "reflex-" + uuid.uuid4().hex[:8]
             messages.append({"role": "assistant", "content": None, "tool_calls": [
@@ -2002,11 +2063,13 @@ class Orchestrator:
         if skill.tool and prefetched is not None:
             res = prefetched if isinstance(prefetched, dict) else {"value": prefetched}
             last_seen.note_result(res)
+            last_seen.note_tool(skill.tool, res)
             link_ledger.note(res)
         elif skill.tool:
             await self.sm.to(State.EXECUTING, force=True)
             out = await registry.execute(skill.tool, args)
             last_seen.note_result(out.get("result"))
+            last_seen.note_tool(skill.tool, out.get("result"))
             link_ledger.note(out)
             if out.get("ok"):
                 res = out.get("result")
@@ -2554,7 +2617,15 @@ class Orchestrator:
         # only un-learn if a reflex actually fired in the last ~40 s; a stray "no ..."
         # out of nowhere must not silently delete a learned example
         recent = (time.time() - getattr(self, "_last_reflex_at", 0)) < 40
-        dropped = await brain.unlearn(last) if recent else None
+        # NEVER UNLEARN SOMETHING THAT WAS NEVER LEARNED. The model's own tool
+        # choices are recorded here too now, and they have no example row —
+        # unlearning one would delete a SEED for a skill that behaved
+        # perfectly.
+        if (last or {}).get("source") == "llm":
+            recent_learn = False
+        else:
+            recent_learn = recent
+        dropped = await brain.unlearn(last) if recent_learn else None
         self._last_reflex = None
         if dropped:
             await bus.emit("brain_learned", text=f"forgot: {last.get('text')}", skill=dropped,
@@ -2569,7 +2640,10 @@ class Orchestrator:
             original = (last or {}).get("query") or ""
             if original and recent:
                 try:
-                    d = await brain.decide(rest, context=_screen_context())
+                    # ...WITH the follow-up context. "The other one" is
+                    # exactly the sentence that needs it, and this was the one
+                    # call site that left it out (survey, 2026-09-08).
+                    d = await brain.decide(rest, context=_with_last_skill(self, _screen_context()))
                     if d and d[0].name not in ("correction", "teach"):
                         if await brain.learn(original, d[0].name, source="user"):
                             await bus.emit("brain_learned",
@@ -2825,8 +2899,21 @@ class Orchestrator:
                 await self.sm.to(state, force=True)
                 result = await registry.execute(tc["name"], tc["arguments"])
                 last_seen.note_result(result.get("result"))
+                last_seen.note_tool(tc["name"], result.get("result"))
                 link_ledger.note(result)
                 used_tools.append((tc["name"], bool(result.get("ok"))))
+                # WHAT "THAT ONE" WILL MEAN NEXT TURN. Only reflexes set this,
+                # so a follow-up after a turn the model handled put its 0.35
+                # bonus on whatever reflex had fired before it — possibly
+                # minutes earlier, on a different subject (survey 2026-09-08).
+                try:
+                    _sk = brain.learned_from_tool(tc["name"])
+                    if _sk:
+                        self._last_reflex = {"skill": _sk, "text": "",
+                                             "query": raw_user, "source": "llm"}
+                        self._last_reflex_at = time.time()
+                except Exception:
+                    log.debug("could not remember what the model just used", exc_info=True)
                 if result.get("declined") or result.get("unconfirmed"):
                     # the user said no (or nothing): acknowledge and stop - never re-ask
                     line = "Alright, leaving it." if result.get("declined") else "I didn't get a yes, so I left it alone."
