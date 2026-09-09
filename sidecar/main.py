@@ -1192,10 +1192,23 @@ async def debug_inject_audio(body: dict, x_jarvis_token: str | None = Header(Non
                 blk = np.pad(blk, (0, 1024 - len(blk)))
             mic._put(blk.copy())
             await asyncio.sleep(1024 / 16000)  # real-time pacing
-        # keep feeding silence while the turn captures end-of-speech
-        for _ in range(int(16000 * 1.5 / 1024)):
+        # KEEP FEEDING SILENCE UNTIL THE TURN HAS STOPPED LISTENING. A fixed
+        # 1.5 s ended while the capture was still open, and the hardware
+        # microphone came back in the middle of the injected utterance: with a
+        # television on, bargein_e2e "heard" the room instead of the question
+        # it had just injected (2026-09-08). Silence is what a finished
+        # sentence sounds like, so this ends the capture rather than
+        # lengthening it - and the cap means a stuck turn cannot deafen him.
+        from state_machine import State
+        quiet, deadline = 0.0, _t.monotonic() + 12.0
+        while _t.monotonic() < deadline:
             mic._put(np.zeros(1024, dtype=np.float32))
             await asyncio.sleep(1024 / 16000)
+            quiet += 1024 / 16000
+            if quiet < 1.5:
+                continue
+            if orchestrator.sm.state not in (State.LISTENING, State.STARTING):
+                break
     finally:
         mic.start()
     return {"ok": True, "seconds": round(len(audio) / 16000, 2)}
