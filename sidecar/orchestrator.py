@@ -20,7 +20,7 @@ from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
 from audio import endpoint, output_watch
-from audio.wake import barge, wake
+from audio.wake import barge, name_in, strip_wake_name, wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
 import clarify
@@ -424,6 +424,7 @@ class Orchestrator:
         self._watchdog_task: asyncio.Task | None = None
         self._preroll: np.ndarray | None = None     # audio from before the wake word fired
         self._heard_text: str | None = None         # transcript the endpoint check already produced
+        self.wakes_rejected = 0                     # fired on the room, not on his name (/health)
         self._barge_capture = False                 # this capture follows a barge-in
         self._last_active: float = time.time()      # when he was last needed, for auto-sleep
         self._clarify: clarify.Pending | None = None  # a question asked, answers already fetching
@@ -1156,7 +1157,10 @@ class Orchestrator:
         q = mic.subscribe()
         last_fire = 0.0
         last_noise_log = 0.0
-        preroll: collections.deque = collections.deque(maxlen=int(MIC_RATE * 2.0 / 1024) + 1)
+        # 2.5 s, not 2.0: the name check below reads this, and the model
+        # fires a little after the last syllable. A short pre-roll is a
+        # false rejection of his own voice, the one failure that must not happen.
+        preroll: collections.deque = collections.deque(maxlen=int(MIC_RATE * 2.5 / 1024) + 1)
         armed_vad = StreamingVAD(threshold=0.6)
         consec = 0
         try:
@@ -1210,6 +1214,9 @@ class Orchestrator:
                         # He is mid-conversation: the window only opens after a
                         # turn he was given. Nothing marginal about it.
                         self._wake_score_fresh = None
+                        # Drain at the snapshot, not at the capture (see the
+                        # wake path below): what arrives between the two is his.
+                        mic.drain()
                         self._preroll = np.concatenate(list(preroll)[-8:])  # ~0.5 s lead-in
                         self._armed_until = 0.0
                         await bus.emit("conversation", armed=False)
@@ -1240,9 +1247,31 @@ class Orchestrator:
                     # jarvis what…" in one breath lost its first syllable now
                     # and then. The words are kept before anything else moves.
                     wake.reset()
-                    self._preroll = np.concatenate(list(preroll))
+                    snap = np.concatenate(list(preroll))
                     preroll.clear()
+                    # DRAIN HERE, NOT IN THE CAPTURE. Between this snapshot and
+                    # the capture's first read there is a gap - the name check
+                    # below, then the surface - and the capture used to open by
+                    # throwing away everything queued in it. The queue is drained
+                    # now, so the capture carries straight on from the pre-roll
+                    # and the words said during the gap are kept.
+                    mic.drain()
                     self.vad.reset()
+                    # THE NAME, OR NOTHING HAPPENS. The model has fired; the
+                    # recogniser now says whether his name is actually in the
+                    # audio it fired on. Ten times a week it was not - a show, a
+                    # game, someone else's voice - and the screen came on, the
+                    # chime played and he sat listening to a room. Nothing below
+                    # this line runs until the name is heard. ~100 ms; the words
+                    # spoken meanwhile are queued, not lost.
+                    ok, heard = await self._name_heard(snap, score)
+                    if not ok:
+                        self.wakes_rejected += 1
+                        self._wake_score_fresh = None
+                        await bus.emit("wake_suppressed", reason="no name",
+                                       score=round(score, 2), heard=heard[:60])
+                        continue
+                    self._preroll = snap
                     self._listen_flag.set()
                     if self.sm.state == State.SLEEPING:
                         # must also LEAVE the sleeping state, not just raise the window —
@@ -1337,7 +1366,7 @@ class Orchestrator:
                 if utterance is not None and len(utterance) >= MIC_RATE // 4:
                     try:
                         spoken = (await stt.transcribe(utterance) or "").strip()
-                        spoken = WAKE_PHRASE.sub("", spoken, count=1).strip()
+                        spoken = strip_wake_name(spoken)
                         await bus.emit("transcript", role="user", text=spoken,
                                        source="confirm")
                         if not await self.try_voice_confirmation(spoken):
@@ -1438,7 +1467,12 @@ class Orchestrator:
             last_speech_t = time.time()
             woke_by_name = True
         self._barge_capture = False
-        mic.drain()
+        # A capture that follows a wake or a follow-up was drained at ITS
+        # snapshot; draining again here would throw away the words said while
+        # the name was being checked and the window surfaced. Only a capture
+        # with no lead-in (push-to-talk, a barge-in) starts from silence.
+        if lead_in is None or not len(lead_in):
+            mic.drain()
         while True:
             if time.time() - t0 > MAX_UTTERANCE_S:
                 break
@@ -1669,7 +1703,7 @@ class Orchestrator:
         if registry.has_pending:          # answering a question, not starting a turn
             pre, self._heard_text = self._heard_text, None
             spoken = (pre if pre is not None else await stt.transcribe(audio) or "").strip()
-            spoken = WAKE_PHRASE.sub("", spoken, count=1).strip()
+            spoken = strip_wake_name(spoken)
             await bus.emit("transcript", role="user", text=spoken, source="confirm")
             if await self.try_voice_confirmation(spoken):
                 return
@@ -1701,7 +1735,9 @@ class Orchestrator:
         self._heard_text = None
         text = already if already is not None else await stt.transcribe(audio)
         self.metrics.mark("stt_ms")
-        text = WAKE_PHRASE.sub("", text or "", count=1).strip()
+        # Wherever the name landed: the pre-roll starts before it, and what
+        # precedes it is the room ("Thought you did me. Hey Jarvis, what time").
+        text = strip_wake_name(text or "")
         waited, budget = self._end_silence
         await bus.emit("transcript", role="user", text=text,
                        stt_ms=int((time.time() - t_start) * 1000),
@@ -3094,6 +3130,30 @@ class Orchestrator:
                 # His own name can stay in the model's window after he speaks,
                 # and the next "hey JARVIS" is swallowed by the echo.
                 log.warning("wake reset after speaking failed", exc_info=True)
+
+    async def _name_heard(self, audio: np.ndarray, score: float) -> tuple[bool, str]:
+        """Is his name actually in the audio the wake model fired on?
+
+        (heard it, transcript). FAILS OPEN: if the recogniser errors or takes
+        longer than a real wake can wait, the wake stands - being unable to
+        hear him is the failure he minds most, and a slow check must never
+        become that. A rejection is logged with what WAS heard, so a wake
+        that should have stood can be found in the log afterwards.
+        """
+        if audio is None or len(audio) < MIC_RATE // 2:
+            return True, ""
+        try:
+            heard = await asyncio.wait_for(
+                stt.transcribe(audio[-int(MIC_RATE * 2.5):]), timeout=1.5)
+        except Exception:
+            log.warning("could not check the wake (%.2f) for his name - letting it through",
+                        score, exc_info=True)
+            return True, ""
+        heard = (heard or "").strip()
+        if name_in(heard):
+            return True, heard
+        log.info("wake rejected (%.2f): heard %r, and his name is not in it", score, heard[:80])
+        return False, heard
 
     async def _barge_in_watch(self) -> None:
         """While speaking, watch for the user cutting in.

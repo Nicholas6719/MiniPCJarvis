@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
+import asyncio
 import httpx
 
 from config import config
@@ -26,12 +27,30 @@ _home: tuple[float, float, str] | None = None
 _home_ts = 0.0
 
 
+async def _get_json(url: str, params: dict, timeout: float) -> dict:
+    """One GET, with a single retry on a CONNECTION-level failure.
+
+    On 2026-09-08 three weather turns died on one refused TCP connect each -
+    the geocoder once, the forecast twice - and both hosts answered in under a
+    second the next day. A dropped connection is not a wrong answer; asking
+    once more is what he would do. An HTTP error is not retried.
+    """
+    async with httpx.AsyncClient(timeout=timeout) as c:
+        for attempt in (1, 2):
+            try:
+                r = await c.get(url, params=params)
+                return r.json() or {}
+            except httpx.TransportError:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.4)
+    return {}
+
+
 async def _one_geocode(name: str) -> list:
-    async with httpx.AsyncClient(timeout=8) as c:
-        r = await c.get("https://geocoding-api.open-meteo.com/v1/search",
-                        params={"name": name, "count": 1, "language": "en",
-                                "format": "json"})
-        return (r.json() or {}).get("results") or []
+    j = await _get_json("https://geocoding-api.open-meteo.com/v1/search",
+                        {"name": name, "count": 1, "language": "en", "format": "json"}, 8)
+    return j.get("results") or []
 
 
 def _variants(place: str) -> list[str]:
@@ -128,14 +147,12 @@ async def get_weather(location: str = "", when: str = "now") -> dict:
         return {"error": f"I couldn't find a place called {location}" if location else "I don't know where you are yet"}
     lat, lon, label = loc
     unit = config.get("weather", "units", default="fahrenheit")
-    async with httpx.AsyncClient(timeout=10) as c:
-        r = await c.get("https://api.open-meteo.com/v1/forecast", params={
-            "latitude": lat, "longitude": lon, "timezone": "auto",
-            "temperature_unit": unit, "wind_speed_unit": "mph" if unit == "fahrenheit" else "kmh",
-            "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation",
-            "daily": "temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset",
-            "forecast_days": 3})
-        j = r.json()
+    j = await _get_json("https://api.open-meteo.com/v1/forecast", {
+        "latitude": lat, "longitude": lon, "timezone": "auto",
+        "temperature_unit": unit, "wind_speed_unit": "mph" if unit == "fahrenheit" else "kmh",
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation",
+        "daily": "temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset",
+        "forecast_days": 3}, 10)
     cur, day = j.get("current", {}), j.get("daily", {})
     idx = 1 if when == "tomorrow" else 0
     # Live data is spoken with its age, the same rule the market tools follow:

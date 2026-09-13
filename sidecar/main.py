@@ -232,7 +232,11 @@ async def health():
     lv = float(getattr(orchestrator, "last_voice_ts", 0.0) or 0.0)
     return {"ok": True, "state": orchestrator.sm.state.value,
             "muted_s": max(0.0, round(speaker.silent_until - now, 1)),
-            "last_voice_s": (round(now - lv, 1) if lv else None)}
+            "last_voice_s": (round(now - lv, 1) if lv else None),
+            # wakes the model fired that the recogniser threw out: the room,
+            # not him. Diagnostics reads it; a day of them is a noisy room,
+            # a rejection of his own voice would show as one he then repeated.
+            "false_wakes_rejected": int(getattr(orchestrator, "wakes_rejected", 0) or 0)}
 
 
 # Mirrors credentials::KNOWN_SECRETS in the Rust core — the only names it ever pushes.

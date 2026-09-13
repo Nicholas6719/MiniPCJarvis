@@ -110,7 +110,7 @@ def main() -> int:
         check("...and his own voice still does", o.last_voice_ts > 0.0)
 
     print("\n-- ...and it is only recorded once the turn is accepted --")
-    turn = orch[orch.index("text = WAKE_PHRASE.sub"):]
+    turn = orch[orch.index("text = strip_wake_name(text"):]
     check("the dismissal comes first", turn.index("not_for_me(text") < turn.index("self._voice_heard()"),
           "a dismissed television line still said 'he is using JARVIS'")
 

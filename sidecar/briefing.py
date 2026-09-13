@@ -342,6 +342,22 @@ class Briefing:
                 # want of a summary.
                 from newsroom import spoken_line, summarize
                 said = await summarize(story)
+                # READ IT, THEN JUDGE IT AGAIN. The tier above was decided on
+                # a headline; the article is now open, and the summary often
+                # holds the one fact the headline left out - "in Laconia, New
+                # Hampshire", "a sweep that found no hazardous materials", "the
+                # outbreak has ended". Each of those went to his phone as
+                # URGENT off its headline (2026-09-10 to 13). If the read
+                # version is not an emergency, nothing is sent - and the story
+                # is already marked seen, so it is not asked again.
+                if said.get("summary"):
+                    judged = dict(story)
+                    judged["summary"] = str(said["summary"])
+                    tier2, why2 = classify_news(judged)
+                    if tier2 not in (ALERT, URGENT):
+                        log.info("demoted after reading: %r - %s", head[:60], why2)
+                        continue
+                    tier = tier2
                 self._remember(said)
                 out.append((spoken_line(said), tier, key))
             else:

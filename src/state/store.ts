@@ -908,7 +908,9 @@ export const useStore = create<Store>((set, get) => ({
         break;
       case "wake_suppressed":
         push({ id: evt.id, ts: evt.ts, kind: "wake",
-               summary: `heard my name, held (${evt.reason ?? "busy"})` });
+               summary: evt.reason === "no name"
+                 ? `thought I heard my name; I hadn't (${evt.score ?? "?"})`
+                 : `heard my name, held (${evt.reason ?? "busy"})` });
         break;
       case "clarify":
         set({ clarify: { subject: String(evt.subject ?? ""), question: String(evt.question ?? ""),

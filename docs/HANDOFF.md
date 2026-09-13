@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-09-08.
+Updated: 2026-09-13.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -4609,6 +4609,130 @@ at 2.85 s, which is very likely the same 500 and should clear with it.
 4. **The iPhone**, which he asked to build WITH him: Shortcuts posting health
    data every ~5 min and calendar/reminders every ~15-25 min through
    Telegram, tagged so the intake can route them, plus a way to force a sync.
+
+## 2026-09-13 — the wake word is HEARD, and the news week replayed (release 64)
+His brief, verbatim: *"The wake word sensitivity is way too high. I can name
+at least ten times... where the screen came on and he was listening even
+though I never said the wake word... I could be watching a show when it
+turns on."* And: *"I expect local news that's an emergency. I expect
+national news that's a huge emergency, but that's not what I'm getting."*
+Then an audit.
+
+### The wake: a name check, not a threshold
+Measured first. In the five days after release 63 the model fired **22
+times, at 0.60-1.00**, and almost none were him: *"Yeah. But Daniel, he
+isn't happy"* at 1.00, *"Did you click on it? Oh yeah."* at 0.93, seven
+fires on nothing at all. The scores of his real wakes and the television's
+overlap completely; **no threshold can separate them, and the threshold
+must not be touched again for this.** (The 0.60 migration of 09-08 stands
+- it removed the 0.45-0.59 band, which was pure silence.)
+
+What separates them is the WORDS. After the model fires, Parakeet is asked
+whether the name is actually in the pre-roll - 48 of 48 synthetic clips in
+93 ms median, every one of his real mishearings one edit away ("Travis",
+"Jovis", spelled out in `audio/wake.py NAME_TOKENS`) - and **nothing
+happens until it says yes**: no display wake, no surface, no chime, no
+`wake` event, no listen flag. A rejection is counted (`/health
+false_wakes_rejected`), logged with what WAS heard, and shown on the HUD
+("thought I heard my name; I hadn't"). It FAILS OPEN: a recogniser error or
+a check over 1.5 s lets the wake stand, because not hearing him is the
+failure he minds most.
+
+Two things had to move for the check to cost nothing:
+- **The mic queue is drained at the snapshot, not at the capture.** The
+  capture used to open by throwing away everything queued, which meant the
+  words said during the surface gap were lost - and the name check widens
+  that gap by ~100 ms. Drained at the snapshot, the capture carries straight
+  on from the pre-roll. A capture with no lead-in (push-to-talk, barge-in)
+  still starts from silence. The follow-up path drains at its snapshot too.
+- **The pre-roll is 2.5 s** (was 2.0) so the name is always inside it.
+- `strip_wake_name` replaces the `^`-anchored `WAKE_PHRASE` on the voice
+  paths: *"Thought you did me. Hey Jarvis, what time is it?"* reached the
+  brain with the television attached. The name in the opening three words
+  drops everything before it; at the end of a sentence it is dropped and
+  the sentence kept; past the opening only the name or a one-edit slip
+  counts, so "remind me to call Travis tomorrow" survives intact.
+`tests/test_wake_verify.py` - the real captures, the real mishearings, the
+order of operations, and the real recogniser on synthesised clips.
+
+### The news: the week his phone got it wrong, replayed
+Every delivery since 09-08 was read out of `deliveries` in his real DB
+(`.agent/scripts/grab_db.cmd`, real-session copy of jarvis.db + WAL). As
+URGENT he received: a dead pit-bull, a pond of trout, an outbreak that had
+ENDED (twice), a crash in Laconia NH off WCVB, a bomb threat at Logan where
+nothing was found, a smoky Green Line train, Fidelity's new office, and an
+op-ed two days after an assassination - while the assassination itself
+never reached him on the day. One cause each, all in `significance.py`:
+- `_human_deaths`: a death word next to an ANIMAL and no PERSON is an
+  animal. Replaces bare `FATALITY` in the classifier and the national toll.
+- `RESOLVED` + `ONGOING_DESPITE`: "declared over", "has ended", "found no
+  hazardous materials", "all clear", "lifted", "hoax" end it - even when
+  the same sentence mentions the evacuation that preceded the all-clear.
+  Only "at large", "still burning", "still missing" and the like keep it
+  open. Also honoured by `_ongoing`.
+- `THREAT_ONLY` / `_hazard_text`: "school shooting, bombing threats" is
+  words, not a shooting; the nouns after "threat" are removed before
+  HAZARD and VIOLENCE look. An EVACUATION for a threat survives - his own
+  school emptied out is his emergency, whatever is found later.
+- `_city_only` + `TRAVELS`: Boston, the T and Logan are near him and not
+  his town. A point incident there (smoke on a train, a threat with nothing
+  found) is Boston's; what spreads (gas, chemicals, an outbreak, fire),
+  what moves (a shooter at large) or a catastrophe still reaches him.
+- `FAR_PLACE` learned the rest of New England by city (Laconia, Nashua,
+  Providence...), the missing states (Utah, Idaho...), and the demonyms
+  (`hawaiian\w*`: "Hawaiian homes devastated" was near him because
+  `\bhawaii\b` does not match it).
+- `RECALL` is a notice; recall boilerplate ("serious injury or death") is
+  in `NOT_A_DEATH`.
+- The national door: `ATTACK` is judged on the HEADLINE when there is one
+  (the body of every follow-up is full of the attack), and `FIGURE_KILLED`
+  opens it for a national figure shot dead - his own bar, "the thing
+  everyone in the country is talking about tonight", which the keyword
+  list had never named.
+- **`briefing.scan` reads the article, then judges again.** The tier was
+  decided on a headline; the summary holds the fact the headline left out
+  ("in Laconia, New Hampshire", "a sweep that found no hazardous
+  materials"). If the read version is not an emergency it is not sent, and
+  it is already marked seen. An unreadable link is judged on the headline
+  as before.
+`tests/test_news_week.py` - every real headline, both directions, and the
+re-read. `test_significance.py` (84) and `test_briefing.py` unchanged and
+green.
+
+### The audit
+- **`get_weather` failed three times on one dropped TCP connect** (09-08
+  19:47, 20:20 x2) - which is what failed the Telegram voice-note suite: it
+  heard *"What is the weather in Boston today?"* perfectly and the lookup
+  died. Both Open-Meteo hosts answered in 0.7 s the next day. `_get_json`
+  retries once on a transport error only.
+- **An audio writer thread gets stuck in the driver on every wake after
+  the screen has been dark** - 13 times, 11 orphaned streams - each
+  timestamp a wake. The chime is the write that absorbs the DisplayPort
+  sink's wake-up; it is abandoned (by design, a freed stream with a thread
+  inside it crashes the process) and the reply plays on a fresh stream.
+  He hears the reply. Left alone: the false-wake fix removes most of the
+  occurrences, and the reply path is the one that must not be touched
+  without a live test. OPEN: ~2 orphaned threads a day on real wakes.
+- **`RuntimeError: aclose(): asynchronous generator is already running`**,
+  three times a day as "Task exception was never retrieved" - the asyncio
+  finalizer closing an httpx internal generator during a cancellation
+  (`wait_for` in the newsroom, the endpoint task at capture end). Library
+  noise, no visible effect. OPEN, low.
+- `hands_e2e` and `clarify_e2e` PASS on release 63 (they had been listed
+  as unverified). HUD `tsc` clean after the store.ts change.
+- The token trap again: `%APPDATA%\JARVIS\session.token` copied out of the
+  REAL session still answered "bad token" against a sidecar autostarted
+  after a reboot. `/health` is unauthenticated and looks fine. The DB and
+  log copies (`grab_db.cmd`, `grab_log.cmd`) are how to look without it;
+  an install re-establishes the token.
+
+### Next
+1. Verify release 64 live: `false_wakes_rejected` climbing while he
+   watches television and NOT on his own voice - the log line says what was
+   heard for every rejection.
+2. Telegram voice replies, episodic memory, calendar/mail (his "useful"
+   list); the iPhone Shortcuts integration to build with him.
+3. The two OPEN audit items above.
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en

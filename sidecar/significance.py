@@ -85,7 +85,11 @@ NEAR_TOWNS = NEAR_SURE + NEAR_ALSO
 _alt = lambda names: "|".join(r"\b" + re.escape(t) + r"\b" for t in names)  # noqa: E731
 NEAR_SURE_RE = re.compile(_alt(NEAR_SURE), re.I)
 NEAR_ALSO_RE = re.compile(_alt(NEAR_ALSO), re.I)
-BIG_CITY_RE = re.compile(r"\b(?:boston|cambridge|newton)\b", re.I)
+BIG_CITY_RE = re.compile(
+    r"\b(?:boston|cambridge|newton|somerville|brookline|quincy|dorchester|roxbury|"
+    r"south end|back bay|fenway|seaport|north station|south station|"
+    r"logan (?:airport|international|cargo|terminal)|"
+    r"green line|red line|orange line|blue line)\b", re.I)
 
 # Massachusetts, but not his ground: beyond ~20 miles, or the big cities of
 # their own regions. A story off a local desk that names one of these, and
@@ -133,6 +137,22 @@ FAR_PLACE = re.compile(
     r"chicago|houston|dallas|austin|atlanta|miami|orlando|tampa|new orleans|"
     r"las vegas|nevada|detroit|cleveland|philadelphia|baltimore|st\. louis|"
     r"new jersey|connecticut|rhode island|new hampshire|vermont|maine|"
+    # ...the rest of New England BY CITY. His desks (WCVB, WHDH) cover all six
+    # states: "3 people dead after overnight crash in Laconia" came off WCVB
+    # with nothing in the headline to say New Hampshire, and reached him as
+    # "many people have died" near home (2026-09-13 10:40). Only names that
+    # are not also Massachusetts towns; Concord, Salem and Manchester need
+    # the state after them.
+    r"laconia|nashua|keene|portsmouth|providence|hartford|new haven|stamford|"
+    r"bridgeport|bangor|kittery|"
+    r"(?:manchester|concord|salem|hampton|dover|exeter|derry|merrimack|rochester),? n\.?h\.?|"
+    r"burlington,? v\.?t\.?|(?:augusta|york|portland),? maine|n\.h\.|"
+    # ...and the states that were missing, and the demonyms
+    r"utah|idaho|montana|wyoming|new mexico|north dakota|south dakota|nebraska|"
+    r"kansas|iowa|minnesota|wisconsin|missouri|arkansas|louisiana|mississippi|"
+    r"alabama|south carolina|north carolina|west virginia|maryland|delaware|"
+    r"pennsylvania|indiana|puerto rico|guam|"
+    r"hawaiian\w*|californian\w*|texans?|floridians?|"
     r"california|florida|texas|arizona|georgia|ohio|michigan|illinois|"
     r"oregon|colorado|utah|alaska|hawaii|oklahoma|kentucky|tennessee|"
     # Washington. A local desk syndicates the national wire, and "Kennedy
@@ -242,7 +262,12 @@ NOT_ACTIVE = re.compile(
     r"\b(?:no (?:ongoing |further |longer a )?threat to the public|no threat to the public|"
     r"no danger to the public|(?<!no )(?<!without a )(?:suspect|gunman|driver|man|woman) (?:is |was )?"
     r"(?:in custody|arrested|taken into custody)|contained|under control|has been extinguished|"
-    r"investigation is ongoing)\b", re.I)
+    r"investigation is ongoing|"
+    # the all-clear. A bomb threat at Logan was URGENT with "a bomb squad
+    # sweep that found no hazardous materials" in the same sentence (2026-09-10).
+    r"found no (?:hazard\w*|explosive\w*|device|threat|danger|evidence of)|"
+    r"nothing (?:suspicious |hazardous |dangerous )?(?:was )?found|all.clear|"
+    r"false alarm|(?:a |was a |deemed a |determined to be a )?hoax)\b", re.I)
 
 # A hazard that happened AT A POINT and is over once it has happened. A gas
 # leak or a chemical cloud travels; a crashed plane does not.
@@ -422,10 +447,17 @@ def national_emergency(text: str, headline: str = "") -> bool:
     # itself is the emergency, the headline says so.
     if headline and FOREIGN.search(text):
         text = headline
-    return bool(SYSTEMIC.search(text) or ATTACK.search(text)
-                or CATASTROPHIC_TOLL.search(text)
-                or (NATIONWIDE.search(text) and (HAZARD.search(text)
-                                                 or FATALITY.search(text))))
+    # AN ATTACK IS IN THE HEADLINE ON THE DAY. The body of every follow-up is
+    # full of the attack - "neighbor turned on neighbor after Charlie Kirk's
+    # killing" said "was assassinated" in its summary and went to his phone
+    # as URGENT two days late. If the thing itself is the news, the headline
+    # says so; the body is judged only when there is no headline.
+    attack_text = headline or text
+    return bool(SYSTEMIC.search(text) or ATTACK.search(attack_text)
+                or FIGURE_KILLED.search(attack_text)
+                or (CATASTROPHIC_TOLL.search(text) and _human_deaths(text))
+                or (NATIONWIDE.search(text) and (HAZARD.search(_hazard_text(text))
+                                                 or _human_deaths(text))))
 
 
 # --- the everyday, which is only interesting when it is HIS everyday ----------
@@ -448,7 +480,14 @@ NOT_A_DEATH = re.compile(
     r"|\bdeath tax\b|\bdeath star\b"
     # Nobody died. "Man seriously injured in box cutter attack" carried
     # "attempted murder" in its summary and reached him as a death near home.
-    r"|\battempted (?:murder|homicide|killing)\b", re.I)
+    r"|\battempted (?:murder|homicide|killing)\b"
+    # A recall notice. "Popular infant toys sold nationwide recalled over
+    # 'serious injury or death'" reached him as an alert (2026-09-09): the
+    # warning label, not a death.
+    r"|\b(?:serious )?injury or death\b|\brisk of (?:serious injury or )?death\b"
+    r"|\b(?:could|can|may|might) (?:cause|result in|lead to) (?:serious injury or )?death\b"
+    r"|\bpotentially (?:fatal|deadly)\b|\bdeadly if\b"
+    r"|\b(?:choking|suffocation|strangulation|fire|burn|laceration|entrapment) hazards?\b", re.I)
 
 
 # A death is not automatically an emergency. On 2026-09-01 he was sent
@@ -503,6 +542,130 @@ WEATHER_EVENT = re.compile(
     r"heat wave|landslide|mudslide|avalanche)\b", re.I)
 
 
+# THE ALL-CLEAR IS NOT THE EMERGENCY. "Massive cyclospora outbreak linked to
+# lettuce declared over" and "Health officials give important update on
+# parasite outbreak" (the update: it has ended) both reached him as URGENT on
+# 2026-09-11, chasing him for an acknowledgement of something that was over.
+# The hazard word is in the sentence; so is the word that cancels it.
+RESOLVED = re.compile(
+    r"\b(?:declared over|(?:has|is|are|was) (?:now )?(?:over|ended|finished)|"
+    r"(?:outbreak|emergency|warning|watch|advisory|alert|order|evacuation|lockdown|"
+    r"shelter.in.place|boil.water (?:order|advisory)|search) (?:has |have |was |were |is )?"
+    r"(?:been )?(?:ended|lifted|expired|called off|cancell?ed|concluded)|"
+    r"(?:given|gets|got|issued) the all.clear|all.clear (?:given|issued)|back to normal|"
+    r"reopen(?:ed|s)?|fully contained|has been extinguished|"
+    r"found no (?:hazard\w*|explosive\w*|device|threat|danger)|"
+    r"nothing (?:suspicious |hazardous |dangerous )?(?:was )?found|false alarm|hoax)\b", re.I)
+
+# A recall is a notice, not an emergency - whatever its label says.
+RECALL = re.compile(r"\brecall(?:ed|s|ing)?\b", re.I)
+
+# Nobody was hurt. Said explicitly, it settles a point incident that is not
+# his town.
+NO_HARM = re.compile(
+    r"\bno (?:one|body) (?:was |were )?(?:hurt|injured|harmed)|no (?:reported |serious |other )?injur(?:y|ies)|"
+    r"without injur\w+|no injuries (?:were |have been )?reported|nobody was (?:hurt|injured)\b", re.I)
+
+# A hazard that SPREADS, or a danger that MOVES: the things distance and a
+# city line do not excuse. Everything else that happens in Boston is Boston's.
+TRAVELS = re.compile(
+    r"\b(?:gas leak|chemical|hazmat|toxic|radiation|nuclear|outbreak|pandemic|"
+    r"wildfire|brush fire|flash flood|flood\w*|hurricane|tornado|earthquake|tsunami|"
+    r"amber alert|manhunt|active shooter|at large|on the loose)\b", re.I)
+
+# A DEAD ANIMAL IS NOT A FATALITY. "Police find dead dog, several others
+# emaciated in Boston apartment" reached him as "many people have died"
+# (2026-09-13 10:29); "Biologists determine why thousands of rainbow trout
+# died in small pond" as URGENT (2026-09-11 14:18). A death word next to an
+# animal, with no person next to it, is not a death.
+ANIMAL = re.compile(
+    r"\b(?:dogs?|pupp(?:y|ies)|pit.?bulls?|cats?|kittens?|pets?|animals?|fish|trout|salmon|bass|"
+    r"cod|birds?|geese|goose|ducks?|chickens?|hens?|turkeys?|cows?|cattle|calves|calf|horses?|"
+    r"ponies|pony|deer|moose|bears?|coyotes?|foxes|seals?|whales?|dolphins?|sharks?|turtles?|"
+    r"bees|hives?|livestock|sheep|lambs?|goats?|pigs?|hogs?|raccoons?|squirrels?|rabbits?|wildlife)\b", re.I)
+PEOPLE = re.compile(
+    r"\b(?:people|persons?|man|men|woman|women|boys?|girls?|teen\w*|child\w*|kids?|bab(?:y|ies)|"
+    r"infants?|toddlers?|residents?|drivers?|passengers?|pedestrians?|officers?|workers?|"
+    r"students?|victims?|firefighters?|crew|hikers?|swimmers?|motorcyclists?|cyclists?|family|"
+    r"families|mother|father|son|daughter|husband|wife|couple|neighbou?rs?|patients?|inmates?|"
+    r"soldiers?|troops|civilians?|tourists?|migrants?|\d+[- ]year[- ]old)\b", re.I)
+
+
+def _human_deaths(text: str) -> bool:
+    """Did a PERSON die in this? Every death word is judged by its neighbours:
+    an animal within three words and no person within three words is an
+    animal. A death word with no animal near it is a person - "Tornado kills
+    14" names nobody and is still a fatality."""
+    t = _event_text(text)
+    words = [(m.start(), m.group(0)) for m in re.finditer(r"[A-Za-z0-9'-]+", t)]
+    found = False
+    for m in FATALITY.finditer(t):
+        i = sum(1 for start, _ in words if start < m.start())
+        window = " ".join(w for _, w in words[max(0, i - 3):i + 4])
+        if ANIMAL.search(window) and not PEOPLE.search(window):
+            continue
+        found = True
+    return found
+
+
+# A THREAT IS NOT THE THING. "Mass. teen charged after school shooting,
+# bombing threats" reached him as URGENT (2026-09-11): a 17-year-old in
+# Raynham, arrested, for words on a gaming platform. The nouns after "threat"
+# are what was threatened, not what happened; they are removed before the
+# hazard and violence rules look. An EVACUATION for a threat survives this -
+# "evacuated" is its own word - which is right: his own school emptied out
+# for a bomb threat is his emergency, whatever was or was not found.
+THREAT_ONLY = re.compile(
+    r"\b(?:(?:school |mass |active )?(?:shooting|shooter|bomb(?:ing)?|attack|violence|terror(?:ism|ist|istic)?)"
+    r"(?:\s*(?:,|and|or|/)\s*(?:school |mass )?(?:shooting|shooter|bomb(?:ing)?|attack|violence))*"
+    r"\s+threats?"
+    r"|threat(?:s|en\w*)?\s+(?:of|to)\s+(?:shoot|bomb|attack|kill|blow|harm)\w*"
+    r"|threat(?:s|ened|ening)?\s+(?:a |an |the )?(?:school|shooting|bombing|attack))\b", re.I)
+
+
+def _hazard_text(text: str) -> str:
+    """The text with threats-of-things removed, for HAZARD and VIOLENCE."""
+    return THREAT_ONLY.sub(" ", text)
+
+
+def _city_only(text: str) -> bool:
+    """Near him ONLY because it is Boston (or the T, or the airport) - not one
+    of his towns, not MetroWest, not the county. A smoky Green Line train at
+    North Station reached him as URGENT (2026-09-11 05:20). Boston is his
+    when something there spreads or moves; a point incident there is
+    Boston's."""
+    return bool(BIG_CITY_RE.search(text)) and not (
+        TOWN_RE.search(text) or NEAR_SURE_RE.search(text) or NEAR_ALSO_RE.search(text)
+        or re.search(r"\bmetrowest\b|\bmiddlesex\b", text, re.I))
+
+
+# THE ASSASSINATION HE DID NOT HEAR ABOUT. A national figure shot dead is
+# the thing everyone in the country is talking about that night - his own
+# bar for the national door - and nothing here named it: ATTACK has
+# "assassinat\w+" and the headline on the day said "shot dead". Two days
+# later an op-ed whose body said "was assassinated" DID reach him, as URGENT
+# (2026-09-12 05:06). The figure, then the killing, in one clause.
+_FIGURE = (r"(?:president|vice president|senators?|congress(?:man|woman|member)|governor|"
+           r"(?:supreme court )?justice|presidential candidate|speaker of the house|"
+           r"attorney general|secretary of (?:state|defense|the treasury)|"
+           r"(?:conservative|liberal|political|civil rights|right.wing|left.wing) "
+           r"(?:activist|commentator|leader|influencer)|(?:fbi|cia) director|federal judge|"
+           r"the pope|prime minister)")
+_KILLED = r"(?:shot dead|shot and killed|assassinated|gunned down|fatally shot|stabbed to death|killed in (?:an? )?(?:shooting|attack|explosion|blast|crash))"
+FIGURE_KILLED = re.compile(
+    r"\b" + _FIGURE + r"\b[^.;:]{0,60}?\b(?:is |was |has been )?" + _KILLED + r"\b"
+    r"|\b" + _KILLED + r"\b[^.;:]{0,40}?\b" + _FIGURE + r"\b", re.I)
+
+
+# ...unless something is still out there when the all-clear is given. The
+# evacuation and the lockdown that PRECEDED an all-clear are not this; a
+# gunman at large or a fire still burning is.
+ONGOING_DESPITE = re.compile(
+    r"\b(?:manhunt|at large|on the loose|active shooter|still burning|still missing|"
+    r"unaccounted for|search continues|police are searching|rescuers|rescue efforts|"
+    r"still (?:evacuated|trapped|unfolding))\b", re.I)
+
+
 def _ongoing(text: str) -> bool:
     """Is this still happening, or is it over?
 
@@ -514,7 +677,7 @@ def _ongoing(text: str) -> bool:
     """
     # OVER IS OVER. "No threat to the public", a suspect in custody, a fire
     # contained: whatever else the sentence says, it is finished.
-    if NOT_ACTIVE.search(text):
+    if NOT_ACTIVE.search(text) or (RESOLVED.search(text) and not ONGOING_DESPITE.search(text)):
         return False
     if STILL_ACTIVE.search(text):
         return True
@@ -666,6 +829,14 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
 
     near, own_town = is_local(story)
 
+    # OVER IS OVER, and a notice is a notice. Before anything that could
+    # promote them: the hazard word and the word that cancels it are in the
+    # same sentence, and every rule below would happily fire on the first.
+    if RESOLVED.search(text) and not ONGOING_DESPITE.search(text):
+        return NOTABLE, "over - the all-clear, not the emergency"
+    if RECALL.search(text) and not _human_deaths(text):
+        return NOTABLE, "a recall is a notice, not an emergency"
+
     # Everything below decides how loud a story is. This decides whether it is
     # his at all, and it comes first so nothing downstream can promote its way
     # past it - a wildfire two thousand miles away is still a wildfire, and the
@@ -688,9 +859,26 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
     # left to the "weighty" rules below (which emergencies-only silences).
     if not near and national_emergency(text, headline=str(story.get("headline") or "")):
         return URGENT, "the whole country needs to know this"
-    hazard = bool(HAZARD.search(text))
-    violence = bool(VIOLENCE.search(_violence_text(text)))
+    scrubbed = _hazard_text(text)               # threats OF things removed
+    hazard = bool(HAZARD.search(scrubbed))
+    violence = bool(VIOLENCE.search(_violence_text(scrubbed)))
     danger = hazard or violence
+
+    # BOSTON IS NOT HIS TOWN. It counts as near - he is there often enough -
+    # but a point incident there is not his emergency: a smoky train at North
+    # Station, a bomb threat at Logan where nothing was found. What reaches him
+    # from the city is what spreads (gas, chemicals, an outbreak, fire), what
+    # moves (a shooter at large), or a catastrophe by size.
+    if (near and not own_town and _city_only(text)
+            and not (TRAVELS.search(scrubbed) or CATASTROPHE.search(text)
+                     or (violence and _ongoing(scrubbed))
+                     or (MANY.search(text) and _human_deaths(text)))):
+        return NOTABLE, "Boston, and not an emergency that reaches him"
+    # Nobody hurt, said plainly, and not his town: a point incident that is
+    # over. A hazard that spreads is still a hazard with nobody hurt yet.
+    if (NO_HARM.search(text) and not own_town
+            and not (TRAVELS.search(scrubbed) or CATASTROPHE.search(text))):
+        return NOTABLE, "nobody was hurt, and it is not his town"
 
     # A courtroom story is the system processing something that is already over,
     # so it cannot be an emergency however violent its vocabulary - unless the
@@ -750,7 +938,7 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
 
     # A death, with no hazard word to announce it. "Fatal MBTA rail incident"
     # names no danger at all and was reading as ordinary local news.
-    if FATALITY.search(_event_text(text)):
+    if _human_deaths(text):
         # An obituary is not an emergency, however local the desk that carried
         # it. This is the Dolly Parton case: a celebrity death from illness,
         # reprinted by MassLive, reaching him as "somebody died close to home".

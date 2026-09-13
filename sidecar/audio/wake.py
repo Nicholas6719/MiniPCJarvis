@@ -5,6 +5,7 @@ Measured on this machine: ~1.8 ms per 80 ms chunk (~2% of one core).
 from __future__ import annotations
 
 import logging
+import re
 import threading
 
 import numpy as np
@@ -85,6 +86,90 @@ class WakeWord:
             return best
         finally:
             self._lock.release()
+
+
+# --- THE NAME, AS THE RECOGNISER HEARS IT ------------------------------------
+# The model above fires on the SOUND of "hey jarvis" - and on television: in
+# the five days after release 63 it fired 22 times, at 0.60 to 1.00, and almost
+# none of them were him ("Yeah. But Daniel, he isn't happy" scored 1.00). No
+# threshold separates those from his voice, because the scores overlap
+# completely. The WORDS separate them: after the model fires, Parakeet is
+# asked whether the name is in the pre-roll, and only then does the screen
+# come on. 48 of 48 synthetic clips in 93 ms median (2026-09-13); every miss
+# in his log is one edit away ("Travis", "Jovis"), so those are spelled out.
+NAME = "jarvis"
+NAME_TOKENS = frozenset({
+    "jarvis", "jarves", "jarvus", "jovis", "jervis", "javis", "jarvi", "jarvas",
+    "jarbis", "jarvez", "jarvie", "jarvys", "jarvish", "jarvess", "jarviss",
+    "charvis", "garvis", "harvis", "darvis", "travis",
+})
+
+
+def _dl(a: str, b: str) -> int:
+    """Damerau-Levenshtein (optimal string alignment): one edit for a
+    substitution, an insertion, a deletion, or swapping two neighbours."""
+    la, lb = len(a), len(b)
+    d = [[0] * (lb + 1) for _ in range(la + 1)]
+    for i in range(la + 1):
+        d[i][0] = i
+    for j in range(lb + 1):
+        d[0][j] = j
+    for i in range(1, la + 1):
+        for j in range(1, lb + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[la][lb]
+
+
+def _is_name(word: str, loose: bool = True) -> bool:
+    """One token. `loose` admits the recogniser's known mishearings ("travis");
+    strict admits only the name and a one-edit slip of it ("jarvi", "jarvus")."""
+    w = word.lower()
+    if w == NAME:
+        return True
+    if loose and w in NAME_TOKENS:
+        return True
+    # ONE edit, not two: two admits "harris", "marvin", "elvis" - names the
+    # television says. The mishearings two edits away are listed above.
+    return 5 <= len(w) <= 7 and _dl(w, NAME) <= 1
+
+
+def name_in(text: str) -> bool:
+    """Is his name anywhere in this transcript, as Parakeet tends to write it?"""
+    return any(_is_name(w) for w in re.findall(r"[a-z]+", (text or "").lower()))
+
+
+def strip_wake_name(text: str) -> str:
+    """The transcript with the wake phrase taken out, wherever the name landed.
+
+    The old pattern was anchored at the start of the sentence, and the
+    pre-roll is 2.5 s of whatever preceded the name - so "Thought you did me.
+    Hey Jarvis, what time is it?" reached the brain with the television still
+    attached. Anything before the name in the first few words is the room.
+    A name at the END ("what time is it, Jarvis?") is dropped and the sentence
+    kept. Beyond the opening, only the name itself or a one-edit slip counts:
+    "remind me to call Travis tomorrow" must survive intact.
+    """
+    s = text or ""
+    for i, m in enumerate(re.finditer(r"[A-Za-z]+", s)):
+        if i >= 8:
+            break
+        if not _is_name(m.group(0), loose=(i < 3)):
+            continue
+        after = re.sub(r"^[\s,.!?:;-]+", "", s[m.end():]).strip()
+        if after:
+            return after                                  # the request follows the name
+        before = s[:m.start()].rstrip(" ,.!?;:-").strip()
+        # The name at the END of an opening ("Hey Jarvis", "um, Jarvis") is
+        # a bare wake, whatever the room said first. The name at the end of
+        # a sentence ("what time is it, Jarvis?") is the sentence.
+        lead = before.split()[-1].lower() if before else ""
+        if i < 3 or lead in ("hey", "hi", "ok", "okay", "yo", "so", "um", "uh"):
+            return ""
+        return before
+    return s.strip()
 
 
 wake = WakeWord()
