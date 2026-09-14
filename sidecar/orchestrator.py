@@ -619,7 +619,7 @@ class Orchestrator:
                 # him and what was held back, on the brief stage.
                 sections = persona.briefing_sections(entries) if gap >= persona.AWAY_S else []
                 if sections:
-                    asyncio.create_task(bus.emit("brief", title="While you were away",
+                    spawn(bus.emit("brief", title="While you were away",
                                                  eyebrow="THE LEDGER", sections=sections))
             except Exception:
                 log.debug("no delivery ledger for the briefing", exc_info=True)
@@ -646,7 +646,7 @@ class Orchestrator:
         # The turn may have changed the tool block; if so, re-read the tools
         # prefix now rather than on his next question (see _rewarm_tools_shape).
         if getattr(self, "_warmed_block", None) != shortlist.block_version:
-            asyncio.create_task(self._rewarm_tools_shape())
+            spawn(self._rewarm_tools_shape())
 
     async def stand_down(self) -> dict:
         """End the conversation window now. He is done talking.
@@ -769,7 +769,7 @@ class Orchestrator:
             log.debug("could not check the picture panel", exc_info=True)
         if mode in ("wake_word", "both") and win > 0:
             self._armed_until = time.time() + win
-            asyncio.create_task(bus.emit("conversation", armed=True,
+            spawn(bus.emit("conversation", armed=True,
                                          until=self._armed_until, window_s=win))
 
     @property
@@ -800,7 +800,7 @@ class Orchestrator:
         if not ok:
             await self.sm.to(State.ERROR, force=True)
             await bus.emit("boot_error", summary="language model failed to start — retrying")
-            asyncio.create_task(self._llm_retry_loop())
+            spawn(self._llm_retry_loop())
             await audio_boot
             return
         await audio_boot
@@ -810,8 +810,8 @@ class Orchestrator:
         self._idle_task = asyncio.create_task(self._idle_watch())
         # The backstop: being unable to hear his name is never permanent.
         self._deaf_task = asyncio.create_task(self._deaf_watch())
-        asyncio.create_task(self._warm_prompts())
-        asyncio.create_task(tts.warm_phrases())
+        spawn(self._warm_prompts())
+        spawn(tts.warm_phrases())
         # The boot chime plays through whatever the default output is, and on
         # this machine that is the monitor's own speakers over DisplayPort. A
         # sleeping monitor does not accept audio: on 2026-08-31 every restart
@@ -819,13 +819,13 @@ class Orchestrator:
         # thread, 27 times in one day. He could not have heard it anyway - a
         # dark screen means either he is not there or the panel is asleep.
         if config.get("audio", "boot_sound", default=True) and not _display_off():
-            asyncio.create_task(self.play_sound("boot"))
+            spawn(self.play_sound("boot"))
         await self.sm.to(State.IDLE)
         await bus.emit("boot", summary="ready")
         # pre-warm the hidden search browser so the first web search is instant
         from search_brave_web import brave_web
         if brave_web.available:
-            asyncio.create_task(brave_web.warmup())
+            spawn(brave_web.warmup())
 
     async def _device_watch(self) -> None:
         """Hot-plug: always use the webcam mic when present, fall back to the
@@ -1331,6 +1331,9 @@ class Orchestrator:
         if self._listen_flag.is_set() or self.armed():
             await self.stand_down()
         else:
+            # Reaching for the hotkey is as deliberate as saying the name:
+            # it lifts a test mute the same way his voice does.
+            self._voice_heard()
             mic.drain()
             self.vad.reset()
             self._listen_flag.set()

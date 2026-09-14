@@ -69,6 +69,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_wake_feed.py || (echo WAKE FEED TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_wake_guard.py || (echo WAKE GUARD TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_wake_verify.py || (echo WAKE VERIFY TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_background_tasks.py || (echo BACKGROUND TASKS TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_bargein_audio.py || (echo BARGEIN AUDIO TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_documents.py || (echo DOCUMENTS TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_office.py || (echo OFFICE TEST FAILED & exit /b 1)

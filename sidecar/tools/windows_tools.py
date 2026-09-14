@@ -809,6 +809,20 @@ def exit_sleep_mode() -> dict:
                     "note": "awake for the phone; the screen and window are left alone"}
     except Exception:
         log.debug("could not tell whether this is a remote turn", exc_info=True)
+    # NOT WHILE THE TESTS ARE RUNNING. A test mute (/debug/silence) means
+    # "leave him alone", and the suites inject his name a dozen times a run:
+    # each one woke the monitor and raised the window in a room he was
+    # asleep in (2026-09-13: "I want my display to be able to go to sleep").
+    # His own voice lifts the mute the moment he speaks, so a real wake is
+    # untouched by this. The state machine still leaves SLEEPING.
+    try:
+        from audio.io import speaker
+        import time as _t
+        if speaker.silent_until > _t.time():
+            return {"sleeping": False, "restored": 0,
+                    "note": "a test mute is on; the screen and window are left alone"}
+    except Exception:
+        log.debug("could not tell whether a test mute is on", exc_info=True)
     # The screen first. Restoring the window to a monitor that is still off is
     # what he actually hit: heard, answered, and invisible.
     if config.get("presence", "wake_display", default=True):

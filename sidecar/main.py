@@ -147,7 +147,7 @@ async def lifespan(app: FastAPI):
     scheduler.announce = _announce_reminder
     scheduler.start()
     from mcp_client import mcp_manager
-    asyncio.create_task(mcp_manager.start())
+    spawn(mcp_manager.start())
     from proactive import proactive
     proactive.announce = _announce_alert
 
@@ -163,11 +163,11 @@ async def lifespan(app: FastAPI):
             await brain.load()
         except Exception:
             logging.getLogger("jarvis").exception("brain failed to load (LLM-only mode)")
-    asyncio.create_task(_load_brain())
-    asyncio.create_task(orchestrator.start())
+    spawn(_load_brain())
+    spawn(orchestrator.start())
     memory.prune()          # bounded transcript / audit log; knowledge is never pruned
     from tools.shortlist import shortlist
-    asyncio.create_task(shortlist.build(registry))   # embed tool descriptions once
+    spawn(shortlist.build(registry))   # embed tool descriptions once
     from dictation import dictation as _dict
     _dict.orchestrator = orchestrator     # so it refuses to fight a real turn
     from brain.night_school import night_school
@@ -952,7 +952,7 @@ async def debug_confirm_test(x_jarvis_token: str | None = Header(None)):
         finally:
             if orchestrator.sm.state != State.ERROR:
                 await orchestrator.sm.to(State.IDLE, force=True)
-    asyncio.create_task(_run())
+    spawn(_run())
     return {"ok": True}
 
 

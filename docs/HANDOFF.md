@@ -4726,6 +4726,46 @@ green.
   log copies (`grab_db.cmd`, `grab_log.cmd`) are how to look without it;
   an install re-establishes the token.
 
+### Release 64 wedged one minute after boot (release 65 is the fix)
+At 20:02:22, sixty seconds into the installed build:
+
+    Task was destroyed but it is pending! TTSRouter.warm_phrases()
+    running at audio/tts.py:434
+
+The TTS warm-up was started with a bare `asyncio.create_task(...)`
+(orchestrator.py:814). The loop holds such a task only weakly; the garbage
+collector took it while it sat inside `async with self._synth_lock`, and a
+destroyed task never runs its exit. The lock stayed held. From then on every
+phrase not already cached waited on it forever: "what time is it" answered
+(cached), and anything that needed the model or a new sentence sat in
+PROCESSING until the stuck watchdog killed it at 35-45 s - "stuck in
+executing/thinking/speaking ... recovering" every two and a half minutes for
+an hour, while llama-server's own log showed 3 s completions the whole time.
+The suites crawled (a file search took 159 s), and he would have had an
+assistant that could tell the time and nothing else all night.
+
+`events.spawn()` - the helper that keeps a reference and logs a failure -
+has existed since release 50. **Thirteen call sites never used it.** All of
+them do now, and `tests/test_background_tasks.py` scans the tree for a bare
+`create_task` so a fourteenth cannot land. Two more layers underneath:
+- `TTSRouter.synthesize_stream` takes the synthesis lock with an 8 s
+  deadline and REPLACES it, loudly, if the holder will not let go - a
+  permanent wedge becomes an eight-second hiccup with an ERROR line naming
+  it.
+- `exit_sleep_mode` stands down while a test mute is on: no monitor wake,
+  no window raised. His brief tonight: *"I want the tests to be completely
+  silent, and I want my display to be able to go to sleep."* The suites
+  inject his name a dozen times a run and each one lit the room. His own
+  voice - and now the hotkey - lifts the mute, so a real wake is untouched.
+  `release.ps1 -Silent` is the only way the suites run at night.
+
+The two "aclose(): asynchronous generator is already running" errors that
+appeared with it at 20:02:23 were the SAME event - the finalizer closing the
+generator inside the destroyed task. That noise has been in the log for
+days (three a day, "Task exception was never retrieved"); it was the
+collector taking un-held tasks, not a library race. Resolved by the same
+change.
+
 ### Next
 1. Verify release 64 live: `false_wakes_rejected` climbing while he
    watches television and NOT on his own voice - the log line says what was

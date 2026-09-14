@@ -486,11 +486,31 @@ class TTSRouter:
         collected: list = []
         try:
             produced = False
-            async with self._synth_lock:      # one synthesis at a time (cache hits skip this)
+            # ONE SYNTHESIS AT A TIME - with a deadline. On 2026-09-13 the
+            # holder of this lock was garbage-collected mid-await (a task nobody
+            # held a reference to) and never released it; every uncached phrase
+            # then waited here forever and he could answer nothing but the
+            # time. A holder that has not let go in eight seconds is gone -
+            # no synthesis takes that long - so the lock is replaced and said so.
+            try:
+                await asyncio.wait_for(self._synth_lock.acquire(), timeout=8.0)
+            except asyncio.TimeoutError:
+                log.error("tts: the synthesis lock has been held for 8 s and its holder "
+                          "is not letting go - replacing it (a task was destroyed while "
+                          "speaking?)")
+                self._synth_lock = asyncio.Lock()
+                await self._synth_lock.acquire()
+            try:
                 async for chunk in active.synthesize_stream(text, cancel):
                     produced = True
                     collected.append(chunk)
                     yield chunk
+            finally:
+                # release THIS lock object even if it was replaced under us
+                try:
+                    self._synth_lock.release()
+                except RuntimeError:
+                    pass
             if produced and not cancel.is_set() and len(text) <= 60:
                 self._cache[key] = collected
                 self._cache.move_to_end(key)
