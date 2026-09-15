@@ -4847,6 +4847,33 @@ through Telegram, and a way to force a sync. Built on the road that exists:
   on the Home Screen / Siri / Back Tap - that is the "force it". Recipe in
   the session's `phone_shortcuts.md`, to build with him.
 
+### iCloud over CalDAV — nothing on the phone (release 68)
+He could not build the Shortcuts: *"I can't do it."* So the calendar and the
+Reminders app come from iCloud instead, pulled from the PC. `icloud.py`:
+- `/icloud <apple id> <app-specific password>` on Telegram stores the pair
+  DPAPI-encrypted (`%APPDATA%\JARVIS\icloud.bin`, like the bot token),
+  DELETES his message from the chat, syncs once and reports the counts.
+  `/icloud off` forgets it. The password is an app-specific one from
+  account.apple.com → Sign-In and Security; revocable on its own.
+- CalDAV against `https://caldav.icloud.com`: current-user-principal →
+  calendar-home-set → the calendars with their component sets (VEVENT and
+  VTODO - Reminders lists are VTODO calendars) → `calendar-query` with
+  `expand` for the next 7 days, and the RFC 4791 "COMPLETED is-not-defined"
+  filter for open reminders. **Every href after the first hop is relative to
+  the host that answered** (pNN-caldav.icloud.com) - `urljoin` against the
+  answering URL, never the base; the gate's fake does exactly what iCloud does.
+- A small, deliberate iCalendar reader (no library bundled): unfolding,
+  escapes, TZID/VALUE=DATE/Z into his clock via zoneinfo (tzdata is bundled),
+  VALARMs skipped, CANCELLED and COMPLETED dropped.
+- The result is written into the SAME two `volatile` documents the phone
+  would send, so `get_agenda`, `get_phone_reminders`, the reflexes and the
+  brief are unchanged. `icloud.sync_loop()` every `phone.icloud_sync_minutes`
+  (15) via `spawn`; `sync_icloud` tool + `sync_phone` reflex ("sync my
+  calendar") is the force-it. `tests/test_icloud.py`.
+- Health still needs the phone (HealthKit is on-device only). The single
+  Health `.shortcut` is built here as a plist for him to sign on the Mac
+  (`shortcuts sign --mode anyone`) - or to leave for later.
+
 ### Next
 - Verify release 66 live: a wake from a dark screen is HEARD (the log line
   "audio: display was dark - reopened the speakers after N ms (endpoint

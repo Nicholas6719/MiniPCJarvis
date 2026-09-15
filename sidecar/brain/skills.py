@@ -2132,6 +2132,14 @@ def say_phone_reminders(s: dict, res: dict) -> str:
     return f"{len(items)} things{which}: {head}."
 
 
+def say_sync_phone(_s: dict, res: dict) -> str:
+    if res.get("error"):
+        return str(res["error"])
+    ev, rm = int(res.get("events") or 0), int(res.get("reminders") or 0)
+    return (f"Synced, sir: {ev} event{'s' if ev != 1 else ''} this week and "
+            f"{rm} open reminder{'s' if rm != 1 else ''}.")
+
+
 def say_reminders(_s: dict, res: dict) -> str:
     rem = res.get("reminders") or []
     if not rem:
@@ -3121,6 +3129,11 @@ SKILLS: list[Skill] = [
         "read me my to do list", "what's on my shopping list", "what's on my errands list",
         "what do i still need to do", "what's on my list"],
         slots=slots_phone_reminders, speak=say_phone_reminders),
+    Skill("sync_phone", "sync_icloud", [
+        "sync my calendar", "sync my phone", "refresh my calendar", "update my calendar",
+        "sync my reminders", "refresh my reminders", "pull my calendar", "resync my calendar",
+        "sync with icloud", "sync icloud", "refresh from my phone", "get my latest calendar"],
+        speak=say_sync_phone),
     Skill("thanks", None, [
         "thank you", "thanks", "thank you jarvis", "thanks jarvis", "cheers",
         "much appreciated", "appreciate it", "thanks a lot", "thank you very much",

@@ -168,7 +168,7 @@ def ingest_payload(raw: str) -> dict:
                     "ignored": max(0, len(src) - len(kept))}
         return {"error": "that payload was not a calendar or a reminders list", "stored": 0}
     except Exception as e:
-        log.exception("phone payload ingest failed")
+        log.warning("phone payload unreadable: %s", e)   # his input, not a bug: no traceback
         return {"error": f"that payload could not be read: {e}", "stored": 0}
 
 
@@ -300,7 +300,19 @@ def setup_text(chat_id) -> str:
     )
 
 
+async def sync_icloud() -> dict:
+    """Pull the calendar and Reminders from iCloud now - his 'force it'."""
+    import icloud
+    return await icloud.sync()
+
+
 def register_all() -> None:
+    registry.register(Tool(
+        name="sync_icloud",
+        description="Refresh the user's calendar and Reminders from iCloud right now. "
+                    "Use when he asks to sync, refresh or update his calendar or reminders.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.SAFE, handler=sync_icloud, timeout=45))
     registry.register(Tool(
         name="get_agenda",
         description="The user's calendar as pushed from his phone: today, tomorrow, this "

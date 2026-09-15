@@ -437,6 +437,40 @@ class TelegramBridge:
                 await self._send("I can't read documents yet, sir — send it as a photo "
                                  "if you want me to look at it.")
             return
+        if text.strip().lower().startswith("/icloud"):
+            # "/icloud <apple id> <app-specific password>". The password is an
+            # app-specific one Apple lets him revoke on its own; it is stored
+            # DPAPI-encrypted like the bot token, and his message is deleted
+            # from the chat so it does not sit there in plain text.
+            import icloud as _ic
+            parts = text.split()
+            mid = msg.get("message_id")
+            if len(parts) == 2 and parts[1].lower() in ("off", "forget", "disconnect"):
+                _ic.forget_credentials()
+                await self._send("iCloud disconnected, sir.")
+                return
+            if len(parts) < 3 or "@" not in parts[1]:
+                await self._send("Send it as: /icloud your@icloud.com xxxx-xxxx-xxxx-xxxx - the "
+                                 "password is an app-specific one from account.apple.com, "
+                                 "Sign-In and Security.")
+                return
+            try:
+                await asyncio.to_thread(_ic.save_credentials, parts[1], " ".join(parts[2:]))
+            except Exception:
+                log.exception("could not store the icloud credentials")
+                await self._send("I couldn't store that, sir.")
+                return
+            if mid is not None:
+                await self._api("deleteMessage", chat_id=chat_id, message_id=mid)
+            res = await _ic.sync()
+            if res.get("error"):
+                await self._send(f"Stored, but the first sync failed: {res['error']}")
+            else:
+                await self._send(f"Connected to iCloud, sir: {res['events']} event"
+                                 f"{'s' if res['events'] != 1 else ''} in the next week and "
+                                 f"{res['reminders']} open reminder{'s' if res['reminders'] != 1 else ''}. "
+                                 "I'll refresh every fifteen minutes.")
+            return
         if text.strip().lower() in ("/setup phone", "/setup", "/phone"):
             # Everything the Shortcuts need, so he never has to go looking
             # for his chat id or guess at the payload shapes.

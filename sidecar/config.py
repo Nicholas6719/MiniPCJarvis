@@ -233,6 +233,10 @@ DEFAULTS: dict[str, Any] = {
     # endpoint, no second entry point.
     "location": {"stale_after_minutes": 120},
     "health": {"stale_after_minutes": 180, "max_payload_bytes": 65536},
+    # His calendar and Reminders: from the phone by Shortcut, or pulled from
+    # iCloud over CalDAV every quarter of an hour once /icloud has been sent.
+    "phone": {"stale_after_minutes": 60, "max_payload_bytes": 65536,
+              "icloud_sync_minutes": 15, "icloud_days_ahead": 7},
     "brain": {"enabled": True, "threshold": 0.82, "general_hint_threshold": 0.7},
     "audio": {"input_device": None, "output_device": None,
               "sound_cues": True, "boot_sound": True,

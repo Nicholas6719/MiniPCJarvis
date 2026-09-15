@@ -169,6 +169,8 @@ async def lifespan(app: FastAPI):
     memory.prune()          # bounded transcript / audit log; knowledge is never pruned
     from tools.shortlist import shortlist
     spawn(shortlist.build(registry))   # embed tool descriptions once
+    import icloud
+    spawn(icloud.sync_loop())          # his calendar and Reminders, every quarter hour
     from dictation import dictation as _dict
     _dict.orchestrator = orchestrator     # so it refuses to fight a real turn
     from brain.night_school import night_school
