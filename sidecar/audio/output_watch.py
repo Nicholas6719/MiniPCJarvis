@@ -115,6 +115,34 @@ def _get_meter():
     return _meter
 
 
+def endpoint_active() -> bool | None:
+    """Is the default render endpoint ACTIVE right now, as WASAPI sees it?
+
+    None when it cannot be asked. His speakers are the monitor's, over
+    DisplayPort: while the panel sleeps the endpoint is unplugged and a
+    stream opened against it plays to nothing (2026-09-15 08:21, a wake
+    from a dark screen that he never heard). Called on a worker thread -
+    it is COM, and a fresh enumerator each time, because the default
+    endpoint is exactly the thing that changes when a monitor wakes.
+    """
+    try:
+        import comtypes
+        from comtypes import CoCreateInstance
+        from pycaw.constants import CLSID_MMDeviceEnumerator, EDataFlow, ERole
+        from pycaw.pycaw import IMMDeviceEnumerator
+        try:
+            comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
+        except OSError:
+            pass
+        enumerator = CoCreateInstance(CLSID_MMDeviceEnumerator, IMMDeviceEnumerator,
+                                      comtypes.CLSCTX_INPROC_SERVER)
+        device = enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender.value,
+                                                    ERole.eMultimedia.value)
+        return int(device.GetState()) == 1          # DEVICE_STATE_ACTIVE
+    except Exception:
+        return None
+
+
 def _scan() -> tuple[bool, str]:
     """Is sound coming out of this machine that is not ours."""
     import comtypes

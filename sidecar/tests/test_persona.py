@@ -43,33 +43,43 @@ def main() -> int:
     check("the first wake of a session greets", P.wake_ack(float("inf"), 9) == "Good morning, sir.")
     check("five hours is not away", P.wake_ack(5 * 3600, 9) == "Yes?")
 
-    print("\n-- while you were away --")
+    print("\n-- while you were away: only what he has not seen --")
+    # 2026-09-15: "The news was news that I got yesterday from Telegram. The two
+    # briefs aren't needed because I read the briefs, and I don't need the
+    # reminders in there because he sent that through Telegram."
     check("nothing happened: no briefing", P.briefing([]) == "")
-    one = [{"ts": 1, "outcome": "telegram", "subject": "the market brief", "text": "..."}]
-    b = P.briefing(one)
-    check("one message: says so, names it", b.startswith("While you were away: One thing reached you")
-          and "the market brief" in b, b)
-    many = one + [{"ts": 2, "outcome": "spoken", "subject": "", "text": "Your dentist is at 4 tomorrow."},
-                  {"ts": 3, "outcome": "held", "subject": "cpu", "text": "..."},
-                  {"ts": 4, "outcome": "held for the next brief", "subject": "", "text": "Rain later today."}]
-    b = P.briefing(many)
-    check("counts, then subjects", "2 things reached you" in b and "2 things I held back" in b, b)
-    check("a task without a subject is named by its text",
-          "Your dentist is at 4 tomorrow" in b, b)
+    phone = [{"ts": 1, "outcome": "telegram", "subject": "news:cause of fatal needham fire can't be determined", "text": "..."},
+             {"ts": 2, "outcome": "telegram", "subject": "brief:2026-09-14 16:15", "text": "Markets: ..."},
+             {"ts": 3, "outcome": "telegram", "subject": "task:278", "text": "Sir, now would be a fitting time to take your supplements."}]
+    check("what reached his phone is not repeated to him", P.briefing(phone) == "", P.briefing(phone))
+    check("...and puts nothing on the screen", P.briefing_sections(phone) == [], P.briefing_sections(phone))
+    check("...so the greeting stands alone",
+          P.wake_line(8 * 3600, 9, None, phone) == "Good morning, sir.", P.wake_line(8 * 3600, 9, None, phone))
+    missed = phone + [{"ts": 4, "outcome": "spoken", "subject": "", "text": "Your dentist is at 4 tomorrow."},
+                      {"ts": 5, "outcome": "held", "subject": "news:gas leak on main street in natick", "text": "..."},
+                      {"ts": 6, "outcome": "held for the next brief", "subject": "", "text": "Rain later today."}]
+    b = P.briefing(missed)
+    check("what was said to an empty room is reported", "one thing I said while you were out" in b, b)
+    check("...and named by its text when it has no subject", "Your dentist is at 4 tomorrow" in b, b)
+    check("what was held back is reported", "2 things I held back" in b, b)
+    check("...by a subject in words, not a ledger key",
+          "Gas leak on main street in natick" in b and "news:" not in b, b)
     check("...and never the whole mail", len(b) < 220, len(b))
-    check("nothing-outcomes are not reported",
-          P.briefing([{"ts": 1, "outcome": "nothing", "why": "empty"}]) == "")
-    secs = P.briefing_sections(many)
-    check("the screen gets the same ledger as sections",
-          [s["title"] for s in secs] == ["Reached you", "Held back"], secs)
-    check("...a subject and its text on one line",
-          secs[0]["lines"][0] == "the market brief" and "Your dentist is at 4 tomorrow" in secs[0]["lines"][1],
-          secs[0]["lines"])
-    check("...and nothing when nothing happened", P.briefing_sections([]) == [])
+    check("nothing-outcomes from a test mute are not reported",
+          P.briefing([{"ts": 1, "outcome": "nothing", "why": "muted for a test", "text": "x"}]) == "")
+    secs = P.briefing_sections(missed)
+    check("the screen lists the same two groups and nothing that reached his phone",
+          [x["title"] for x in secs] == ["Said while you were out", "Held back"], secs)
+    check("...without the briefs or the reminders he already read",
+          not any("brief" in ln.lower() or "supplements" in ln.lower() for x in secs for ln in x["lines"]), secs)
+    check("a brief's key becomes a time when it is ever named",
+          P._subject({"subject": "brief:2026-09-14 16:15", "text": "Markets"}) == "the 4:15 PM brief")
+    check("a news key becomes its headline",
+          P._subject({"subject": "news:framingham road closed after crash", "text": "..."}) == "Framingham road closed after crash")
     check("the greeting carries it after time away",
-          P.wake_line(8 * 3600, 9, None, one).startswith("Good morning, sir. While you were away"),
-          P.wake_line(8 * 3600, 9, None, one))
-    check("...but not on an ordinary wake", P.wake_line(30, 9, None, one) == "Yes?")
+          P.wake_line(8 * 3600, 9, None, missed).startswith("Good morning, sir. While you were away"),
+          P.wake_line(8 * 3600, 9, None, missed))
+    check("...but not on an ordinary wake", P.wake_line(30, 9, None, missed) == "Yes?")
 
     print("\n-- a follow-up never repeats the last answer --")
     # Measured live 2026-09-05: "and Chile?" -> "Lima. Santiago."; "and when was

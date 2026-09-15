@@ -245,7 +245,9 @@ ADJUDICATED = re.compile(
     r"held without bail|allegedly|charged with|charges of|accused of|"
     r"pleaded|pleads|family identifies|identified as|identifies|"
     r"tributes?|remembered|mourn\w*|vigil|funeral|memorial|"
-    r"told police|police say|police said)\b", re.I)
+    r"told police|police say|police said|police report(?:s|ed)?|"
+    r"cause (?:of|can't be|cannot be|could not be|has not been) determined|"
+    r"investigators say|investigation (?:found|concluded|determined))\b", re.I)
 
 # ...unless the thing is still out there. An active manhunt is an emergency even
 # when the same sentence is full of courtroom words, so this outranks the guard
@@ -290,8 +292,16 @@ FATALITY = re.compile(
 # "Mass." is the state, not a massacre: "boy who died... at Mass. camp" read
 # as "many people have died" (2026-09-06). The word counts only as a scale
 # when it modifies casualties.
-MANY = re.compile(r"\b(?:thousands|hundreds|dozens|multiple|several|"
-                  r"mass (?:casualt\w+|shooting|killing|grave|death))\b", re.I)
+# ...and a count is a count OF PEOPLE. "'Multiple possible ignition sources'
+# caused fatal Mass. fire" reached him as "many people have died" (2026-09-14
+# 10:37): one man died, the sources were multiple. The number has to be
+# counting the dead, the hurt or the people.
+MANY = re.compile(
+    r"\b(?:thousands|hundreds|dozens|multiple|several)\s+(?:of\s+)?(?:more\s+)?"
+    r"(?:people|persons|residents|victims|students|children|workers|passengers|"
+    r"dead|deaths|killed|died|injured|hurt|shot|wounded|fatalities|casualties|bodies|missing)\b"
+    r"|\b(?:thousands|hundreds|dozens)\b(?=[^.]{0,30}\b(?:dead|killed|died|injured|missing|evacuated)\b)"
+    r"|\bmass (?:casualt\w+|shooting|killing|grave|death)\b", re.I)
 
 # ...and what makes a distant event enormous regardless of the count. Kept apart
 # from MAJOR_SCALE below ON PURPOSE: that list contains the fatality words, so
@@ -453,6 +463,8 @@ def national_emergency(text: str, headline: str = "") -> bool:
     # as URGENT two days late. If the thing itself is the news, the headline
     # says so; the body is judged only when there is no headline.
     attack_text = headline or text
+    if RECALL.search(text) and not MANY.search(text):
+        return False            # "sold nationwide" on a recall is reach, not an emergency
     return bool(SYSTEMIC.search(text) or ATTACK.search(attack_text)
                 or FIGURE_KILLED.search(attack_text)
                 or (CATASTROPHIC_TOLL.search(text) and _human_deaths(text))
@@ -834,7 +846,9 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
     # same sentence, and every rule below would happily fire on the first.
     if RESOLVED.search(text) and not ONGOING_DESPITE.search(text):
         return NOTABLE, "over - the all-clear, not the emergency"
-    if RECALL.search(text) and not _human_deaths(text):
+    if RECALL.search(text) and not MANY.search(text):
+        # "serious injury or death" is the label on every recall; "could
+        # die" is the label too. Only a recall AFTER many deaths is more.
         return NOTABLE, "a recall is a notice, not an emergency"
 
     # Everything below decides how loud a story is. This decides whether it is

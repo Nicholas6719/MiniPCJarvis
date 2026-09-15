@@ -342,6 +342,35 @@ class Speaker:
         except Exception:
             log.debug("could not schedule an output prewarm", exc_info=True)
 
+    async def reopen_when_ready(self, rate: int, timeout: float = 4.0) -> float:
+        """After a dark screen has been woken: drop any stream opened while
+        the endpoint was asleep, wait for the endpoint to report ACTIVE, then
+        open a fresh one. Returns the seconds waited.
+
+        A stream bound to a sleeping DisplayPort endpoint takes every write
+        and plays it nowhere - no stall, no error, no sound (2026-09-15).
+        Only a stream opened AFTER the endpoint is back is worth writing to.
+        When WASAPI cannot be asked, a fixed moment is given instead.
+        """
+        from audio.output_watch import endpoint_active
+        t0 = time.time()
+        if self._stream is not None:
+            self.close()
+        loop = asyncio.get_running_loop()
+        while True:
+            state = await loop.run_in_executor(_writer_executor(), endpoint_active)
+            if state is None:
+                await asyncio.sleep(1.5)                  # cannot ask: give it a moment
+                break
+            if state or time.time() - t0 >= timeout:
+                break
+            await asyncio.sleep(0.2)
+        waited = time.time() - t0
+        self.prewarm(rate)
+        log.info("audio: display was dark - reopened the speakers after %d ms (endpoint %s)",
+                 int(waited * 1000), {True: "active", False: "still asleep", None: "unknown"}[state])
+        return waited
+
     def stop_playback(self) -> None:
         """Stop what is playing and STAY READY. Never closes the stream.
 

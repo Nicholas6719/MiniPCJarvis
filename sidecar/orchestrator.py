@@ -1238,7 +1238,13 @@ class Orchestrator:
                     # panel is; opening that device is most of a second and it
                     # was being paid by the first syllable of the answer. The
                     # answer is seconds away - the device has that long.
-                    speaker.prewarm(tts.sample_rate)
+                    # ...UNLESS THE SCREEN IS DARK. Then the endpoint is asleep
+                    # too, and a stream opened now is bound to it: every write
+                    # succeeds and nothing is heard (2026-09-15 08:21). The
+                    # speakers are opened after the display is woken instead.
+                    dark = self.sm.state == State.SLEEPING and _display_off()
+                    if not dark:
+                        speaker.prewarm(tts.sample_rate)
                     # SNAPSHOT FIRST, SURFACE SECOND. The pre-roll used to be
                     # taken AFTER the window was brought forward — EnumWindows,
                     # an ALT tap, SetForegroundWindow, a display check — and the
@@ -1278,6 +1284,13 @@ class Orchestrator:
                         # the capture/turn path only runs from IDLE, so restoring the
                         # window alone left him awake-looking but deaf.
                         await self.wake_if_sleeping()
+                        if dark:
+                            # the monitor has been told to wake; give its
+                            # speakers the same courtesy before the chime
+                            try:
+                                await speaker.reopen_when_ready(tts.sample_rate)
+                            except Exception:
+                                log.debug("could not reopen the speakers after the wake", exc_info=True)
                     else:
                         # Awake but BURIED. Surfacing used to happen only on the
                         # sleeping path, so calling his name while he sat behind

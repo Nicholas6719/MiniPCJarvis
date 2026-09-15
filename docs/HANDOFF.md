@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-09-13.
+Updated: 2026-09-15.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -4773,6 +4773,56 @@ change.
 2. Telegram voice replies, episodic memory, calendar/mail (his "useful"
    list); the iPhone Shortcuts integration to build with him.
 3. The two OPEN audit items above.
+
+## 2026-09-15 — the morning after: a greeting he could not hear, and a brief he did not need (release 66)
+He woke JARVIS from a dark screen. The wake was accepted (0.88), the screen
+showed "While you were away", and he heard nothing. Two faults.
+
+### The greeting went into a sleeping endpoint
+The line WAS synthesised (rebuilt from his ledger and run through Pocket:
+16.6 s of audio) and every write succeeded - no stall, no reopen, no error.
+His speakers are the monitor's, over DisplayPort. The prewarm at the wake
+opened the output stream while the panel, and so the endpoint, was still
+asleep; a stream bound to a sleeping endpoint takes every write and plays it
+nowhere. The failure of 09-08 was a write that BLOCKED (detected, abandoned,
+reopened on a fresh stream, heard); this was a write that went through to
+nothing. Fix, in the wake path: if the display was dark, no prewarm before
+the display is woken; after `wake_if_sleeping`, `speaker.reopen_when_ready`
+closes the stale stream, asks WASAPI (`output_watch.endpoint_active`, the
+default render endpoint's DEVICE_STATE) until it reports active - up to
+4 s, 200 ms polls, a fixed 1.5 s if COM cannot be asked - and opens a fresh
+one before the chime. `tests/test_speaker_wake.py`.
+
+### "While you were away" repeated his phone to him
+*"The news was news that I got yesterday from Telegram. The two briefs
+aren't needed because I read the briefs, and I don't need the reminders in
+there because he sent that through Telegram."* The screen listed nine ledger
+KEYS ("news:cause of fatal needham...", "brief:2026-09-14 16:15") and the
+voice read two of them aloud. Now (`brain/persona.py`): anything that
+reached Telegram, and every brief, is left out - he reads his phone. What is
+listed and said is what was SPOKEN to a room he was not in, and what was
+HELD back; nothing missed means no stage and a bare greeting. `_subject`
+turns keys into words ("the 4:15 PM brief", the headline). The persona gate
+was rewritten to the new contract.
+
+### Three more news rules, from the first day of release 65
+As URGENT he was sent a fire investigation ("'multiple possible ignition
+sources' caused fatal Mass. fire" - `MANY` matched "multiple" with nothing
+counted), a Shein decor recall "sold nationwide... serious injury or death"
+(the recall rule stood down on a death word; the national door then took
+"nationwide"), and "Framingham police report third pedestrian fatal" (a
+police REPORT is aftermath; "police say" was listed, "report" was not).
+`MANY` now counts people; a recall is a notice unless many died, and never
+opens the national door; "police report", "cause can't be determined",
+"investigators say" are aftermath. All in `test_news_week.py` /
+`test_significance.py`.
+
+### Next
+- Verify release 66 live: a wake from a dark screen is HEARD (the log line
+  "audio: display was dark - reopened the speakers after N ms (endpoint
+  active)"), and the morning stage lists only what he has not seen.
+- His phone: the health / calendar / reminders integration via Shortcuts +
+  Telegram (his next ask).
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en

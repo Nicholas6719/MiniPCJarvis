@@ -113,6 +113,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_market_resilience.py || (echo MARKET RESILIENCE TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_wake_display.py || (echo WAKE DISPLAY TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_speaker_wake.py || (echo SPEAKER WAKE TEST FAILED & exit /b 1)
 
 .venv\Scripts\python.exe tests\test_deaf_watch.py || (echo DEAF WATCH TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_launchable.py || (echo LAUNCHABLE TEST FAILED & exit /b 1)

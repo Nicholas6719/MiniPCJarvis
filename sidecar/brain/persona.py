@@ -23,13 +23,46 @@ def greeting(hour: int) -> str:
 
 
 def _subject(e: dict) -> str:
+    """What an entry was ABOUT, in words he can hear. The ledger key is
+    for deduplication ("news:cause of fatal needham christmas eve fire...",
+    "brief:2026-09-14 16:15", "task:278") and was being read aloud as-is
+    (2026-09-15)."""
     s = str(e.get("subject") or "").strip()
-    if s.startswith("task:"):
+    kind, _, rest = s.partition(":")
+    if kind == "task" or not s:
         s = ""
+    elif kind == "brief":
+        hhmm = rest.strip()[-5:]
+        try:
+            h, m = int(hhmm[:2]), int(hhmm[3:])
+            s = f"the {h % 12 or 12}:{m:02d} {'PM' if h >= 12 else 'AM'} brief"
+        except ValueError:
+            s = "a brief"
+    elif rest and kind in ("news", "market", "weather", "watchlist", "nws", "alert"):
+        s = rest.strip()
+        s = s[0].upper() + s[1:] if s else s
     if not s:
         t = str(e.get("text") or "").strip().rstrip(".!?")
         s = t if len(t) <= 48 else t[:45].rsplit(" ", 1)[0] + "…"
+    elif len(s) > 60:
+        s = s[:57].rsplit(" ", 1)[0] + "…"
     return s
+
+
+def _missed(entries: list[dict]) -> list[dict]:
+    """What he has NOT seen. Telegram reached his phone and he reads his
+    phone; a brief is read there too. Spoken to a room he was not in, or
+    held back, is the whole point of telling him."""
+    out = []
+    for e in entries:
+        if str(e.get("subject") or "").startswith("brief:"):
+            continue
+        if e.get("outcome") == "telegram":
+            continue
+        if e.get("outcome") == "nothing" and "test" in str(e.get("why") or ""):
+            continue                                    # muted for a test
+        out.append(e)
+    return out
 
 
 def briefing(entries: list[dict]) -> str:
@@ -37,26 +70,25 @@ def briefing(entries: list[dict]) -> str:
     delivery ledger; "" when nothing did. Counts first, then the subjects,
     never the whole text of anything — the films' JARVIS reports, he does
     not read the mail aloud."""
-    if not entries:
-        return ""
-    sent = [e for e in entries if e.get("outcome") in ("telegram", "spoken")]
-    held = [e for e in entries if e.get("outcome") not in ("telegram", "spoken", "nothing")]
+    missed = _missed(entries or [])
+    if not missed:
+        return ""                 # everything reached his phone: nothing to add
+    spoken = [e for e in missed if e.get("outcome") == "spoken"]
+    held = [e for e in missed if e.get("outcome") != "spoken"]
     parts = []
-    if sent:
-        subs = [_subject(e) for e in sent if _subject(e)]
-        head = ("One thing reached you" if len(sent) == 1 else f"{len(sent)} things reached you")
+    if spoken:
+        subs = [_subject(e) for e in spoken if _subject(e)]
+        p = ("one thing I said while you were out" if len(spoken) == 1
+             else f"{len(spoken)} things I said while you were out")
         if subs:
-            head += " — " + (subs[0] if len(subs) == 1 else ", ".join(subs[:2])
-                             + (f" and {len(subs) - 2} more" if len(subs) > 2 else ""))
-        parts.append(head)
+            p += f" — {subs[0]}" + (f", and {len(subs) - 1} more" if len(subs) > 1 else "")
+        parts.append(p)
     if held:
         subs = [_subject(e) for e in held if _subject(e)]
-        h = ("one thing I held back" if len(held) == 1 else f"{len(held)} things I held back")
+        p = ("one thing I held back" if len(held) == 1 else f"{len(held)} things I held back")
         if subs:
-            h += f" ({subs[0]}{'…' if len(subs) > 1 else ''})"
-        parts.append(h)
-    if not parts:
-        return ""
+            p += f" — {subs[0]}" + (f", and {len(subs) - 1} more" if len(subs) > 1 else "")
+        parts.append(p)
     line = "While you were away: " + "; ".join(parts) + "."
     return line[0].upper() + line[1:]
 
@@ -103,12 +135,16 @@ def briefing_sections(entries: list[dict]) -> list[dict]:
             return f"{subj}: {text}"
         return text or subj
 
-    sent = [line(e) for e in entries if e.get("outcome") in ("telegram", "spoken")]
-    held = [line(e) for e in entries
-            if e.get("outcome") not in ("telegram", "spoken", "nothing")]
+    # What reached his phone is not listed: he reads his phone. What the
+    # screen is for is the rest (2026-09-15: "the news was news that I got
+    # yesterday from Telegram... the briefs aren't needed because I read the
+    # briefs"). Nothing missed means no stage at all.
+    missed = _missed(entries)
+    spoken = [line(e) for e in missed if e.get("outcome") == "spoken"]
+    held = [line(e) for e in missed if e.get("outcome") != "spoken"]
     out = []
-    if sent:
-        out.append({"title": "Reached you", "lines": [s for s in sent if s][-6:]})
+    if spoken:
+        out.append({"title": "Said while you were out", "lines": [s for s in spoken if s][-6:]})
     if held:
         out.append({"title": "Held back", "lines": [h for h in held if h][-6:]})
     return out
