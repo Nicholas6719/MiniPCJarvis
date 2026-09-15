@@ -247,7 +247,7 @@ async def main() -> int:
         for row in rows:
             check(f"{row.get('symbol')} is a real company, not a word",
                   bool(str(row.get("name") or "").strip())
-                  and str(row.get("name")).upper() != str(row.get("symbol")).upper(),
+                  and str(row.get("name")).strip() != str(row.get("symbol")).strip(),   # "Aon" is a name; "AON" is an echo
                   row)
             check(f"{row.get('symbol')} carries a verdict",
                   bool(str(row.get("verdict") or "").strip()), row)
