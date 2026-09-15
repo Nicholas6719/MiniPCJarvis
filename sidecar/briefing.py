@@ -683,6 +683,12 @@ class Briefing:
                     when = hhmm
                 text = str(r.get("text") or "").strip()
                 out.append((f"{text} at {when}", f"{when} - {text}"))
+            # ...and the day's calendar, as the phone last sent it.
+            try:
+                from tools import phone as _phone
+                out.extend(_phone.today_lines())
+            except Exception:
+                log.debug("brief: phone calendar failed", exc_info=True)
             return out[:5]
         except Exception:
             log.debug("brief: reminders failed", exc_info=True)

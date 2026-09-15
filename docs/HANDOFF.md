@@ -4817,6 +4817,36 @@ opens the national door; "police report", "cause can't be determined",
 "investigators say" are aftermath. All in `test_news_week.py` /
 `test_significance.py`.
 
+### The phone, sidecar side (release 67) — the Shortcuts are his, with me on the line
+His ask (09-08): health every ~5 min, calendar and reminders every 15-25 min,
+through Telegram, and a way to force a sync. Built on the road that exists:
+`tools/health.py` already takes a JSON document on the paired chat.
+- **`tools/phone.py`**: `{"type":"calendar","events":[...]}` and
+  `{"type":"reminders","items":[...]}` - same discipline as health (size cap,
+  type-checked, allow-listed keys, never raises), stored whole in `volatile`
+  (`phone:calendar`, `phone:reminders`), stale after 60 min. ISO-8601 or the
+  Shortcuts default "9/16/2026, 1:30 PM"; Z/offset into his clock. Tools
+  `get_agenda(today|tomorrow|week|next)` and `get_phone_reminders(list_name)`,
+  every answer carrying its age.
+- **No receipts for automated payloads.** The poller replied "Logged N
+  readings, sir." to every one - ~290 messages a day at his cadence. A
+  payload that names its `type` was sent by a Shortcut and gets silence on
+  success; an unreadable one still gets one line. `_phone_payload` sniffs
+  all three kinds; `/setup phone` (or `/setup`, `/phone`) on Telegram replies
+  with his chat id and the three templates.
+- **Reflexes**: `health` ("how's my heart rate", "how did I sleep"),
+  `agenda` ("what do I have tomorrow", "when's my next meeting"),
+  `phone_reminders` ("what's on my to-do list", "what's on my grocery list")
+  - worded without "reminders", which stays JARVIS's own `reminders` skill.
+  All three in `QUERY_SKILLS`. seed_collisions and test_brain (303/303) clean.
+- **The brief**: `_today_lines` carries today's calendar beside JARVIS's
+  reminders.
+- `tests/test_phone.py` (hermetic; routing block loads the brain).
+- **iOS truth, stated**: Shortcuts automations cannot fire every 5 minutes.
+  Practical: hourly Time-of-Day automations plus a "Sync JARVIS" shortcut
+  on the Home Screen / Siri / Back Tap - that is the "force it". Recipe in
+  the session's `phone_shortcuts.md`, to build with him.
+
 ### Next
 - Verify release 66 live: a wake from a dark screen is HEARD (the log line
   "audio: display was dark - reopened the speakers after N ms (endpoint

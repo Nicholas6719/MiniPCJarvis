@@ -57,7 +57,7 @@ def walk(schema, path, out):
 def main() -> int:
     # the same set main.py registers - test_evolution_wiring keeps that honest
     from tools import (biometric, browser_tools, builtin, camera_tools, documents,
-                       fabrication, office, image_tools,
+                       fabrication, office, image_tools, phone,
                        file_tools, handoff, health, holo_tools, input_tools, location,
                        market_tools, memory_tools, news_tools, projects, render_tools,
                        model_tools, task_tools, uia, vision_analyze, vision_tools,
@@ -67,7 +67,7 @@ def main() -> int:
               vision_tools, browser_tools, handoff, file_tools, weather,
               camera_tools, market_tools, news_tools, input_tools, uia,
               projects, location, health, vision_analyze, biometric, fabrication,
-              holo_tools, render_tools, model_tools, documents, office, image_tools,
+              holo_tools, render_tools, model_tools, documents, office, image_tools, phone,
               workspace_tools, market_intel):
         m.register_all()
     from tools.registry import registry

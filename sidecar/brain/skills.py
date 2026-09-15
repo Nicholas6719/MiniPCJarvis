@@ -2024,6 +2024,114 @@ def _reminder_said(r: dict) -> str:
     return f"{text} at {clock}"
 
 
+_METRIC_WORDS = [
+    (re.compile(r"\bresting\b"), "resting_heart_rate"),
+    (re.compile(r"\bhrv\b|variability"), "hrv"),
+    (re.compile(r"heart\s*rate|\bpulse\b|\bbpm\b"), "heart_rate"),
+    (re.compile(r"\bsteps?\b|step count"), "steps"),
+    (re.compile(r"\bsleep|slept"), "sleep_hours"),
+    (re.compile(r"oxygen|\bspo2\b"), "blood_oxygen"),
+    (re.compile(r"\bweigh"), "body_weight"),
+    (re.compile(r"calories|energy|burned"), "active_energy"),
+    (re.compile(r"exercise|workout|active\b"), "exercise_minutes"),
+    (re.compile(r"breath|respirat"), "respiratory_rate"),
+]
+
+
+def slots_health(t: str) -> dict | None:
+    low = (t or "").lower()
+    for rx, name in _METRIC_WORDS:
+        if rx.search(low):
+            return {"metric": name}
+    return {}
+
+
+def _reading_said(m: dict) -> str:
+    v = m.get("value")
+    num = f"{v:g}" if isinstance(v, (int, float)) else str(v)
+    unit = str(m.get("unit") or "").strip()
+    name = str(m.get("spoken") or m.get("metric") or "")
+    if name == "sleep":
+        return f"you slept {num} hours"
+    if name == "steps":
+        return f"{num} steps"
+    return f"your {name} is {num}{(' ' + unit) if unit and unit != '%' else ('%' if unit == '%' else '')}"
+
+
+def say_health(s: dict, res: dict) -> str:
+    if res.get("error"):
+        return str(res["error"])
+    ms = res.get("metrics") or []
+    if not ms:
+        return "I don't have anything from your watch yet, sir."
+    if s.get("metric"):
+        m = ms[0]
+        line = _reading_said(m)
+        line = line[0].upper() + line[1:]
+        tail = f", as of {m.get('as_of')}" if m.get("as_of") else ""
+        if m.get("stale"):
+            tail += " - that reading is old"
+        return f"{line}{tail}."
+    parts = [_reading_said(m) for m in ms[:3]]
+    fresh = ms[0].get("as_of")
+    return ("; ".join(parts).capitalize() + (f", as of {fresh}" if fresh else "") + ".")
+
+
+def slots_agenda(t: str) -> dict | None:
+    low = (t or "").lower()
+    if "tomorrow" in low:
+        return {"day": "tomorrow"}
+    if re.search(r"\bnext (?:meeting|appointment|event|thing)\b", low):
+        return {"day": "next"}
+    if re.search(r"this week|coming up|the week\b", low):
+        return {"day": "week"}
+    return {"day": "today"}
+
+
+def say_agenda(s: dict, res: dict) -> str:
+    if res.get("error"):
+        return str(res["error"])
+    evs = res.get("events") or []
+    day = str(res.get("day") or "today")
+    old = " - and that copy is old" if res.get("stale") else ""
+    if day == "next":
+        if not evs:
+            return f"Nothing coming up on your calendar, sir{old}."
+        e = evs[0]
+        where = f" at {e['location']}" if e.get("location") else ""
+        return f"Your next appointment is {e['title']}, {e['when']}{where}{old}."
+    if not evs:
+        return f"Nothing on your calendar {day}, sir{old}."
+    def one(e):
+        return f"{e['title']} {e['when']}" if e.get("all_day") else f"{e['title']} at {e['when']}"
+    if len(evs) == 1:
+        return f"One thing {day}: {one(evs[0])}{old}."
+    head = ", ".join(one(e) for e in evs[:3]) + (f", and {len(evs) - 3} more" if len(evs) > 3 else "")
+    return f"{len(evs)} things {day}: {head}{old}."
+
+
+def slots_phone_reminders(t: str) -> dict | None:
+    m = re.search(r"\bmy (\w+) list\b", (t or "").lower())
+    if m and m.group(1) not in ("to", "todo", "reminders", "reminder", "whole", "entire"):
+        return {"list_name": m.group(1)}
+    return {}
+
+
+def say_phone_reminders(s: dict, res: dict) -> str:
+    if res.get("error"):
+        return str(res["error"])
+    items = res.get("reminders") or []
+    which = f" on your {res['list']} list" if res.get("list") else " on your list"
+    if not items:
+        return f"Nothing{which}, sir."
+    def one(r):
+        return f"{r['title']}" + (f" ({r['when']})" if r.get("when") else "")
+    if len(items) == 1:
+        return f"One thing{which}: {one(items[0])}."
+    head = "; ".join(one(r) for r in items[:4]) + (f"; and {len(items) - 4} more" if len(items) > 4 else "")
+    return f"{len(items)} things{which}: {head}."
+
+
 def say_reminders(_s: dict, res: dict) -> str:
     rem = res.get("reminders") or []
     if not rem:
@@ -2986,6 +3094,33 @@ SKILLS: list[Skill] = [
         "do i have any reminders", "show me my reminders", "what's on my reminder list",
         "what reminders are set"],
         slots=slots_reminders, speak=say_reminders),
+    # HIS PHONE. The watch, the calendar and the Reminders app, answered
+    # from what the phone last sent (tools/health.py, tools/phone.py) -
+    # reflexes, so "how's my heart rate" is a third of a second and not a
+    # trip through the model. The to-do list is worded without "reminders":
+    # that word is JARVIS's own reminders, the skill above.
+    Skill("health", "get_health", [
+        "how's my heart rate", "what's my heart rate", "what's my heart rate right now",
+        "how many steps have i taken today", "how many steps today", "what's my step count",
+        "how did i sleep", "how much sleep did i get", "how did i sleep last night",
+        "what's my resting heart rate", "how's my hrv", "what's my blood oxygen",
+        "how's my health today", "what does my watch say", "any readings from my watch",
+        "how active have i been today", "what's my weight", "how many calories have i burned"],
+        slots=slots_health, speak=say_health),
+    Skill("agenda", "get_agenda", [
+        "what's on my calendar today", "what's on my calendar", "what do i have today",
+        "what do i have on today", "what do i have tomorrow", "what's on my calendar tomorrow",
+        "what's on the calendar this week", "when's my next meeting", "what's my next appointment",
+        "do i have anything today", "do i have any meetings today", "what's my schedule today",
+        "what's my schedule tomorrow", "what's coming up this week", "when's my next appointment",
+        "what's on the agenda today", "do i have anything tomorrow"],
+        slots=slots_agenda, speak=say_agenda),
+    Skill("phone_reminders", "get_phone_reminders", [
+        "what's on my to do list", "what do i need to do today", "what are my to dos",
+        "anything on my to do list", "what's on my grocery list", "what's left on my list",
+        "read me my to do list", "what's on my shopping list", "what's on my errands list",
+        "what do i still need to do", "what's on my list"],
+        slots=slots_phone_reminders, speak=say_phone_reminders),
     Skill("thanks", None, [
         "thank you", "thanks", "thank you jarvis", "thanks jarvis", "cheers",
         "much appreciated", "appreciate it", "thanks a lot", "thank you very much",
@@ -3378,6 +3513,7 @@ QUERY_SKILLS = frozenset({
     "quote", "analyst", "markets", "market_take", "watchlist", "earnings", "stock_context",
     "news", "breaking", "general", "recall", "protocols", "briefing", "tasks", "reminders",
     "battery", "volume_get", "where_am_i", "screen", "read_screen", "camera", "face",
+    "health", "agenda", "phone_reminders",
 })
 
 

@@ -62,6 +62,32 @@ def load_token() -> str | None:
 
 
 
+def _phone_payload(text: str) -> str | None:
+    """'health', 'calendar' or 'reminders' if this is telemetry from his phone;
+    None if it is something he said. Never raises: a bad detector here must
+    not be able to swallow a real message or crash the poller."""
+    try:
+        from tools.health import looks_like_payload as _is_health
+        if _is_health(text):
+            return "health"
+        from tools.phone import kind_of
+        return kind_of(text)
+    except Exception:
+        log.debug("phone payload sniff failed", exc_info=True)
+        return None
+
+
+def _automated(text: str) -> bool:
+    """A payload that names its type was sent by a Shortcut, not typed. It gets
+    no receipt: at a five-minute cadence 'Logged 3 readings, sir.' is three
+    hundred messages a day on his phone (2026-09-15)."""
+    try:
+        import json as _json
+        return bool(str(_json.loads(text).get("type", "")).strip())
+    except Exception:
+        return False
+
+
 def _health_payload(text: str) -> bool:
     """Is this telemetry rather than something he said? Never raises: a bad
     detector here must not be able to swallow a real message or crash the
@@ -365,16 +391,28 @@ class TelegramBridge:
             # as a new message: fixing a typo in "delete the screenshot on my
             # desktop" ran the delete a second time, with a second DO IT.
             return
-        if text and _health_payload(text):
-            from tools import health as _health
-            res = _health.ingest_payload(text)
+        kind = _phone_payload(text) if text else None
+        if kind:
+            if kind == "health":
+                from tools import health as _health
+                res = _health.ingest_payload(text)
+                what = "health data"
+            else:
+                from tools import phone as _phone
+                res = _phone.ingest_payload(text)
+                what = "calendar" if kind == "calendar" else "reminders"
+            log.info("phone: %s payload - %s", kind,
+                     res.get("error") or f"{res.get('stored', 0)} stored")
             if res.get("error"):
-                await self._send(f"I couldn't read that health data, sir — {res['error']}.")
+                await self._send(f"I couldn't read that {what}, sir — {res['error']}.")
+            elif _automated(text):
+                pass                              # a Shortcut sent it: no receipt
             elif res.get("stored"):
-                await self._send(f"Logged {res['stored']} reading"
+                unit = "reading" if kind == "health" else ("event" if kind == "calendar" else "item")
+                await self._send(f"Logged {res['stored']} {unit}"
                                  f"{'s' if res['stored'] != 1 else ''}, sir.")
             else:
-                await self._send("Nothing in that payload was a metric I track, sir.")
+                await self._send(f"Nothing in that payload was {what} I could use, sir.")
             return
 
         if not text:
@@ -398,6 +436,12 @@ class TelegramBridge:
             if msg.get("document"):
                 await self._send("I can't read documents yet, sir — send it as a photo "
                                  "if you want me to look at it.")
+            return
+        if text.strip().lower() in ("/setup phone", "/setup", "/phone"):
+            # Everything the Shortcuts need, so he never has to go looking
+            # for his chat id or guess at the payload shapes.
+            from tools.phone import setup_text
+            await self._send(setup_text(chat_id))
             return
         if text == "/start":
             await self._send("At your service. Ask me anything you would at the PC.")

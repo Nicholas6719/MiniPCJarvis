@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
     # The Evolution (2026-09-01). Registered as stubs in Phase 0 on purpose: the
     # wiring is proved by the gated build BEFORE any of them has behaviour, so an
     # integration mistake surfaces on its own rather than buried under a feature.
-    from tools import (biometric, fabrication, health, holo_tools, location,
+    from tools import (biometric, fabrication, health, holo_tools, location, phone,
                        model_tools, projects, render_tools, vision_analyze,
                        workspace_tools)
     holo_tools.register_all()     # the holographic stage
@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI):
     projects.register_all()       # phase 1
     location.register_all()       # phase 2 — rides the existing Telegram poller
     health.register_all()         # phase 2 — same poller, same allowed-chat check
+    phone.register_all()          # his calendar and Reminders, the same road (2026-09-15)
     vision_analyze.register_all() # phase 3 — reuses the existing Gemma vision model
     biometric.register_all()      # phase 4 — ADDITIVE to the spoken confirmation
     fabrication.register_all()    # phase 5 — no printer; NoPrinterBackend only
