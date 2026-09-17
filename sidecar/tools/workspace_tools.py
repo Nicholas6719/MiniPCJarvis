@@ -270,7 +270,7 @@ async def project_status(name: str = "") -> dict:
 
     said = (name or "").strip() or active()
     if not said:
-        return {"error": "which project, sir? Nothing is open."}
+        return {"error": "No project is open at the moment, sir."}
     got, near = workspace.resolve(said)
     if not got:
         if near:

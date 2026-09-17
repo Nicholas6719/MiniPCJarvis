@@ -219,6 +219,26 @@ async def get_news(topic: str = "top", count: int = 5, query: str = "") -> dict:
             "items": unique[:max(1, min(10, count))]}
 
 
+async def local_emergencies() -> dict:
+    """What would actually interrupt him, right now: the same sweep and the same
+    rules as the watch (briefing + significance). "Any emergencies near me" used
+    to read out the national political wire as 'breaking' (2026-09-17)."""
+    try:
+        from briefing import briefing
+        from significance import ALERT, URGENT, classify_news
+        out = []
+        for story in await briefing._fresh_stories():
+            tier, why = classify_news(story)
+            age = story.get("age_minutes")
+            if tier in (ALERT, URGENT) and (age is None or age <= 360):
+                out.append({"text": str(story.get("headline") or "").strip().rstrip(".") + ".",
+                            "tier": tier, "why": why, "source": story.get("source") or ""})
+        return {"emergencies": out[:5], "count": len(out)}
+    except Exception as e:
+        log.warning("could not check for emergencies: %s", e)
+        return {"error": "I couldn't check the wires just now, sir."}
+
+
 async def get_breaking_news(count: int = 4) -> dict:
     """Only what broke in the last few hours, across the wires."""
     res = await get_news("top", count=10)
@@ -232,6 +252,13 @@ async def get_breaking_news(count: int = 4) -> dict:
 
 
 def register_all() -> None:
+    registry.register(Tool(
+        name="local_emergencies",
+        description="Emergencies near the user RIGHT NOW, judged by his own rules (local "
+                    "emergencies, and national ones only if huge). Use for 'any emergencies "
+                    "near me', 'is anything happening nearby'. Returns an empty list when quiet.",
+        parameters={"type": "object", "properties": {}, "required": []},
+        risk=Risk.SAFE, handler=local_emergencies, timeout=40))
     if not config.get("news", "enabled", default=True):
         return
     registry.register(Tool(

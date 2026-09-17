@@ -152,7 +152,7 @@ async def get_health(metric: str = "") -> dict:
                     "stale": got["age_minutes"] > window})
     if not out:
         return {"error": "I don't have anything from your watch yet, sir."
-                if not want else f"I don't have a recent {metric} reading, sir."}
+                if not want else f"I don't have a recent {METRICS[want][0]} reading, sir."}
     out.sort(key=lambda m: m["age_minutes"])
     return {"metrics": out, "count": len(out)}
 

@@ -157,6 +157,30 @@ def _content_words(s: str) -> set:
     return {w for w in re.findall(r"[a-z]{3,}", (s or "").lower()) if w not in _STOPWORDS}
 
 
+# "SAVE THAT AS A WORD DOCUMENT CALLED X." It ran find_files("x") and said it
+# could not find anything called x (2026-09-17 19:02). "That" is what he just
+# said, and saving it is one tool call.
+SAVE_THAT_RE = re.compile(
+    r"^\s*(?:please\s+|can you\s+|could you\s+|jarvis,?\s+)?(?:save|put|write|export|turn|make)\s+"
+    r"(?:that|this|it|the outline|the essay|the answer|your answer|what you (?:just )?said)\s+"
+    r"(?:down\s+)?(?:as|into|in|to)\s+(?:a\s+|an\s+|my\s+)?(?:new\s+)?(?:word\s+)?"
+    r"(?P<kind>document|doc|docx|file|note|text file|txt)"
+    r"(?:\s+(?:called|named|titled)\s+(?P<name>.+?))?\s*[.!?]*$", re.I)
+
+# A follow-up that points backwards with a pronoun. "How far apart are they"
+# after Lima and Santiago ran distance_to(place="car") - the car out of his
+# memories - and asked where HE was (2026-09-17 19:03).
+PRONOUN_FOLLOW = re.compile(r"\b(?:they|them|those|these|both|the two|it|that one|there|he|she)\b", re.I)
+
+# An order for a THING: a model, a document, an image, a reminder. The model
+# once answered "Arc reactor model generated. Ready for hologram." having
+# called nothing (2026-09-17 17:56); speech is streamed, so the claim is out
+# before it can be checked. An order for an artefact must start with a tool.
+ARTEFACT_ORDER = re.compile(
+    r"^\s*(?:please\s+|can you\s+|could you\s+|jarvis,?\s+)?(?:make|create|generate|build|render|design|"
+    r"write|draft|save|export|set|schedule|add)\b[^?]*\b(?:3d model|3d rendering|rendering|render|model|hologram|stl|part|document|docx?|"
+    r"spreadsheet|workbook|note|file|image|picture|logo|poster|reminder|timer|alarm)\b", re.I)
+
 # "SAY THAT AGAIN." It went to the model, which answered with something new.
 REPEAT_RE = re.compile(
     r"^\s*(?:sorry,?\s+|wait,?\s+|jarvis,?\s+)?(?:say that again|repeat that|come again|what did you (?:just )?say|"
@@ -1884,6 +1908,21 @@ class Orchestrator:
         if amb is not None and await self._ask_clarification(amb, t_start):
             return
         # ---- reflex: JARVIS's own brain handles known requests without the LLM ----
+        sv = SAVE_THAT_RE.match(text or "")
+        if sv:
+            prev = next((str(m.get("content") or "") for m in reversed(self._history)
+                         if m.get("role") == "assistant" and len(str(m.get("content") or "")) > 40), "")
+            if prev:
+                kind = (sv.group("kind") or "document").lower()
+                name = (sv.group("name") or "").strip(" .") or ("JARVIS " + time.strftime("%Y-%m-%d %H%M"))
+                tool = "write_note" if kind in ("note", "text file", "txt") else "write_document"
+                res = await registry.execute(tool, {"name": name, "content": prev})
+                r = res.get("result") if isinstance(res.get("result"), dict) else {}
+                last_seen.note_tool(tool, r)
+                line = (str(r.get("spoken") or "") or
+                        (f"{str(r.get('error')).rstrip('.')}, sir." if r.get("error") else f"Saved as {name}, sir."))
+                await self._say_and_finish(line, text, t_start, "save_that")
+                return
         if REPEAT_RE.match(text or ""):
             prev = next((str(m.get("content") or "") for m in reversed(self._history)
                          if m.get("role") == "assistant" and str(m.get("content") or "").strip()), "")
@@ -1960,6 +1999,14 @@ class Orchestrator:
         general_hint = ""
         # ...and "keep going" is not a question at all: it is the previous
         # answer, continued. Nothing carried that before.
+        if (not reflex and not general_hint and len((text or "").split()) <= 9
+                and PRONOUN_FOLLOW.search(text or "")):
+            turns = [m for m in self._history if m.get("role") in ("user", "assistant")][-4:]
+            if len(turns) >= 2:
+                ctx = " | ".join(f"{'He' if m['role'] == 'user' else 'You'}: {str(m.get('content') or '')[:90]}" for m in turns)
+                general_hint = ("[Note: this continues the conversation so far (" + ctx + "). Words like "
+                                "'they', 'it' or 'there' mean what was just discussed - resolve them from "
+                                "that, not from his memories or his location, and do not ask him what he means.]")
         if not reflex and CONTINUE_RE.match(text or ""):
             prev = next((str(m.get("content") or "") for m in reversed(self._history)
                          if m.get("role") == "assistant"), "")
@@ -2810,7 +2857,9 @@ class Orchestrator:
         already = {tc["function"]["name"] for m in messages
                    for tc in (m.get("tool_calls") or [])}
         tools = await shortlist.pick(registry, raw_user or user_text, keep=already)
-        must_use_tool = bool(SEARCH_INTENT.search(raw_user or ""))
+        must_use_tool = bool(SEARCH_INTENT.search(raw_user or "")
+                             or (ARTEFACT_ORDER.search(raw_user or "")
+                                 and not CREATIVE_INTENT.search(raw_user or "")))
         if getattr(self, "_no_tools_first", False):
             must_use_tool = False   # the brain already ran the tool; the model only composes
         used_tools: list[tuple[str, bool]] = []   # (name, ok) - for self-training

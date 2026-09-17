@@ -101,7 +101,7 @@ def main() -> int:
         "make me a logo for my robotics club": "image_make",
         "set an alarm for 7 am": "reminder", "set a timer for ten minutes": "reminder",
         "wake me up at six thirty tomorrow": "reminder", "cancel my stretch reminder": "unremind",
-        "how long until my next class": "agenda", "any emergencies near me": "breaking",
+        "how long until my next class": "agenda", "any emergencies near me": "emergencies",
         "text me the summary": "to_phone", "help": "capabilities", "show me the bracket": "holo_show",
         "start a new project called robotics arm": "project_start",
         "search youtube for calculus derivatives": "video", "summarize the news for me": "news",

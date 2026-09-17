@@ -644,6 +644,12 @@ def slots_switch(t: str) -> dict | None:
     if not m:
         return None
     name = m.group(1).strip()
+    # "What do you think I should focus on tonight" ran focus_window("tonight")
+    # and answered "I don't see a tonight window open" (2026-09-17 19:05).
+    if re.search(r"\b(?:should|think|need to|want to|have to|trying to|going to|can't|cannot|help me)\b", t or "", re.I) \
+            or re.fullmatch(r"(?:the\s+)?(?:tonight|today|tomorrow|this week|now|first|next|school|studying|"
+                            r"(?:my\s+)?(?:work|studies|homework|exam|exams|essay|classes|assignment|project|reading))", name, re.I):
+        return None
     # "go back to full screen" is about JARVIS's own window, not an app
     # called "full screen" (it looked for one, 2026-09-17).
     if re.fullmatch(r"(?:the\s+)?full[ -]?(?:screen|size|window)(?:\s+(?:again|mode))?", name, re.I):
@@ -1193,6 +1199,94 @@ def slots_remember(t: str) -> dict | None:
 
 
 # ---------- speak templates ----------
+
+_CITY_TZ = {
+    "tokyo": "Asia/Tokyo", "japan": "Asia/Tokyo", "london": "Europe/London", "england": "Europe/London",
+    "uk": "Europe/London", "paris": "Europe/Paris", "france": "Europe/Paris", "berlin": "Europe/Berlin",
+    "germany": "Europe/Berlin", "rome": "Europe/Rome", "italy": "Europe/Rome", "madrid": "Europe/Madrid",
+    "spain": "Europe/Madrid", "amsterdam": "Europe/Amsterdam", "dublin": "Europe/Dublin", "ireland": "Europe/Dublin",
+    "moscow": "Europe/Moscow", "dubai": "Asia/Dubai", "india": "Asia/Kolkata", "mumbai": "Asia/Kolkata",
+    "delhi": "Asia/Kolkata", "beijing": "Asia/Shanghai", "shanghai": "Asia/Shanghai", "china": "Asia/Shanghai",
+    "hong kong": "Asia/Hong_Kong", "singapore": "Asia/Singapore", "seoul": "Asia/Seoul", "korea": "Asia/Seoul",
+    "sydney": "Australia/Sydney", "melbourne": "Australia/Melbourne", "australia": "Australia/Sydney",
+    "auckland": "Pacific/Auckland", "new zealand": "Pacific/Auckland", "hawaii": "Pacific/Honolulu",
+    "honolulu": "Pacific/Honolulu", "alaska": "America/Anchorage", "los angeles": "America/Los_Angeles",
+    "la": "America/Los_Angeles", "california": "America/Los_Angeles", "san francisco": "America/Los_Angeles",
+    "seattle": "America/Los_Angeles", "las vegas": "America/Los_Angeles", "denver": "America/Denver",
+    "colorado": "America/Denver", "phoenix": "America/Phoenix", "arizona": "America/Phoenix",
+    "chicago": "America/Chicago", "texas": "America/Chicago", "dallas": "America/Chicago", "houston": "America/Chicago",
+    "new york": "America/New_York", "boston": "America/New_York", "miami": "America/New_York",
+    "florida": "America/New_York", "washington": "America/New_York", "toronto": "America/Toronto",
+    "vancouver": "America/Vancouver", "mexico city": "America/Mexico_City", "mexico": "America/Mexico_City",
+    "sao paulo": "America/Sao_Paulo", "brazil": "America/Sao_Paulo", "buenos aires": "America/Argentina/Buenos_Aires",
+    "lima": "America/Lima", "santiago": "America/Santiago", "cairo": "Africa/Cairo", "egypt": "Africa/Cairo",
+    "johannesburg": "Africa/Johannesburg", "south africa": "Africa/Johannesburg", "lagos": "Africa/Lagos",
+    "istanbul": "Europe/Istanbul", "turkey": "Europe/Istanbul", "tel aviv": "Asia/Jerusalem", "israel": "Asia/Jerusalem",
+    "bangkok": "Asia/Bangkok", "thailand": "Asia/Bangkok", "manila": "Asia/Manila", "philippines": "Asia/Manila",
+    "jakarta": "Asia/Jakarta", "lisbon": "Europe/Lisbon", "portugal": "Europe/Lisbon", "stockholm": "Europe/Stockholm",
+    "sweden": "Europe/Stockholm", "zurich": "Europe/Zurich", "switzerland": "Europe/Zurich", "athens": "Europe/Athens",
+    "greece": "Europe/Athens", "utc": "UTC", "gmt": "UTC",
+}
+_TIME_IN = re.compile(r"\b(?:time|clock)\b.*?\b(?:in|at|for)\s+(?:the\s+)?([a-z][a-z .]{1,24}?)(?:\s+(?:right now|now|today|currently))?\s*[?.!]*$", re.I)
+
+
+def slots_time_in(t: str) -> dict | None:
+    m = _TIME_IN.search(t or "")
+    if not m:
+        return None
+    place = re.sub(r"\s+", " ", m.group(1).strip(" .").lower())
+    return {"place": place, "tz": _CITY_TZ[place]} if place in _CITY_TZ else None
+
+
+def say_time_in(slots: dict, _res: dict) -> str:
+    from zoneinfo import ZoneInfo
+    there = dt.datetime.now(ZoneInfo(slots["tz"]))
+    here = dt.datetime.now().astimezone()
+    h = there.hour % 12 or 12
+    clock = f"{h}:{there.minute:02d} {'AM' if there.hour < 12 else 'PM'}"
+    day = ""
+    if there.date() > here.date():
+        day = " tomorrow"
+    elif there.date() < here.date():
+        day = " yesterday"
+    return f"It's {clock}{day} in {slots['place'].title()}."
+
+
+def say_emergencies(_s: dict, res: dict) -> str:
+    if res.get("error"):
+        return str(res["error"])
+    items = res.get("emergencies") or []
+    if not items:
+        return "Nothing near you right now, sir."
+    if len(items) == 1:
+        return f"One thing, sir: {items[0]['text']}"
+    return f"{len(items)} things, sir. " + " ".join(i["text"] for i in items[:3])
+
+
+_NOTE = re.compile(
+    r"^\s*(?:please\s+)?(?:take|make|jot|write)\s+(?:a\s+|this\s+|that\s+)?(?:quick\s+)?(?:note|down)"
+    r"(?:\s+to self)?(?:\s+(?:called|named|titled)\s+(?P<name>[^:,]{2,60}?)(?=\s*[:,-]))?\s*(?:[:,-]|\bthat\b|\bsaying\b)?\s*(?P<body>.*)$"
+    r"|^\s*note to self\s*[:,-]?\s*(?P<body2>.*)$", re.I)
+
+
+def slots_note_take(t: str) -> dict | None:
+    """A note is a FILE. "Take a note called X: ..." was answered "Note saved"
+    after remember_fact ran and nothing was written (2026-09-17)."""
+    m = _NOTE.match(t or "")
+    if not m:
+        return None
+    body = (m.group("body") or m.group("body2") or "").strip(" .")
+    if len(body) < 3:
+        return None                  # "take a note" alone: let him be asked what it says
+    name = (m.group("name") or "").strip() or ("Note " + dt.date.today().isoformat())
+    return {"name": name, "content": body[0].upper() + body[1:]}
+
+
+def say_note_take(slots: dict, res: dict) -> str:
+    if res.get("error"):
+        return str(res["error"])
+    return str(res.get("spoken") or f"Noted in {slots.get('name')}, sir.")
+
 
 def say_time(_: dict, __: dict) -> str:
     return "It's " + dt.datetime.now().strftime("%I:%M %p").lstrip("0") + "."
@@ -1903,6 +1997,10 @@ def say_reminder(slots: dict, res: dict) -> str:
     # Say what was STORED, never what was asked for. He was once told "9:00 PM
     # daily" for a reminder actually sitting at 3:46 PM, which is worse than
     # setting it wrong: he had no reason to check.
+    if slots.get("text") == "your timer is up" and slots.get("minutes_from_now"):
+        n = int(slots["minutes_from_now"])
+        return (f"Timer set for {n} minute{'s' if n != 1 else ''}." if n < 120 or n % 60
+                else f"Timer set for {n // 60} hours.")
     if res.get("spoken"):
         return str(res["spoken"])
     due = str(res.get("due", ""))          # "Saturday 18:00" from set_reminder
@@ -2066,7 +2164,11 @@ def say_unremind(slots: dict, res: dict) -> str:
         q = slots.get("query")
         return f"I don't have a reminder about {q}." if q else "You have no reminders set."
     if n == 1:
-        return f"Done. I won't remind you about {res['texts'][0]} again."
+        gone = str(res['texts'][0])
+        if "timer" in gone.lower():
+            return "Timer cancelled, sir."
+        return f"Done. I won't remind you to {gone} again." if not gone.lower().startswith(("your ", "the ")) \
+            else "Done - that reminder is cancelled."
     return f"Done. I've cancelled {n} reminders."
 
 
@@ -2466,6 +2568,24 @@ SKILLS: list[Skill] = [
         "convert 2 liters to gallons", "how many cups in a quart",
         "what's 70 fahrenheit in celsius", "10 kilometers in miles"],
         slots=_mathskill.slots, speak=_mathskill.say),
+    # THE WORLD CLOCK. "What time is it in Tokyo" went to the model: 27 seconds,
+    # two searches, a URL it made up, and the wrong answer (2026-09-17). A
+    # clock is arithmetic.
+    Skill("time_in", None, [
+        "what time is it in tokyo", "what's the time in london", "time in los angeles",
+        "what time is it in new york right now", "what time is it in paris", "current time in sydney",
+        "what time is it in california", "what's the time in india"],
+        slots=slots_time_in, speak=say_time_in),
+    Skill("emergencies", "local_emergencies", [
+        "any emergencies near me", "is anything happening nearby", "any emergencies i should know about",
+        "anything dangerous going on around here", "is there an emergency nearby",
+        "any alerts for my area"],
+        speak=say_emergencies),
+    Skill("note_take", "write_note", [
+        "take a note", "take a note called groceries: milk and eggs", "take a note for me: the lab is due friday",
+        "jot this down: call the registrar", "write this down: locker combination is on the card",
+        "take a note: the midterm covers chapters one through five", "take a quick note: bring the charger"],
+        slots=slots_note_take, speak=say_note_take),
     Skill("time", None, [
         "what time is it", "what's the time", "tell me the time", "do you have the time",
         "current time", "time check", "what time is it right now", "got the time",
@@ -3332,7 +3452,7 @@ SKILLS: list[Skill] = [
         slots=slots_news, speak=say_news),
     Skill("breaking", "get_breaking_news", [
         # added 2026-09-17 from the untested-phrasings battery
-        "any emergencies near me", "is anything happening nearby", "any emergencies i should know about",
+        "what just broke in the news",
         "any breaking news", "what's breaking", "anything breaking right now",
         "has anything happened", "anything urgent in the news"],
         speak=say_breaking),
