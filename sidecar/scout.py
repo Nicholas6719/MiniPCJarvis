@@ -154,7 +154,7 @@ def question(description: str, found: dict) -> dict:
     if model.get("repo"):
         size = f", {model['bytes'] // 1024} KB" if model.get("bytes") else ""
         q = (f"Somebody's already made one, sir — {model['file']}{size}, from "
-             f"{model['repo']}. Shall I fetch it?")
+             f"{model['repo']}. Shall I fetch it, or make my own?")
         return {"question": q, "route": "fetch", "found": "model"}
 
     if dims.get("said"):

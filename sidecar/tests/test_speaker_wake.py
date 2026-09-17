@@ -60,12 +60,12 @@ def main() -> int:
         spk._stream = object()
         spk._rate = 24000
         closed = []
-        spk.close = lambda: closed.append(True) or setattr(spk, "_stream", None)
         warmed = []
         spk.prewarm = lambda rate: warmed.append(rate)
         seq = list(states)
         OW.endpoint_active = lambda: seq.pop(0) if seq else True
         waited = await spk.reopen_when_ready(24000, timeout=2.0)
+        closed.append(spk._stream is None)
         return closed, warmed, waited
 
     real = OW.endpoint_active

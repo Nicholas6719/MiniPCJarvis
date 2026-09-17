@@ -176,7 +176,8 @@ def main() -> int:
     print("\n-- what goes wrong is said plainly --")
     I._state["calendars"] = None
     bad = asyncio.run(I.sync(client=Fake(fail_auth=True)))
-    check("a wrong password is named as such", "app-specific password" in str(bad.get("error", "")), bad)
+    check("a wrong password is named as such, with what to check", "Apple refused that sign-in" in str(bad.get("error", ""))
+          and "app-specific" in str(bad.get("error", "")), bad)
     check("...and the calendar list is forgotten so the next try discovers again", I._state["calendars"] is None)
     real_load = I.load_credentials
     I.load_credentials = lambda: None

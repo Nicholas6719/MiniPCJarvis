@@ -170,6 +170,9 @@ def main() -> int:
 
     newsroom.summarize = fake_summarize
     b = br.Briefing()
+    # The gates share one database, and a seen story is remembered for three
+    # days now: another gate's "Gas leak ... in Natick" must not dedupe this one.
+    b._seen = {}
     b._primed = True
     b._market_moves = fake_moves
     b._fresh_stories = lambda: fake_stories([

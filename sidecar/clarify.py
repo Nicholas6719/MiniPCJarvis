@@ -110,7 +110,7 @@ def choose(pending: Pending, text: str) -> Branch | str | None:
     # A yes may run to a few more words ("yes, go ahead and render it") and is
     # still safe, because the approval branch below only takes an utterance
     # made ENTIRELY of its own words. A choice between readings stays short.
-    if len(t.split()) > (MAX_ANSWER_WORDS + 3 if names == {"go ahead", "leave it"}
+    if len(t.split()) > (MAX_ANSWER_WORDS + 3 if {"go ahead", "leave it"} <= names
                          else MAX_ANSWER_WORDS):
         return None
     # A COST QUESTION IS ANSWERED BY A YES OR A NO, NOT BY A WORD. "Shall I?"
@@ -122,7 +122,10 @@ def choose(pending: Pending, text: str) -> Branch | str | None:
     # utterance has to BE a yes or a no; anything with a subject in it is the
     # new request it sounds like.
     names = {b.label for b in pending.amb.branches}
-    if names == {"go ahead", "leave it"}:
+    if {"go ahead", "leave it"} <= names:
+        own = next((b for b in pending.amb.branches if b.label == "make my own"), None)
+        if own is not None and _OWN.search(t):
+            return own
         from orchestrator import NO_WORDS, YES_WORDS     # lazy: orchestrator imports us
         go = next(b for b in pending.amb.branches if b.label == "go ahead")
         leave = next(b for b in pending.amb.branches if b.label == "leave it")
@@ -317,8 +320,18 @@ def _say_quote(args: dict, res: dict) -> str:
     return say_quote(args, res)
 
 
+# "MAKE YOUR OWN." Asked "Somebody's already made one - shall I fetch it?" he
+# said exactly that (2026-09-17 17:56). It was "not an answer"; the model then
+# claimed to have generated one; and his next word, "Show.", counted as a yes
+# and fetched the stranger's model he had just turned down.
+_OWN = re.compile(
+    r"\b(?:your own|yourself|my own|our own|from scratch|own version|original|custom|"
+    r"don'?t fetch|not that one|not theirs|make (?:me )?one|build (?:me )?one|design (?:me )?one|"
+    r"make it|build it|design it)\b", re.I)
+
+
 def approval(subject: str, question: str, tool: str, args: dict, render,
-             *, yes_words: tuple = (), no_words: tuple = ()) -> Ambiguity:
+             *, yes_words: tuple = (), no_words: tuple = (), alt: dict | None = None) -> Ambiguity:
     """"About two minutes, sir. Shall I?" — a COST question, not a risk one.
 
     His correction: an estimate on its own is not enough, because he may not want
@@ -353,7 +366,9 @@ def approval(subject: str, question: str, tool: str, args: dict, render,
                     "not", "forget", "stop", "cancel", "never", "mind", "hold", "wait",
                     "off") + tuple(no_words),
                    render=lambda a, r: "Of course, sir.", speculative=False),
-        ),
+        ) + ((Branch("make my own", tool, dict(alt.get("args") or {}),
+                     ("own", "yourself", "scratch", "original", "custom"),
+                     render=render, speculative=False),) if alt else ()),
     )
 
 

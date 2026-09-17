@@ -244,7 +244,10 @@ class Client:
                                        '<?xml version="1.0"?><d:propfind xmlns:d="DAV:">'
                                        '<d:prop><d:current-user-principal/></d:prop></d:propfind>')
         if code == 401:
-            raise PermissionError("Apple did not accept that Apple ID and app-specific password")
+            raise PermissionError(
+                "Apple refused that sign-in. Two things to check: the email must be the one you sign in "
+                "to iCloud with, and the password must be a freshly generated app-specific one, typed "
+                "with its dashes. Send /icloud again when you have them.")
         if code >= 400:
             raise RuntimeError(f"iCloud answered {code} to the principal lookup")
         href = ET.fromstring(xml).find(f".//{DAV}current-user-principal/{DAV}href")
@@ -338,12 +341,13 @@ async def sync(client: Client | None = None) -> dict:
     import volatile
 
     creds = load_credentials()
+    own = False
     if client is None:
         if not creds:
             return {"error": "iCloud is not connected. Send /icloud <email> <app-specific password> on Telegram.",
                     "connected": False}
         client = Client(*creds)
-    own = client is not None and creds is not None
+        own = True                      # made here, closed here; one handed in is the caller's
     try:
         if _state["calendars"] is None:
             principal = await client.principal()

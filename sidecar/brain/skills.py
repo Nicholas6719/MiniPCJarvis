@@ -229,7 +229,24 @@ def slots_app(t: str) -> dict | None:
     return {"name": name}
 
 
+_KNOWN_SITES = {
+    "youtube": "youtube.com", "reddit": "reddit.com", "netflix": "netflix.com", "gmail": "mail.google.com",
+    "amazon": "amazon.com", "wikipedia": "wikipedia.org", "github": "github.com", "twitch": "twitch.tv",
+    "google": "google.com", "google docs": "docs.google.com", "google drive": "drive.google.com",
+    "chatgpt": "chatgpt.com", "claude": "claude.ai", "linkedin": "linkedin.com", "instagram": "instagram.com",
+    "twitter": "x.com", "espn": "espn.com", "hulu": "hulu.com", "ebay": "ebay.com", "printables": "printables.com",
+    "thingiverse": "thingiverse.com", "outlook": "outlook.office.com", "canvas": "canvas.instructure.com",
+}
+_GO_TO = re.compile(r"^\s*(?:please\s+)?(?:go to|head (?:over )?to|take me to|pull up|bring up|navigate to)\s+"
+                    r"(?:the\s+)?(?P<site>[a-z][a-z ]{1,24}?)(?:\s+(?:website|site|page))?\s*[.!?]*$", re.I)
+
+
 def slots_site(t: str) -> dict | None:
+    # "Go to youtube" names a place, not a URL - and with no URL this skill
+    # stepped aside and the NEXT one paused his music (battery, 2026-09-17).
+    g = _GO_TO.match(t or "")
+    if g and g.group("site").strip().lower() in _KNOWN_SITES:
+        return {"url": _KNOWN_SITES[g.group("site").strip().lower()]}
     m = re.search(r"(https?://\S+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|gov|edu|co|tv|ai|uk|ca)\b(?:/\S*)?)", t)
     return {"url": m.group(1)} if m else None
 
@@ -321,7 +338,18 @@ _FIND_B = re.compile(r"\b(?:find|search for|look for|locate|where is|where's)\s+
 _FIND_C = re.compile(r"\bsearch\s+(?:my\s+)?(desktop|documents|downloads|pictures)\s+for\s+(.+?)[.!?]*$")
 
 
+_MAKE_A_FILE = re.compile(
+    r"^\s*(?:please\s+|can you\s+|could you\s+)?(?:create|make|write|draft|start|compose|build|generate|"
+    r"put together|type up)\b.*\b(?:document|doc|docx|spreadsheet|workbook|essay|letter|report|outline|"
+    r"notes?|file|table|list)\b", re.I)
+
+
 def slots_find(t: str) -> dict | None:
+    # "Create a word document with my notes on photosynthesis" came here at
+    # 1.00 and SEARCHED for a file called "my notes on photosynthesis"
+    # (2026-09-17). Making a file is never finding one.
+    if _MAKE_A_FILE.search(t or ""):
+        return None
     mc = _FIND_C.search(t)
     if mc:
         return {"query": mc.group(2).strip(" '\""), "folder": mc.group(1)}
@@ -616,6 +644,10 @@ def slots_switch(t: str) -> dict | None:
     if not m:
         return None
     name = m.group(1).strip()
+    # "go back to full screen" is about JARVIS's own window, not an app
+    # called "full screen" (it looked for one, 2026-09-17).
+    if re.fullmatch(r"(?:the\s+)?full[ -]?(?:screen|size|window)(?:\s+(?:again|mode))?", name, re.I):
+        return None
     # "switch to a british voice" is about HIS voice, not a window title
     if re.search(r"\b(?:voice|accent|language|tone)\b", name):
         return None
@@ -1030,6 +1062,34 @@ def _recurrence_in(t: str) -> str:
         if pat.search(t):
             found = name
     return found
+
+
+_TIMER = re.compile(
+    r"\b(?:set|start|put on|give me)\s+(?:a\s+|an\s+)?(?:\w+\s+)?timer\s+(?:for\s+)?"
+    r"(\d{1,3}|[a-z]+(?:[ -][a-z]+)?)\s+(second|sec|minute|min|hour|hr)s?\b", re.I)
+_ALARM = re.compile(r"\b(?:set\s+(?:an?\s+|my\s+)?alarm|wake me(?: up)?)\b", re.I)
+
+
+def slots_reminder_any(t: str) -> dict | None:
+    """Reminders, and the two things that are reminders by another name: a
+    timer ("set a timer for ten minutes") and an alarm ("wake me up at six
+    thirty"). Both went to the model before 2026-09-17, which has no clock."""
+    s = t or ""
+    m = _TIMER.search(s)
+    if m:
+        n = _number(m.group(1))
+        if n is None:
+            return None
+        unit = m.group(2).lower()
+        mins = n * 60 if unit.startswith(("hour", "hr")) else (max(1, round(n / 60)) if unit.startswith("sec") else n)
+        return {"minutes_from_now": int(mins), "text": "your timer is up"}
+    out = slots_reminder(s)
+    if _ALARM.search(s):
+        if out is None:
+            out = slots_reminder(s + " to wake up")
+        if out is not None and not str(out.get("text") or "").strip():
+            out["text"] = "wake up"
+    return out
 
 
 def slots_reminder(t: str) -> dict | None:
@@ -1971,9 +2031,21 @@ _CANCEL_ALL = re.compile(r"\b(?:cancel|clear|delete|remove)\b.*\b(?:all\s+)?(?:m
                          r"(?:remind(?:ers?|ing)|alarms?)\b")
 
 
+_CANCEL_NAMED = re.compile(
+    r"\b(?:cancel|delete|remove|clear|drop|kill|get rid of)\s+(?:my|the|that|this)\s+"
+    r"(?:(?P<a>[a-z][a-z' -]{1,40}?)\s+reminder\b|reminder\s+(?:about|for|to)\s+(?P<b>.+?)[.!?]*$)", re.I)
+
+
 def slots_unremind(t: str) -> dict | None:
     """'don't remind me to stretch anymore' -> {'query': 'stretch'};
     'cancel my reminders' -> {'query': ''} (all)."""
+    # A NAMED reminder is never "all of them". "Cancel my stretch reminder"
+    # parsed as query '' - which cancels EVERYTHING (battery, 2026-09-17).
+    named = _CANCEL_NAMED.search(t or "")
+    if named:
+        what = (named.group("a") or named.group("b") or "").strip(" .!?'\"")
+        if what and what.lower() not in ("last", "next", "first", "other", "whole"):
+            return {"query": what}
     m = _STOP_REMIND.search(t)
     if m:
         what = (m.group("what") or "").strip(" .!?'\"")
@@ -2081,7 +2153,8 @@ def slots_agenda(t: str) -> dict | None:
     low = (t or "").lower()
     if "tomorrow" in low:
         return {"day": "tomorrow"}
-    if re.search(r"\bnext (?:meeting|appointment|event|thing)\b", low):
+    if re.search(r"\bnext (?:meeting|appointment|event|thing|class|lecture|lesson|lab)\b|\bhow long until\b"
+                 r"|\bwhat'?s next\b", low):
         return {"day": "next"}
     if re.search(r"this week|coming up|the week\b", low):
         return {"day": "week"}
@@ -2599,6 +2672,8 @@ SKILLS: list[Skill] = [
     #
     # Every seed below was checked through `_norm` and survives it unchanged.
     Skill("project_start", "start_project", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "start a new project called robotics arm", "begin a new project named drone frame",
         "we're starting a new project",
         "this is a new project",
         "this should be its own project",
@@ -2656,6 +2731,8 @@ SKILLS: list[Skill] = [
     # "How's the suit going" is a PROJECT question, not a render-status one:
     # the render is a job of minutes, the project is a folder of weeks.
     Skill("project_status", "project_status", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "what are we working on", "what's the current project", "what project is open",
         "how's the spider-man suit going",
         "how is the arc reactor project going",
         "where are we with the mark two project",
@@ -2700,6 +2777,8 @@ SKILLS: list[Skill] = [
         "i'm done with my hands"],
         fixed_args={"on": False}, speak=say_hands),
     Skill("holo_show", "show_hologram", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "show me the bracket", "bring the bracket back up", "put the phone stand back on the stage",
         "show me that as a hologram", "project that as a hologram",
         "put it up as a hologram", "show me the hologram",
         "bring up the hologram", "open the hologram",
@@ -2887,6 +2966,8 @@ SKILLS: list[Skill] = [
         "let's have some music", "music please"],
         speak=None),
     Skill("video", "play_media", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "search youtube for calculus derivatives", "find a youtube video explaining mitosis",
         "find me a youtube video of someone playing iron man",
         "find me a video of a rocket launch", "pull up a video about black holes",
         "play a video of northern lights", "search youtube for guitar lessons",
@@ -2907,6 +2988,8 @@ SKILLS: list[Skill] = [
     # DRAWING one. Twenty seconds of his own machine, so `generate_image` asks
     # first, exactly as a render does.
     Skill("image_make", "generate_image", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "make me a logo for my robotics club", "design a poster for the bake sale", "create an icon of a rocket",
         "draw me a picture of a lighthouse",
         "draw a picture of an owl in a storm",
         "make me a picture of a red sports car",
@@ -2937,6 +3020,8 @@ SKILLS: list[Skill] = [
         "tell me what you see on screen", "what's wrong with this screen"],
         speak=say_screen, llm_after=True),
     Skill("reminder", "set_reminder", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "set an alarm for 7 am", "wake me up at six thirty tomorrow", "set a timer for ten minutes", "set an alarm for six in the morning",
         "remind me in 10 minutes to stretch", "set a reminder for 5 pm to call mom",
         "remind me in an hour to check the oven", "remind me at 9 to take my meds",
         "set a reminder in 20 minutes to drink water", "remind me in two hours to leave",
@@ -2948,7 +3033,7 @@ SKILLS: list[Skill] = [
         "set a daily reminder at 8 am to take my vitamins",
         "every night at 10 remind me to wear my retainers",
         "remind me every weekday at 9 to check the calendar"],
-        slots=slots_reminder, speak=say_reminder),
+        slots=slots_reminder_any, speak=say_reminder),
     Skill("remember", "remember_fact", [
         "remember that i drink my coffee black", "remember my favorite color is blue",
         "remember that my wifi password is on the fridge", "remember i park in spot 12",
@@ -3008,6 +3093,8 @@ SKILLS: list[Skill] = [
         "look at what i'm working on"],
         speak=None),
     Skill("office_selection", "read_open_document", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "what does this cell say", "what's in this cell",
         "read what i've highlighted", "what have i selected",
         "read the selection", "what's highlighted", "read this bit",
         "what does the highlighted part say"],
@@ -3017,6 +3104,8 @@ SKILLS: list[Skill] = [
     # dismissal) and not "go to sleep" (that stops listening) - companion mode
     # is the opposite of both: smaller, and MORE attentive.
     Skill("companion_on", "companion_mode", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "help me with this essay", "help me with my homework", "get out of my way",
         "help me with this excel sheet", "help me with this spreadsheet",
         "help me out on this excel sheet", "i'm working on a word document, help me with this",
         "work with me on this document", "work with me on this",
@@ -3026,6 +3115,9 @@ SKILLS: list[Skill] = [
         "i'm writing an essay, work with me", "help me write this"],
         fixed_args={"on": True}, speak=None),
     Skill("companion_off", "companion_mode", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "take the full screen again", "be full screen again", "come back to the full window",
+        "go back to full screen", "go back to full size",
         # NOT "go back to full screen": the `switch to APP` canon eats every
         # "go back to X" and this collided head-on with the app switcher.
         "come out of the corner", "come back to full size",
@@ -3040,6 +3132,8 @@ SKILLS: list[Skill] = [
         "am i in word or excel"],
         speak=None),
     Skill("open_site", "open_url", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "go to youtube", "take me to reddit", "go to netflix", "head over to youtube",
         "open youtube.com", "go to wikipedia.org", "pull up amazon.com", "open the website reddit.com",
         "take me to github.com", "open up netflix.com", "go to the website espn.com", "load bbc.com",
         "bring up espn.com", "open twitch.tv for me"],
@@ -3089,6 +3183,8 @@ SKILLS: list[Skill] = [
         "put the windows back", "unminimize everything"],
         slots=lambda t: {}, speak=say_restore_win),
     Skill("unremind", "cancel_reminders_matching", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "cancel my stretch reminder", "delete the homework reminder", "cancel the reminder about laundry",
         # NOT "clear my reminders" (canonicalizes onto the ui skill's "hide
         # everything") and NOT "no more reminders" (collides with corrections).
         "don't remind me to stretch anymore", "stop reminding me to stretch",
@@ -3116,6 +3212,8 @@ SKILLS: list[Skill] = [
         "how active have i been today", "what's my weight", "how many calories have i burned"],
         slots=slots_health, speak=say_health),
     Skill("agenda", "get_agenda", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "how long until my next class", "when is my next class", "what's next on my schedule",
         "what's on my calendar today", "what's on my calendar", "what do i have today",
         "what do i have on today", "what do i have tomorrow", "what's on my calendar tomorrow",
         "what's on the calendar this week", "when's my next meeting", "what's my next appointment",
@@ -3171,6 +3269,8 @@ SKILLS: list[Skill] = [
         "press alt tab", "press the down arrow", "press page down"],
         slots=slots_press, speak=say_press),
     Skill("to_phone", "send_to_phone", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "text me the summary", "text that to me", "send this to my phone",
         "send it to my phone", "send that to my phone", "send it to me",
         "send that to me", "send it through telegram", "text it to me",
         "send me that on telegram", "put that on my phone", "send it over"],
@@ -3223,12 +3323,16 @@ SKILLS: list[Skill] = [
         "give me a rundown on apple stock", "how is amazon looking as a stock"],
         slots=slots_analyst, speak=say_spoken),
     Skill("news", "get_news", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "summarize the news for me", "give me the headlines",
         "what's in the news", "give me the news", "what's happening in the world",
         "catch me up on the news", "any news today", "what's the latest news",
         "tell me the tech news", "what's happening in business", "sports news",
         "what's the local news", "read me the headlines", "news about the election"],
         slots=slots_news, speak=say_news),
     Skill("breaking", "get_breaking_news", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "any emergencies near me", "is anything happening nearby", "any emergencies i should know about",
         "any breaking news", "what's breaking", "anything breaking right now",
         "has anything happened", "anything urgent in the news"],
         speak=say_breaking),
@@ -3266,6 +3370,8 @@ SKILLS: list[Skill] = [
         "stop telling me about the battery", "forget about the cpu rule", "stop watching everything"],
         slots=slots_unwatch, speak=say_unwatch),
     Skill("weather", "get_weather", [
+        # added 2026-09-17 from the untested-phrasings battery
+        "do i need a jacket", "do i need an umbrella today", "should i bring a coat",
         "what's the weather", "what's the weather like right now", "how's the weather today",
         "what's the weather in boston", "is it going to rain today", "what's the temperature outside",
         "do i need an umbrella", "what's the forecast for tomorrow", "how hot is it in phoenix",
@@ -3309,6 +3415,8 @@ SKILLS: list[Skill] = [
         "how's it going", "how are things", "how are you doing"],
         slots=slots_greeting, speak=say_greeting),
     Skill("capabilities", None, [
+        # added 2026-09-17 from the untested-phrasings battery
+        "help", "what can i ask you",
         "what can you do", "what are you able to do", "what do you do",
         "what are your capabilities", "what can i ask you", "what can you help me with",
         "tell me what you can do", "what are you capable of"],

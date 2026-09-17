@@ -144,6 +144,25 @@ SENTENCE_END = re.compile(r"([.!?…]+[\"')\]]*)(?=\s)")
 # and "spoken" (2026-09-06 12:46); it counts as an empty round instead.
 SPEAKABLE = re.compile(r"\w")
 
+_THINKING_WORK = re.compile(
+    r"^\s*(?:please\s+|can you\s+|could you\s+|jarvis,?\s+)?(?:help me (?:study|write|understand|prepare|plan|"
+    r"figure|with my)|write|draft|compose|outline|summari[sz]e|proofread|rewrite|rephrase|fix the|"
+    r"explain|quiz|teach|translate|define|give me (?:a|an|some|one)|plan|brainstorm|compare|"
+    r"what should i|how should i|walk me through)\b", re.I)
+_STOPWORDS = frozenset("a an the my me i you your to of in on at for with and or is are was be it this that "
+                       "what how do does can could please some any up out about from into".split())
+
+
+def _content_words(s: str) -> set:
+    return {w for w in re.findall(r"[a-z]{3,}", (s or "").lower()) if w not in _STOPWORDS}
+
+
+# "SAY THAT AGAIN." It went to the model, which answered with something new.
+REPEAT_RE = re.compile(
+    r"^\s*(?:sorry,?\s+|wait,?\s+|jarvis,?\s+)?(?:say that again|repeat that|come again|what did you (?:just )?say|"
+    r"can you repeat that|one more time|say it again|i didn'?t (?:catch|hear) that|pardon|what was that)"
+    r"\s*[.!?]*$", re.I)
+
 # "KEEP GOING." It matched no follow-up pattern, scored below threshold on
 # everything, and reached the model with no idea what it was meant to carry
 # on with (survey, 2026-09-08). Anchored at both ends on purpose: "go on
@@ -1670,6 +1689,19 @@ class Orchestrator:
         # because it is a wrong answer that also needs a reply. If he is
         # asking how many, who, when or why, the model answers; only a skill
         # that itself answers questions may still be offered.
+        # WORK IS NOT A NEAR-MISS FOR A BUTTON. "Help me study for my biology
+        # test" sat nearest to face_learn, "write me an essay outline" to
+        # companion mode, "give me a study plan" to the calendar - and each
+        # would have been asked "Did you mean ...?" (battery, 2026-09-17). A
+        # request to write, study, explain or plan belongs to the model, and
+        # a guess that shares no word with what he said is not a guess.
+        if _THINKING_WORK.search(text or ""):
+            log.info("not asking about %s: %r is work for the model", name, text[:60])
+            return False
+        seed = str((brain.last_match or {}).get("text") or "")
+        if seed and not (_content_words(seed) & _content_words(text)):
+            log.info("not asking about %s: nothing in %r resembles %r", name, text[:50], seed[:50])
+            return False
         from brain.skills import ask_allowed
         if not ask_allowed(text, name):
             log.info("not asking about %s: '%s' is a question, not an order", name, text[:60])
@@ -1852,6 +1884,12 @@ class Orchestrator:
         if amb is not None and await self._ask_clarification(amb, t_start):
             return
         # ---- reflex: JARVIS's own brain handles known requests without the LLM ----
+        if REPEAT_RE.match(text or ""):
+            prev = next((str(m.get("content") or "") for m in reversed(self._history)
+                         if m.get("role") == "assistant" and str(m.get("content") or "").strip()), "")
+            if prev:
+                await self._say_and_finish(prev, text, t_start, "repeat")
+                return
         reflex = None
         if config.get("brain", "enabled", default=True):
             try:
@@ -2277,7 +2315,8 @@ class Orchestrator:
                 subject=str(asked.get("subject") or "that"),
                 question=str(asked.get("question") or "Shall I, sir?"),
                 tool=tool, args=dict(asked.get("args") or {}), render=render,
-                yes_words=tuple(asked.get("yes_words") or verbs.get(tool, ())))
+                yes_words=tuple(asked.get("yes_words") or verbs.get(tool, ())),
+                alt=asked.get("alt") or None)
             self._drop_clarification("superseded")
             self._clarify = clarify.Pending(amb)
             # He must be able to answer without saying the name again — but only

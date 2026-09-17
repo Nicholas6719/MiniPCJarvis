@@ -107,6 +107,19 @@ ACK_ONLY = re.compile(
     r"👍|👌|🙏|✅)[.!\s]*")
 
 
+# A REMARK ABOUT WHAT HE WAS SENT. "That's awful, thank you for telling me"
+# ran as a full turn - thirty seconds - and came back "I'm sorry to hear
+# that." (2026-09-14 10:42). It is an acknowledgement with feeling in it.
+REMARK = re.compile(
+    r"(?:oh |oh no,? |wow,? |damn,? |geez,? |jeez,? |man,? |yikes,? )?"
+    r"(?:(?:that'?s|thats|that is|how|so|this is) "
+    r"(?:so |really |very |pretty |just )?(?:awful|terrible|sad|horrible|tragic|crazy|wild|insane|scary|"
+    r"unfortunate|good|great|interesting|nice|a shame|too bad)\b[^?]{0,50}"
+    # ...thanks, as long as nothing is being ASKED after it
+    r"|(?:thanks?|thank you)(?![^?]*\b(?:now|then|and|but|can|could|would|will|please|open|what|how|when|"
+    r"where|why|who|tell|show|find|set|play|send)\b)[^?]{0,40})[.!\s]*")
+
+
 class TelegramBridge:
     def __init__(self) -> None:
         self.token: str | None = None
@@ -489,6 +502,11 @@ class TelegramBridge:
         # answered with silence - the way a person's "ok" is.
         if ACK_ONLY.fullmatch(text.strip().lower()):
             log.info("telegram: %r acknowledged, not a turn", text[:20])
+            return
+        if len(text.split()) <= 12 and REMARK.fullmatch(text.strip().lower()):
+            log.info("telegram: %r is a remark, not a turn", text[:30])
+            if "thank" in text.lower():
+                await self._send("Of course, sir.")
             return
         await self._remote_turn(text)
 

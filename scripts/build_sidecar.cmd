@@ -90,6 +90,8 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_handoff.py || (echo HANDOFF TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_significance.py || (echo SIGNIFICANCE TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_news_week.py || (echo NEWS WEEK TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_perfect1.py || (echo PERFECT1 TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_perfect2.py || (echo PERFECT2 TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_briefing.py || (echo BRIEFING TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_nws.py || (echo NWS TEST FAILED & exit /b 1)
 

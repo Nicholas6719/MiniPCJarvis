@@ -552,7 +552,9 @@ class Briefing:
         return out
 
     def _forget_old(self) -> None:
-        cutoff = time.time() - 12 * 3600
+        # Three days, not twelve hours: the thwarted-plot story came round again
+        # the next day off a different desk and was sent a second time.
+        cutoff = time.time() - 72 * 3600
         self._seen = {k: v for k, v in self._seen.items() if v > cutoff}
 
     # ---------- the brief ----------

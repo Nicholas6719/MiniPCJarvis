@@ -153,6 +153,8 @@ FAR_PLACE = re.compile(
     r"alabama|south carolina|north carolina|west virginia|maryland|delaware|"
     r"pennsylvania|indiana|puerto rico|guam|"
     r"hawaiian\w*|californian\w*|texans?|floridians?|"
+    # a body in the Grand Canyon came off WHDH as "a death nearby" (2026-09-17)
+    r"grand canyon|yellowstone|yosemite|national park|appalachian trail|"
     r"california|florida|texas|arizona|georgia|ohio|michigan|illinois|"
     r"oregon|colorado|utah|alaska|hawaii|oklahoma|kentucky|tennessee|"
     # Washington. A local desk syndicates the national wire, and "Kennedy
@@ -187,7 +189,7 @@ ELSEWHERE_RE = re.compile(
 # toxic workplace, and `collapse` for a market collapse or the collapse of talks.
 HAZARD = re.compile(
     r"\b(?:earthquake|tsunami|tornado|hurricane|wildfire|flash flood|"
-    r"explosion|blast|gas leak|chemical (?:leak|spill)|hazmat|"
+    r"explosion|bomb blast|blasts? (?:kills?|injures?|rocks?|rips?|levels?|heard|reported|at|in|near)|gas leak|chemical (?:leak|spill)|hazmat|"
     r"toxic (?:gas|fumes?|smoke|spill|leak|cloud|chemical|water|air|waste)|"
     r"evacuat\w+|shelter in place|lockdown|"
     r"terror(?:ist)? attack|terror plot|bombing|bomb threat|"
@@ -246,6 +248,7 @@ ADJUDICATED = re.compile(
     r"pleaded|pleads|family identifies|identified as|identifies|"
     r"tributes?|remembered|mourn\w*|vigil|funeral|memorial|"
     r"told police|police say|police said|police report(?:s|ed)?|"
+    r"da says|d\.a\. says|district attorney|prosecutors? sa(?:y|id)|wife says|husband says|family says|"
     r"cause (?:of|can't be|cannot be|could not be|has not been) determined|"
     r"investigators say|investigation (?:found|concluded|determined))\b", re.I)
 
@@ -465,6 +468,8 @@ def national_emergency(text: str, headline: str = "") -> bool:
     attack_text = headline or text
     if RECALL.search(text) and not MANY.search(text):
         return False            # "sold nationwide" on a recall is reach, not an emergency
+    if THWARTED.search(text) or OLD_EVENT.search(text):
+        return False            # it did not happen, or it happened long ago
     return bool(SYSTEMIC.search(text) or ATTACK.search(attack_text)
                 or FIGURE_KILLED.search(attack_text)
                 or (CATASTROPHIC_TOLL.search(text) and _human_deaths(text))
@@ -635,9 +640,47 @@ THREAT_ONLY = re.compile(
     r"|threat(?:s|ened|ening)?\s+(?:a |an |the )?(?:school|shooting|bombing|attack))\b", re.I)
 
 
+# A SEASON WITH NO HURRICANES IS NOT A HURRICANE. "Atlantic season sets a
+# record-late start with no hurricanes yet" reached him as URGENT, "something
+# dangerous close to home" (2026-09-16 06:40). When the story is about the
+# ABSENCE of the thing, the word for the thing is not evidence of it.
+NO_SUCH_WEATHER = re.compile(
+    r"\bno (?:\w+ ){0,3}?(?:hurricanes?|storms?|tornado(?:es|s)?|wildfires?|outbreaks?|flooding)\b"
+    r"|\b(?:record.?(?:late|low|quiet|slow)|unusually quiet|quietest|slow(?:est)? start|late(?:st)? start)\b"
+    r"|\bwhere have the\b", re.I)
+WEATHER_WORDS = re.compile(
+    r"\b(?:hurricanes?|tropical storms?|storms?|tornado(?:es|s)?|wildfires?|flash floods?|flood\w*)\b", re.I)
+
+
 def _hazard_text(text: str) -> str:
-    """The text with threats-of-things removed, for HAZARD and VIOLENCE."""
-    return THREAT_ONLY.sub(" ", text)
+    """The text with threats-of-things and absent-things removed, for HAZARD,
+    VIOLENCE and everything that asks whether something is loose."""
+    t = THREAT_ONLY.sub(" ", text)
+    if NO_SUCH_WEATHER.search(t):
+        t = WEATHER_WORDS.sub(" ", t)
+    return t
+
+
+# STOPPED BEFORE IT HAPPENED. "FBI investigation thwarts 'mass casualty
+# attack'" went to his phone as URGENT - "the whole country needs to know
+# this" - twice, a day apart (2026-09-15, 09-16). The casualties are the ones
+# that did not happen.
+THWARTED = re.compile(
+    r"\b(?:thwart\w*|foil\w*|averted|disrupt(?:s|ed)|prevent(?:s|ed))\b[^.]{0,60}?\b(?:attack|plot|shooting|bombing|massacre)"
+    r"|\b(?:plot(?:ted|ting)?|plann(?:ed|ing)|conspir\w+) to (?:attack|kill|bomb|shoot|carry out)"
+    r"|\baccused of (?:planning|plotting)\b|\b(?:alleged|suspected) plot\b", re.I)
+
+# AN OLD EVENT IS NOT BREAKING. "Remains of Hurricane Helene victim found
+# nearly 2 years after storm" was URGENT (2026-09-16 12:01).
+OLD_EVENT = re.compile(
+    r"\b(?:nearly |almost |over |more than |about )?(?:\d+|two|three|four|five|six|seven|eight|nine|ten|"
+    r"\w+teen|twenty|thirty|forty|fifty) (?:years?|months?|decades?) (?:after|later|ago|since|on)\b"
+    r"|\banniversary\b|\bcold case\b|\byears? after\b", re.I)
+
+# A crash that is over. His own town or not, it is told once - not chased.
+TRAFFIC = re.compile(
+    r"\b(?:crash\w*|collision|hit by|struck by|pedestrian|hit.and.run|motorcycl\w+|rollover|wrong.way|"
+    r"suv|pickup truck|tractor.trailer)\b", re.I)
 
 
 def _city_only(text: str) -> bool:
@@ -850,6 +893,10 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
         # "serious injury or death" is the label on every recall; "could
         # die" is the label too. Only a recall AFTER many deaths is more.
         return NOTABLE, "a recall is a notice, not an emergency"
+    if THWARTED.search(text):
+        return NOTABLE, "stopped before it happened"
+    if OLD_EVENT.search(text) and not ONGOING_DESPITE.search(text):
+        return NOTABLE, "an old event, not breaking news"
 
     # Everything below decides how loud a story is. This decides whether it is
     # his at all, and it comes first so nothing downstream can promote its way
@@ -961,6 +1008,13 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
         if own_town:
             # a fresh death in his own town is his emergency; the AFTERMATH of
             # one (held without bail, family identifies) was caught above
+            # ...but a crash that is over is told ONCE. Three pedestrian
+            # deaths in Framingham and Natick in one week each reached him as
+            # URGENT and chased him for an acknowledgement (2026-09-15 to 17).
+            # He should know; there is nothing to acknowledge.
+            if (TRAFFIC.search(text) and not STILL_ACTIVE.search(text)
+                    and not DISRUPTION.search(text)):
+                return ALERT, "a fatal crash in one of his towns, already over"
             return URGENT, "somebody died in one of his towns"
         # A death elsewhere in the state that is already over is news, not an
         # emergency - see the Falmouth and Lynn cases above. If it is still

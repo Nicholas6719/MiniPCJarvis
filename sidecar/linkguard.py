@@ -81,6 +81,13 @@ class LinkLedger:
             for k, v in node.items():
                 if "price" in str(k).lower() and v not in (None, "", 0):
                     self._saw_price = True
+                # A search SNIPPET with a price in it is a price a tool saw.
+                # Asked to "look up what the current price of an RTX 5090 is",
+                # he searched, answered from the snippets, and then disowned
+                # it: "Those prices are from memory, not looked up just now"
+                # (2026-09-15) - only a KEY called price used to count.
+                if isinstance(v, str) and _PRICE_IN_TEXT.search(v):
+                    self._saw_price = True
                 self._harvest(v, depth + 1)
         elif isinstance(node, (list, tuple)):
             for v in node:
@@ -278,6 +285,9 @@ def check_captions(reply: str, ledger: LinkLedger) -> tuple[str, int]:
             flagged += 1
         out_lines.append(annotated)
     return "\n".join(out_lines), flagged
+
+
+_PRICE_IN_TEXT = re.compile(r"[$£€]\s?\d|\b\d[\d,.]*\s?(?:dollars|usd|euros|pounds)\b", re.I)
 
 
 def price_caveat(reply: str, ledger: LinkLedger) -> str:

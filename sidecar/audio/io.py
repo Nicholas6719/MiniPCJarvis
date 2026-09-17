@@ -342,7 +342,7 @@ class Speaker:
         except Exception:
             log.debug("could not schedule an output prewarm", exc_info=True)
 
-    async def reopen_when_ready(self, rate: int, timeout: float = 4.0) -> float:
+    async def reopen_when_ready(self, rate: int, timeout: float = 2.5) -> float:
         """After a dark screen has been woken: drop any stream opened while
         the endpoint was asleep, wait for the endpoint to report ACTIVE, then
         open a fresh one. Returns the seconds waited.
@@ -354,8 +354,23 @@ class Speaker:
         """
         from audio.output_watch import endpoint_active
         t0 = time.time()
-        if self._stream is not None:
-            self.close()
+        # DROP IT, DO NOT CLOSE IT HERE. stream.stop() against a sleeping
+        # DisplayPort endpoint blocked the EVENT LOOP for eight seconds on
+        # 2026-09-17 17:55 - he said "Hey Jarvis" twice into the silence and
+        # the greeting came twelve seconds late. The stale stream is handed to
+        # a throwaway thread to die in its own time.
+        stale, self._stream, self._rate = self._stream, None, None
+        if stale is not None:
+            _ORPHANS.append(stale)
+            import threading
+
+            def _shut(s=stale) -> None:
+                try:
+                    s.abort()
+                    s.close()
+                except Exception:
+                    pass
+            threading.Thread(target=_shut, name="jarvis-audio-stale", daemon=True).start()
         loop = asyncio.get_running_loop()
         while True:
             state = await loop.run_in_executor(_writer_executor(), endpoint_active)

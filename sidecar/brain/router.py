@@ -118,7 +118,7 @@ _CANON = [
     # ...but not "focus on image three" / "focus on number 8": a picture on
     # screen, not a window. The rewrite made it "switch to APP" at 1.00, the
     # switch guard refused it, and the retry landed on open_app (2026-09-06).
-    (r"(?!.*\b(?:version|edit|revision)\b)\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+"
+    (r"(?!.*\b(?:version|edit|revision|full[ -]?screen|full size|full window)\b)\b(?:switch (?:over )?to|focus on|focus|go back to|jump to|bring me to)\s+"
      r"(?!(?:on\s+)?(?:the\s+)?(?:image|picture|photo|pic|number|no\.?|#)\s*(?:number\s*)?"
      r"(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b)"
      r"(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),

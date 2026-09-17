@@ -298,6 +298,11 @@ async def make_hologram(description: str = "", image_path: str = "", tier: int =
                          "image_path": "", "confirmed": True,
                          "reference": pic, "detailed": detailed,
                          "scouted_model": (found.get("model") or {}) if fetch else {}},
+                # "Make your own." - the other answer to "shall I fetch it?".
+                # The same build he would have had if nobody had published one.
+                "alt": ({"args": {"description": desc, "tier": (t if t != 5 else 4), "name": name,
+                                  "image_path": "", "confirmed": True, "reference": pic,
+                                  "detailed": detailed, "scouted_model": {}}} if fetch else None),
             },
                 "found": q["found"], "scouted": found,
                 "instruction": ("Tell him what was actually found — the model, "

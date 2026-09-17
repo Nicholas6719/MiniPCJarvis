@@ -1,7 +1,7 @@
 # JARVIS — Continuation Handoff (living document)
 
 Read this first after any context reset. Everything below was learned the hard way.
-Updated: 2026-09-15.
+Updated: 2026-09-17.
 
 ## Who / what
 - User: Nicholas. Wants a speech-first, OS-like JARVIS (not a chatbot). Extremely
@@ -4880,6 +4880,68 @@ Reminders app come from iCloud instead, pulled from the PC. `icloud.py`:
   active)"), and the morning stage lists only what he has not seen.
 - His phone: the health / calendar / reminders integration via Shortcuts +
   Telegram (his next ask).
+
+## 2026-09-17 — "make him perfect": his own sessions, then what was never tested (release 69)
+His brief: review the logs and the Telegram, find every imperfection, and
+*"don't just test what time it is... test what we haven't tested."*
+
+### Method (repeatable)
+1. Real-session copies: `grab_log.cmd`, `grab_db.cmd`, `grab_token.cmd`,
+   `grab_cfg.cmd`, `grab_llama_log.cmd` (all in `.agent/scripts`).
+2. Read HIS conversations out of `transcript` (filter the suites' chatter) and
+   every `deliveries` row, replaying the news rows through today's
+   `classify_news` - anything whose tier differs from what was sent, or that
+   should never have been sent, is a bug with its own headline as the test.
+3. Route a battery of untested everyday phrasings through `brain.decide`
+   OFFLINE (no app needed) and read the table: wrong skill at high confidence,
+   and "near X" rows, which become "Did you mean X, sir?".
+4. `.agent/scripts/live_probe.py PORT TOKEN [group]` for what only the running
+   assistant shows (documents, follow-ups, study help, honest refusals,
+   memory). Muted; replies read back from `/transcript`.
+**After a reboot the debug token is stale** (autostart): `/health` answers,
+everything authed is 401. An install re-establishes it.
+
+### Round one - from his sessions and his phone (tests/test_perfect1.py)
+- **"Make your own."** to "Somebody's already made one - shall I fetch it?"
+  was "not an answer"; the MODEL then claimed "Arc reactor model generated"
+  (nothing was); "Show." then counted as yes and fetched the stranger's model.
+  `clarify.approval(alt=...)` adds a third branch "make my own" (`_OWN`),
+  `render_tools` supplies the build's args, the question says "or make my own?".
+- **Dark-screen wake: 12 s to the greeting.** `reopen_when_ready` called
+  `close()` -> `stream.stop()` on the EVENT LOOP against a sleeping endpoint:
+  8 s. The stale stream is now orphaned and shut on a daemon thread; cap 2.5 s.
+- **News** (each a real delivery): NO_SUCH_WEATHER ("no hurricanes yet"),
+  THWARTED (sent twice; `_seen` now kept 72 h, was 12), OLD_EVENT ("2 years
+  after"), "blast" as a verb, Grand Canyon/national parks far, "DA says" is
+  aftermath, and a finished TRAFFIC death in his own town is ALERT (told once)
+  not URGENT (chased) - unless it has closed something (DISRUPTION).
+- `linkguard`: a price in a search SNIPPET is a price seen (was: only a key
+  named price) - "look up the RTX 5090 price" was answered then disowned.
+- Telegram `REMARK`: "that's awful, thank you for telling me" is acknowledged
+  ("Of course, sir."), not a 30 s turn.
+- Prompt: "next/upcoming" must be after today's date.
+- iCloud 401 now says what to check. **OPEN: his first /icloud was refused by
+  Apple (401 at the principal lookup; gmail.com Apple ID, code shaped right).**
+  `.agent/scripts/icloud_probe.cmd` re-runs the sync step by step in his real
+  session without printing secrets.
+
+### Round two - the brain on untested phrasings (tests/test_perfect2.py)
+Wrong at 1.00: "create a word document..." -> find_file; "go to youtube" ->
+media_pause; "go back to full screen" -> switch('full screen'); "what are we
+working on" -> office_what. **Destructive: "cancel my stretch reminder" parsed
+as query '' = cancel ALL** (`_CANCEL_NAMED` first now). Added: `slots_reminder_any`
+(timers, alarms, "wake me up at"), `_KNOWN_SITES`/`_GO_TO`, `_MAKE_A_FILE`
+guard, full-screen guard + canon exclusion, agenda "next class", ~45 seeds.
+**The near-miss question has manners** (`_ask_if_unsure`): `_THINKING_WORK`
+(write/study/explain/plan...) is never "did you mean", and a guess sharing no
+content word with the utterance is not asked ("help me study for my biology
+test" sat nearest `face_learn`). `REPEAT_RE`: "say that again" repeats the last
+reply before the brain or the model is consulted.
+
+### Wake check, five days on
+11 fires rejected, none of his lost that the log shows; one to watch:
+16:05 "Hey, uh" (0.77) then "Wow." (0.92) - if he reports a missed wake, that
+pair is the first place to look (the recogniser clipping the name).
 
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
