@@ -219,6 +219,14 @@ def main() -> int:
     check("...and restarts llama-server, at most once per ten minutes", "async def _restart_llm" in orch and "_last_llm_restart < 600" in orch and "await llama.stop()" in orch)
     check("...through a held task, and he is told", 'spawn(self._restart_llm(' in orch and "went off the rails" in orch)
 
+    print("\n-- the model is probed every ten idle minutes --")
+    check("a model that answers passes", O.Orchestrator._probe_verdict("OK", "stop"))
+    check("...even chatty", O.Orchestrator._probe_verdict("Certainly, sir: OK.", "stop"))
+    check("channel gibberish with no letters fails", not O.Orchestrator._probe_verdict("<|channel|>...<|end|>", "length"))
+    check("nothing at all fails", not O.Orchestrator._probe_verdict("", "length"))
+    check("every ten minutes, idle only, from the watchdog", "PROBE_EVERY = 600.0" in orch and "await self._probe_model()" in orch)
+    check("two failures in a row restart the server, one is let go", "_probe_failures >= 2" in orch and "model probe %d/2 failed" in orch)
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")

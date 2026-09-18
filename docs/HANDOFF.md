@@ -5107,6 +5107,30 @@ time was the one thing never stored. So:
   re-run needs Gemma at 16k+ (q8 KV was chosen to fit 12k; measure RAM
   first) and `chat_template_kwargs` thinking off is already set.
 
+### Round three (release 76) - the probe, the diet that was not worth it, and the GPU
+- **Model liveness probe**: every ten idle minutes the watchdog asks the side
+  slot for one word; two probes in a row with no letters in the reply
+  restart llama-server (`_probe_model`, `_probe_verdict`). /health never saw
+  this morning's gibberish; this would have, within twenty minutes.
+- **Tools-prompt diet: NOT done, on purpose.** The registry is 96 tools,
+  ~8.5k JSON chars rendered to ~7.8k tokens by gpt-oss's template; the
+  shortlist sends all of them at boot by design (eviction was measured worse,
+  see shortlist.py). A cold re-read happens about once a day; trimming
+  descriptions would save ~7 s once a day and every long description is a
+  behavioural rule that a suite once had to teach (enter_sleep_mode, play_media).
+  Not worth the regression risk on this GPU; irrelevant on a real one.
+- **The real lever is his OCuLink port.** The machine is a GMKtec NucBox K8
+  Plus (Ryzen 7 8845HS, 780M, 30 GB, USB4 + OCuLink PCIe 4.0 x4). Recommended
+  to him: Minisforum DEG1 dock + used RTX 3090 (24 GB) + 750 W ATX PSU;
+  NVIDIA for CUDA. Expected from today's numbers: prompt reading 300 ->
+  4,000+ tok/s, generation 24 -> ~100 t/s, the cold 13.5k tools prompt 37 s
+  -> ~3 s, Hunyuan minutes -> seconds. **When the card arrives:** a CUDA
+  build of llama.cpp at `C:\AI\llama.cpp` (keep the Vulkan one beside it),
+  `llm.server_binary` to it, drop `-t 8`, keep `-ngl 999`; vision server on
+  the GPU too (`vision.device`); then re-bench Gemma at 16k+ context, retry
+  `rewarm_history` with `--cache-ram 0`, and Hunyuan on CUDA. Houston's
+  llama-server on :8080 shares the machine: coordinate VRAM.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the

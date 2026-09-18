@@ -994,8 +994,44 @@ class Orchestrator:
             except Exception as e:
                 log.debug("device watch: %s", e)
 
+    PROBE_EVERY = 600.0
+    _probe_at = 0.0
+    _probe_failures = 0
+
+    @staticmethod
+    def _probe_verdict(text: str, finish: str | None) -> bool:
+        """True when the model is answering like a model: a few letters of
+        content. Gibberish channel markup with no content, or a budget spent
+        entirely on reasoning, is False."""
+        return bool(re.search(r"[A-Za-z]{2,}", text or ""))
+
+    async def _probe_model(self) -> None:
+        """Ask the side slot for one word. This morning (2026-09-18) llama-server
+        was alive and /health was fine while every answer was 4,000 tokens of
+        gibberish; the watchdog only ever checked the process."""
+        text, finish = "", None
+        try:
+            async for ch in local_llm.stream(
+                    [{"role": "user", "content": "Reply with the single word OK."}],
+                    max_tokens=120, sampling={"temperature": 0.0}):
+                text += ch.text or ""
+                if ch.done:
+                    finish = ch.finish_reason
+        except Exception as e:
+            log.info("model probe skipped: %s", e)
+            return
+        if self._probe_verdict(text, finish):
+            self._probe_failures = 0
+            return
+        self._probe_failures += 1
+        log.warning("model probe %d/2 failed: finish=%s text=%r", self._probe_failures, finish, text[:80])
+        if self._probe_failures >= 2:
+            self._probe_failures = 0
+            await self._restart_llm("two liveness probes in a row came back with nothing speakable")
+
     async def _llm_watchdog(self) -> None:
-        """Runtime self-healing: recover a dead llama-server without a restart."""
+        """Runtime self-healing: recover a dead llama-server without a restart,
+        and every ten idle minutes make sure the live one still answers."""
         while True:
             await asyncio.sleep(60)
             if self.sm.state not in (State.IDLE, State.SLEEPING, State.ERROR):
@@ -1003,6 +1039,11 @@ class Orchestrator:
             if await llama.healthy():
                 if self.sm.state == State.ERROR:
                     await self.sm.to(State.IDLE, force=True)
+                if (time.time() - self._probe_at >= self.PROBE_EVERY
+                        and self.sm.state in (State.IDLE, State.SLEEPING)
+                        and getattr(self, "_llm_ready", True)):
+                    self._probe_at = time.time()
+                    await self._probe_model()
                 continue
             log.warning("llama-server unhealthy — attempting recovery")
             if self.sm.state != State.ERROR:
