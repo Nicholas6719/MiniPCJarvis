@@ -229,7 +229,7 @@ def main() -> int:
 
     print("\n-- round five: awake releases, keyless-first search, a day memory --")
     rel = (ROOT.parent / "scripts" / "release.ps1").read_text(encoding="utf-8")
-    check("the release keeps the machine awake, display allowed to sleep", "SetThreadExecutionState([uint32]0x80000001)" in rel)
+    check("the release keeps the machine awake, display allowed to sleep", "SetThreadExecutionState([uint32]2147483649)" in rel)
     from tools import builtin as BI
     calls = []
 

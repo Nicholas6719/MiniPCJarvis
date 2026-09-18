@@ -423,13 +423,18 @@ async def _ddg_search(query: str, count: int) -> dict:
     headers = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                               "AppleWebKit/537.36 (KHTML, like Gecko) "
                               "Chrome/126.0.0.0 Safari/537.36")}
+    # HTTP/1.1 ON PURPOSE: with http2=True DuckDuckGo answered 200 with a page
+    # that had no results at all (every call, release 77, 2026-09-18); the same
+    # request over HTTP/1.1 returns eleven. Ads (result--ad) are skipped.
     async with httpx.AsyncClient(timeout=12, follow_redirects=True,
-                                 headers=headers, http2=True) as c:
+                                 headers=headers) as c:
         r = await c.post("https://html.duckduckgo.com/html/", data={"q": query})
         r.raise_for_status()
     doc = _html.fromstring(r.text)
     results = []
     for res in doc.cssselect("div.result"):
+        if "result--ad" in (res.get("class") or ""):
+            continue
         a = res.cssselect("a.result__a")
         sn = res.cssselect(".result__snippet")
         if not a:

@@ -32,7 +32,7 @@ $log = { param($m) Write-Host ("[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m) }
 # awake for the life of this process; it clears itself when the script exits.
 try {
     Add-Type -Namespace Jarvis -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'
-    [void][Jarvis.Power]::SetThreadExecutionState([uint32]0x80000001)
+    [void][Jarvis.Power]::SetThreadExecutionState([uint32]2147483649)
     & $log "keeping the machine awake for the release (display may still sleep)"
 } catch { & $log "could not set keep-awake: $($_.Exception.Message)" }
 
