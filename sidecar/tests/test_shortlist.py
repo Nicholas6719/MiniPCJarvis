@@ -62,7 +62,7 @@ async def main() -> int:
     for m in (builtin, memory_tools, windows_tools, web_tools, task_tools,
               vision_tools, browser_tools, file_tools, weather, input_tools):
         m.register_all()
-    total = len(registry._tools)
+    total = len(registry.schemas())      # what the model can see: underscore tools are internal
     await shortlist.build(registry)
     check("shortlist built", shortlist._matrix is not None)
 
