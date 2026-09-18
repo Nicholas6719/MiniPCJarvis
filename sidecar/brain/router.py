@@ -124,7 +124,9 @@ _CANON = [
      r"(?:the\s+|my\s+)?[a-z0-9 .+#-]{2,40}(?:\s+window|\s+app)?$", "switch to APP"),
     (r"\b(?:open|show|browse|go to|list|look at|pull up|what's (?:in|on))\b.*\b(?:desktop|documents|docs|downloads|pictures|photos)\b(?!\s+(?:of|from)\b).*", "open my FOLDER folder"),
     (r"\b(?:find|look for|locate|where is|where's)\b.*\b(?:file|folder|document|resume|screenshot|invoice|report|notes?|photo|picture)s?\b(?!\s+(?:of|from)\b).*", "find the file called NAME"),
-    (r".*\b(?:file|folder|document)s?\s+(?:called|named|with|containing)\b.*", "find the file called NAME"),
+    # ...unless he is asking to READ it: "read me the document called outline"
+    # is doc_read, and folding it here made "read me" answer "Found it" (2026-09-17).
+    (r"(?!.*\b(?:read|what does)\b).*\b(?:file|folder|document)s?\s+(?:called|named|with|containing)\b.*", "find the file called NAME"),
     (r"\bsearch (?:my )?(?:desktop|documents|downloads|pictures) for\b.*", "find the file called NAME"),
     # "...in my browser" decides WHERE the pictures appear, so it must survive
     # the rewrite. Folded in, "show me pictures of X in my browser" became the

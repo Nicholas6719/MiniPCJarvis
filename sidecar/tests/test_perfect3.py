@@ -128,6 +128,30 @@ def main() -> int:
           K.say_reminder({"text": "your timer is up", "minutes_from_now": 10}, {"due": "x"}) == "Timer set for 10 minutes.")
     check("...and cancelled as one", K.say_unremind({"query": "timer"}, {"cancelled": 1, "texts": ["your timer is up"]}) == "Timer cancelled, sir.")
 
+    print("\n-- round four: the re-check on release 70 --")
+    today = dt.date.today()
+    nf = K.slots_date("what's the date next friday")
+    d = dt.date.fromisoformat(nf["date"])
+    check("'next friday' is a Friday, at least a week out", d.weekday() == 4 and (d - today).days >= 7, nf)
+    tm = K.slots_date("what day is it tomorrow")
+    check("tomorrow is tomorrow", tm and tm["date"] == (today + dt.timedelta(days=1)).isoformat(), tm)
+    xm = K.slots_date("how many days until christmas")
+    check("days until christmas is counted", xm and xm["kind"] == "until" and xm["date"].endswith("-12-25"), xm)
+    check("...and spoken with the day", K.say_date(xm, {}).startswith(f"{(dt.date.fromisoformat(xm['date']) - today).days} days until christmas"))
+    check("a plain 'what's the date' is untouched", K.say_date(K.slots_date("what's the date"), {}).startswith("It's "))
+    check("a date he means and it cannot work out goes to the model", K.slots_date("how many days until my birthday") is None)
+    for said, want in (("call mom", None), ("phone my dentist", None), ("text my mom that i will be late", None),
+                       ("text me the summary", {}), ("send that to my phone", {}), ("send it to me", {})):
+        check(f"to_phone {said!r} -> {'refused' if want is None else 'his phone'}", K.slots_to_phone(said) == want)
+    check("'read me the document called X' names X", K.slots_doc_read("read me the document called outline") == {"path": "outline"})
+    check("...and reads it rather than finding it", K.say_doc_read({"path": "x"}, {"text": "Hello there."}) == "Hello there.")
+    from audio.speech_text import tidy_reply
+    check("the model's END marker is not spoken", tidy_reply("consequences【END】") == "consequences")
+    check("a lone 'Sir.' becomes ', sir.'", tidy_reply("your Windows assistant. Sir.") == "your Windows assistant, sir.")
+    mt = (ROOT / "tools" / "memory_tools.py").read_text(encoding="utf-8")
+    check("recall has a relevance floor", ">= 0.30" in mt and "nothing stored about that" in mt)
+    check("the general hint APPENDS to the pronoun hint", 'if general_hint else "") + (' in src)
+
     print("\n-- the routes --")
     from brain.router import brain
 

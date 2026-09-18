@@ -505,6 +505,22 @@ def say_press(sl: dict, res: dict) -> str:
     return f"Pressed {key}." if key else "Done, sir."
 
 
+_NOT_TO_PHONE = re.compile(
+    r"\b(?:call|ring|dial|facetime)\b"
+    r"|\b(?:text|message|tell|email|notify|phone|write to)\s+(?:my\s+|your\s+|the\s+)?"
+    r"(?:mom|dad|mother|father|mum|parents|brother|sister|wife|husband|girlfriend|boyfriend|friend|"
+    r"professor|teacher|boss|doctor|dentist|everyone|someone|somebody|them|him|her)\b", re.I)
+
+
+def slots_to_phone(t: str) -> dict | None:
+    """HIS phone, for something that exists. "Call mom" went here as a reflex and
+    texted HIM "Sent to your phone, sir." (2026-09-17 20:10). Calling anyone, or
+    messaging anyone but him, is not this and is not anything."""
+    if _NOT_TO_PHONE.search(t or ""):
+        return None
+    return {}
+
+
 def say_to_phone(_s: dict, res: dict) -> str:
     if "error" in res:
         return res["error"]
@@ -1288,6 +1304,30 @@ def say_note_take(slots: dict, res: dict) -> str:
     return str(res.get("spoken") or f"Noted in {slots.get('name')}, sir.")
 
 
+_DOC_READ = re.compile(
+    r"\b(?:read(?: me)?|open and read|what does)\s+(?:me\s+)?(?:the\s+|my\s+)?"
+    r"(?:word\s+)?(?:document|doc|docx|file|note|essay|spreadsheet|sheet|pdf|paper)\s+"
+    r"(?:called|named|titled)\s+(?P<name>.+?)(?:\s+say)?\s*[?.!]*$", re.I)
+
+
+def slots_doc_read(t: str) -> dict | None:
+    m = _DOC_READ.search(t or "")
+    return {"path": m.group("name").strip(" '\"")} if m else None
+
+
+def say_doc_read(slots: dict, res: dict) -> str:
+    """'Read me' means read it, not find it (2026-09-17: 'Found it: outline.docx')."""
+    if res.get("error"):
+        return str(res["error"])
+    text = str(res.get("text") or "").strip()
+    if not text:
+        return f"{slots.get('path')} is empty, sir."
+    words = text.split()
+    if len(words) > 220:
+        return " ".join(words[:220]) + "... and it goes on, sir - that's the first part."
+    return text
+
+
 def say_time(_: dict, __: dict) -> str:
     return "It's " + dt.datetime.now().strftime("%I:%M %p").lstrip("0") + "."
 
@@ -1430,10 +1470,90 @@ def say_who_am_i(_: dict, __: dict) -> str:
     return "You're Nicholas."
 
 
-def say_date(_: dict, __: dict) -> str:
-    d = dt.datetime.now()
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september",
+           "october", "november", "december")
+
+
+def _holiday(name: str, today: "dt.date") -> "dt.date | None":
+    y = today.year
+    fixed = {"christmas": (12, 25), "christmas eve": (12, 24), "halloween": (10, 31), "new year": (1, 1),
+             "new years": (1, 1), "new year's": (1, 1), "valentine's day": (2, 14), "valentines day": (2, 14),
+             "the fourth of july": (7, 4), "july 4th": (7, 4), "independence day": (7, 4), "st patrick's day": (3, 17)}
+    if name in fixed:
+        m, d = fixed[name]
+        when = dt.date(y, m, d)
+        return when if when >= today else dt.date(y + 1, m, d)
+    if name == "thanksgiving":
+        def tg(year):
+            first = dt.date(year, 11, 1)
+            return first + dt.timedelta(days=(3 - first.weekday()) % 7 + 21)
+        when = tg(y)
+        return when if when >= today else tg(y + 1)
+    return None
+
+
+def slots_date(t: str) -> dict | None:
+    """Today's date, or a date he can work out from it: next Friday, ten days
+    from now, how long until Christmas. 'What's the date next Friday' came
+    back a TUESDAY from the model (2026-09-17). Calendars are arithmetic."""
+    low = (t or "").lower()
+    today = dt.date.today()
+    m = re.search(r"\b(next|this|coming)\s+(" + "|".join(_WEEKDAYS) + r")\b", low)
+    if m:
+        wd = _WEEKDAYS.index(m.group(2))
+        ahead = (wd - today.weekday()) % 7 or 7
+        if m.group(1) == "next" and ahead < 7:
+            ahead += 7                     # "next Friday" on a Thursday is not tomorrow
+        return {"kind": "date", "date": (today + dt.timedelta(days=ahead)).isoformat(), "label": f"{m.group(1)} {m.group(2)}"}
+    if re.search(r"\btomorrow\b", low):
+        return {"kind": "date", "date": (today + dt.timedelta(days=1)).isoformat(), "label": "tomorrow"}
+    m = re.search(r"\b(?:in|from now|from today)\b.*?\b(\d{1,3}|[a-z]+)\s+(day|week)s?\b|\b(a|one)\s+(week|day)\s+from\s+(?:today|now)", low)
+    if m:
+        n = _number(m.group(1)) if m.group(1) else 1
+        unit = m.group(2) or m.group(4)
+        if n is not None:
+            days = n * (7 if unit.startswith("week") else 1)
+            return {"kind": "date", "date": (today + dt.timedelta(days=days)).isoformat(), "label": f"in {n} {unit}{'s' if n != 1 else ''}"}
+    m = re.search(r"\b(?:how many days|how long|days)\b.*?\b(?:until|till|to|before|left until)\s+(.+?)\s*[?.!]*$", low)
+    if m:
+        target = m.group(1).strip()
+        when = _holiday(target, today)
+        if when is None:
+            md = re.search(r"\b(" + "|".join(_MONTHS) + r")\s+(\d{1,2})(?:st|nd|rd|th)?\b|\b(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(" + "|".join(_MONTHS) + r")\b", target)
+            if md:
+                mon = _MONTHS.index(md.group(1) or md.group(4)) + 1
+                day = int(md.group(2) or md.group(3))
+                try:
+                    when = dt.date(today.year, mon, day)
+                    if when < today:
+                        when = dt.date(today.year + 1, mon, day)
+                except ValueError:
+                    when = None
+        if when is None:
+            return None                    # a date he means and I cannot work out: the model's
+        return {"kind": "until", "date": when.isoformat(), "label": target}
+    return slots_clock(t)
+
+
+def _spoken_date(d: "dt.date") -> str:
     suf = "th" if 11 <= d.day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(d.day % 10, "th")
-    return f"It's {d.strftime('%A, %B')} {d.day}{suf}."
+    return f"{d.strftime('%A, %B')} {d.day}{suf}"
+
+
+def say_date(slots: dict, __: dict) -> str:
+    kind = (slots or {}).get("kind")
+    if kind == "date":
+        d = dt.date.fromisoformat(slots["date"])
+        return f"{slots['label'].capitalize()} is {_spoken_date(d)}."
+    if kind == "until":
+        d = dt.date.fromisoformat(slots["date"])
+        n = (d - dt.date.today()).days
+        if n == 0:
+            return "That's today, sir."
+        return f"{n} day{'s' if n != 1 else ''} until {slots['label']} - {_spoken_date(d)}."
+    d = dt.datetime.now()
+    return f"It's {_spoken_date(d.date())}."
 
 
 def say_volume(slots: dict, res: dict) -> str:
@@ -2586,6 +2706,11 @@ SKILLS: list[Skill] = [
         "jot this down: call the registrar", "write this down: locker combination is on the card",
         "take a note: the midterm covers chapters one through five", "take a quick note: bring the charger"],
         slots=slots_note_take, speak=say_note_take),
+    Skill("doc_read", "read_document", [
+        "read me the document called outline", "read me my note called groceries",
+        "what does the document called plan say", "read the spreadsheet called schedule",
+        "read me the essay titled causes", "read me the doc called study plan"],
+        slots=slots_doc_read, speak=say_doc_read),
     Skill("time", None, [
         "what time is it", "what's the time", "tell me the time", "do you have the time",
         "current time", "time check", "what time is it right now", "got the time",
@@ -2594,8 +2719,11 @@ SKILLS: list[Skill] = [
     Skill("date", None, [
         "what's the date", "what day is it", "what is today's date", "what day is it today",
         "what's today", "date please", "which day is it", "what day of the week is it",
-        "what is the date today", "tell me the date", "what's the day today"],
-        slots=slots_clock, speak=say_date),
+        "what is the date today", "tell me the date", "what's the day today",
+        "what's the date next friday", "what date is this saturday", "what day is it tomorrow",
+        "how many days until christmas", "how many days until halloween", "how many days till thanksgiving",
+        "what's the date in ten days", "how many days until october 25th", "what's the date a week from today"],
+        slots=slots_date, speak=say_date),
     # The camera. Three skills, not one, because "toggle" and "turn it off" mean
     # different things and he should not have to guess which word works. The
     # toggle seeds are his own phrasing: "toggle camera view mode".
@@ -3394,7 +3522,7 @@ SKILLS: list[Skill] = [
         "send it to my phone", "send that to my phone", "send it to me",
         "send that to me", "send it through telegram", "text it to me",
         "send me that on telegram", "put that on my phone", "send it over"],
-        speak=say_to_phone),
+        slots=slots_to_phone, speak=say_to_phone),
     Skill("article", "open_article", [
         "give me the article", "open the article", "pull up the article",
         "show me the source", "open that story", "pull it up",

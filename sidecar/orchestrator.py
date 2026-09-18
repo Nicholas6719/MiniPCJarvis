@@ -2022,8 +2022,11 @@ class Orchestrator:
                 level = None
             if level:
                 self._no_tools_first = level == "sure"
-                general_hint = ("[Note: this is a general knowledge or creative question - answer from "
-                                "your own knowledge right away; do not search or use tools for it.]")
+                # APPEND, never overwrite: the pronoun hint above was being lost
+                # here, and "how far apart are they" kept asking where HE was.
+                general_hint = ((general_hint + " ") if general_hint else "") + (
+                    "[Note: this is a general knowledge or creative question - answer from "
+                    "your own knowledge right away; do not search or use tools for it.]")
                 await bus.emit("reflex", skill="general", tool=None, args={},
                                confidence=brain._last[1],
                                mode="answer_directly" if level == "sure" else "answer_hint")

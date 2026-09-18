@@ -86,7 +86,20 @@ def strip_markdown(text: str) -> str:
     return _WS.sub(" ", t).strip()
 
 
+_MODEL_MARKERS = re.compile(r"【[^】]{0,40}】|<\|[a-z_]+\|>|\bEND\b\s*$")
+_LONE_SIR = re.compile(r"([.!?])\s+Sir\.\s*$")
+
+
+def tidy_reply(text: str) -> str:
+    """The model's own markers, and a 'Sir.' standing as a sentence of its own
+    (an outline ended '...consequences【END】'; 'your Windows assistant. Sir.')."""
+    t = _MODEL_MARKERS.sub("", text or "").rstrip()
+    t = _LONE_SIR.sub(r", sir.", t)
+    return t
+
+
 def clean_for_speech(text: str) -> str:
+    text = tidy_reply(text)
     # The model writes "8,848 meters" and "212 °F" with a NARROW
     # NO-BREAK SPACE, and "Mount Everest" too. Neither the width rule
     # below nor the voice knows the character; the plain space is what it means.
