@@ -1005,7 +1005,7 @@ class Orchestrator:
         # asked for OK, a working model says OK in a short reply; gibberish is
         # long and never quite says it
         plain = re.sub(r"<\|[^|>]*\|>", " ", text or "")
-        return len(plain) < 200 and bool(re.search(r"(?:ok|okay)", plain, re.I))
+        return len(plain) < 200 and bool(re.search(r"\b(?:ok|okay)\b", plain, re.I))
 
     async def _probe_model(self) -> None:
         """Ask the side slot for one word. This morning (2026-09-18) llama-server
