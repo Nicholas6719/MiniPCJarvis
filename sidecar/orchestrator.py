@@ -676,7 +676,16 @@ class Orchestrator:
                                                getattr(self, "_last_wake_ack", None))
         return ack
 
+    def _cancel_history_rewarm(self) -> None:
+        t = self._rewarm_task
+        if t is not None and not t.done():
+            t.cancel()
+
     def _newer_turn_started(self) -> None:
+        self._cancel_history_rewarm()
+        self._newer_turn_started_inner()
+
+    def _newer_turn_started_inner(self) -> None:
         """Something newer took over (a barge-in, a fresh capture) without being
         a turn task of its own yet."""
         self._turn_gen += 1
@@ -1021,6 +1030,52 @@ class Orchestrator:
                 return
         self._warmed_block = shortlist.block_version
         log.info("prompt cache warmed (tools + no-tools prefixes)")
+
+    _rewarm_task: "asyncio.Task | None" = None
+
+    def _schedule_history_rewarm(self) -> None:
+        """Called at the end of every turn that added to the history."""
+        if not config.get("llm", "rewarm_history", default=True):
+            return
+        t = self._rewarm_task
+        if t is not None and not t.done():
+            t.cancel()
+        self._rewarm_task = spawn(self._rewarm_history(), name="history-rewarm")
+
+    async def _rewarm_history(self) -> None:
+        """Read the conversation so far into BOTH prompt shapes while he is idle.
+
+        Measured on release 73 (2026-09-18): a model turn on the shape the last
+        turn used re-processed ~300 tokens (1.1-1.6 s to the first word); one
+        on the OTHER shape re-processed 760-1,008 (2.5-3.1 s), because each
+        shape has its own slot and cache. At ~300 tok/s of prompt processing
+        the uncached tail is the wait. Paid here, one token per shape, two
+        seconds after the turn, only while idle; cancelled by the next turn.
+        """
+        await asyncio.sleep(2.0)
+        try:
+            if self.sm.state not in (State.IDLE, State.SLEEPING) or not getattr(self, "_llm_ready", True):
+                return
+            hist = [m for m in self._history[self._hist_base:]
+                    if m.get("role") in ("user", "assistant") and m.get("content")]
+            if not hist:
+                return
+            sysmsg = {"role": "system", "content": system_prompt(pinned_block(memory.list_pinned()))}
+            tail = {"role": "user", "content": "hi"}
+            tools = shortlist.current_block(registry)
+            t0 = time.time()
+            for tl, slot in ((tools, 0), (None, 1)):
+                if self.sm.state not in (State.IDLE, State.SLEEPING):
+                    return
+                if tl is None and slot == 0:
+                    continue
+                async for _ in local_llm.stream([sysmsg, *hist, tail], tools=tl, max_tokens=1, slot=slot):
+                    pass
+            log.info("history re-warmed in both shapes (%d messages) in %.1f s", len(hist), time.time() - t0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("history re-warm skipped: %s", e)
 
     async def _rewarm_tools_shape(self) -> None:
         """Re-read the tools-shape prefix in the background when the block changed.
@@ -1679,6 +1734,7 @@ class Orchestrator:
             return
         self._begin_turn()
         await self.sm.to(State.PROCESSING, force=True)
+        self._cancel_history_rewarm()
         self.metrics.begin()
         await bus.emit("transcript", role="user", text=text, source="text")
         try:
@@ -1799,6 +1855,7 @@ class Orchestrator:
                 return
             self._begin_turn()
             await self.sm.to(State.PROCESSING, force=True)
+            self._cancel_history_rewarm()
             self.metrics.begin()
             self._voice_heard()
             await bus.emit("transcript", role="user", text=spoken)
@@ -1810,6 +1867,7 @@ class Orchestrator:
         self._begin_turn()
         await self.sm.to(State.PROCESSING)
         t_start = time.time()
+        self._cancel_history_rewarm()
         self.metrics.begin()
         already = self._heard_text          # transcribed while judging the pause
         self._heard_text = None
@@ -2195,6 +2253,8 @@ class Orchestrator:
                        breakdown=breakdown, text=strip_markdown(full_reply or ""))
         # The LLM path, same rule: a barge-in mid-reply has already moved on.
         await self._settle_idle(State.ERROR)
+        if full_reply:
+            self._schedule_history_rewarm()
 
     _FILLERS = ["Let me see.", "One moment.", "Let me think.", "Hmm, let me check.", "Just a second."]
     _TOOL_FILLERS = {"web_search": ["Searching.", "Let me look that up.", "Checking the web."],
@@ -2602,6 +2662,8 @@ class Orchestrator:
                 await bus.emit("conversation", armed=False)
             elif self._turn_is_current():
                 await self.sm.to(State.IDLE, force=True)
+        if reply and label not in ("sleep", "correction", "teach"):
+            self._schedule_history_rewarm()
 
     async def ask_confirmation(self, tool: str, args: dict) -> None:
         """A risk-gated tool is waiting on the user: ask out loud AND listen for a spoken
