@@ -839,6 +839,7 @@ class Orchestrator:
 
     async def start(self) -> None:
         registry.confirm_hook = self.ask_confirmation
+        local_llm.quiet_hook = self._quiet_moment
         registry.confirm_done_hook = self.confirmation_answered
         await self.sm.to(State.STARTING)
         await bus.emit("boot", summary="initializing subsystems")
@@ -1030,6 +1031,21 @@ class Orchestrator:
                 return
         self._warmed_block = shortlist.block_version
         log.info("prompt cache warmed (tools + no-tools prefixes)")
+
+    async def _quiet_moment(self, settle: float = 4.0) -> None:
+        """Return once he has been idle for `settle` seconds straight. Given to
+        local_llm.quiet_hook so background side calls never share the GPU
+        with one of his answers."""
+        quiet_since = None
+        while True:
+            idle = self.sm.state in (State.IDLE, State.SLEEPING)
+            if idle:
+                quiet_since = quiet_since or time.time()
+                if time.time() - quiet_since >= settle:
+                    return
+            else:
+                quiet_since = None
+            await asyncio.sleep(0.5)
 
     _rewarm_task: "asyncio.Task | None" = None
 

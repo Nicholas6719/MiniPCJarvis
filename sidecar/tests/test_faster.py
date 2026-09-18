@@ -180,6 +180,38 @@ def main() -> int:
     check("held by a reference, never a bare task", 'spawn(self._rewarm_history(), name="history-rewarm")' in orch)
     check("switchable in config", 'config.get("llm", "rewarm_history", default=True)' in orch)
 
+    print("\n-- background side calls wait for a quiet moment --")
+    from llm import provider as P
+    import brain.facts as F
+    import newsroom as N
+    import market_intel as MI
+    check("the fact classifier waits", "await wait_for_quiet()" in (ROOT / "brain" / "facts.py").read_text(encoding="utf-8"))
+    check("the newsroom waits", "await wait_for_quiet()" in (ROOT / "newsroom.py").read_text(encoding="utf-8"))
+    check("the market story waits", "await wait_for_quiet()" in (ROOT / "market_intel.py").read_text(encoding="utf-8"))
+    check("a turn's own calls do not", "wait_for_quiet" not in (ROOT / "tools" / "fabrication.py").read_text(encoding="utf-8")
+          and "wait_for_quiet" not in (ROOT / "reminder_voice.py").read_text(encoding="utf-8"))
+    check("no hook = no wait", asyncio.run(P.wait_for_quiet()) is None)
+    calls = []
+
+    async def slow_hook():
+        calls.append(1)
+        await asyncio.sleep(0.05)
+
+    P.local_llm.quiet_hook = slow_hook
+    asyncio.run(P.wait_for_quiet())
+    check("the hook is awaited", calls == [1])
+
+    async def stuck_hook():
+        await asyncio.sleep(10)
+
+    P.local_llm.quiet_hook = stuck_hook
+    t0 = time.time()
+    asyncio.run(P.wait_for_quiet(max_wait=0.2))
+    check("...and bounded: a stuck hook does not hold the call forever", time.time() - t0 < 2)
+    P.local_llm.quiet_hook = None
+    check("the orchestrator installs the hook", "local_llm.quiet_hook = self._quiet_moment" in orch)
+    check("...which returns after four idle seconds straight", "def _quiet_moment(self, settle: float = 4.0)" in orch and "quiet_since = None" in orch)
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")

@@ -95,8 +95,9 @@ async def _read(url: str) -> str:
 
 
 async def _think(headline: str, body: str) -> str:
-    from llm.provider import local_llm
+    from llm.provider import local_llm, wait_for_quiet
     out = ""
+    await wait_for_quiet()            # never beside one of his turns
     async for ch in local_llm.stream(
             [{"role": "user", "content": PROMPT.format(headline=headline,
                                                        body=body[:FETCH_CHARS])}],

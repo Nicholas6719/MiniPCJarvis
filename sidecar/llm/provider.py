@@ -2,6 +2,7 @@
 cloud providers slot in behind the same interface later."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -38,6 +39,10 @@ class LocalLLM:
     # The orchestrator files it with the turn (2026-09-18) - the model's
     # time is the only part of a turn that was still a guess.
     last_call: dict = {}
+
+    # BACKGROUND CALLS WAIT THEIR TURN. Set by the orchestrator: a coroutine
+    # that returns once he has been idle for a few seconds. See wait_for_quiet.
+    quiet_hook = None
 
     async def stream(
         self,
@@ -181,3 +186,20 @@ class LocalLLM:
 
 
 local_llm = LocalLLM()
+
+
+async def wait_for_quiet(max_wait: float = 90.0) -> None:
+    """For BACKGROUND side calls only (the fact classifier, the newsroom, the
+    market story): wait until he has been idle a few seconds, bounded. A
+    fact-classifier call three seconds after a search halved the next answer's
+    generation speed (13.5 vs 24 t/s, release 74, 2026-09-18). Calls that
+    belong to a turn must never use this."""
+    hook = getattr(local_llm, "quiet_hook", None)
+    if hook is None:
+        return
+    try:
+        await asyncio.wait_for(hook(), timeout=max_wait)
+    except asyncio.TimeoutError:
+        log.info("side call waited %.0f s for a quiet moment; going ahead", max_wait)
+    except Exception:
+        log.debug("quiet hook failed", exc_info=True)

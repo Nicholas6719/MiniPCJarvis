@@ -173,8 +173,9 @@ class FactStore:
         return False
 
     async def _classify_timeless(self, q: str, a: str) -> bool:
-        from llm.provider import local_llm
+        from llm.provider import local_llm, wait_for_quiet
         out = ""
+        await wait_for_quiet()        # never beside one of his turns
         try:
             # gpt-oss reasons before it answers: give it room, or the YES/NO
             # gets truncated away and everything reads as NO

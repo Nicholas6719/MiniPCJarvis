@@ -322,8 +322,9 @@ class MarketIntel:
         if heads:
             lines = "\n".join(f"- {h['headline']} ({h['source']})" for h in heads)
             try:
-                from llm.provider import local_llm
+                from llm.provider import local_llm, wait_for_quiet
                 text = ""
+                await wait_for_quiet()    # never beside one of his turns
                 async for ch in local_llm.stream(
                         [{"role": "user", "content": STORY_PROMPT.format(lines=lines)}],
                         max_tokens=160, sampling={"temperature": 0.0}):
