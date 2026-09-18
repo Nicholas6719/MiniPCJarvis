@@ -49,6 +49,14 @@ DEFAULTS: dict[str, Any] = {
         # forecast when asked). Set to "gemma-3-4b" to try it again, with a
         # smaller context on the big model or a ~1B draft.
         "draft_model": "",
+        # Re-read the conversation into both prompt shapes after every turn
+        # (orchestrator._rewarm_history). OFF: on release 74 (2026-09-18) it
+        # made llama-server's host prompt cache save/restore a slot on every
+        # rewarm ("making room for prompt cache entry" x87) and the next real
+        # question generated 4,000 tokens of gibberish; every model turn after
+        # it did the same until the server was restarted. Worth ~1.5 s on a
+        # shape switch; not worth that. Re-try only with --cache-ram 0 measured.
+        "rewarm_history": False,
         # Sampling was never sent, so llama-server's chat defaults applied (temp 0.8,
         # top_p 0.95) -- creative-writing sampling on an assistant whose job is mostly to
         # state facts. Measured over 20 verifiable questions x 4 runs, word-for-word

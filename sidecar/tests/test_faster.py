@@ -212,6 +212,13 @@ def main() -> int:
     check("the orchestrator installs the hook", "local_llm.quiet_hook = self._quiet_moment" in orch)
     check("...which returns after four idle seconds straight", "def _quiet_moment(self, settle: float = 4.0)" in orch and "quiet_since = None" in orch)
 
+    print("\n-- after the release-74 runaway --")
+    from config import DEFAULTS as _D
+    check("the rewarm is off by default", _D["llm"].get("rewarm_history") is False)
+    check("a runaway round is recognised by its token count", "def _runaway_round(self)" in orch and ">= 600" in orch)
+    check("...and restarts llama-server, at most once per ten minutes", "async def _restart_llm" in orch and "_last_llm_restart < 600" in orch and "await llama.stop()" in orch)
+    check("...through a held task, and he is told", 'spawn(self._restart_llm(' in orch and "went off the rails" in orch)
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")

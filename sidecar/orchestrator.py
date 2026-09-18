@@ -2384,6 +2384,30 @@ class Orchestrator:
         return reply
 
     _last_offer_at = 0.0
+    _last_llm_restart = 0.0
+
+    def _runaway_round(self) -> bool:
+        """Hundreds of generated tokens and nothing speakable is a broken model,
+        not a short answer (release 74, 2026-09-18: 4,000 tokens of channel
+        markup per turn until llama-server was restarted)."""
+        lc = getattr(local_llm, "last_call", {}) or {}
+        return int(lc.get("gen_tokens") or 0) >= 600
+
+    async def _restart_llm(self, why: str) -> None:
+        """Restart llama-server in the background, at most once per ten minutes."""
+        if time.time() - self._last_llm_restart < 600:
+            return
+        self._last_llm_restart = time.time()
+        log.error("restarting llama-server: %s", why)
+        await bus.emit("error", summary="language model went off the rails - restarting it")
+        try:
+            await llama.stop()
+            ok = await llama.ensure()
+            log.info("llama-server restarted: %s", "ok" if ok else "FAILED")
+            if ok:
+                spawn(self._warm_prompts(), name="warm-after-restart")
+        except Exception:
+            log.exception("llama-server restart failed")
 
     async def _offer_overheard(self, text: str) -> None:
         """'My chemistry final is on the 25th, what should I study?' - the
@@ -3189,6 +3213,11 @@ class Orchestrator:
                 if not SPEAKABLE.search(full_text):
                     # never end a turn in silence (a "." is silence)
                     fallback = "I'm afraid I lost that. Would you say it again?"
+                    if self._runaway_round():
+                        fallback = "The language model went off the rails, sir. I'm restarting it; give me a minute."
+                        spawn(self._restart_llm("runaway round: %d tokens, nothing speakable"
+                                                % int((local_llm.last_call or {}).get("gen_tokens") or 0)),
+                              name="llm-restart")
                     await bus.emit("assistant_delta", text=fallback)
                     await speak_queue.put(clean_for_speech(fallback))
                     return fallback

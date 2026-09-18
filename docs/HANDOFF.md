@@ -5056,6 +5056,48 @@ time was the one thing never stored. So:
 - The correction loop he asked for ALREADY EXISTS (`_correct`: unlearn the
   misfire, learn the corrected sentence, re-run) - verified, not rebuilt.
 
+### Round two (releases 73-75) - the timing line paid off, and bit
+- **Release 73** installed but its research suite failed on the suite's own
+  length floor (a correct 39-character answer called a shrug, third time);
+  floor is 24 now. Two earlier attempts died on `build_sidecar.cmd` being
+  LF-only (a Git-Bash `sed -i` had rewritten it; cmd.exe needs CRLF - check
+  `git ls-files --eol`).
+- **The `llm:` line on 73/74** said where a model turn's time goes: prompt
+  processing ~300 tok/s, generation ~24 t/s, reasoning 0-400 chars. A turn on
+  the shape the last turn used re-processed ~300 tokens (1.1-1.6 s to the
+  first word); one on the OTHER shape 760-1,000 (2.5-3.1 s) because each
+  shape has its own slot and cache. Search turns carry ~600 tokens of new
+  results whatever happens.
+- **`_rewarm_history`** (release 74): read the plain history into both slots,
+  one token each, two seconds after a turn. It WORKED (general turns fell to
+  150-350 uncached tokens) and then, at the first bench question after the
+  suites, llama-server's host prompt cache had been thrashing ("making room
+  for prompt cache entry, removing oldest entry (236 MiB)" on every slot-1
+  rewarm, 87 times) and the model generated 4,000 tokens of channel-markup
+  gibberish on every turn (35 s of nothing, then "I lost that") until the
+  server was restarted. **`llm.rewarm_history` is OFF by default**; the code
+  stays for a measured retry with `--cache-ram 0`. His live config carries
+  the flag as false.
+- **Self-heal (release 75)**: a round that generates >= 600 tokens with nothing
+  speakable is a runaway; `_restart_llm` stops and re-ensures llama-server
+  (once per ten minutes), re-warms, and he is told plainly. The sidecar had
+  no way to notice a live-but-broken model before.
+- **Side calls wait for a quiet moment**: the fact classifier three seconds
+  after a search halved the next answer's generation (13.5 vs 24 t/s). The
+  classifier, the newsroom read and the market story now `await
+  wait_for_quiet()` (four idle seconds, bounded 90 s). A turn's own calls
+  (part generation, reminder phrasing) never do.
+- **Recovery, by hand, this morning**: `jarvis_relaunch.cmd` only STARTS
+  jarvis.exe; with the app already up, Tauri's single instance handed off and
+  left an orphan sidecar + a second llama-server. Killed those by PID, then
+  killed the wedged llama-server by PID and let the sidecar's supervisor bring
+  it back. Never blanket-kill llama-server (Houston's).
+- The live probe now always unmutes (`finally`), prints UTF-8, and reads the
+  newest metrics row; a print crash had left the microphone off for an hour.
+- **Model bench**: `scratchpad/model_bench.py` exists (switch via `PATCH
+  /config {llm:{active_model}}`, restores the original in `finally`); the
+  first run hit the runaway and was stopped. Not yet measured.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the
