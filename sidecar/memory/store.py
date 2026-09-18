@@ -108,14 +108,63 @@ class MemoryStore:
             log.warning('rollback failed on the shared connection', exc_info=True)
 
     # ---- turn-path instrumentation (brain roadmap stage 1) --------------------
-    def log_turn_stat(self, path: str, skill: str | None, latency_ms: int) -> None:
+    def log_turn_stat(self, path: str, skill: str | None, latency_ms: int,
+                      first_ms: int | None = None, prompt_tokens: int | None = None,
+                      gen_tokens: int | None = None, reasoning_chars: int | None = None) -> None:
+        """latency_ms is the WHOLE turn, speech included - a long weather
+        sentence 'takes 4.5 s' with its first word at 160 ms. first_ms is the
+        time to that first word, the number that is actually felt; the token
+        counts say what the model spent (2026-09-18)."""
         try:
-            self.db.execute("INSERT INTO turn_stats (ts, path, skill, latency_ms) VALUES (?,?,?,?)",
-                            (time.time(), path, skill, latency_ms))
+            self._turn_stats_columns()
+            self.db.execute("INSERT INTO turn_stats (ts, path, skill, latency_ms, first_ms, "
+                            "prompt_tokens, gen_tokens, reasoning_chars) VALUES (?,?,?,?,?,?,?,?)",
+                            (time.time(), path, skill, latency_ms, first_ms, prompt_tokens,
+                             gen_tokens, reasoning_chars))
             self.db.commit()
         except Exception:
             log.exception("turn stat insert failed")
             self._unlock()
+
+    _stats_cols_ok = False
+
+    def _turn_stats_columns(self) -> None:
+        """The four columns added on 2026-09-18, on a table that already has
+        ten thousand rows in his real database: ALTER, once, and never fail."""
+        if self._stats_cols_ok:
+            return
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(turn_stats)")}
+        for col in ("first_ms", "prompt_tokens", "gen_tokens", "reasoning_chars"):
+            if col not in have:
+                self.db.execute(f"ALTER TABLE turn_stats ADD COLUMN {col} INTEGER")
+        self.db.commit()
+        self._stats_cols_ok = True
+
+    def turn_stats_report(self, hours: float = 24) -> dict:
+        """Yesterday, in numbers: how many turns, how fast the first word
+        came on reflexes and on the model, the slowest turn, what the model
+        spent. The morning brief speaks one sentence of it (self_report.py)."""
+        self._turn_stats_columns()
+        since = time.time() - hours * 3600
+        rows = self.db.execute(
+            "SELECT path, skill, latency_ms, first_ms, prompt_tokens, gen_tokens, reasoning_chars "
+            "FROM turn_stats WHERE ts >= ?", (since,)).fetchall()
+
+        def med(vals):
+            vals = sorted(v for v in vals if v is not None)
+            return int(vals[len(vals) // 2]) if vals else None
+
+        reflex = [r for r in rows if r[0] in ("reflex", "fact", "routine")]
+        model = [r for r in rows if r[0] not in ("reflex", "fact", "routine")]
+        slow = max(rows, key=lambda r: r[2] or 0) if rows else None
+        return {
+            "hours": hours, "turns": len(rows), "reflex_turns": len(reflex), "model_turns": len(model),
+            "reflex_first_ms": med(r[3] for r in reflex), "model_first_ms": med(r[3] for r in model),
+            "reflex_total_ms": med(r[2] for r in reflex), "model_total_ms": med(r[2] for r in model),
+            "model_prompt_tokens": med(r[4] for r in model), "model_gen_tokens": med(r[5] for r in model),
+            "model_reasoning_chars": med(r[6] for r in model),
+            "slowest": {"path": slow[0], "skill": slow[1], "ms": slow[2]} if slow else None,
+        }
 
     def turn_stats_summary(self, days: int = 7) -> dict:
         """What fraction of turns woke the LLM, and what they cost — the data that

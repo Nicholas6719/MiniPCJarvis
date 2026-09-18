@@ -23,6 +23,13 @@ _CODES = {
     99: "thunderstorms with hail",
 }
 _geo_cache: dict[str, tuple[float, float, str]] = {}
+# The forecast, for ten minutes per place. Open-Meteo's observation trails
+# the request by up to an hour anyway and its age is spoken from the
+# observation's own stamp, so a ten-minute-old fetch is as honest as a
+# fresh one - and "do I need a jacket" right after "what's the weather"
+# stops paying for the network twice (2026-09-18).
+FORECAST_TTL = 600.0
+_forecast_cache: dict[tuple, tuple[float, dict]] = {}
 _home: tuple[float, float, str] | None = None
 _home_ts = 0.0
 
@@ -147,13 +154,27 @@ async def get_weather(location: str = "", when: str = "now") -> dict:
         return {"error": f"I couldn't find a place called {location}" if location else "I don't know where you are yet"}
     lat, lon, label = loc
     unit = config.get("weather", "units", default="fahrenheit")
-    j = await _get_json("https://api.open-meteo.com/v1/forecast", {
+    ck = (round(lat, 3), round(lon, 3), unit)
+    hit = _forecast_cache.get(ck)
+    j = hit[1] if hit and time.time() - hit[0] < FORECAST_TTL else None
+    if j is None:
+        j = await _fetch_forecast(lat, lon, unit)
+        if j.get("current"):
+            _forecast_cache[ck] = (time.time(), j)
+    cur, day = j.get("current", {}), j.get("daily", {})
+    return _shape(j, cur, day, label, unit, when)
+
+
+async def _fetch_forecast(lat: float, lon: float, unit: str) -> dict:
+    return await _get_json("https://api.open-meteo.com/v1/forecast", {
         "latitude": lat, "longitude": lon, "timezone": "auto",
         "temperature_unit": unit, "wind_speed_unit": "mph" if unit == "fahrenheit" else "kmh",
         "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation",
         "daily": "temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset",
         "forecast_days": 3}, 10)
-    cur, day = j.get("current", {}), j.get("daily", {})
+
+
+def _shape(j: dict, cur: dict, day: dict, label: str, unit: str, when: str) -> dict:
     idx = 1 if when == "tomorrow" else 0
     # Live data is spoken with its age, the same rule the market tools follow:
     # never cached, and never presented as timeless. Open-Meteo stamps the

@@ -173,7 +173,7 @@ class ToolRegistry:
         self._tools[tool.name] = tool
 
     def schemas(self) -> list[dict]:
-        return [t.openai_schema() for t in self._tools.values()]
+        return [t.openai_schema() for n, t in self._tools.items() if not n.startswith("_")]
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)

@@ -10,6 +10,13 @@ async def remember_fact(content: str, category: str = "fact") -> dict:
     return {"remembered": content, "id": mid}
 
 
+async def note_overheard(content: str) -> dict:
+    """A fact he said in passing, kept only after his yes (the MEDIUM gate
+    asks). Not for the model: it has remember_fact for what he ASKS to keep."""
+    mid = await memory.remember(content, category="fact", source="overheard", confidence="medium")
+    return {"remembered": content, "id": mid}
+
+
 async def recall(query: str) -> dict:
     hits = await memory.search(query, top_k=5)
     # ONLY WHAT IS ABOUT THE QUESTION. Asked the wifi password, he recited his
@@ -41,6 +48,12 @@ def register_all() -> None:
             "category": {"type": "string", "enum": ["identity", "preference", "person", "project", "goal", "routine", "fact"]}},
             "required": ["content"]},
         risk=Risk.SAFE, handler=remember_fact))
+    registry.register(Tool(
+        name="_note_overheard",
+        description="(internal) keep a fact the user mentioned in passing, after asking him.",
+        parameters={"type": "object", "properties": {"content": {"type": "string"}},
+                    "required": ["content"]},
+        risk=Risk.MEDIUM, handler=note_overheard))
     registry.register(Tool(
         name="recall",
         description="Search your long-term memory about the user. Use when the user asks "

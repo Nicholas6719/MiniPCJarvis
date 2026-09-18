@@ -1338,6 +1338,65 @@ _CANNOT = (
                           r"headphones|charger|book|tickets|new)\b", re.I)),
     ("home", re.compile(r"\b(?:lights?|lamp|thermostat|heat|ac|air conditioning|front door|garage door|blinds|tv)\b", re.I)),
 )
+_PLACE_PAIR = [
+    re.compile(r"^(?:jarvis[,\s]+)?how far(?: away)? (?:is|are) (?P<a>[^?]+?) (?:from|to) (?P<b>[^?]+?)[?.!]*$", re.I),
+    re.compile(r"^(?:jarvis[,\s]+)?how far (?:apart )?(?:is it |are )?(?:between |from )(?P<a>[^?]+?) (?:and|to) (?P<b>[^?]+?)[?.!]*$", re.I),
+    re.compile(r"^(?:jarvis[,\s]+)?how far apart are (?P<a>[^?]+?) and (?P<b>[^?]+?)[?.!]*$", re.I),
+    re.compile(r"^(?:jarvis[,\s]+)?(?:what(?:'s| is) the )?(?:straight[- ]line )?distance (?:between|from) (?P<a>[^?]+?) (?:and|to) (?P<b>[^?]+?)[?.!]*$", re.I),
+    re.compile(r"^(?:jarvis[,\s]+)?how many (?:miles|kilomet(?:er|re)s|km) (?:is it |are there )?(?:between |from )(?P<a>[^?]+?) (?:and|to) (?P<b>[^?]+?)[?.!]*$", re.I),
+]
+_NOT_A_PLACE = re.compile(r"^(?:me|here|home|my (?:house|place|home)|they|them|it|those|these|each other|there)$", re.I)
+
+
+def slots_distance_between(t: str) -> dict | None:
+    """'how far is boston from new york' -> two places. Pronouns ('they') and
+    'from here' are left to the model and distance_to; digits mean a unit
+    conversion, not geography."""
+    s = (t or "").strip()
+    if re.search(r"\d", s):
+        return None
+    for rx in _PLACE_PAIR:
+        m = rx.match(s)
+        if not m:
+            continue
+        a, b = m.group("a").strip(" ,"), m.group("b").strip(" ,")
+        if _NOT_A_PLACE.match(a) or _NOT_A_PLACE.match(b):
+            return None
+        if len(a) > 40 or len(b) > 40:
+            return None
+        return {"place_a": a, "place_b": b}
+    return None
+
+
+def say_distance_between(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    return (f"About {res['miles']:,} miles from {res['from']} to {res['to']}, "
+            f"or {res['km']:,} kilometres, as the crow flies.")
+
+
+_STOCKISH = re.compile(r"\b(?:stock|stocks|shares?|ticker|public(?:ly)?|ipo|listed|traded|trading|invest(?:ing)?|"
+                       r"buy|price|quote|market|released|go(?:ing|ne)? public|float)\b", re.I)
+
+
+def slots_private_stock(t: str) -> dict | None:
+    """'has openai stock been released' -> {'name': 'OpenAI'}; anything about a
+    LISTED company (or no company) falls through to the quote skill / model."""
+    from tools.market_tools import PRIVATE
+    s = (t or "").lower()
+    if not _STOCKISH.search(s):
+        return None
+    for key in sorted(PRIVATE, key=len, reverse=True):
+        if re.search(r"(?<![a-z])" + re.escape(key) + r"(?:'s)?(?![a-z])", s):
+            return {"name": PRIVATE[key]}
+    return None
+
+
+def say_private_stock(slots: dict, _res: dict) -> str:
+    from tools.market_tools import not_listed_line
+    return not_listed_line(slots.get("name", "That company"))
+
+
 _CANNOT_SAID = {
     "call": "I can't place calls, sir. I can send a note to your own phone, or set a reminder to call.",
     "message": "I can only message you, sir - not anyone else. I can put it on your phone as a note to send on.",
@@ -2731,6 +2790,23 @@ SKILLS: list[Skill] = [
     # I'll be late" was refused by send_to_phone's guard, so the model called
     # the tool itself and said "Message sent" (2026-09-17 21:00). A reflex gets
     # there first, and says what he CAN do instead.
+    # ARITHMETIC, NOT RECALL (2026-09-18): the model put Lima 1,200 km from
+    # Santiago; the geocoder and a haversine put it at 2,450.
+    Skill("distance_between", "distance_between", [
+        "how far is boston from new york", "distance between london and paris",
+        "how far apart are lima and santiago", "how far is it from chicago to denver",
+        "what's the distance from tokyo to seoul", "how many miles from miami to atlanta",
+        "how far is los angeles from san francisco", "distance from framingham to boston",
+        "how far away is paris from berlin", "how many kilometers between madrid and lisbon"],
+        slots=slots_distance_between, speak=say_distance_between),
+    # NO TICKER TO QUOTE (2026-09-18): 'has openai stock been released' cost
+    # 38 seconds of quoting Apple and asking Finnhub for OPENAI.
+    Skill("private_stock", None, [
+        "has openai stock been released", "can i buy openai stock", "is spacex publicly traded",
+        "is openai on the stock market", "when is the spacex ipo", "does anthropic have a stock",
+        "can you buy shares of stripe", "is discord a public company", "has spacex gone public yet",
+        "what's the ticker symbol for openai"],
+        slots=slots_private_stock, speak=say_private_stock),
     Skill("cannot", None, [
         "call mom", "call my mom", "call my dentist", "phone my sister", "ring my dad",
         "facetime my brother", "text my mom that i'll be late", "message my friend that i'm on my way",

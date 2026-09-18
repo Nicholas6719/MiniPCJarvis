@@ -721,6 +721,16 @@ class Briefing:
             today = self._today_lines()
             if today:
                 out.append(("Today", today))
+            # ...and how he himself did yesterday, in one sentence. His ask
+            # (2026-09-18): regressions should surface without anyone reading
+            # the log.
+            try:
+                import self_report
+                me = self_report.lines()
+                if me:
+                    out.append(("Yesterday", me))
+            except Exception:
+                log.debug("brief: self report failed", exc_info=True)
 
         try:
             movers = await get_market_movers()

@@ -32,6 +32,13 @@ class ChatResult:
 class LocalLLM:
     """Streams chat completions from the managed llama-server."""
 
+    # What the LAST call cost, from llama-server's own final chunk: prompt
+    # tokens (and how many the cache already had), generated tokens, the
+    # rates, and how many characters of reasoning came before the answer.
+    # The orchestrator files it with the turn (2026-09-18) - the model's
+    # time is the only part of a turn that was still a guess.
+    last_call: dict = {}
+
     async def stream(
         self,
         messages: list[dict],
@@ -139,6 +146,22 @@ class LocalLLM:
                             slot["name"] = fn["name"]
                         if fn.get("arguments"):
                             slot["arguments"] += fn["arguments"]
+                    if obj.get("timings") or obj.get("usage"):
+                        tm, us = obj.get("timings") or {}, obj.get("usage") or {}
+                        LocalLLM.last_call = {
+                            "prompt_tokens": int(us.get("prompt_tokens") or tm.get("prompt_n") or 0),
+                            "cached_tokens": int(tm.get("cache_n") or 0),
+                            "gen_tokens": int(us.get("completion_tokens") or tm.get("predicted_n") or 0),
+                            "prompt_ms": int(tm.get("prompt_ms") or 0),
+                            "gen_ms": int(tm.get("predicted_ms") or 0),
+                            "gen_tps": round(float(tm.get("predicted_per_second") or 0), 1),
+                            "reasoning_chars": reasoned, "slot": body.get("id_slot"),
+                        }
+                        if tm:
+                            log.info("llm: %d prompt tok (%d cached) in %d ms, %d gen tok at %.1f t/s, %d chars of reasoning",
+                                     LocalLLM.last_call["prompt_tokens"], LocalLLM.last_call["cached_tokens"],
+                                     LocalLLM.last_call["prompt_ms"], LocalLLM.last_call["gen_tokens"],
+                                     LocalLLM.last_call["gen_tps"], reasoned)
                     if finish:
                         if finish == "length" and not saw_content and reasoned:
                             log.warning(

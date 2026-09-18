@@ -162,6 +162,45 @@ def _err(data) -> str | None:
 _NAMES: dict[str, tuple[str, str]] = {}
 
 
+# COMPANIES WITH NO TICKER. "Has OpenAI stock been released?" took 38 seconds
+# on 2026-09-18: the model quoted Apple, then asked Finnhub for a symbol
+# called OPENAI, then reasoned its way to "OpenAI isn't publicly traded."
+# The household names that are private, as of this writing; if one of them
+# lists, the news watch will say so and the row comes out.
+PRIVATE = {
+    "openai": "OpenAI", "open ai": "OpenAI", "chatgpt": "OpenAI", "anthropic": "Anthropic",
+    "claude": "Anthropic", "spacex": "SpaceX", "space x": "SpaceX", "starlink": "SpaceX",
+    "xai": "xAI", "x ai": "xAI", "stripe": "Stripe", "databricks": "Databricks",
+    "canva": "Canva", "epic games": "Epic Games", "epic": "Epic Games", "valve": "Valve",
+    "steam": "Valve", "bytedance": "ByteDance", "tiktok": "ByteDance", "discord": "Discord",
+    "mistral": "Mistral", "cohere": "Cohere", "perplexity": "Perplexity",
+    "cargill": "Cargill", "ikea": "IKEA", "fidelity": "Fidelity", "vanguard": "Vanguard",
+    "bloomberg": "Bloomberg", "mars": "Mars", "publix": "Publix", "chick-fil-a": "Chick-fil-A",
+    "chick fil a": "Chick-fil-A", "in-n-out": "In-N-Out", "in n out": "In-N-Out",
+    "patagonia": "Patagonia", "shein": "Shein", "revolut": "Revolut", "kraken": "Kraken",
+    "huawei": "Huawei", "bosch": "Bosch", "lego": "LEGO", "aldi": "Aldi", "trader joe's": "Trader Joe's",
+    "trader joes": "Trader Joe's", "wawa": "Wawa", "dell technologies": "", "koch": "Koch Industries",
+    "koch industries": "Koch Industries", "deloitte": "Deloitte", "pwc": "PwC", "ey": "EY",
+    "kpmg": "KPMG", "mckinsey": "McKinsey", "bain": "Bain", "hugging face": "Hugging Face",
+    "huggingface": "Hugging Face", "midjourney": "Midjourney", "runway": "Runway",
+    "scale ai": "Scale AI", "cerebras": "Cerebras", "groq": "Groq", "notion": "Notion",
+    "figma": "", "reddit": "", "klarna": "",     # listed since: never say these are private
+}
+PRIVATE = {k: v for k, v in PRIVATE.items() if v}
+
+
+def private_company(name: str) -> str | None:
+    """'openai' -> 'OpenAI' when the company has no listed stock; None otherwise."""
+    q = re.sub(r"\s+", " ", (name or "").strip().lower().rstrip(".?!"))
+    q = re.sub(r"^(?:the )?", "", q)
+    q = re.sub(r"(?:'s| inc\.?| corp\.?| corporation| company| co\.?| stock| shares?)$", "", q).strip()
+    return PRIVATE.get(q)
+
+
+def not_listed_line(pretty: str) -> str:
+    return f"{pretty} isn't publicly traded, sir - there's no stock to buy or quote. If that changes, the news will say so."
+
+
 def _looks_like_ticker(q: str) -> bool:
     return q.isupper() and 1 <= len(q) <= 5 and q.isalpha()
 
@@ -239,6 +278,9 @@ async def _resolve_symbol(name: str) -> tuple[str, str] | None:
 
 async def get_stock_quote(symbol: str) -> dict:
     """Live price for one company or ticker."""
+    private = private_company(symbol)
+    if private:
+        return {"error": not_listed_line(private), "private": True, "name": private}
     hit = await _resolve_symbol(symbol)
     if hit is None:
         return {"error": NO_KEY if not secrets.get("finnhub_api_key")

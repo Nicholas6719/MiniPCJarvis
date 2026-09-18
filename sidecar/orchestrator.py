@@ -102,6 +102,10 @@ NO_WORDS = re.compile(r"^\s*(?:no|no thanks|no thank you|nope|nah|naw|cancel|sto
 # go to the Recycle Bin, moves can be moved back). If that ever changes, the wording
 # is already here.
 CONFIRM_PHRASE = {
+    "_note_overheard": lambda a: "Shall I remember that " + str(a.get("content", "that"))
+                                  .replace("My ", "your ", 1).replace("I'm ", "you're ", 1)
+                                  .replace("I am ", "you are ", 1).replace("I ", "you ", 1)
+                                  .rstrip(".") + "?",
     "close_application": lambda a: f"Close {a.get('name', 'that app')}?",
     "open_application": lambda a: f"Open {a.get('name', 'that app')}?",
     "move_file": lambda a: f"Move {a.get('path', 'that file')}?",
@@ -2167,9 +2171,17 @@ class Orchestrator:
             memory.log_turn("assistant", full_reply)
         breakdown = self.metrics.finish()
         latency = int((time.time() - t_start) * 1000)
+        _lc = dict(getattr(local_llm, "last_call", {}) or {})
         memory.log_turn_stat("tool_then_llm" if reflex else
                              "llm_general" if general_hint else "llm_tools",
-                             reflex[0].name if reflex else None, latency)
+                             reflex[0].name if reflex else None, latency,
+                             first_ms=breakdown.get("first_token_ms"),
+                             prompt_tokens=_lc.get("prompt_tokens"), gen_tokens=_lc.get("gen_tokens"),
+                             reasoning_chars=_lc.get("reasoning_chars"))
+        # A lasting fact said in passing is offered for memory, after the
+        # answer, through the ordinary yes/no gate (2026-09-18).
+        if full_reply and not self._speak_cancel.is_set():
+            spawn(self._offer_overheard(text), name="overheard")
         # the turn's web evidence may graduate into a timeless fact (realm 1) —
         # classified in the background, never blocking the conversation
         evidence = facts.take_evidence()
@@ -2294,6 +2306,44 @@ class Orchestrator:
                 await bus.emit("assistant_delta", text=reply)
                 await queue.put(clean_for_speech(reply))
         return reply
+
+    _last_offer_at = 0.0
+
+    async def _offer_overheard(self, text: str) -> None:
+        """'My chemistry final is on the 25th, what should I study?' - the
+        question is answered; the fact is offered: 'Shall I remember that
+        your chemistry final is on the 25th? Say yes or no.' The offer rides
+        the MEDIUM-risk gate every risky tool uses (voice, HUD or phone
+        answers it), so nothing new listens for a yes.
+
+        Never to a muted room (a test), never to the phone, never twice in
+        ten minutes, never for something already stored."""
+        try:
+            from brain import overheard
+            fact = overheard.extract(text)
+            if not fact:
+                return
+            if self.remote_turn or speaker.silent_until > time.time():
+                return
+            if time.time() - self._last_offer_at < 600 or registry.has_pending:
+                return
+            if await memory.search(fact, top_k=1, min_score=0.88):
+                return
+            self._last_offer_at = time.time()
+            # after the answer has been spoken, not over it
+            for _ in range(60):
+                if self.sm.state == State.IDLE:
+                    break
+                await asyncio.sleep(0.25)
+            if self.sm.state != State.IDLE:
+                return
+            res = await registry.execute("_note_overheard", {"content": fact})
+            if res.get("ok"):
+                log.info("overheard and kept: %r", fact)
+        except Exception:
+            log.debug("overheard offer failed", exc_info=True)
+        finally:
+            await self._settle_idle(State.ERROR, State.SLEEPING)
 
     async def _fact_intake(self, question: str, answer: str, evidence: dict) -> None:
         """Background: maybe graduate this turn's sourced answer into the fact
@@ -2537,7 +2587,8 @@ class Orchestrator:
         breakdown["reflex"] = label
         latency = int((time.time() - t_start) * 1000)
         memory.log_turn_stat("fact" if label == "fact" else
-                             "routine" if label == "command" else "reflex", label, latency)
+                             "routine" if label == "command" else "reflex", label, latency,
+                             first_ms=breakdown.get("first_token_ms"))
         await bus.emit("turn_done", latency_ms=latency,
                        breakdown=breakdown, reflex=label, text=strip_markdown(reply or ""))
         if self.sm.state != State.ERROR:

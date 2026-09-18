@@ -110,7 +110,35 @@ async def distance_to(place: str) -> dict:
             "stale": got["age_minutes"] > _window()}
 
 
+async def distance_between(place_a: str, place_b: str) -> dict:
+    """Straight-line distance between two named places. Arithmetic, not
+    recall: asked how far Lima is from Santiago the model said 1,200 km
+    (2026-09-17); the geocoder and a haversine say 2,450 (2026-09-18)."""
+    a, b = (place_a or "").strip(), (place_b or "").strip()
+    if not a or not b:
+        return {"error": "which two places, sir?"}
+    from tools.weather import _geocode
+    ga, gb = await _geocode(a), await _geocode(b)
+    if not ga:
+        return {"error": f"I couldn't find a place called {a}"}
+    if not gb:
+        return {"error": f"I couldn't find a place called {b}"}
+    miles = haversine_miles(ga[0], ga[1], gb[0], gb[1])
+    return {"from": ga[2], "to": gb[2], "miles": round(miles), "km": round(miles * 1.609344),
+            "straight_line": True}
+
+
 def register_all() -> None:
+    registry.register(Tool(
+        name="distance_between",
+        description="Straight-line (great-circle) distance between two named places, cities or "
+                    "countries. ALWAYS use this for any 'how far is X from Y' or 'how far apart' "
+                    "question instead of estimating - your own distance figures are unreliable. "
+                    "Not a driving distance; say 'as the crow flies'.",
+        parameters={"type": "object", "properties": {
+            "place_a": {"type": "string"}, "place_b": {"type": "string"}},
+            "required": ["place_a", "place_b"]},
+        risk=Risk.SAFE, handler=distance_between, timeout=30))
     registry.register(Tool(
         name="where_am_i",
         description="Where the user is, from the most recent location his phone shared. "

@@ -4993,6 +4993,76 @@ planting facts and cancels the timer it sets. What it found, and the fixes:
 16:05 "Hey, uh" (0.77) then "Wow." (0.92) - if he reports a missed wake, that
 pair is the first place to look (the recogniser clipping the name).
 
+## 2026-09-18 — "Faster, smarter, better": round one (tests/test_faster.py)
+
+His ask, verbatim: *"What other ways can you improve him? How can you make him
+faster, smarter, better... Go ahead, do it all... continually approve him...
+test it silently because I'm away... then continue looking for performance
+enhancements."*
+
+### What the real numbers said first (861 turns since 09-14, `turn_stats`)
+| path | share | p50 | p90 |
+|---|---|---|---|
+| reflex | 76% | 0.8 s | 2.3 s |
+| llm_general | 4% | 4.3 s | 5.7 s |
+| llm_tools | 7% | 5.2 s | 15 s |
+| search then model | 8% | 8.9 s | 12 s |
+
+**`latency_ms` was the WHOLE turn, speech included.** A weather sentence
+"took 4.5 s" with its first word at 160 ms (the log's `speak: ... after N ms`).
+The reflex floor is physics (endpoint 0.4 s + Parakeet 0.14 s + first audio
+~0.15 s); the network calls measured from here: forecast 0.5 s, geocode 0.5 s,
+DDG-in-browser ~1.5 s, Finnhub 0.1 s. The time is the MODEL's, and the model's
+time was the one thing never stored. So:
+- `turn_stats` gained `first_ms`, `prompt_tokens`, `gen_tokens`,
+  `reasoning_chars` (ALTER TABLE on first write; `memory.turn_stats_report()`).
+  `LocalLLM.last_call` carries llama-server's own final-chunk `timings`
+  (prompt_n / cache_n / predicted_n / predicted_per_second) and is logged as
+  `llm: N prompt tok (M cached) in X ms, N gen tok at Y t/s, R chars of reasoning`.
+  **Read that line before tuning anything else**: it says whether a slow turn
+  was prompt processing (cache miss), generation, or reasoning.
+- `list_controls` at 140 calls was the SUITES, not the model (every 15 s in a
+  test window) - not a real cost. Struck from the list.
+- Search: every search ran the hidden Brave window with DuckDuckGo as the
+  engine ("via duckduckgo" is the engine name, not the fallback). A Brave
+  Search API key (`brave_api_key`, free tier) is already wired and would cut
+  ~1 s; he has to create it.
+
+### Fixed
+- **"Has OpenAI stock been released?" -> 38 s** (quoted AAPL, then a ticker
+  OPENAI, then reasoned). `market_tools.PRIVATE` (household private names;
+  reddit/figma/klarna deliberately excluded as listed) -> `get_stock_quote`
+  answers without the network; `private_stock` skill for the non-quote shapes
+  ("is spacex publicly traded", "when is the ipo"); the `quote` route speaks
+  the same `not_listed_line`.
+- **Lima-Santiago "about 1,200 km"** -> `distance_between(place_a, place_b)`
+  in tools/location.py (geocoder + haversine, 2,450 km); `distance_between`
+  skill for "how far is A from B / distance between / how many miles from";
+  the prompt tells the model to call it and never estimate, so "how far apart
+  are they" (pronoun, model's turn) uses it too.
+- **Forecast cached 10 min** per place (`weather.FORECAST_TTL`); the spoken
+  age still comes from the observation stamp.
+- **Morning self-report**: `self_report.lines()` -> a "Yesterday" section in
+  the FIRST brief: turns, first-word medians on reflexes and on the model,
+  corrections learned (brain_examples source=user), false wakes rejected.
+- **Overheard facts** (`brain/overheard.py`, whitelist of lasting subjects):
+  "my chemistry final is on the 25th, what should I study" answers the
+  question, then `_offer_overheard` asks "Shall I remember that your chemistry
+  final is on the 25th? Say yes or no." through the MEDIUM gate of an
+  underscore-named internal tool `_note_overheard` (underscore = never shown to
+  the model; `registry.schemas()` now filters those too). Never to a muted
+  room (tests), never to the phone, once per ten minutes, never for something
+  already stored, only after a completed model reply.
+- The correction loop he asked for ALREADY EXISTS (`_correct`: unlearn the
+  misfire, learn the corrected sentence, re-run) - verified, not rebuilt.
+
+### Not done / next
+- Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
+  battery: the config's own note says "smarter and quicker for text". Needs the
+  reasoning-chars numbers above first; the switch is `POST /config
+  {llm:{active_model}}`. RAM: gemma-4 puts vision on the CPU (~96% peak).
+- Brave Search API key (his account); iCloud 401; Health shortcut signing.
+
 ## Next ideas
 1. Speed: LLM first token is ~2.5-4.5 s on cached prefix; reflex ~0.3 s. STT small.en
    ~1.5 s (consider base.en); Kokoro ~1 s/sentence. `open_site` turn is ~14 s (page
