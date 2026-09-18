@@ -32,8 +32,10 @@ DEFAULTS: dict[str, Any] = {
     },
     "llm": {
         "server_binary": r"C:\AI\llama.cpp\llama-server.exe",
-        # other local apps (Houston) may already serve the same model — reuse it
-        "adopt_ports": [8080],
+        # Ports where ANOTHER app might already be serving the same GGUF, to
+        # reuse instead of loading a duplicate. Empty since 2026-09-18: Houston
+        # is gone and JARVIS is the only assistant on this machine.
+        "adopt_ports": [],
         "context": 16384,
         "active_model": "gpt-oss-20b",
         # THE DRAFT MODEL: a second, small server for plain knowledge

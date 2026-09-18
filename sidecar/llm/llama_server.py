@@ -119,7 +119,7 @@ class LlamaServer:
             s.bind(("127.0.0.1", 0))
             self.port = s.getsockname()[1]
         self.base_url = f"http://127.0.0.1:{self.port}"
-        self.external = False  # adopted server owned by another app (e.g. Houston)
+        self.external = False  # adopted server owned by another app (none since 2026-09-18)
         self.adopted_pid: int | None = None
         # How many slots the server has (from /props). The conversation owns
         # slot 0; every side call (fact classifier, night school, newsroom,
@@ -142,13 +142,14 @@ class LlamaServer:
         return self.proc is not None and self.proc.poll() is None
 
     async def _try_adopt(self, model_name: str) -> bool:
-        """This machine runs other assistants (Houston on :8080) that may already
-        be serving the exact same GGUF. Reuse instead of loading a duplicate 11GB."""
+        """Reuse a server another app already runs for the exact same GGUF instead
+        of loading a duplicate 11 GB. No such app exists since 2026-09-18 (Houston
+        was retired); llm.adopt_ports is empty and this returns False at once."""
         mcfg = config.get("llm", "models", default={}).get(model_name)
         if not mcfg or not self.adopt:
             return False
         want = str(mcfg["path"]).lower()
-        for port in config.get("llm", "adopt_ports", default=[8080]):
+        for port in config.get("llm", "adopt_ports", default=[]):
             try:
                 async with httpx.AsyncClient(timeout=2.0) as c:
                     r = await c.get(f"http://127.0.0.1:{port}/v1/models")

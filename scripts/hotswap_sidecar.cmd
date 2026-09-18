@@ -7,7 +7,7 @@ echo [%DATE% %TIME%] hotswap start > "%LOG%"
 taskkill /F /IM jarvis.exe >> "%LOG%" 2>&1
 taskkill /F /IM jarvis-sidecar.exe >> "%LOG%" 2>&1
 REM children that keep DLLs in the sidecar folder open: JARVIS's hidden Brave profiles and
-REM the llama-servers JARVIS itself started (never Houston's - matched by our log path)
+REM the llama-servers JARVIS itself started (matched by our log path; nothing else runs one now)
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'brave.exe' -and $_.CommandLine -match 'JARVIS\\(browser-profile|session-browser)') -or ($_.Name -eq 'llama-server.exe' -and $_.CommandLine -match 'JARVIS\\logs') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; Write-Output ('stopped child ' + $_.Name + ' ' + $_.ProcessId) }" >> "%LOG%" 2>&1
 timeout /t 2 /nobreak > nul
 REM Brave helper processes (utility/gpu/renderer) orphaned by the kill above don't carry the

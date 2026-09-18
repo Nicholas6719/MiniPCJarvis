@@ -5131,6 +5131,23 @@ time was the one thing never stored. So:
   `rewarm_history` with `--cache-ram 0`, and Hunyuan on CUDA. Houston's
   llama-server on :8080 shares the machine: coordinate VRAM.
 
+### Round four (2026-09-18 evening) - llama.cpp b10964 measured, Houston retired
+- **llama.cpp b10964 vs the shipped b10488, in situ on gpt-oss** (config
+  `llm.server_binary` switched, JARVIS's server killed by PID, supervisor
+  restart, the same probe set): prompt reading 307-322 tok/s vs ~308 (no
+  change), generation 20-23 t/s vs 23-24 (slightly worse). The RDNA3 MoE
+  prefill tuning in the changelog did not reach the Vulkan iGPU path.
+  **Reverted to `C:\AI\llama.cpp` (b10488).** The new build stays unpacked at
+  `C:\AI\llama.cpp-b10964` for the GPU day (its prompt-cache fixes matter
+  once `rewarm_history` is retried). Method: `PATCH /config`, kill by PID,
+  wait for "llama-server ready", read the `llm:` lines.
+- **Houston is retired** (his word). `llm.adopt_ports` is `[]` in code and in
+  his live config; nothing listens on 8080/8081 any more; the adopt path
+  stays as a gated mechanism; comments and the memory note no longer name
+  it. The rule that survives: kill llama-server by PID, never by image name.
+- The ten-minute liveness probe is visible in the log as a 1-token,
+  18-generated-token side call every ten minutes (16:46, 16:56, 17:06).
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the
