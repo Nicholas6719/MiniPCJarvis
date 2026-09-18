@@ -40,8 +40,10 @@ def numbers(hours: float = 24) -> dict:
     except Exception:
         rep["corrections"] = None
     try:
-        import main as _main            # the running app, when there is one
-        rep["false_wakes"] = int(getattr(_main.orchestrator, "wakes_rejected", 0) or 0)
+        # the module-level singleton; never "import main", which would execute
+        # the entry module a second time inside the running app
+        from orchestrator import orchestrator as _orch
+        rep["false_wakes"] = int(getattr(_orch, "wakes_rejected", 0) or 0)
     except Exception:
         rep["false_wakes"] = None
     return rep
