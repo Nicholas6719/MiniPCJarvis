@@ -227,6 +227,64 @@ def main() -> int:
     check("every ten minutes, idle only, from the watchdog", "PROBE_EVERY = 600.0" in orch and "await self._probe_model()" in orch)
     check("two failures in a row restart the server, one is let go", "_probe_failures >= 2" in orch and "model probe %d/2 failed" in orch)
 
+    print("\n-- round five: awake releases, keyless-first search, a day memory --")
+    rel = (ROOT.parent / "scripts" / "release.ps1").read_text(encoding="utf-8")
+    check("the release keeps the machine awake, display allowed to sleep", "SetThreadExecutionState([uint32]0x80000001)" in rel)
+    from tools import builtin as BI
+    calls = []
+
+    async def ddg_ok(q, n):
+        calls.append(q)
+        return {"query": q, "results": [{"title": "t", "url": "https://x", "snippet": "s"}], "provider": "duckduckgo"}
+
+    async def ddg_empty(q, n):
+        calls.append(q)
+        return {"query": q, "results": []}
+
+    BI._ddg_search = ddg_ok
+    BI._DDG_BREAKER.update(failures=0, until=0.0)
+    out = asyncio.run(BI._ddg_first("tallest building", 5))
+    check("the keyless endpoint answers first", out and out["results"] and calls == ["tallest building"], out)
+    BI._ddg_search = ddg_empty
+    for _ in range(3):
+        asyncio.run(BI._ddg_first("q", 5))
+    check("three misses rest it for ten minutes", BI._DDG_BREAKER["until"] > time.time() + 500, BI._DDG_BREAKER)
+    calls.clear()
+    asyncio.run(BI._ddg_first("q2", 5))
+    check("...during which it is not even tried", calls == [], calls)
+    BI._DDG_BREAKER.update(failures=0, until=0.0)
+    src = (ROOT / "tools" / "builtin.py").read_text(encoding="utf-8")
+    check("the browser is the fallback, not the first reach", src.index("fast = await _ddg_first(query, count)") < src.index("from search_brave_web import brave_web"))
+    import day_memory as DM
+    import volatile
+    check("no summary, no line", DM.line() == "" or "Earlier today" in DM.line())
+    volatile.put(DM.KEY, {"text": "He drafted an essay outline on the causes of World War One and asked about his chemistry final."}, source="test")
+    ln = DM.line()
+    check("a stored summary rides in the turn note", ln.startswith(chr(10) + "Earlier today: He drafted"), ln)
+    from llm import prompts as PR
+    note = PR.turn_context("", None)
+    check("...through turn_context", "Earlier today: He drafted" in note, note[:200])
+    check("the day starts at 4 AM", abs(DM._day_start() - __import__("datetime").datetime.now().replace(hour=4, minute=0, second=0, microsecond=0).timestamp()) < 86400 + 1)
+    check("too little conversation is not worth a call", asyncio.run(DM.summarise([(0, "user", "hi"), (1, "assistant", "Hello.")])) is None)
+    from llm import provider as P
+
+    class _Ch:
+        def __init__(self, text): self.text, self.done, self.finish_reason = text, True, "stop"
+
+    async def fake_stream(msgs, **kw):
+        yield _Ch("He worked on the reactor model and set a reminder to call the dentist.")
+
+    P.local_llm.stream = fake_stream
+    rows = [(i, "user" if i % 2 == 0 else "assistant", "sentence number %d about the reactor model and the dentist" % i) for i in range(12)]
+    text = asyncio.run(DM.summarise(rows))
+    check("a summary comes back from the model", text and text.startswith("He worked"), text)
+    async def nothing_stream(msgs, **kw):
+        yield _Ch("NOTHING")
+    P.local_llm.stream = nothing_stream
+    check("NOTHING means no summary", asyncio.run(DM.summarise(rows)) is None)
+    check("the loop waits for a quiet moment", "await wait_for_quiet()" in (ROOT / "day_memory.py").read_text(encoding="utf-8"))
+    check("started at boot", "spawn(day_memory.loop())" in (ROOT / "main.py").read_text(encoding="utf-8"))
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")

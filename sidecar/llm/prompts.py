@@ -27,6 +27,14 @@ def turn_context(memory_context: str = "", honorific: bool | None = None,
         mem += f"\nOn his screen right now: {looking_at}."
     if just_did:
         mem += f"\nA moment ago you {just_did}"
+    # WHAT HAPPENED EARLIER TODAY, in three sentences (day_memory.py). The
+    # history window is twenty messages; by the afternoon the morning's work
+    # was gone. Small enough to ride in the note rather than the cached prefix.
+    try:
+        import day_memory
+        mem += day_memory.line()
+    except Exception:
+        pass
     # The honorific's frequency is decided for us (brain.skills.want_honorific) and
     # stated per turn, because the model cannot pace it itself — see system_prompt.
     hint = ""

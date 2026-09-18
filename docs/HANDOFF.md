@@ -5150,6 +5150,18 @@ time was the one thing never stored. So:
 - The ten-minute liveness probe is visible in the log as a 1-token,
   18-generated-token side call every ten minutes (16:46, 16:56, 17:06).
 
+### Round five (release 77) - awake releases, keyless-first search, a day memory
+- `release.ps1` sets ES_CONTINUOUS|ES_SYSTEM_REQUIRED for its own lifetime:
+  the PC no longer sleeps under a build (release 76 lost six hours to that);
+  the display still may.
+- `web_search` without a Brave key tries `html.duckduckgo.com` first (0.7 s
+  measured) with a 4 s timeout and a breaker (three misses -> ten minutes
+  off); the hidden browser is the fallback, then the keyless routes.
+- `day_memory.py`: every twenty idle minutes, given six or more new transcript
+  rows, a quiet side call condenses the day since 4 AM into three sentences
+  (volatile `day:summary`); `turn_context` appends "Earlier today: ..." while
+  it is under twelve hours old. Sits in the turn note, never the cached prefix.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the

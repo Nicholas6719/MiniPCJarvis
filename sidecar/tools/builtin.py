@@ -653,11 +653,42 @@ async def web_search(query: str, count: int = 5) -> dict:
     return out
 
 
+_DDG_BREAKER = {"failures": 0, "until": 0.0}
+
+
+async def _ddg_first(query: str, count: int) -> dict | None:
+    """The keyless HTML endpoint answered in 0.7 s from here on 2026-09-18
+    against ~1.5 s for the hidden browser. Tried first, with a short
+    timeout; three misses in a row rest it for ten minutes so a blocked
+    endpoint never taxes a search."""
+    import time as _t
+    if _t.time() < _DDG_BREAKER["until"]:
+        return None
+    try:
+        out = await asyncio.wait_for(_ddg_search(query, count), timeout=4.0)
+    except Exception as e:
+        log.info("ddg-first failed: %s", str(e)[:80])
+        out = {}
+    if out.get("results"):
+        _DDG_BREAKER["failures"] = 0
+        return out
+    _DDG_BREAKER["failures"] += 1
+    if _DDG_BREAKER["failures"] >= 3:
+        _DDG_BREAKER["failures"] = 0
+        _DDG_BREAKER["until"] = _t.time() + 600
+        log.info("ddg-first resting for ten minutes after three misses")
+    return None
+
+
 async def _web_search(query: str, count: int = 5) -> dict:
     key = secrets.get("brave_api_key")
     from events import bus
     await bus.emit("web", stage="searching", query=query)
     if not key:
+        fast = await _ddg_first(query, count)
+        if fast:
+            await bus.emit("web", stage="results", query=query, results=fast["results"])
+            return fast
         # No key needed: drive the user's installed Brave browser (hidden).
         from search_brave_web import brave_web
         if brave_web.available:

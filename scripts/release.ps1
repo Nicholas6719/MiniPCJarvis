@@ -26,6 +26,15 @@ $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
 $log = { param($m) Write-Host ("[{0}] {1}" -f (Get-Date -Format HH:mm:ss), $m) }
+# STAY AWAKE FOR THE BUILD. Release 76 (2026-09-18) started at 09:35 and its app
+# came up at 16:14: the PC slept with the display and the build paused for
+# hours. ES_CONTINUOUS|ES_SYSTEM_REQUIRED keeps the system (not the display)
+# awake for the life of this process; it clears itself when the script exits.
+try {
+    Add-Type -Namespace Jarvis -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'
+    [void][Jarvis.Power]::SetThreadExecutionState([uint32]0x80000001)
+    & $log "keeping the machine awake for the release (display may still sleep)"
+} catch { & $log "could not set keep-awake: $($_.Exception.Message)" }
 
 if (-not $SkipBuild) {
     & $log "sidecar build (gated)"
