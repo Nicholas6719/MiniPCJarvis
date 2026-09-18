@@ -129,7 +129,11 @@ async def main() -> int:
             # answered the question whatever its length.
             r["substantive"] = (not SHRUG.search(r["reply"])
                                 and not HONEST.search(r["reply"])
-                                and (len(r["reply"]) >= 40
+                                # 24, not 40: "The 8845HS supports ECC-enabled
+                                # memory." is 39 characters and correct (release
+                                # 73, 2026-09-18) - the third time this floor has
+                                # called a right answer a shrug.
+                                and (len(r["reply"]) >= 24
                                      or bool(LIVE_CLAIM.search(r["reply"]))
                                      or bool(DIRECT_ANSWER.match(r["reply"]))))
             r["honest"] = bool(HONEST.search(r["reply"]))
