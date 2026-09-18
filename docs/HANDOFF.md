@@ -5094,9 +5094,18 @@ time was the one thing never stored. So:
   it back. Never blanket-kill llama-server (Houston's).
 - The live probe now always unmutes (`finally`), prints UTF-8, and reads the
   newest metrics row; a print crash had left the microphone off for an hour.
-- **Model bench**: `scratchpad/model_bench.py` exists (switch via `PATCH
-  /config {llm:{active_model}}`, restores the original in `finally`); the
-  first run hit the runaway and was stopped. Not yet measured.
+- **Model bench, measured on release 75** (`.agent/scripts/model_bench.py
+  PORT TOKEN`; switches via `PATCH /config {llm:{active_model}}`, restores
+  the original in `finally`, deaf+mute throughout):
+  | model | judged right | first word p50 / p90 | note |
+  |---|---|---|---|
+  | gpt-oss-20b | 18/19 (the miss is the matcher) | 2.4 s / 4.8 s | as shipped |
+  | gemma-4-26b-a4b | 8/19 | 4.3 s / 6.9 s | 11 turns REFUSED: "request (13,474 tokens) exceeds the available context size (12,288)" |
+  The tools prompt is ~13.5k tokens now (the config note's 9.7k is from
+  August); Gemma's 12k single-slot context cannot hold it, and on the turns
+  it did run it was slower to the first word. **gpt-oss stays.** A fair
+  re-run needs Gemma at 16k+ (q8 KV was chosen to fit 12k; measure RAM
+  first) and `chat_template_kwargs` thinking off is already set.
 
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
