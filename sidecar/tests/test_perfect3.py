@@ -161,6 +161,17 @@ def main() -> int:
         check(f"{said!r} is not refused", K.slots_cannot(said) is None, K.slots_cannot(said))
     check("every refusal offers something", all("I can" in v or "aren't wired" in v for v in K._CANNOT_SAID.values()))
 
+    print("\n-- a test mute is deaf as well as mute (his rule, 2026-09-17) --")
+    main_py = (ROOT / "main.py").read_text(encoding="utf-8")
+    sil = main_py[main_py.index('@app.post("/debug/silence")'):][:2600]
+    check("the mute stops the microphone", "await asyncio.to_thread(mic.stop)" in sil)
+    check("...and brings it back when the mute ends", "_ears_back" in sil and "await asyncio.to_thread(mic.start)" in sil)
+    check("...with a held reference", "spawn(_ears_back()" in sil)
+    inj = main_py[main_py.index("async def debug_inject_audio"):][:2600]
+    check("injected audio does not switch the ears back on mid-mute", "_spk.silent_until <= _t.time()" in inj)
+    dw = src[src.index("async def _device_watch"):][:4000]
+    check("the device watch leaves a deliberately stopped mic alone", "if speaker.silent_until > time.time():" in dw)
+
     print("\n-- the routes --")
     from brain.router import brain
 

@@ -909,6 +909,10 @@ class Orchestrator:
 
         while True:
             await asyncio.sleep(15)
+            # A test mute stops the microphone ON PURPOSE; it is not a device
+            # that needs healing back to life (2026-09-17).
+            if speaker.silent_until > time.time():
+                continue
             try:
                 # self-heal: if the stream is open but no audio has arrived for
                 # 6 s (e.g. an exclusive-mode app yanked the device), reopen it

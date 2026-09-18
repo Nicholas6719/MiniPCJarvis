@@ -768,7 +768,30 @@ async def debug_silence(body: dict, x_jarvis_token: str | None = Header(None)):
     # mute. Emergencies still go through (delivery._deliver).
     from delivery import delivery
     delivery.mute_until = speaker.silent_until
-    return {"ok": True, "until": speaker.silent_until}
+    # ...AND THE EARS. His rule (2026-09-17): a test must not hear him or the
+    # television. The microphone is stopped for the window and restarted at
+    # its end; injected audio still arrives, it feeds the queue directly.
+    from audio.io import mic
+    secs = float(body.get("seconds", 600))
+    if secs > 0:
+        try:
+            await asyncio.to_thread(mic.stop)
+        except Exception:
+            logging.getLogger("jarvis").debug("could not stop the mic for the mute", exc_info=True)
+
+        async def _ears_back(until=speaker.silent_until):
+            while _t.time() < until and speaker.silent_until == until:
+                await asyncio.sleep(5)
+            if speaker.silent_until <= _t.time() and mic._stream is None:
+                try:
+                    await asyncio.to_thread(mic.start)
+                    logging.getLogger("jarvis").info("test mute over: microphone back on")
+                except Exception:
+                    logging.getLogger("jarvis").warning("microphone did not come back after the mute", exc_info=True)
+        spawn(_ears_back(), name="ears-back")
+    elif mic._stream is None:
+        await asyncio.to_thread(mic.start)
+    return {"ok": True, "until": speaker.silent_until, "mic": mic._stream is not None}
 
 
 @app.get("/debug/ledger")
@@ -1217,7 +1240,10 @@ async def debug_inject_audio(body: dict, x_jarvis_token: str | None = Header(Non
             if orchestrator.sm.state not in (State.LISTENING, State.STARTING):
                 break
     finally:
-        mic.start()
+        # not during a test mute: the ears stay off until it ends
+        from audio.io import speaker as _spk
+        if _spk.silent_until <= _t.time():
+            mic.start()
     return {"ok": True, "seconds": round(len(audio) / 16000, 2)}
 
 

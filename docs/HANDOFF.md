@@ -4971,6 +4971,23 @@ planting facts and cancels the timer it sets. What it found, and the fixes:
   friday" had come back a Tuesday); `tidy_reply` strips the model's own END
   marker and turns a lone "Sir." into ", sir.".
 
+### Round five and his rule for the night (release 72)
+- `cannot` skill: calls, messages to anyone but him, email without an address,
+  orders, the house - refused by reflex WITH an offer, before the model can
+  improvise ("text my mom that I'll be late" had the model calling
+  send_to_phone itself and saying "Message sent").
+- `recall` floor 0.62, measured against his real store (unrelated 0.48-0.60,
+  related 0.64-0.77).
+- **His standing rule:** *"when testing have the mic off so Jarvis does not
+  hear what I am saying / the TV."* `/debug/silence` now also STOPS the
+  microphone for the window (`_ears_back` restarts it at expiry or on
+  seconds=0); the device watch leaves a deliberately stopped mic alone; the
+  inject endpoint does not restart it mid-mute. `release.ps1 -Silent`,
+  `suites.ps1` and `live_probe.py` are therefore deaf, mute and dark.
+- Still true after five rounds: Lima-Santiago came back "about 1,200 km"
+  (it is ~2,450) - the model's geography, not a routing fault; a `distance`
+  reflex over a city table would be the fix if it matters.
+
 ### Wake check, five days on
 11 fires rejected, none of his lost that the log shows; one to watch:
 16:05 "Hey, uh" (0.77) then "Wow." (0.92) - if he reports a missed wake, that
