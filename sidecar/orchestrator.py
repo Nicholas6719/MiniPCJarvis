@@ -1172,9 +1172,13 @@ class Orchestrator:
         degrade (logged + announced), never wedge the boot."""
         async def _wake_warm():
             await asyncio.to_thread(wake.warmup)
+        async def _turn_warm():
+            from audio import turn_model
+            await asyncio.to_thread(turn_model.warmup)
         for label, warm in (("wake word", _wake_warm),
                             ("speech recognition", stt.warmup),
-                            ("voice synthesis", tts.warmup)):
+                            ("voice synthesis", tts.warmup),
+                            ("turn model", _turn_warm)):
             try:
                 await warm()
             except Exception as e:

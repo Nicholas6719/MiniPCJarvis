@@ -331,7 +331,12 @@ DEFAULTS: dict[str, Any] = {
         "auto_sleep": True,
         "idle_sleep_minutes": 2,
     },
-    "wake": {"mode": "both", "threshold": 0.60, "semantic_endpoint": True},
+    # turn_model: Smart Turn v3 (pipecat-ai, BSD-2) hears whether a pause is the
+    # end of a turn; audio/turn_model.py. The file lives at
+    # %APPDATA%\JARVIS\models\smart-turn-v3.2-cpu.onnx (or turn_model_path);
+    # absent, the endpoint reads the words alone as before (2026-09-18).
+    "wake": {"mode": "both", "threshold": 0.60, "semantic_endpoint": True,
+             "turn_model": True, "turn_model_path": ""},
     "vision": {
         "model": r"C:\AI\models\gemma-3-4b-it-q4_0.gguf",
         "mmproj": r"C:\AI\models\gemma-3-4b-it-mmproj.gguf",

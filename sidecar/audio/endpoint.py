@@ -26,6 +26,7 @@ from config import config
 log = logging.getLogger("jarvis.endpoint")
 
 # Budgets in seconds of trailing silence.
+SNAP = 0.20        # finished by the words AND by the sound of it (turn model, 2026-09-18)
 FAST = 0.40        # clearly finished
 NORMAL = 0.90      # unchanged default
 PATIENT = 1.90     # clearly mid-thought — let them finish
@@ -72,8 +73,30 @@ _QUESTION_STEM = re.compile(r"^\s*(?:what|who|when|where|why|which|how|is|are|do
                             r"open|close|play|set|remind|search|look|read)\b", re.I)
 
 
-def budget_for(text: str, brain_hit: bool) -> tuple[float, str]:
-    """(seconds of silence to require, why) for a partial transcript."""
+COMPLETE = 0.85    # turn model: confidently finished
+INCOMPLETE = 0.15  # turn model: confidently mid-thought
+
+
+def budget_for(text: str, brain_hit: bool, turn_p: float | None = None) -> tuple[float, str]:
+    """(seconds of silence to require, why) for a partial transcript, and the
+    turn model's probability that the SOUND of it was a finished turn."""
+    secs, why = _by_words(text, brain_hit)
+    if turn_p is None:
+        return secs, why
+    # The words keep the first say when they say he trailed off: prosody
+    # cannot override "remind me to".
+    if secs == PATIENT:
+        return secs, why
+    if turn_p >= COMPLETE:
+        if secs == FAST:
+            return SNAP, why + ", and it sounded finished"
+        return FAST, "unclear by the words but it sounded finished"
+    if turn_p <= INCOMPLETE and secs == NORMAL:
+        return PATIENT, "unclear by the words and it sounded unfinished"
+    return secs, why
+
+
+def _by_words(text: str, brain_hit: bool) -> tuple[float, str]:
     t = (text or "").strip()
     if not t:
         return NORMAL, "nothing heard yet"
@@ -107,16 +130,32 @@ async def decide(audio, stt, brain) -> tuple[float, str, str]:
     """
     if not config.get("wake", "semantic_endpoint", default=True):
         return NORMAL, "disabled", ""
+    # The turn model listens while Parakeet reads: both off the loop, in
+    # parallel, so the sound-based verdict costs no extra wait.
+    import asyncio
+    from audio import turn_model
+    turn_task = (asyncio.ensure_future(asyncio.to_thread(turn_model.predict, audio))
+                 if turn_model.available() else None)
     try:
         text = (await stt.transcribe(audio) or "").strip()
     except Exception:
         log.debug("endpoint transcribe failed", exc_info=True)
+        if turn_task is not None:
+            turn_task.cancel()
         return NORMAL, "transcribe failed", ""
+    turn_p = None
+    if turn_task is not None:
+        try:
+            turn_p = await asyncio.wait_for(turn_task, timeout=0.25)
+        except Exception:
+            turn_p = None
     brain_hit = False
     try:
         if text and config.get("brain", "enabled", default=True):
             brain_hit = await brain.decide(text) is not None
     except Exception:
         brain_hit = False
-    secs, why = budget_for(text, brain_hit)
+    secs, why = budget_for(text, brain_hit, turn_p)
+    if turn_p is not None:
+        why = f"{why} [turn {turn_p:.2f}]"
     return secs, why, text
