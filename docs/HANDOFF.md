@@ -5169,6 +5169,25 @@ time was the one thing never stored. So:
   endpoint served it. Rapid repeated queries can still get an empty page;
   the breaker and the browser cover that.
 
+### Round six (release 79) - the endpoint hears the pause: Smart Turn v3
+- `audio/turn_model.py`: pipecat-ai's Smart Turn v3.2 (8 MB int8 ONNX, BSD-2,
+  Whisper-Tiny encoder + linear head, 23 languages) at
+  `C:/AI/models/smart-turn-v3.2-cpu.onnx` (config `wake.turn_model_path`;
+  APPDATA is virtualised for the agent shell, C:/AI is not). Input
+  `input_features` (N, 80, 800) = Whisper log-mel of the last 8 s, left-padded,
+  computed with librosa+numpy (transformers never enters the bundle); output
+  `logits` is already a probability (0.98 on silence). 48 ms per verdict on
+  his CPU after a 1.7 s first load (warmed at audio boot).
+- `endpoint.decide()` runs it in parallel with Parakeet (bounded 0.25 s) and
+  `budget_for(text, brain_hit, turn_p)` only MOVES the silence budget:
+  finished by words and sound -> SNAP 0.20 s; unclear words that sound
+  finished -> FAST 0.40 (was 0.90); unclear + sounds unfinished -> PATIENT;
+  trailing-off rules keep the first say. Log line: `endpoint: 0.20s (...,
+  and it sounded finished [turn 0.93])`. `wake.turn_model: false` disables.
+- Sources: daily.co "Smart Turn v3 with CPU inference in 12 ms";
+  github.com/pipecat-ai/smart-turn (inference.py: WhisperFeatureExtractor
+  chunk_length=8, threshold 0.5); Pipecat runs it after its VAD pause.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the
