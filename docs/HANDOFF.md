@@ -5184,6 +5184,13 @@ time was the one thing never stored. So:
   finished -> FAST 0.40 (was 0.90); unclear + sounds unfinished -> PATIENT;
   trailing-off rules keep the first say. Log line: `endpoint: 0.20s (...,
   and it sounded finished [turn 0.93])`. `wake.turn_model: false` disables.
+- **Release 79 installed; its suite run reported two failures, both re-run
+  green by hand on the installed build:** endpoint_e2e expected the old 400 ms
+  and got the new 200 ms (the suite now accepts either); soak_e2e read
+  +1,184 MB over 4.5 min right after the endpoint suite (first-ever
+  librosa/numba + ONNX arena warm-up), and a clean re-run read -68 MB. Real
+  log on 79: `endpoint: 0.20s (... and it sounded finished [turn 0.98])`;
+  "what's the weather in?" stayed at 1.90 s (words outrank sound).
 - Sources: daily.co "Smart Turn v3 with CPU inference in 12 ms";
   github.com/pipecat-ai/smart-turn (inference.py: WhisperFeatureExtractor
   chunk_length=8, threshold 0.5); Pipecat runs it after its VAD pause.

@@ -97,7 +97,8 @@ async def main() -> int:
 
     check("both utterances were heard", bool(fin.get("text")) and bool(dang.get("text")))
     fb, db = fin.get("budget_ms"), dang.get("budget_ms")
-    check("a finished sentence gets the short budget", fb == 400, f"{fb} ms")
+    # 400 = FAST by the words; 200 = SNAP when the turn model also heard it end (release 79)
+    check("a finished sentence gets the short budget", fb in (200, 400), f"{fb} ms")
     check("a dangling one gets the patient budget", db == 1900, f"{db} ms")
     fs, ds = fin.get("silence_ms") or 0, dang.get("silence_ms") or 0
     check("he really did cut the finished one early", 0 < fs < 900, f"{fs} ms")
