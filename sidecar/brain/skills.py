@@ -1328,6 +1328,42 @@ def say_doc_read(slots: dict, res: dict) -> str:
     return text
 
 
+_CANNOT = (
+    ("call", re.compile(r"\b(?:call|ring|dial|facetime|video call|phone)\b(?!\s+number)", re.I)),
+    ("message", re.compile(r"\b(?:text|message|sms|dm|tell|notify|ping)\s+(?:my\s+|your\s+|the\s+)?"
+                            r"(?:mom|dad|mother|father|mum|parents|brother|sister|wife|husband|girlfriend|boyfriend|"
+                            r"friend|professor|teacher|boss|doctor|dentist|everyone|someone|somebody|them|him|her|[a-z]+)\b", re.I)),
+    ("email", re.compile(r"\b(?:e-?mail|send (?:an? )?(?:e-?mail|message) to)\b", re.I)),
+    ("order", re.compile(r"\b(?:order|buy|purchase|get me)\b.*\b(?:pizza|food|dinner|lunch|coffee|groceries|delivery|mouse|keyboard|"
+                          r"headphones|charger|book|tickets|new)\b", re.I)),
+    ("home", re.compile(r"\b(?:lights?|lamp|thermostat|heat|ac|air conditioning|front door|garage door|blinds|tv)\b", re.I)),
+)
+_CANNOT_SAID = {
+    "call": "I can't place calls, sir. I can send a note to your own phone, or set a reminder to call.",
+    "message": "I can only message you, sir - not anyone else. I can put it on your phone as a note to send on.",
+    "email": "I can't send email, sir. Give me the address and I'll open a draft for you to send.",
+    "order": "I can't buy or order anything, sir. I can find it and open the page.",
+    "home": "I don't control anything in the house, sir - the lights, the heat and the doors aren't wired to me.",
+}
+
+
+def slots_cannot(t: str) -> dict | None:
+    s = t or ""
+    # "send that to my phone", "text me the summary": his own phone is not this
+    if re.search(r"\b(?:to my phone|to me|me the|me that|me this|text me|message me|send me)\b", s, re.I):
+        return None
+    if re.search(r"\b(?:email|e-mail)\b.*@", s):
+        return None                      # a real address: the model may open a draft
+    for kind, rx in _CANNOT:
+        if rx.search(s):
+            return {"kind": kind}
+    return None
+
+
+def say_cannot(slots: dict, _res: dict) -> str:
+    return _CANNOT_SAID.get(slots.get("kind"), "I can't do that, sir.")
+
+
 def say_time(_: dict, __: dict) -> str:
     return "It's " + dt.datetime.now().strftime("%I:%M %p").lstrip("0") + "."
 
@@ -2691,6 +2727,17 @@ SKILLS: list[Skill] = [
     # THE WORLD CLOCK. "What time is it in Tokyo" went to the model: 27 seconds,
     # two searches, a URL it made up, and the wrong answer (2026-09-17). A
     # clock is arithmetic.
+    # WHAT HE CANNOT DO, SAID BEFORE THE MODEL CAN IMPROVISE. "Text my mom that
+    # I'll be late" was refused by send_to_phone's guard, so the model called
+    # the tool itself and said "Message sent" (2026-09-17 21:00). A reflex gets
+    # there first, and says what he CAN do instead.
+    Skill("cannot", None, [
+        "call mom", "call my mom", "call my dentist", "phone my sister", "ring my dad",
+        "facetime my brother", "text my mom that i'll be late", "message my friend that i'm on my way",
+        "send my professor an email", "email my teacher that i'm sick", "text dad",
+        "order me a pizza", "order some food", "buy me a new mouse", "turn off the lights",
+        "turn on the lights", "dim the lights", "set the thermostat to 70", "lock the front door"],
+        slots=slots_cannot, speak=say_cannot),
     Skill("time_in", None, [
         "what time is it in tokyo", "what's the time in london", "time in los angeles",
         "what time is it in new york right now", "what time is it in paris", "current time in sydney",

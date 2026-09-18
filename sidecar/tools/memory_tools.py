@@ -15,7 +15,9 @@ async def recall(query: str) -> dict:
     # ONLY WHAT IS ABOUT THE QUESTION. Asked the wifi password, he recited his
     # desk lamp, his car and his own name (2026-09-17): the nearest memories,
     # however far. Below this the answer is "I don't have that".
-    hits = [h for h in hits if float(h.get("score") or 0) >= 0.30]
+    # 0.62, measured against his real store on 2026-09-17: unrelated memories
+    # score 0.48-0.60 to a question, related ones 0.64-0.77.
+    hits = [h for h in hits if float(h.get("score") or 0) >= 0.62]
     if not hits:
         return {"memories": [], "note": "nothing stored about that - say so plainly, do not list other memories"}
     out = {"memories": [{"content": h["content"], "category": h["category"],

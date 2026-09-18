@@ -4938,6 +4938,39 @@ content word with the utterance is not asked ("help me study for my biology
 test" sat nearest `face_learn`). `REPEAT_RE`: "say that again" repeats the last
 reply before the brain or the model is consulted.
 
+### Round three - the LIVE battery on release 69 (tests/test_perfect3.py)
+`.agent/scripts/live_probe.py PORT TOKEN all` put ~50 untested things to the
+installed build, muted, and the AUDIT LOG (`deliveries`' sibling `audit_log`
+in the real DB) said what each turn really did. It also had side effects on
+his machine - an Outlook draft, a Telegram message to his own phone, a
+YouTube tab, two files, a memory row - which is why the probe now avoids
+planting facts and cancels the timer it sets. What it found, and the fixes:
+- "call mom" -> `send_to_phone("Mom, I'm running late...")` + "Message sent";
+  "email my professor" -> mailto: to professor@example.com. Prompt now has a
+  "what you CANNOT do" paragraph (calls, messaging anyone but him, email
+  without a real address, ordering, lights, bank) and `slots_to_phone`
+  refuses calls and messages to anyone but him (`_NOT_TO_PHONE`).
+- "save that as a word document called X" -> `find_files("x")`. `SAVE_THAT_RE`
+  runs before the router with his LAST REPLY as the content (`write_document`
+  / `write_note`).
+- "take a note called X: ..." -> `remember_fact`. `note_take` -> `write_note`.
+- "what do you think i should focus on tonight" -> `focus_window("tonight")`.
+- "how far apart are they" (Lima, Santiago) -> `distance_to(place="car")`.
+  `PRONOUN_FOLLOW` hint carries the last exchange; the general-knowledge hint
+  APPENDS to it (it overwrote it in release 70).
+- "what time is it in tokyo" -> 27 s, two searches, a made-up URL, wrong.
+  `time_in` reflex over zoneinfo (`_CITY_TZ`).
+- "any emergencies near me" -> the national political wire. `local_emergencies`
+  tool = the watch's sweep through his rules; `emergencies` skill.
+- `ARTEFACT_ORDER` -> `must_use_tool`: an order for a model/document/image/
+  reminder must start with a tool call (the "Arc reactor model generated" lie).
+- Round four (release 71): "read me the document called X" -> `doc_read` reads
+  it (find-file canon no longer swallows "read..."); `recall` relevance floor
+  0.30 ("what's the wifi password" recited his desk lamp); `slots_date` for
+  next/this weekday, tomorrow, N days/weeks, days until holidays/dates ("next
+  friday" had come back a Tuesday); `tidy_reply` strips the model's own END
+  marker and turns a lone "Sir." into ", sir.".
+
 ### Wake check, five days on
 11 fires rejected, none of his lost that the log shows; one to watch:
 16:05 "Hey, uh" (0.77) then "Wow." (0.92) - if he reports a missed wake, that

@@ -149,8 +149,17 @@ def main() -> int:
     check("the model's END marker is not spoken", tidy_reply("consequences【END】") == "consequences")
     check("a lone 'Sir.' becomes ', sir.'", tidy_reply("your Windows assistant. Sir.") == "your Windows assistant, sir.")
     mt = (ROOT / "tools" / "memory_tools.py").read_text(encoding="utf-8")
-    check("recall has a relevance floor", ">= 0.30" in mt and "nothing stored about that" in mt)
+    check("recall has a relevance floor", ">= 0.62" in mt and "nothing stored about that" in mt)
     check("the general hint APPENDS to the pronoun hint", 'if general_hint else "") + (' in src)
+
+    print("\n-- round five: the impossible is refused with an offer --")
+    for said, kind in (("call mom", "call"), ("text my mom that i'll be late", "message"), ("email my professor", "email"),
+                       ("order me a pizza", "order"), ("turn off the lights", "home")):
+        got = K.slots_cannot(said)
+        check(f"{said!r} -> {kind}", got == {"kind": kind}, got)
+    for said in ("send that to my phone", "text me the summary", "email john@example.com that i'm late", "what's my mom's phone number"):
+        check(f"{said!r} is not refused", K.slots_cannot(said) is None, K.slots_cannot(said))
+    check("every refusal offers something", all("I can" in v or "aren't wired" in v for v in K._CANNOT_SAID.values()))
 
     print("\n-- the routes --")
     from brain.router import brain
