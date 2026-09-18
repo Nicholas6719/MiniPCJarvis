@@ -5161,6 +5161,13 @@ time was the one thing never stored. So:
   rows, a quiet side call condenses the day since 4 AM into three sentences
   (volatile `day:summary`); `turn_context` appends "Earlier today: ..." while
   it is under twelve hours old. Sits in the turn note, never the cached prefix.
+- **Release 78** fixed what 77's live check showed: the keep-awake constant
+  (`[uint32]2147483649`; PowerShell parsed the hex as a negative int) and the
+  DuckDuckGo client (HTTP/2 got a 200 with NO results every time; HTTP/1.1
+  returns eleven; ads skipped). Verified on 78: the keep-awake line fires, and
+  a "look up" turn produced no browser "results via" line, i.e. the keyless
+  endpoint served it. Rapid repeated queries can still get an empty page;
+  the breaker and the browser cover that.
 
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
