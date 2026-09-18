@@ -1000,10 +1000,12 @@ class Orchestrator:
 
     @staticmethod
     def _probe_verdict(text: str, finish: str | None) -> bool:
-        """True when the model is answering like a model: a few letters of
-        content. Gibberish channel markup with no content, or a budget spent
-        entirely on reasoning, is False."""
-        return bool(re.search(r"[A-Za-z]{2,}", text or ""))
+        """True when the model answered the question it was asked. Gibberish
+        channel markup, or a budget spent entirely on reasoning, is False."""
+        # asked for OK, a working model says OK in a short reply; gibberish is
+        # long and never quite says it
+        plain = re.sub(r"<\|[^|>]*\|>", " ", text or "")
+        return len(plain) < 200 and bool(re.search(r"(?:ok|okay)", plain, re.I))
 
     async def _probe_model(self) -> None:
         """Ask the side slot for one word. This morning (2026-09-18) llama-server
