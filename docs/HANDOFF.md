@@ -5145,6 +5145,8 @@ time was the one thing never stored. So:
   his live config; nothing listens on 8080/8081 any more; the adopt path
   stays as a gated mechanism; comments and the memory note no longer name
   it. The rule that survives: kill llama-server by PID, never by image name.
+- Installed build is release 76 (a40394b); commit 8ee1876 changes only comments and the
+  adopt_ports DEFAULT (his live config already carries []), so no release was cut for it.
 - The ten-minute liveness probe is visible in the log as a 1-token,
   18-generated-token side call every ten minutes (16:46, 16:56, 17:06).
 
