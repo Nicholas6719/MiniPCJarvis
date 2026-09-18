@@ -169,19 +169,14 @@ def main() -> int:
     check("waits for the answer to finish", "State.IDLE" in src)
     check("only after a completed model reply", "if full_reply and not self._speak_cancel.is_set():\n            spawn(self._offer_overheard(text)" in orch)
 
-    print("
--- the conversation is re-read into both prompt shapes while he is idle --")
+    print("\n-- the conversation is re-read into both prompt shapes while he is idle --")
     src = orch[orch.index("async def _rewarm_history"):][:2600]
     check("both shapes, one token each", "for tl, slot in ((tools, 0), (None, 1)):" in src and "max_tokens=1" in src)
     check("only while idle, two seconds after the turn", "await asyncio.sleep(2.0)" in src and "State.IDLE, State.SLEEPING" in src)
     check("the plain history, no turn note", '{"role": "user", "content": "hi"}' in src)
-    check("scheduled after a model reply", "if full_reply:
-            self._schedule_history_rewarm()" in orch)
-    check("...and after a reflex that added to the history", 'label not in ("sleep", "correction", "teach"):
-            self._schedule_history_rewarm()' in orch)
-    check("cancelled wherever a turn begins", orch.count("self._cancel_history_rewarm()
-") >= 4 and "self._cancel_history_rewarm()
-        self.metrics.begin()" in orch)
+    check("scheduled after a model reply", "if full_reply:\n            self._schedule_history_rewarm()" in orch)
+    check("...and after a reflex that added to the history", 'label not in ("sleep", "correction", "teach"):\n            self._schedule_history_rewarm()' in orch)
+    check("cancelled wherever a turn begins", orch.count("self._cancel_history_rewarm()\n") >= 4 and "self._cancel_history_rewarm()\n        self.metrics.begin()" in orch)
     check("held by a reference, never a bare task", 'spawn(self._rewarm_history(), name="history-rewarm")' in orch)
     check("switchable in config", 'config.get("llm", "rewarm_history", default=True)' in orch)
 
