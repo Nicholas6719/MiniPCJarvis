@@ -5225,6 +5225,11 @@ model); Pipecat/Hermes JARVIS builds win on theatre wired to function.
 - Workshop commentary already existed (render_queue announces completion with
   `create3d.spoken_caveats`), so nothing was added there.
 - Gate: tests/test_awareness.py.
+- **Release 80 installed**; its suite run failed only the soak (+68 MB over 4.5
+  min, 15.2 MB/min against the 12 line) and a seven-minute re-run by hand read
+  -115 MB. suites.ps1 now gives the soak 420 s. Live on 80: "how is my phone
+  doing" -> "I haven't heard from your phone lately, sir. The status shortcut
+  sends it."; the watcher runs quietly (it logs only when it notes something).
 
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect

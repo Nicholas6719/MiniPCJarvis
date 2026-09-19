@@ -126,7 +126,11 @@ foreach ($t in @("brain_e2e.py", "general_e2e.py", "teach_e2e.py", "files_e2e.py
     # NOT $args — that is an automatic variable, and writing to it inside a
     # loop body is the kind of thing that works until it does not.
     $suiteArgs = @($port, $tok)
-    if ($t -eq "soak_e2e.py") { $suiteArgs += "300" }
+    # 420, not 300: at 300 the leak window is 4.5 min and twice (releases 79, 80)
+    # it read allocator churn as a leak (+68 MB) that a longer run showed
+    # falling (-115 MB over 6.5 min). The suite says so itself: a short window
+    # measures noise.
+    if ($t -eq "soak_e2e.py") { $suiteArgs += "420" }
     $out = & .\.venv\Scripts\python.exe "tests\$t" @suiteArgs 2>&1
     $code = $LASTEXITCODE
     # ALWAYS keep the whole thing. An intermittent failure that only shows its
