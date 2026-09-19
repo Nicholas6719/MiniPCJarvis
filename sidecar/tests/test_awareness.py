@@ -101,6 +101,12 @@ def main() -> int:
     from config import DEFAULTS
     check("switchable in config", DEFAULTS["persona"].get("wit") is True and DEFAULTS["awareness"]["enabled"] is True)
 
+    # THE GATES SHARE ONE DATABASE: leave no fake calendar or phone behind
+    # (test_briefing read "Chemistry lecture" as today's reminder, release 80).
+    volatile.forget(P.KEY_CAL)
+    volatile.forget(P.KEY_STATUS)
+    volatile.forget(P.KEY_REM)
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")
