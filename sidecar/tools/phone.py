@@ -35,6 +35,7 @@ log = logging.getLogger("jarvis.tools.phone")
 
 KEY_CAL = "phone:calendar"
 KEY_REM = "phone:reminders"
+KEY_STATUS = "phone:status"      # battery, charging, place, focus - from Shortcuts automations
 MAX_EVENTS = 60
 MAX_REMINDERS = 80
 _TEXT = 120
@@ -97,6 +98,8 @@ def kind_of(text: str) -> str | None:
         return "calendar"
     if kind in ("reminders", "todo", "todos", "tasks"):
         return "reminders"
+    if kind in ("status", "battery", "phone"):
+        return "status"
     if isinstance(obj.get("events"), list):
         return "calendar"
     if isinstance(obj.get("items"), list) or isinstance(obj.get("reminders"), list):
@@ -166,7 +169,11 @@ def ingest_payload(raw: str) -> dict:
             ok = volatile.put(KEY_REM, {"items": kept, "count": len(kept)}, source="phone")
             return {"type": "reminders", "stored": len(kept) if ok else 0,
                     "ignored": max(0, len(src) - len(kept))}
-        return {"error": "that payload was not a calendar or a reminders list", "stored": 0}
+        if kind == "status":
+            st = _clean_status(obj)
+            ok = volatile.put(KEY_STATUS, st, source="phone")
+            return {"type": "status", "stored": 1 if ok else 0}
+        return {"error": "that payload was not a calendar, a reminders list or a status", "stored": 0}
     except Exception as e:
         log.warning("phone payload unreadable: %s", e)   # his input, not a bug: no traceback
         return {"error": f"that payload could not be read: {e}", "stored": 0}
@@ -258,6 +265,61 @@ async def get_phone_reminders(list_name: str = "") -> dict:
     return {"list": want, "reminders": out, "count": len(out),
             "as_of": volatile.spoken_age(got["age_minutes"]),
             "age_minutes": got["age_minutes"], "stale": got["age_minutes"] > _window()}
+
+
+def _clean_status(obj: dict) -> dict:
+    """{'type':'status','battery':18,'charging':false,'place':'left campus','focus':'Work'}
+    from an iOS Shortcuts automation (Battery Level / Charger / Arrive-Leave / Focus triggers)."""
+    out: dict = {}
+    b = obj.get("battery", obj.get("battery_level"))
+    try:
+        if b is not None:
+            b = float(str(b).rstrip("% "))
+            out["battery"] = int(round(b * 100 if 0 < b <= 1 else b))
+    except (TypeError, ValueError):
+        pass
+    ch = obj.get("charging", obj.get("charger"))
+    if isinstance(ch, str):
+        ch = ch.strip().lower() in ("true", "yes", "connected", "charging", "1")
+    if ch is not None:
+        out["charging"] = bool(ch)
+    for k in ("place", "focus", "note"):
+        v = _s(obj.get(k), 60)
+        if v:
+            out[k] = v
+    return out
+
+
+def status() -> dict | None:
+    """The phone's last status while it is fresh (an hour), else None."""
+    got = volatile.get(KEY_STATUS)
+    if not got or got["age_minutes"] > max(_window(), 60):
+        return None
+    v = dict(got["value"] or {})
+    v["age_minutes"] = got["age_minutes"]
+    return v
+
+
+def upcoming(minutes: float = 12) -> list[dict]:
+    """Events starting within `minutes` (or just started, up to 2 min ago),
+    each with 'minutes' until start. Empty when the calendar is stale."""
+    got = volatile.get(KEY_CAL)
+    if not got or got["age_minutes"] > 24 * 60:
+        return []
+    now = _now()
+    out = []
+    for ev in (got["value"] or {}).get("events") or []:
+        if ev.get("all_day"):
+            continue
+        start = _parse_dt(ev.get("start"))
+        if start is None:
+            continue
+        if start.tzinfo is not None:
+            start = start.astimezone().replace(tzinfo=None)
+        delta = (start - now).total_seconds() / 60.0
+        if -2 <= delta <= minutes:
+            out.append({**ev, "minutes": round(delta, 1)})
+    return out
 
 
 def today_lines() -> list[tuple[str, str]]:

@@ -672,6 +672,10 @@ class Orchestrator:
                 log.debug("no delivery ledger for the briefing", exc_info=True)
         ack = persona.wake_line(gap, time.localtime().tm_hour,
                                 getattr(self, "_last_wake_ack", None), entries)
+        from brain import wit
+        _w = wit.remark("late", hour=time.localtime().tm_hour)
+        if _w:
+            ack = ack.rstrip() + " " + _w
         self._last_wake_ack = persona.wake_ack(gap, time.localtime().tm_hour,
                                                getattr(self, "_last_wake_ack", None))
         return ack
@@ -2358,6 +2362,11 @@ class Orchestrator:
         if skill.speak_first and skill.tool:
             # announce the action immediately ("Opening youtube.com."), then do it
             reply = polish(skill.speak(args, {}))
+            if skill.name == "cannot" and reply.strip():
+                from brain import wit
+                _w = wit.remark("refusal", str(args.get("kind") or ""), remote=self.remote_turn)
+                if _w:
+                    reply = reply.rstrip() + " " + _w
             self.metrics.mark("first_token_ms")
             # A skill may deliberately say NOTHING — taking a screenshot is the
             # case: the picture is the answer and "Screenshot saved." is one more
@@ -3036,6 +3045,10 @@ class Orchestrator:
                     # correction itself.
                     log.debug("could not learn from the correction", exc_info=True)
             ack = "Sorry."
+            from brain import wit
+            _w = wit.remark("mistake", remote=self.remote_turn)
+            if _w:
+                ack = ack + " " + _w
             await bus.emit("assistant_delta", text=ack + " ")
             await queue.put(ack)
             await queue.put(None)

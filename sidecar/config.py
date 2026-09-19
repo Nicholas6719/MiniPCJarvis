@@ -174,7 +174,12 @@ DEFAULTS: dict[str, Any] = {
     "speech": {"fillers": True},
     # ~1 line in 3 carries the honorific, matching JARVIS's actual dialogue (see
     # brain/skills.py honorific()). Set honorific "" to switch it off entirely.
-    "persona": {"honorific": "sir", "honorific_rate": 0.55},
+    "persona": {"honorific": "sir", "honorific_rate": 0.55,
+                # one dry remark an hour at most, on a few triggers (brain/wit.py)
+                "wit": True},
+    # The watcher (awareness.py): every 90 s, notices change, holds it as
+    # context, speaks only in the interrupt tiers (2026-09-18).
+    "awareness": {"enabled": True, "every_s": 90},
     "confirm": {"by_voice": True},   # answer shutdown/restart confirmations by saying yes/no
     "ui": {"panel_hold_s": 5},      # seconds the stage holds after an answer (§6.3: 5 s + drain bar)
     # token lives DPAPI-encrypted on disk, never here

@@ -173,6 +173,9 @@ async def lifespan(app: FastAPI):
     spawn(icloud.sync_loop())          # his calendar and Reminders, every quarter hour
     import day_memory
     spawn(day_memory.loop())           # three sentences on the day so far, for the turn note
+    import awareness as _aw
+    _aw.awareness.speak = _aw.speak_via_delivery
+    spawn(_aw.awareness.loop())        # notices change; speaks only in the interrupt tiers
     from dictation import dictation as _dict
     _dict.orchestrator = orchestrator     # so it refuses to fight a real turn
     from brain.night_school import night_school

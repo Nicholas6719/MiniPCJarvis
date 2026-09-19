@@ -35,6 +35,13 @@ def turn_context(memory_context: str = "", honorific: bool | None = None,
         mem += day_memory.line()
     except Exception:
         pass
+    # ...and what is around him right now (awareness.py): the window he has
+    # had in front, what landed, his phone. Context for "this" and "that".
+    try:
+        from awareness import awareness as _aw
+        mem += _aw.context_line()
+    except Exception:
+        pass
     # The honorific's frequency is decided for us (brain.skills.want_honorific) and
     # stated per turn, because the model cannot pace it itself — see system_prompt.
     hint = ""

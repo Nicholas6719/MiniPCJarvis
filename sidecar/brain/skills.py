@@ -1397,6 +1397,21 @@ def say_private_stock(slots: dict, _res: dict) -> str:
     return not_listed_line(slots.get("name", "That company"))
 
 
+def say_phone_status(_slots: dict, _res: dict) -> str:
+    from tools import phone as _phone
+    st = _phone.status()
+    if not st or not isinstance(st.get("battery"), int):
+        return "I haven't heard from your phone lately, sir. The status shortcut sends it."
+    line = f"Your phone is at {st['battery']} percent"
+    line += ", charging" if st.get("charging") else ", not charging"
+    if st.get("place"):
+        line += f"; last I heard, {st['place']}"
+    age = st.get("age_minutes") or 0
+    if age >= 10:
+        line += f" - that was {int(age)} minutes ago"
+    return line + "."
+
+
 _CANNOT_SAID = {
     "call": "I can't place calls, sir. I can send a note to your own phone, or set a reminder to call.",
     "message": "I can only message you, sir - not anyone else. I can put it on your phone as a note to send on.",
@@ -2807,6 +2822,12 @@ SKILLS: list[Skill] = [
         "can you buy shares of stripe", "is discord a public company", "has spacex gone public yet",
         "what's the ticker symbol for openai"],
         slots=slots_private_stock, speak=say_private_stock),
+    # HIS PHONE, from the status its Shortcuts send (awareness, 2026-09-18)
+    Skill("phone_status", None, [
+        "how's my phone", "how is my phone doing", "what's my phone battery at",
+        "how much battery does my phone have", "is my phone charging", "what's my phone at",
+        "phone battery", "how's my phone battery"],
+        slots=lambda t: {}, speak=say_phone_status),
     Skill("cannot", None, [
         "call mom", "call my mom", "call my dentist", "phone my sister", "ring my dad",
         "facetime my brother", "text my mom that i'll be late", "message my friend that i'm on my way",

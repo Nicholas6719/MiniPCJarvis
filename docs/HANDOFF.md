@@ -5195,6 +5195,37 @@ time was the one thing never stored. So:
   github.com/pipecat-ai/smart-turn (inference.py: WhisperFeatureExtractor
   chunk_length=8, threshold 0.5); Pipecat runs it after its VAD pause.
 
+### Round seven (release 80) - he notices, and interrupts only for cause
+His brief: situational awareness, priorities that interrupt, the phone as a
+sensor, and "he is JARVIS": dry wit on a budget. Research: proactive agents
+that speak more than 3-5 times a day get switched off (notification-budget
+model); Pipecat/Hermes JARVIS builds win on theatre wired to function.
+- `awareness.py`: every 90 s (`awareness.every_s`), off the loop: the front
+  window (a title in front 20+ min becomes context), the Downloads folder (a
+  file landing is context), disk under 10 GB, the phone's status, the phone's
+  calendar (next event inside 10 min). Each note gets a tier: CUT_IN
+  (delivery URGENT, interrupts once), NEXT_PAUSE (waits for IDLE, then
+  ALERT), HOLD (turn note only: "Around him: ..."). Phone-battery notes are
+  desk-only (away, he is holding the phone). Dedup + hourly ceiling are
+  delivery's. Terminal error lines and "a build failed" are NOT in v1.
+- Phone status: `{"type":"status","battery":18,"charging":false,"place":"left
+  campus"}` from Shortcuts automations (Battery Level falls below 15 / 5,
+  Charger, Arrive/Leave, Focus) -> `phone.status()` (volatile `phone:status`,
+  fresh for an hour); `phone.upcoming(minutes)` for the calendar warning;
+  `phone_status` skill ("how's my phone"). Instructions sent to him:
+  scratchpad/phone_status_shortcuts.md.
+- Tiers on HIS setup (a plugged-in mini PC): CUT_IN = phone <= 5% unplugged, a
+  local emergency (news watch, already), a render he waits on failing
+  (render_queue, already); NEXT_PAUSE = phone <= 15% unplugged, calendar in
+  10 min, disk low, render done (already); HOLD = everything else.
+- `brain/wit.py`: one dry line an hour at most; triggers: after "Sorry."
+  (a correction), after a `cannot` refusal (order/home/call/message/email),
+  a bare wake between 1 and 5 AM. Never muted, never on the phone, never the
+  same line twice running. `persona.wit` switches it off.
+- Workshop commentary already existed (render_queue announces completion with
+  `create3d.spoken_caveats`), so nothing was added there.
+- Gate: tests/test_awareness.py.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the

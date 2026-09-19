@@ -95,6 +95,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_perfect3.py || (echo PERFECT3 TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_faster.py || (echo FASTER TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_turn_model.py || (echo TURN MODEL TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_awareness.py || (echo AWARENESS TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_briefing.py || (echo BRIEFING TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_nws.py || (echo NWS TEST FAILED & exit /b 1)
 

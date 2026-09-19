@@ -413,7 +413,7 @@ class TelegramBridge:
             else:
                 from tools import phone as _phone
                 res = _phone.ingest_payload(text)
-                what = "calendar" if kind == "calendar" else "reminders"
+                what = {"calendar": "calendar", "status": "phone status"}.get(kind, "reminders")
             log.info("phone: %s payload - %s", kind,
                      res.get("error") or f"{res.get('stored', 0)} stored")
             if res.get("error"):
@@ -421,7 +421,7 @@ class TelegramBridge:
             elif _automated(text):
                 pass                              # a Shortcut sent it: no receipt
             elif res.get("stored"):
-                unit = "reading" if kind == "health" else ("event" if kind == "calendar" else "item")
+                unit = {"health": "reading", "calendar": "event", "status": "status"}.get(kind, "item")
                 await self._send(f"Logged {res['stored']} {unit}"
                                  f"{'s' if res['stored'] != 1 else ''}, sir.")
             else:
