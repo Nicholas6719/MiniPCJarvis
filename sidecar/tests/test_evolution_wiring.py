@@ -58,7 +58,7 @@ def main() -> int:
                        file_tools, handoff, health, holo_tools, input_tools, location,
                        market_tools, memory_tools, news_tools, projects, render_tools, model_tools,
                        task_tools, uia, vision_analyze, vision_tools, weather,
-                       workspace_tools,
+                       workspace_tools, site_tools,
                        web_tools, windows_tools)
     import market_intel   # the market as a story (2026-09-05), sidecar-level module
     mods = (builtin, memory_tools, windows_tools, web_tools, task_tools,
@@ -67,7 +67,7 @@ def main() -> int:
             projects, location, health, vision_analyze, biometric, fabrication,
             holo_tools, render_tools, model_tools,
             documents, office, image_tools, phone,
-            workspace_tools, market_intel)
+            workspace_tools, site_tools, market_intel)
     for m in mods:
         m.register_all()
 
