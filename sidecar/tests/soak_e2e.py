@@ -145,7 +145,13 @@ async def main() -> int:
         # a 930 MB DROP. A number that can only be flattered is not a
         # measurement, so the baseline is taken a fifth of the way in, once the
         # caches and the recogniser have stopped moving.
-        warmup = min(30.0, SECONDS * 0.2)
+        # ...AND AFTER THE VISION STACK HAS LOADED. In a silent release the camera
+        # first opens INSIDE this soak (hands_e2e and wake_guard are skipped), and
+        # YOLOX, YuNet, SFace and the hand landmarker then load lazily 40-80 s in:
+        # hundreds of megabytes of one-time model loading read as "+169 MB/min"
+        # (release 81, 2026-09-22) while a by-hand run on the same build fell.
+        # Ninety seconds when the run is long enough to afford it.
+        warmup = 90.0 if SECONDS >= 300 else min(30.0, SECONDS * 0.2)
         start_rss = 0.0
 
         last_diag = last_uia = last_holo = 0.0
