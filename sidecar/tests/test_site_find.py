@@ -102,6 +102,7 @@ def main() -> int:
     rows = S.clean_rows([{"title": "Lasko Ellipse Ceramic Tower Heater & Fan", "price": "$81.00"}, {"title": "x", "price": "$1"}, {"title": "Dreo Tower Fan and Heater Combo", "price": "$129.99"}])
     check("DOM rows are cleaned: short titles dropped, prices plain", rows == [{"title": "Lasko Ellipse Ceramic Tower Heater & Fan", "price": "81.00"}, {"title": "Dreo Tower Fan and Heater Combo", "price": "129.99"}], rows)
     check("a category and a price facet are not a product", S.extract_results("amazon", "Tools & Home Improvement\n$10\nHome & Kitchen\n$25") == [])
+    check("a speak-first skill speaks its results too, not only its errors", 'if "error" in res or res.get("results"):' in (ROOT / "orchestrator.py").read_text(encoding="utf-8"))
     check("registered at boot", "site_tools.register_all()" in (ROOT / "main.py").read_text(encoding="utf-8"))
     check("the model is told: never the hidden browser for a product",
           "call find_on_site" in (ROOT / "llm" / "prompts.py").read_text(encoding="utf-8"))

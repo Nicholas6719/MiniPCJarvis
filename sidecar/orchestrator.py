@@ -2423,8 +2423,14 @@ class Orchestrator:
                 return reply
 
         if skill.speak_first and skill.tool:
-            if "error" in res:
-                extra = skill.speak(args, res)
+            # An error, or a RESULT WORTH A SECOND LINE: find_on_site announces
+            # the page first and the top of the list follows the read
+            # (release 82 announced and then said nothing, 2026-09-22).
+            if "error" in res or res.get("results"):
+                extra = (skill.speak(args, res) or "").strip()
+            else:
+                extra = ""
+            if extra:
                 reply += " " + extra
                 await bus.emit("assistant_delta", text=" " + extra)
                 await queue.put(clean_for_speech(extra))
