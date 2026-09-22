@@ -5264,6 +5264,15 @@ show it to me. That should just be intuitive."
   opens INSIDE the soak (hands/wake_guard skipped) and YOLOX/YuNet/SFace/the
   landmarker load lazily 40-80 s in; the baseline is now taken at 90 s. Two
   by-hand soaks on 81 read -45 and -13 MB.
+- **Release 82** installed and green; live, the announcement was spoken but
+  not the list: a speak-first skill only spoke again on an error
+  (`_exec_skill`). Fixed in 0199d1a; he was in a hurry, so the gated sidecar
+  build of release 83 was HOT-SWAPPED (`jarvis_hotswap.cmd`, 19:26) instead of
+  waiting for the app build + install. Installed now: 82's app shell with 83's
+  sidecar. Live on it: "Amazon's results for tower fan heater are up in your
+  browser, sir. Top of the list: Lasko 42\" DUO Comfort DC Tower Fan Space
+  Heater at 128.99 dollars; DREO 42\" Space Heater ... at 169.99 dollars; ..."
+  17 s end to end including the read (the page opens at ~2 s).
 
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
