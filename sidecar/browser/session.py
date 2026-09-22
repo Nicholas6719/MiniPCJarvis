@@ -115,6 +115,15 @@ class BrowserSession:
     async def read(self) -> dict:
         return await self._act("read", lambda page: self.observe())
 
+    async def evaluate(self, js: str) -> dict:
+        """Run a read-only expression on the current page; {'value': ...}."""
+        async def fn(page):
+            try:
+                return {"url": page.url, "value": await page.evaluate(js)}
+            except Exception as e:
+                return {"error": f"evaluate failed: {e}", "url": page.url}
+        return await self._act("evaluate", fn)
+
     async def click(self, target: str) -> dict:
         """Click by visible text / accessible name; falls back to CSS selector."""
         async def fn(page):

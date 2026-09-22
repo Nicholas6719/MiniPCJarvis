@@ -5252,6 +5252,18 @@ show it to me. That should just be intuitive."
   `LocalLLM.working_since` marks a call in flight so `_deaf_watch` no longer
   resets him mid-read (it did, at 35 s).
 - Gate: tests/test_site_find.py.
+- **Live on 81:** the page opened in his browser at once (right); the spoken
+  top-of-the-list was "Tools & Home Improvement at 10 dollars" (the 3,000-char
+  text read starts with the filter column), 11 s after the question. Release
+  82: results come from the DOM (`site_tools._JS` per shop; `browser.evaluate`
+  added to browser/session.py), the text heuristic demands a product-shaped
+  title, and the skill SPEAKS FIRST ("Amazon's results ... are up in your
+  browser, sir") with "Top of the list: ..." following the read; nothing is
+  said when the read finds nothing.
+- Release 81's suite run failed only the soak: in a silent release the camera
+  opens INSIDE the soak (hands/wake_guard skipped) and YOLOX/YuNet/SFace/the
+  landmarker load lazily 40-80 s in; the baseline is now taken at 90 s. Two
+  by-hand soaks on 81 read -45 and -13 MB.
 
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect

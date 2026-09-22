@@ -79,8 +79,10 @@ def main() -> int:
     res = asyncio.run(S.find_on_site("amazon", "tower fan heater"))
     check("his browser gets the page at once", opened == ["https://www.amazon.com/s?k=tower%20fan%20heater"], opened)
     check("...and the hidden read finds the results", res["count"] == 3 and res["opened"], res)
+    first = K.say_site_find({"site": "amazon", "query": "tower fan heater"}, {})
+    check("what he hears first, before the read", first == "Amazon's results for tower fan heater are up in your browser, sir.", first)
     said = K.say_site_find({}, res)
-    check("what he hears", said.startswith("Amazon's results for tower fan heater are up in your browser, sir. Top of the list: Lasko Ellipse") and "81.00 dollars" in said, said)
+    check("...then the top of the list", said.startswith("Top of the list: Lasko Ellipse") and "81.00 dollars" in said, said)
 
     class _Wall:
         async def goto(self, url):
@@ -89,14 +91,17 @@ def main() -> int:
     BS.browser = _Wall()
     res = asyncio.run(S.find_on_site("amazon", "tower fan heater"))
     said = K.say_site_find({}, res)
-    check("a bot wall: the page is still up, the sentence is honest", said == "Amazon's results for tower fan heater are up in your browser, sir.", said)
+    check("a bot wall: the page is still up and nothing is invented", said == "", said)
     res = asyncio.run(S.find_on_site("reddit", ""))
-    check("the front page: 'Reddit is up in your browser'", K.say_site_find({}, res) == "Reddit is up in your browser, sir.")
+    check("the front page: 'Reddit is up in your browser'", K.say_site_find({"site": "reddit", "query": ""}, {}) == "Reddit is up in your browser, sir.")
 
     print("\n-- wired: skill, tool, prompt --")
     from brain.skills import SKILL_BY_NAME
     sk = SKILL_BY_NAME["site_browse"]
-    check("the skill runs find_on_site and speaks itself", sk.tool == "find_on_site" and not sk.llm_after)
+    check("the skill runs find_on_site, speaks first, and speaks itself", sk.tool == "find_on_site" and not sk.llm_after and sk.speak_first)
+    rows = S.clean_rows([{"title": "Lasko Ellipse Ceramic Tower Heater & Fan", "price": "$81.00"}, {"title": "x", "price": "$1"}, {"title": "Dreo Tower Fan and Heater Combo", "price": "$129.99"}])
+    check("DOM rows are cleaned: short titles dropped, prices plain", rows == [{"title": "Lasko Ellipse Ceramic Tower Heater & Fan", "price": "81.00"}, {"title": "Dreo Tower Fan and Heater Combo", "price": "129.99"}], rows)
+    check("a category and a price facet are not a product", S.extract_results("amazon", "Tools & Home Improvement\n$10\nHome & Kitchen\n$25") == [])
     check("registered at boot", "site_tools.register_all()" in (ROOT / "main.py").read_text(encoding="utf-8"))
     check("the model is told: never the hidden browser for a product",
           "call find_on_site" in (ROOT / "llm" / "prompts.py").read_text(encoding="utf-8"))

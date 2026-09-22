@@ -1532,22 +1532,25 @@ def slots_site_find(t: str) -> dict | None:
 
 
 def say_site_find(slots: dict, res: dict) -> str:
-    if "error" in res:
+    """Spoken twice per turn: FIRST with an empty result (the announcement, before
+    the page is read) and again with the result (the top of the list). The page
+    read takes seconds; he should hear that it is up straight away."""
+    if res and "error" in res:
         return res["error"]
-    site, q = res.get("site", "the site"), (res.get("query") or "").strip()
-    where = " in your browser" if res.get("opened") else ""
-    if not q:
-        return f"{site} is up{where}, sir."
+    if not res:
+        from tools.site_tools import pretty as _pretty
+        site, q = _pretty(str(slots.get("site") or "")), (slots.get("query") or "").strip()
+        return (f"{site}'s results for {q} are up in your browser, sir." if q
+                else f"{site} is up in your browser, sir.")
     rows = res.get("results") or []
-    lead = f"{site}'s results for {q} are up{where}, sir."
     if not rows:
-        return lead
+        return ""
     said = []
     for r in rows[:3]:
         title = r.get("title", "")
         title = title[:70].rsplit(" ", 1)[0] if len(title) > 70 else title
         said.append(f"{title} at {r['price']} dollars" if r.get("price") else title)
-    return lead + " Top of the list: " + "; ".join(said) + "."
+    return "Top of the list: " + "; ".join(said) + "."
 
 
 def slots_site_browse(t: str) -> dict | None:
@@ -3604,7 +3607,7 @@ SKILLS: list[Skill] = [
         "look it up on wikipedia",
         "check ebay for a graphics card",
         "browse printables for an arc reactor"],
-        slots=slots_site_find, speak=say_site_find),
+        slots=slots_site_find, speak=say_site_find, speak_first=True),
     Skill("read_site", "browser_open", [
         "open example.com and tell me what the page says", "read me what's on wikipedia.org",
         "go to bbc.com and summarize the headlines", "what does example.com say",

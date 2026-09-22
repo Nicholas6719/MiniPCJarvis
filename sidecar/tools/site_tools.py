@@ -51,6 +51,31 @@ PRETTY = {"bestbuy": "Best Buy", "ebay": "eBay", "youtube": "YouTube", "github":
           "stackoverflow": "Stack Overflow", "microcenter": "Micro Center", "newegg": "Newegg"}
 SHOPS = {"amazon", "ebay", "bestbuy", "walmart", "target", "newegg", "microcenter", "etsy"}
 
+# THE PAGE'S OWN STRUCTURE, per shop: title and price straight from the DOM.
+# Each returns [{title, price}] for the first results; the text heuristic
+# below is the fallback when a selector fails or a site is not listed.
+_JS = {
+    "amazon": """() => Array.from(document.querySelectorAll('[data-component-type="s-search-result"]'))
+        .filter(c => !c.querySelector('.puis-sponsored-label-text, .s-sponsored-label-text, [data-component-type="sp-sponsored-result"]'))
+        .map(c => ({title: (c.querySelector('h2')||{}).innerText||'', price: (c.querySelector('.a-price .a-offscreen')||{}).innerText||''}))
+        .filter(r => r.title && r.price).slice(0, 5)""",
+    "ebay": """() => Array.from(document.querySelectorAll('li.s-item, li.s-card'))
+        .map(c => ({title: (c.querySelector('.s-item__title, .s-card__title')||{}).innerText||'', price: (c.querySelector('.s-item__price, .s-card__price')||{}).innerText||''}))
+        .filter(r => r.title && r.price && !/shop on ebay/i.test(r.title)).slice(0, 5)""",
+    "bestbuy": """() => Array.from(document.querySelectorAll('li.sku-item, .product-list-item'))
+        .map(c => ({title: (c.querySelector('.sku-title, h4')||{}).innerText||'', price: (c.querySelector('[data-testid="customer-price"], .priceView-customer-price span')||{}).innerText||''}))
+        .filter(r => r.title && r.price).slice(0, 5)""",
+    "walmart": """() => Array.from(document.querySelectorAll('[data-item-id]'))
+        .map(c => ({title: (c.querySelector('[data-automation-id="product-title"]')||{}).innerText||'', price: (c.querySelector('[data-automation-id="product-price"] .f2, [data-automation-id="product-price"]')||{}).innerText||''}))
+        .filter(r => r.title && r.price).slice(0, 5)""",
+    "target": """() => Array.from(document.querySelectorAll('[data-test="@web/site-top-of-funnel/ProductCardWrapper"], [data-test="product-card"]'))
+        .map(c => ({title: (c.querySelector('[data-test="product-title"]')||{}).innerText||'', price: (c.querySelector('[data-test="current-price"]')||{}).innerText||''}))
+        .filter(r => r.title && r.price).slice(0, 5)""",
+    "newegg": """() => Array.from(document.querySelectorAll('.item-cell'))
+        .map(c => ({title: (c.querySelector('.item-title')||{}).innerText||'', price: (c.querySelector('.price-current')||{}).innerText||''}))
+        .filter(r => r.title && r.price).slice(0, 5)""",
+}
+_CATEGORY = re.compile(r"^(?:[A-Z][a-z]+(?: & | )?){1,4}$")     # "Tools & Home Improvement", "Home & Kitchen"
 _PRICE = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)")
 _NOISE = re.compile(r"sponsored|results?|filter|sort by|sign in|skip to|department|"
                     r"delivery|free shipping|add to cart|see options|customer reviews|"
@@ -85,7 +110,9 @@ def extract_results(site: str, text: str, limit: int = 3) -> list[dict]:
         for ln in lines:
             m = _PRICE.search(ln)
             if m and len(ln) < 40:
-                title = next((t for t in reversed(recent) if len(t) >= 20 and not _NOISE.search(t)), "")
+                # a product title is long and specific; a category is two capitalised words
+                title = next((t for t in reversed(recent)
+                              if len(t) >= 30 and not _NOISE.search(t) and not _CATEGORY.match(t)), "")
                 if title and title not in seen:
                     seen.add(title)
                     out.append({"title": title[:90], "price": m.group(1)})
@@ -102,6 +129,24 @@ def extract_results(site: str, text: str, limit: int = 3) -> list[dict]:
             out.append({"title": ln[:110]})
             if len(out) >= limit:
                 break
+    return out
+
+
+def clean_rows(rows, limit: int = 3) -> list[dict]:
+    """DOM rows -> [{title, price}], prices as plain numbers, no repeats."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        title = " ".join(str(r.get("title") or "").split())
+        m = _PRICE.search(str(r.get("price") or ""))
+        if len(title) < 12 or not m or title in seen:
+            continue
+        seen.add(title)
+        out.append({"title": title[:90], "price": m.group(1)})
+        if len(out) >= limit:
+            break
     return out
 
 
@@ -122,7 +167,11 @@ async def find_on_site(site: str, query: str = "") -> dict:
         try:
             from browser.session import browser
             obs = await asyncio.wait_for(browser.goto(url), timeout=12)
-            results = extract_results(site, str((obs or {}).get("text") or ""))
+            if site in _JS and hasattr(browser, "evaluate"):
+                got = await asyncio.wait_for(browser.evaluate(_JS[site]), timeout=6)
+                results = clean_rows((got or {}).get("value"))
+            if not results:
+                results = extract_results(site, str((obs or {}).get("text") or ""))
         except Exception as e:
             log.info("could not read %s results for him: %s", site, str(e)[:80])
     return {"site": pretty(site), "query": query, "url": url, "opened": opened,
