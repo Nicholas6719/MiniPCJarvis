@@ -125,10 +125,17 @@ def main() -> int:
 
         async def run():
             lat = []
-            for v, ph in (("am_michael", "Hey Jarvis"), ("af_sarah", "Jarvis"), ("bm_george", "Hey Jarvis, what time is it"),
-                          ("am_adam", "Jarvis, go to sleep"), ("af_bella", "Hey Jarvis")):
+            # SYNTHESISE FIRST, TIME SECOND. Kokoro's ONNX threads keep spinning
+            # after a run, and a transcription timed right behind one measured
+            # 700 ms of contention (2026-09-22) against 140-160 ms steady-state.
+            # The product never runs Kokoro; the gate must not either, mid-timing.
+            clips = [(v, ph, say(ph, v)) for v, ph in (
+                ("am_michael", "Hey Jarvis"), ("af_sarah", "Jarvis"), ("bm_george", "Hey Jarvis, what time is it"),
+                ("am_adam", "Jarvis, go to sleep"), ("af_bella", "Hey Jarvis"))]
+            await stt.transcribe(clips[0][2])          # the model's first call loads it: not a latency
+            for v, ph, clip in clips:
                 t = time.perf_counter()
-                heard = await stt.transcribe(say(ph, v))
+                heard = await stt.transcribe(clip)
                 lat.append(time.perf_counter() - t)
                 check(f"{v} saying {ph!r} is heard", name_in(heard), heard)
             for ph in ("Did you click on it? Oh yeah.", "Yeah, but Daniel, he isn't happy.",
