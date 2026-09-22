@@ -39,6 +39,10 @@ class LocalLLM:
     # The orchestrator files it with the turn (2026-09-18) - the model's
     # time is the only part of a turn that was still a guess.
     last_call: dict = {}
+    # A call in flight. Prompt processing emits nothing for tens of seconds
+    # on a cold cache; the deaf watch read that as a wedged turn and reset
+    # him 35 s into a 41 s read (2026-09-21 20:44).
+    working_since: float = 0.0
 
     # BACKGROUND CALLS WAIT THEIR TURN. Set by the orchestrator: a coroutine
     # that returns once he has been idle for a few seconds. See wait_for_quiet.
@@ -63,6 +67,8 @@ class LocalLLM:
         # `server` picks the process: the big conversation server (default)
         # or the draft (llm.draft_model) for plain knowledge questions.
         srv = server or llama
+        import time as _time
+        LocalLLM.working_since = _time.time()
         model_name = srv.model_name or config.get("llm", "active_model")
         mcfg = config.get("llm", "models", default={}).get(model_name, {})
         body: dict[str, Any] = {
@@ -179,9 +185,11 @@ class LocalLLM:
                             for i, t in sorted(pending_tools.items())
                             if t["name"]
                         ]
+                        LocalLLM.working_since = 0.0
                         yield Chunk(done=True, finish_reason=finish,
                                     tool_calls=calls or None)
                         return
+        LocalLLM.working_since = 0.0
         yield Chunk(done=True, finish_reason="stop")
 
 

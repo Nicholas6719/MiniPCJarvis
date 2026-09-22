@@ -982,6 +982,10 @@ _WANTS_A_MODEL = re.compile(
 
 
 def slots_search(t: str) -> dict | None:
+    # "FIND ME X ON AMAZON" IS NOT A WEB SEARCH (his rule, 2026-09-22): naming
+    # the site is the instruction to open it. Step aside; site_browse is next.
+    if slots_site_find(t) is not None:
+        return None
     q = _QUERY_LEAD.sub("", t.strip(), count=1).strip(" .?!")
     q = re.sub(r"\b(please|for me)\b", "", q).strip(" .?!")
     if _FOLDER_ONLY.match(q):
@@ -1460,6 +1464,10 @@ _SERVICE_FOR = re.compile(
 # comes back is the one he would have got himself.
 _SITE_SEARCH = {
     "amazon":     "https://www.amazon.com/s?k={q}",
+    "bestbuy":    "https://www.bestbuy.com/site/searchpage.jsp?st={q}",
+    "walmart":    "https://www.walmart.com/search?q={q}",
+    "target":     "https://www.target.com/s?searchTerm={q}",
+    "microcenter": "https://www.microcenter.com/search/search_results.aspx?Ntt={q}",
     "reddit":     "https://www.reddit.com/search/?q={q}",
     "youtube":    "https://www.youtube.com/results?search_query={q}",
     "ebay":       "https://www.ebay.com/sch/i.html?_nkw={q}",
@@ -1496,6 +1504,50 @@ _SITE_STRIP = re.compile(
 _SITE_HAPPENING = re.compile(
     r"^(?:trending|popular|hot|new|happening|going on|news|headlines|"
     r"bestsellers?|best sellers?|top posts?)$", re.I)
+
+
+_TWO_WORD_SITES = ((re.compile(r"\bbest\s+buy\b", re.I), "bestbuy"),
+                   (re.compile(r"\bmicro\s+center\b", re.I), "microcenter"),
+                   (re.compile(r"\bstack\s+overflow\b", re.I), "stackoverflow"),
+                   (re.compile(r"\be-?bay\b", re.I), "ebay"))
+
+
+def slots_site_find(t: str) -> dict | None:
+    """{'site', 'query'} for find_on_site. 'Can you please find me a tower fan
+    and heater on Amazon' -> amazon, 'tower fan heater'. None when no site."""
+    s = t or ""
+    for rx, key in _TWO_WORD_SITES:
+        s = rx.sub(key, s)
+    m = _ON_SITE.search(s)
+    if not m:
+        return None
+    site = m.group(1).lower()
+    rest = s.lower().replace(site, " ")
+    rest = _SITE_STRIP.sub(" ", rest)
+    rest = re.sub(r"[^a-z0-9 .+-]", " ", rest)
+    subject = " ".join(w for w in rest.split() if len(w) > 1).strip()
+    if len(subject) < 3 or _SITE_HAPPENING.match(subject):
+        return {"site": site, "query": ""}
+    return {"site": site, "query": subject}
+
+
+def say_site_find(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return res["error"]
+    site, q = res.get("site", "the site"), (res.get("query") or "").strip()
+    where = " in your browser" if res.get("opened") else ""
+    if not q:
+        return f"{site} is up{where}, sir."
+    rows = res.get("results") or []
+    lead = f"{site}'s results for {q} are up{where}, sir."
+    if not rows:
+        return lead
+    said = []
+    for r in rows[:3]:
+        title = r.get("title", "")
+        title = title[:70].rsplit(" ", 1)[0] if len(title) > 70 else title
+        said.append(f"{title} at {r['price']} dollars" if r.get("price") else title)
+    return lead + " Top of the list: " + "; ".join(said) + "."
 
 
 def slots_site_browse(t: str) -> dict | None:
@@ -3533,8 +3585,16 @@ SKILLS: list[Skill] = [
     # NAMING A PLACE IS AN INSTRUCTION ABOUT WHERE. Ahead of `search` and of
     # `news`, both of which were claiming these: "look at reddit and tell me
     # what's trending" was answered "did you mean news, sir?" twice.
-    Skill("site_browse", "browser_open", [
+    # NAMING THE SITE IS THE INSTRUCTION TO SHOW IT (his rule, 2026-09-22):
+    # the site's own results open in HIS browser at once and he hears the
+    # top of the list. The night before, this went to the hidden browser and
+    # "can you show me?" opened another hidden page.
+    Skill("site_browse", "find_on_site", [
         "find me the best mini pc for ai work on amazon",
+        "can you please find me a tower fan and heater on amazon",
+        "find me a usb c hub on amazon", "find a mechanical keyboard on best buy",
+        "look for a used graphics card on ebay", "find me a standing desk on walmart",
+        "find a ryzen mini pc on micro center",
         "look at reddit and tell me what's trending",
         "check amazon for a usb microphone",
         "search amazon for a 3d printer",
@@ -3544,7 +3604,7 @@ SKILLS: list[Skill] = [
         "look it up on wikipedia",
         "check ebay for a graphics card",
         "browse printables for an arc reactor"],
-        slots=slots_site_browse, llm_after=True),
+        slots=slots_site_find, speak=say_site_find),
     Skill("read_site", "browser_open", [
         "open example.com and tell me what the page says", "read me what's on wikipedia.org",
         "go to bbc.com and summarize the headlines", "what does example.com say",

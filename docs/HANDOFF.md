@@ -5231,6 +5231,28 @@ model); Pipecat/Hermes JARVIS builds win on theatre wired to function.
   doing" -> "I haven't heard from your phone lately, sir. The status shortcut
   sends it."; the watcher runs quietly (it logs only when it notes something).
 
+### Round eight (release 81, 2026-09-22) - naming the site is the instruction to show it
+Last night: "Can you please find me a tower fan and heater on Amazon?" -> a web
+search + Amazon in the HIDDEN browser + a price off a snippet; "can you show
+me?" -> another hidden page and "now open, sir" to a dark room. His rule: "If
+I say find me something on Amazon, Best Buy, eBay, Reddit... I want him to
+show it to me. That should just be intuitive."
+- `tools/site_tools.py` `find_on_site(site, query)`: opens the site's own
+  results in HIS browser (open_url) at once AND reads the page in the hidden
+  browser for the top three (shops: title + price; others: first lines); a
+  bot wall yields an honest "results are up in your browser, sir". Sites:
+  Amazon, eBay, Best Buy, Walmart, Target, Newegg, Micro Center, Etsy, Reddit,
+  YouTube, Wikipedia, GitHub, Stack Overflow, Thingiverse, Printables.
+- `site_browse` skill -> find_on_site with `slots_site_find` / `say_site_find`
+  (no llm_after); `_CANON` folds every shop onto "on amazon" for the
+  embedding; `slots_search` steps aside when a site is named (the "find X"
+  canon had sent "find me a standing desk on walmart" to web_search).
+- The 41 s first answer: prompt cache cold after hours idle (35/11,126
+  cached). `_llm_watchdog` re-warms both prefixes hourly while idle;
+  `LocalLLM.working_since` marks a call in flight so `_deaf_watch` no longer
+  resets him mid-read (it did, at 35 s).
+- Gate: tests/test_site_find.py.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the

@@ -552,6 +552,11 @@ class Orchestrator:
                     continue
                 stuck_for = time.time() - since
                 quiet_for = time.time() - getattr(bus, "last_event_at", time.time())
+                # A model call in flight is work, not silence: a cold prompt
+                # read says nothing for up to a minute (2026-09-21 20:44).
+                ws = float(getattr(local_llm, "working_since", 0.0) or 0.0)
+                if ws and time.time() - ws < 90:
+                    quiet_for = 0.0
                 # Either it has been silent for a while in a state that cannot
                 # hear, or it has been in one far too long even while noisy.
                 if stuck_for < self.STUCK_AFTER_S and quiet_for < self.SILENT_AFTER_S:
@@ -1050,6 +1055,14 @@ class Orchestrator:
                         and getattr(self, "_llm_ready", True)):
                     self._probe_at = time.time()
                     await self._probe_model()
+                # THE FIRST QUESTION OF AN EVENING WAS 41 SECONDS: the prompt cache
+                # had gone cold over hours of idling (35 of 11,126 tokens cached,
+                # 2026-09-21). Re-read both prefixes once an hour while he is idle.
+                if (time.time() - getattr(self, "_last_prompt_warm", 0.0) >= 3600
+                        and self.sm.state in (State.IDLE, State.SLEEPING)
+                        and getattr(self, "_llm_ready", True)):
+                    self._last_prompt_warm = time.time()
+                    await self._warm_prompts()
                 continue
             log.warning("llama-server unhealthy — attempting recovery")
             if self.sm.state != State.ERROR:
@@ -1077,6 +1090,7 @@ class Orchestrator:
                 log.info("prompt warm skipped: %s", e)
                 return
         self._warmed_block = shortlist.block_version
+        self._last_prompt_warm = time.time()
         log.info("prompt cache warmed (tools + no-tools prefixes)")
 
     async def _quiet_moment(self, settle: float = 4.0) -> None:

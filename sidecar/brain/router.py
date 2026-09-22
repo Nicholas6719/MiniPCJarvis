@@ -59,6 +59,10 @@ _CANON = [
     # meta-requests first: they contain other commands inside them
     (r"^(?:from now on[, ]*|ok[, ]*|okay[, ]*)?(?:when(?:ever)? i say|if i say|teach you).*", "when i say PHRASE do ACTION"),
     (r"^(?:no|nope|wrong|not that|that's wrong|that is wrong|that's not)\b.*", "no i meant ACTION"),
+    # A SHOP IS A SHOP. "find a keyboard on best buy" embedded beside the
+    # web-search seeds and got a page of links; the site-search seeds are
+    # all "on amazon". The slots read the ORIGINAL words, so the site is kept.
+    (r"\b(on|at|from|over on)\s+(?:the\s+)?(?:best\s?buy|walmart|target|micro\s?center|newegg|etsy|e-?bay)\b", r"\1 amazon"),
     (r"\b(?:tell me|let me know|warn me|alert me|notify me|ping me|keep an eye on)\b.*\b(?:cpu|processor|ram|memory|disk|storage|drive|space|battery)\b.*\b(?:above|over|exceeds|more than|higher than|hits|reaches|below|under|drops|less than|lower than|falls|passes)\b.*", "tell me if METRIC goes above N"),
     # "stop watching my HANDS" is not a system-monitor rule. Folded onto
     # "stop watching METRIC" the word `hands` was erased, and turning the
