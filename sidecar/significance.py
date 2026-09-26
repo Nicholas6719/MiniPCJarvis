@@ -339,7 +339,9 @@ NATIONAL_WEIGHT = re.compile(
 # lower bar for what interrupts him.
 DISRUPTION = re.compile(
     r"\b(?:power outage|outage|blackout|water main|boil water|no water|"
-    r"road clos\w+|closure|clos(?:e|es|ed|ing)|shut down|shutdown|detour|"
+    # closures, not "a close win" or "close call" (Framingham beat Braintree
+    # 21-20 and it went out as an ALERT, 2026-09-25)
+    r"road clos\w+|closure|clos(?:es|ed|ing)|close (?:for|until|indefinitely|early)|shut down|shutdown|detour|"
     r"schools? closed|cancell?ed|suspended|delays?|"
     r"evacuat\w+|shelter|curfew|state of emergency|"
     r"service (?:disruption|change)|no service)\b", re.I)
@@ -364,7 +366,11 @@ DISRUPTION = re.compile(
 # millions without power" came out silent - no hazard word in it, and no death yet.
 SYSTEMIC = re.compile(
     r"\b(?:nuclear (?:plant|reactor|meltdown|accident)|radiation leak|"
-    r"pandemic|grid (?:collapse|failure)|nationwide (?:blackout|outage)|"
+    # a pandemic DECLARED or spreading, not the word: "There's a global pandemic
+    # treaty. Here's what it does" reached him as URGENT (2026-09-25)
+    r"(?:new|global|declares? (?:an? )?)pandemic(?! (?:treaty|agreement|accord|plan|preparedness|fund|response|era|lessons|readiness))|"
+    r"pandemic (?:declared|emergency|outbreak)|"
+    r"grid (?:collapse|failure)|nationwide (?:blackout|outage)|"
     r"national emergency|martial law|"
     # the President declaring one is the country's emergency; a governor's
     # "state of emergency" for a hurricane in Florida is not (see the test)
@@ -466,6 +472,8 @@ def national_emergency(text: str, headline: str = "") -> bool:
     # as URGENT two days late. If the thing itself is the news, the headline
     # says so; the body is judged only when there is no headline.
     attack_text = headline or text
+    if THREAT_ONLY.search(attack_text) and not _human_deaths(text):
+        return False            # a threat or a call for violence, not an attack
     if RECALL.search(text) and not MANY.search(text):
         return False            # "sold nationwide" on a recall is reach, not an emergency
     if THWARTED.search(text) or OLD_EVENT.search(text):
@@ -482,6 +490,9 @@ ROUTINE = re.compile(
     r"\b(?:road closure|lane closure|traffic|detour|construction|road work|"
     r"weather advisory|forecast|clouds|sunny|rain expected|"
     r"high school|little league|festival|parade|fundrais\w+|"
+    # the scoreboard: a town's team winning or losing is the brief's, never a ping
+    r"(?:win|victory|loss|defeat) over|beats?|defeats?|edges|tops|routs?|shuts out|"
+    r"season opener|playoffs?|touchdown|varsity|football|hockey|basketball|baseball|soccer|lacrosse|"
     r"ribbon cutting|groundbreaking|town meeting|select ?board|"
     r"school committee|library|farmers market)\b", re.I)
 
@@ -637,7 +648,10 @@ THREAT_ONLY = re.compile(
     r"(?:\s*(?:,|and|or|/)\s*(?:school |mass )?(?:shooting|shooter|bomb(?:ing)?|attack|violence))*"
     r"\s+threats?"
     r"|threat(?:s|en\w*)?\s+(?:of|to)\s+(?:shoot|bomb|attack|kill|blow|harm)\w*"
-    r"|threat(?:s|ened|ening)?\s+(?:a |an |the )?(?:school|shooting|bombing|attack))\b", re.I)
+    r"|threat(?:s|ened|ening)?\s+(?:a |an |the )?(?:school|shooting|bombing|attack)"
+    # a call for one is a threat, not an event: "account calls for assassination
+    # of Democrats ... later deleted" went out as URGENT (2026-09-24)
+    r"|(?:call(?:s|ed|ing)? for|urg(?:es|ed|ing)|advocat\w+|incit\w+)\s+(?:the |an? )?(?:assassination|killing|murder|shooting|bombing|attack|violence))\b", re.I)
 
 
 # A SEASON WITH NO HURRICANES IS NOT A HURRICANE. "Atlantic season sets a

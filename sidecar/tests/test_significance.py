@@ -97,6 +97,23 @@ def main() -> int:
                  "Hundreds dead as earthquake levels city"):
         check(f"reaches him: {huge[:42]!r}", tier(huge) == URGENT, tier(huge))
 
+    # From his phone, 2026-09-23..25 (the quiet days): three that should not
+    # have rung, and what they must be instead.
+    check("a pandemic TREATY explainer is not a pandemic",
+          tier("There's a global pandemic treaty. Here's what it does",
+               "WHO adopted a global pandemic treaty in May 2025, but the final details remain unresolved.") != URGENT)
+    check("...a declared one still is", tier("CDC declares pandemic as new virus spreads") == URGENT)
+    check("a call for assassination is a threat, not an assassination",
+          tier("NH Libertarian Party account calls for assassination of Democrats",
+               "A New Hampshire Libertarian Party X account posted a message calling for the assassination "
+               "of every elected Democrat in New Hampshire, which was later deleted.") != URGENT)
+    check("...the real thing still rings", tier("President assassinated in Dallas") == URGENT)
+    check("a close win is not a closure",
+          tier("Nick Durate leads Framingham to close win over Braintree",
+               "Framingham beat Braintree 21-20 on Friday night.") not in (ALERT, URGENT))
+    check("...but a road closed in Framingham still changes his day",
+          tier("Route 9 closed in Framingham after water main break") == ALERT)
+
     # A foreign story is judged by its HEADLINE. On 2026-09-05 this one reached
     # his phone as URGENT and chased him for an acknowledgement: peace talks,
     # with the war they are about in the summary. The body of a story about a

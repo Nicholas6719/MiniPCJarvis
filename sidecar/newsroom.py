@@ -94,10 +94,20 @@ async def _read(url: str) -> str:
     return str(page.get("content") or "").strip()
 
 
+import contextvars
+
+# A brief is itself background work: its summaries must not wait for a quiet
+# moment (they queued behind the brief's own market calls and timed out, three
+# of three, every night from the 18th to the 25th). An ALERT's summary still
+# waits, because that one can land beside his turn.
+QUIET_WAIT = contextvars.ContextVar("newsroom_quiet_wait", default=True)
+
+
 async def _think(headline: str, body: str) -> str:
     from llm.provider import local_llm, wait_for_quiet
     out = ""
-    await wait_for_quiet()            # never beside one of his turns
+    if QUIET_WAIT.get():
+        await wait_for_quiet()        # never beside one of his turns
     async for ch in local_llm.stream(
             [{"role": "user", "content": PROMPT.format(headline=headline,
                                                        body=body[:FETCH_CHARS])}],
@@ -169,12 +179,24 @@ def spoken_line(s: dict) -> str:
 
 
 async def summarize_all(stories: list[dict], limit: int = 3) -> list[dict]:
-    """Read several at once. They are independent, so they are read in parallel."""
+    """Read several, ONE AFTER ANOTHER. They were read in parallel, and on one
+    model slot that meant three summaries queued and every one ran out its
+    budget while waiting for the others (every night brief, 2026-09-18..25).
+    Nobody is waiting on a brief; fifteen seconds is fine. No quiet-wait:
+    the brief is the background."""
     picked = list(stories)[:limit]
     if not picked:
         return []
-    done = await asyncio.gather(*(summarize(s) for s in picked),
-                                return_exceptions=True)
+    token = QUIET_WAIT.set(False)
+    try:
+        done = []
+        for s in picked:
+            try:
+                done.append(await summarize(s))
+            except Exception as e:      # one bad article must not cost the others
+                done.append(e)
+    finally:
+        QUIET_WAIT.reset(token)
     out = []
     for original, result in zip(picked, done):
         if isinstance(result, dict):
