@@ -148,6 +148,11 @@ def main() -> int:
     check("it stops at the limit it was given",
           len(asyncio.run(newsroom.summarize_all([story] * 9, limit=3))) == 3)
 
+    print("\n-- a brief reads its stories one after another, and never waits for quiet --")
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'newsroom.py'), encoding='utf-8').read()
+    check("sequential, no quiet wait", "QUIET_WAIT.set(False)" in src and "done.append(await summarize(s))" in src and "asyncio.gather(*(summarize(s)" not in src)
+    check("an alert's summary still waits for a quiet moment", "if QUIET_WAIT.get():" in src)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

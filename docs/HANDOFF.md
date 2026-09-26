@@ -5274,6 +5274,31 @@ show it to me. That should just be intuitive."
   Heater at 128.99 dollars; DREO 42\" Space Heater ... at 169.99 dollars; ..."
   17 s end to end including the read (the page opens at ~2 s).
 
+### 2026-09-26 - the quiet days, read from his phone
+He did not speak to JARVIS between the 22nd and the 26th (every "wake word
+detected" was the television, rejected by name; the hourly cache warm and the
+ten-minute probe ran on schedule; RSS steady). What his PHONE got was the
+signal:
+- **Every night brief 09-18..25 sent headlines only**: `summarize_all` read
+  the three articles in parallel, each `_think` waited for a quiet moment,
+  all three queued on the one side slot behind the brief's own market calls,
+  and all three ran out the 13 s think budget at the same instant. Now
+  sequential, and a `QUIET_WAIT` contextvar turns the quiet-wait off inside a
+  brief (an ALERT's summary still waits). Verify on tonight's 20:00 brief: no
+  "summary timed out" lines, summaries in the Telegram text.
+- **Three alerts that should not have rung** (significance.py): "There's a
+  global pandemic treaty. Here's what it does" (SYSTEMIC matched the word;
+  now a declared/spreading pandemic only); "NH Libertarian Party account
+  calls for assassination ... later deleted" (a call for one is THREAT_ONLY,
+  checked before ATTACK); "Nick Durate leads Framingham to close win over
+  Braintree" (DISRUPTION's bare "close"; the scoreboard is ROUTINE). Gated in
+  test_significance.py; test_news_week still green.
+- Considered and dropped: an openWakeWord custom verifier (GitHub:
+  dscripka/openWakeWord, docs/custom_verifier_models.md). 3-9 TV false wakes a
+  day, every one rejected by the name check before any sound or light; a
+  second filter would change nothing he can hear.
+- Release 84 aligns the installed app shell (82) with the sidecar (83 + this).
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the
