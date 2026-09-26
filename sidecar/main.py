@@ -9,6 +9,7 @@ import argparse
 import os
 import asyncio
 import logging
+import logging.handlers
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -32,7 +33,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(LOG_DIR / "sidecar.log", encoding="utf-8"),
+        # 20 MB x 3, not one file forever: sidecar.log was 13.6 MB after a month
+        # on a box that never restarts (2026-09-26). The newest is still
+        # sidecar.log, so the grab scripts and the log readers keep working.
+        logging.handlers.RotatingFileHandler(LOG_DIR / "sidecar.log", encoding="utf-8",
+                                             maxBytes=20 * 1024 * 1024, backupCount=3),
     ],
 )
 log = logging.getLogger("jarvis.main")

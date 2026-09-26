@@ -5298,6 +5298,13 @@ signal:
   day, every one rejected by the name check before any sound or light; a
   second filter would change nothing he can hear.
 - Release 84 aligns the installed app shell (82) with the sidecar (83 + this).
+- **Release 85**: the sidecar log rotates (RotatingFileHandler 20 MB x 3;
+  newest is still sidecar.log so grab_log and the readers are unchanged), and
+  `/status` (also `/health`) on Telegram answers with one line from
+  `self_report.status_text()`: uptime, sidecar RSS, model + last probe, state,
+  false wakes, turns and first-word medians in 24 h, phone status age, briefs
+  sent today, disk free. Idle cost measured 2026-09-26: sidecar 0.6% CPU,
+  llama-server 0.1%.
 
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect

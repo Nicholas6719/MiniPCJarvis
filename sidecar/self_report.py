@@ -49,6 +49,61 @@ def numbers(hours: float = 24) -> dict:
     return rep
 
 
+def status_text() -> str:
+    """/status on Telegram: how JARVIS is doing right now, in one message he
+    can read on his phone (2026-09-26)."""
+    parts: list[str] = []
+    try:
+        import os
+        import psutil
+        p = psutil.Process(os.getpid())
+        up = time.time() - p.create_time()
+        d, h = int(up // 86400), int((up % 86400) // 3600)
+        parts.append(f"Up {d}d {h}h" if d else f"Up {h}h {int((up % 3600) // 60)}m")
+        parts.append(f"sidecar {p.memory_info().rss / 1e6:.0f} MB")
+    except Exception:
+        pass
+    try:
+        from llm.llama_server import llama
+        from orchestrator import orchestrator as _o
+        name = llama.model_name or "no model"
+        probe = getattr(_o, "_probe_at", 0.0)
+        fails = int(getattr(_o, "_probe_failures", 0) or 0)
+        ago = f"{int((time.time() - probe) / 60)} min ago" if probe else "not yet"
+        parts.append(f"{name}: probe {ago}" + (f", {fails} failing" if fails else ", answering"))
+        parts.append(f"state {_o.sm.state.value}")
+        parts.append(f"false wakes rejected {int(getattr(_o, 'wakes_rejected', 0) or 0)}")
+    except Exception:
+        pass
+    try:
+        r = numbers(24)
+        if r.get("turns"):
+            parts.append(f"{r['turns']} turns in 24h, first word {r.get('reflex_first_ms') or '-'} ms reflex / {r.get('model_first_ms') or '-'} ms model")
+    except Exception:
+        pass
+    try:
+        from tools import phone as _phone
+        st = _phone.status()
+        if st and isinstance(st.get("battery"), int):
+            parts.append(f"phone {st['battery']}%{' charging' if st.get('charging') else ''}, {int(st.get('age_minutes') or 0)} min ago")
+        else:
+            parts.append("phone: no status yet")
+    except Exception:
+        pass
+    try:
+        from delivery import delivery
+        briefs = [e for e in delivery.entries(time.time() - 86400) if str(e.get("subject", "")).startswith("brief:")]
+        parts.append(f"{len(briefs)} briefs sent today" if briefs else "no brief yet today")
+    except Exception:
+        pass
+    try:
+        import shutil
+        parts.append(f"disk {shutil.disk_usage('C:' + chr(92)).free / 1e9:.0f} GB free")
+    except Exception:
+        pass
+    return "JARVIS status - " + "; ".join(parts) + "."
+
+
 def lines(hours: float = 24) -> list[tuple[str, str]]:
     """[(spoken, written)] - empty when there is nothing to say."""
     try:

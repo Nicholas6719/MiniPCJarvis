@@ -285,6 +285,12 @@ def main() -> int:
     check("the loop waits for a quiet moment", "await wait_for_quiet()" in (ROOT / "day_memory.py").read_text(encoding="utf-8"))
     check("started at boot", "spawn(day_memory.loop())" in (ROOT / "main.py").read_text(encoding="utf-8"))
 
+    print("\n-- /status from his phone; the log rotates --")
+    st = self_report.status_text()
+    check("a status line he can read on his phone", st.startswith("JARVIS status - ") and "disk" in st and "phone" in st, st)
+    check("wired to Telegram", '"/status", "/health", "/how are you"' in (ROOT / "remote_telegram.py").read_text(encoding="utf-8"))
+    check("the sidecar log rotates at 20 MB x 3", "RotatingFileHandler" in (ROOT / "main.py").read_text(encoding="utf-8") and "backupCount=3" in (ROOT / "main.py").read_text(encoding="utf-8"))
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")

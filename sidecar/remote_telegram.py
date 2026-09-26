@@ -490,6 +490,10 @@ class TelegramBridge:
             from tools.phone import setup_text
             await self._send(setup_text(chat_id))
             return
+        if text.strip().lower() in ("/status", "/health", "/how are you"):
+            import self_report
+            await self._send(self_report.status_text())
+            return
         if text == "/start":
             await self._send("At your service. Ask me anything you would at the PC.")
             return
