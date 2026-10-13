@@ -5327,6 +5327,13 @@ after a reboot on 10-06 (autostart: no debug token, so no live PATCH).
   send him looking at the wrong thing. Gated in test_faster.py.
 - Audit of the rest: all gates green; 7-day uptime with the hourly warm and
   the probe on schedule; idle CPU 0.6%; false wakes all rejected by name.
+- **Measured on release 86**: llama-server private 24.4 GB -> 14.3 GB with
+  `--cache-ram 0`; generation 24-26 t/s unchanged. Tried q8_0 KV on top: 13.3
+  GB but ~4% slower generation and ~8% slower prompt reading - reverted (his
+  rule: never hinder performance). JARVIS's whole footprint now: llama 14.3 +
+  sidecar 3.3 + the Pocket TTS worker (python, pocket_worker.py) 2.3 = ~20 GB
+  of 28.8. The rest of the box that afternoon was his own: a Gradle/Kotlin
+  daemon (4.4 GB), Steam, Claude sessions. The alert now names them.
 
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
