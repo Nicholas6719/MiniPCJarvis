@@ -122,8 +122,14 @@ DEFAULTS: dict[str, Any] = {
                 # the first word) instead of ~260 (1.2 s). 16k per slot as
                 # before; the third costs ~0.8 GB of KV cache, which the 28 GB
                 # machine has.
+                # --cache-ram 0: llama-server's HOST prompt cache (default 8192 MiB)
+                # saves evicted slot states to RAM and filled to its 8 GB cap after a
+                # week of hourly re-warms and ten-minute probes alternating slots -
+                # 22.5 GB private for a 12 GB model, 0.7 GB free on the box, and
+                # "memory is running very tight" on his phone every two hours
+                # (2026-10-13). The slots keep their own KV; nothing uses the copy.
                 "args": ["-ngl", "999", "-t", "8", "-fa", "on", "--jinja", "--cache-reuse", "256",
-                         "-np", "3", "--swa-full"],
+                         "-np", "3", "--swa-full", "--cache-ram", "0"],
                 "context": 49152,
                 "template_kwargs": {"reasoning_effort": "low"},
                 "reasoning_field": "reasoning_content",

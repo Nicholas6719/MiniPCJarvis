@@ -5306,6 +5306,28 @@ signal:
   sent today, disk free. Idle cost measured 2026-09-26: sidecar 0.6% CPU,
   llama-server 0.1%.
 
+### 2026-10-13 - "memory is running very tight" (release 86)
+His phone got that line every two hours from 10-12 with nothing running but
+JARVIS. The box (28.8 GB) was at 98%, 0.7 GB free, pagefile 1.2 GB in use,
+after a reboot on 10-06 (autostart: no debug token, so no live PATCH).
+- **The hog was llama-server's host prompt cache**: 22.5-24 GB PRIVATE for a
+  12.1 GB model + ~3 GB KV. `--cache-ram` defaults to 8192 MiB in b10488 and
+  saves evicted slot states to RAM; a week of hourly re-warms and ten-minute
+  probes alternating slots filled it to the cap ("making room for prompt
+  cache entry, removing oldest entry" every few minutes). The slots keep
+  their own KV; nothing of ours reads the host copy. `--cache-ram 0` on the
+  gpt-oss args. Expect ~8 GB back; verify with llama-server's private bytes
+  after the restart (Get-Process ... PrivateMemorySize64) and no more "making
+  room" lines.
+- The sidecar is ~3 GB private (Parakeet int8, the embedding model, wake,
+  turn model, HUD state) and the camera stack has not loaded since the 10-06
+  boot (it loads on first use); nothing to trim there without cost.
+- `proactive.ram_high` now says the percentage AND the top holders by private
+  bytes ("the model server 24 GB, JARVIS 3 GB") so a warning can never again
+  send him looking at the wrong thing. Gated in test_faster.py.
+- Audit of the rest: all gates green; 7-day uptime with the hourly warm and
+  the probe on schedule; idle CPU 0.6%; false wakes all rejected by name.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the

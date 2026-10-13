@@ -291,6 +291,15 @@ def main() -> int:
     check("wired to Telegram", '"/status", "/health", "/how are you"' in (ROOT / "remote_telegram.py").read_text(encoding="utf-8"))
     check("the sidecar log rotates at 20 MB x 3", "RotatingFileHandler" in (ROOT / "main.py").read_text(encoding="utf-8") and "backupCount=3" in (ROOT / "main.py").read_text(encoding="utf-8"))
 
+    print("\n-- memory: no host prompt cache, and the alert names the hog --")
+    from config import DEFAULTS as _D2
+    args = _D2["llm"]["models"]["gpt-oss-20b"]["args"]
+    check("gpt-oss runs with --cache-ram 0", "--cache-ram" in args and args[args.index("--cache-ram") + 1] == "0", args)
+    import proactive as PR2
+    hogs = PR2._memory_hogs()
+    check("the alert can name what is using the memory", hogs == "" or (hogs.startswith(" - ") and ("GB" in hogs or "MB" in hogs)), hogs)
+    check("...and says the percentage", "Memory is at {int(vm.percent)} percent{_memory_hogs()}" in (ROOT / "proactive.py").read_text(encoding="utf-8"))
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")
