@@ -36,6 +36,34 @@ def user_idle_seconds() -> float:
     return millis / 1000.0
 
 
+# What is holding the memory, for the RAM alert. MODULE LEVEL: this was pasted
+# inside the class body on 2026-10-13 and the class lost every method after it
+# ('Proactive' object has no attribute 'run_checks', 19,047 times in two weeks).
+def _memory_hogs(n: int = 3) -> str:
+    """' - the model server 22 GB, JARVIS 3 GB, Brave 1 GB' - by PRIVATE bytes,
+    the number that is actually committed (llama-server on this iGPU shows a
+    7 GB working set and 22 GB private)."""
+    try:
+        by: dict[str, float] = {}
+        for p in psutil.process_iter(["name", "memory_info"]):
+            try:
+                nm = (p.info["name"] or "").lower()
+                priv = getattr(p.info["memory_info"], "private", 0) or p.info["memory_info"].rss
+            except Exception:
+                continue
+            label = {"llama-server.exe": "the model server", "jarvis-sidecar.exe": "JARVIS",
+                     "brave.exe": "Brave", "chrome.exe": "Chrome", "msedge.exe": "Edge",
+                     "memory compression": "memory compression"}.get(nm, nm.removesuffix(".exe"))
+            by[label] = by.get(label, 0.0) + priv / 1e9
+        top = sorted(by.items(), key=lambda kv: -kv[1])[:n]
+        top = [(k, v) for k, v in top if v >= 0.5]
+        if not top:
+            return ""
+        return " - " + ", ".join(f"{k} {v:.0f} GB" if v >= 1 else f"{k} {v * 1000:.0f} MB" for k, v in top)
+    except Exception:
+        return ""
+
+
 class Proactive:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
@@ -124,30 +152,6 @@ class Proactive:
     }
     METRIC_WORDS = {"cpu": "CPU", "ram": "memory", "disk_free_gb": "free disk space", "battery": "the battery"}
 
-
-def _memory_hogs(n: int = 3) -> str:
-    """' - the model server 22 GB, JARVIS 3 GB, Brave 1 GB' - by PRIVATE bytes,
-    the number that is actually committed (llama-server on this iGPU shows a
-    7 GB working set and 22 GB private)."""
-    try:
-        by: dict[str, float] = {}
-        for p in psutil.process_iter(["name", "memory_info"]):
-            try:
-                nm = (p.info["name"] or "").lower()
-                priv = getattr(p.info["memory_info"], "private", 0) or p.info["memory_info"].rss
-            except Exception:
-                continue
-            label = {"llama-server.exe": "the model server", "jarvis-sidecar.exe": "JARVIS",
-                     "brave.exe": "Brave", "chrome.exe": "Chrome", "msedge.exe": "Edge",
-                     "memory compression": "memory compression"}.get(nm, nm.removesuffix(".exe"))
-            by[label] = by.get(label, 0.0) + priv / 1e9
-        top = sorted(by.items(), key=lambda kv: -kv[1])[:n]
-        top = [(k, v) for k, v in top if v >= 0.5]
-        if not top:
-            return ""
-        return " - " + ", ".join(f"{k} {v:.0f} GB" if v >= 1 else f"{k} {v * 1000:.0f} MB" for k, v in top)
-    except Exception:
-        return ""
 
     def rules(self) -> list[dict]:
         return list(config.get("proactive", "rules", default=[]) or [])

@@ -300,6 +300,10 @@ def main() -> int:
     check("the alert can name what is using the memory", hogs == "" or (hogs.startswith(" - ") and ("GB" in hogs or "MB" in hogs)), hogs)
     check("...and says the percentage", "Memory is at {int(vm.percent)} percent{_memory_hogs()}" in (ROOT / "proactive.py").read_text(encoding="utf-8"))
 
+    from proactive import Proactive as _P
+    check("the proactive class kept its methods (a module-level def pasted inside it cost two weeks of checks)",
+          all(hasattr(_P, m) for m in ("run_checks", "run_rules", "rules", "_loop", "_fire")))
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")
