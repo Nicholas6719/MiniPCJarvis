@@ -304,6 +304,22 @@ def main() -> int:
     check("the proactive class kept its methods (a module-level def pasted inside it cost two weeks of checks)",
           all(hasattr(_P, m) for m in ("run_checks", "run_rules", "rules", "_loop", "_fire")))
 
+    print("\n-- one event, two outlets, one ping; every decision kept; he assesses himself --")
+    import briefing as BR
+    b = BR.Briefing.__new__(BR.Briefing)
+    b._seen = {"news:80-year-old woman fatally struck by vehicle in maynard": time.time() - 3600}
+    b._seen_text = {"news:80-year-old woman fatally struck by vehicle in maynard": "An 80-year-old woman was fatally struck by a vehicle on Tiger Drive in Maynard around 6:30 p.m."}
+    check("the same death in another outlet's words is seen", b._seen_before("Pedestrian killed on Great Road in Maynard, police say", "An 80-year-old woman was struck and killed by a car on Great Road near Tiger Drive in Maynard, Massachusetts."))
+    check("a different story in the same town is not", not b._seen_before("Maynard library extends weekend hours", "The Maynard Public Library will open Sundays starting in November."))
+    b._seen["news:old"] = time.time() - 24 * 3600
+    b._seen_text["news:old"] = "A house fire in Natick killed one person on Monday."
+    check("...and yesterday's event is not today's", not b._summary_seen_before("A house fire in Natick killed one person on Friday night.", ""))
+    BR._judged({"headline": "Hazmat teams respond to 3-alarm fire at Mass. chemical plant", "summary": "Hazmat teams responded to a fire.", "source": "MassLive"}, BR.URGENT, "something dangerous in one of his towns")
+    row = memory.db.execute("select tier, why, headline from news_judged order by ts desc limit 1").fetchone()
+    check("every alert decision is kept with its reason and text", row and row[0] == "urgent" and "dangerous" in row[1] and row[2].startswith("Hazmat"), row)
+    said = K.say_self_assess({}, {})
+    check("he assesses himself from his own numbers and gaps", ("spoken" in said or "numbers are thin" in said) and "graphics card" in said, said)
+
     print()
     if fails:
         print(f"FAILED: {len(fails)}: {fails}")

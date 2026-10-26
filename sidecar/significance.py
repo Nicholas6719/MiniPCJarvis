@@ -341,7 +341,10 @@ DISRUPTION = re.compile(
     r"\b(?:power outage|outage|blackout|water main|boil water|no water|"
     # closures, not "a close win" or "close call" (Framingham beat Braintree
     # 21-20 and it went out as an ALERT, 2026-09-25)
-    r"road clos\w+|closure|clos(?:es|ed|ing)|close (?:for|until|indefinitely|early)|shut down|shutdown|detour|"
+    # "closing for the season" is a calendar, not a closure (Marlborough's
+    # boardwalk went out as an ALERT, 2026-10-26)
+    r"road clos\w+|closure|clos(?:es|ed|ing)(?! for the (?:season|winter|summer|year|holidays?))|"
+    r"close (?:for|until|indefinitely|early)(?! the (?:season|winter|summer|year|holidays?))|shut down|shutdown|detour|"
     r"schools? closed|cancell?ed|suspended|delays?|"
     r"evacuat\w+|shelter|curfew|state of emergency|"
     r"service (?:disruption|change)|no service)\b", re.I)
@@ -421,7 +424,9 @@ FOREIGN = re.compile(
     r"\b(?:nepal|india|pakistan|bangladesh|china|chinese|japan|korea|vietnam|"
     r"thailand|indonesia|philippines|myanmar|afghanistan|iran|iraq|syria|israel|"
     r"gaza|lebanon|turkey|turkiye|egypt|libya|sudan|nigeria|kenya|ethiopia|"
-    r"somalia|congo|ghana|morocco|algeria|russia|russian|ukraine|poland|germany|"
+    r"somalia|congo|ghana|morocco|algeria|russia|russian|ukraine|ukrainian|kyiv|moscow|"
+    r"tibet|tibetan|mexico|mexican|canada|canadian|brazil|brazilian|argentina|chile|peru|"
+    r"colombia|venezuela|cuba|haiti|jamaica|australia|australian|new zealand|poland|germany|"
     r"german|france|french|spain|spanish|italy|italian|greece|britain|british|"
     r"england|scotland|wales|ireland|netherlands|dutch|belgium|sweden|norway|"
     r"denmark|finland|brazil|argentina|chile|peru|colombia|venezuela|mexico|"
@@ -666,10 +671,28 @@ WEATHER_WORDS = re.compile(
     r"\b(?:hurricanes?|tropical storms?|storms?|tornado(?:es|s)?|wildfires?|flash floods?|flood\w*)\b", re.I)
 
 
+# A WORD USED AS A FIGURE OF SPEECH. "Paul George fined after 38-point scoring
+# explosion" went to his phone as URGENT (2026-10-22); so did a "thriller
+# inspired by Die Hard" (10-26). Sports and screen language is scrubbed before
+# the hazard words are read, and a story that is plainly about a game, a film
+# or a show never rises above NOTABLE unless somebody actually died.
+METAPHOR = re.compile(
+    r"\b(?:scoring|offensive|three-point|population|growth|price|talent|cambrian|"
+    r"creative|of interest|of color|of flavou?r)\s+explosion\b"
+    r"|\bexplosion of (?:interest|talent|growth|color|colour|flavou?r|joy|offense|points)\b"
+    r"|\b(?:die hard|die another day|live and let die|tomorrow never dies)\b"
+    r"|\b(?:killer (?:app|serve|instinct|whale|performance)|killed it|killing it|to die for|dying to)\b", re.I)
+ENTERTAINMENT = re.compile(
+    r"\b(?:to star in|stars? in|starring|cast in|casts?\b.{0,20}\bin|thriller|sequel|trailer|premiere[sd]?|"
+    r"box office|netflix|hbo|disney\+|hulu|streaming|season \d+|episode|showrunner|"
+    r"fined after|scoring|points? against|scores? \d+|touchdowns?|home runs?|hat trick|"
+    r"playoffs?|game-winning|buzzer-beater|overtime win|halftime)\b", re.I)
+
+
 def _hazard_text(text: str) -> str:
     """The text with threats-of-things and absent-things removed, for HAZARD,
     VIOLENCE and everything that asks whether something is loose."""
-    t = THREAT_ONLY.sub(" ", text)
+    t = THREAT_ONLY.sub(" ", METAPHOR.sub(" ", text))
     if NO_SUCH_WEATHER.search(t):
         t = WEATHER_WORDS.sub(" ", t)
     return t
@@ -893,6 +916,8 @@ def emergencies_only() -> bool:
 def _classify_news_full(story: dict) -> tuple[str, str]:
     """(tier, why). `story` is any dict with a headline and ideally a summary."""
     text = _text_of(story).strip()
+    if text and ENTERTAINMENT.search(text) and not _human_deaths(METAPHOR.sub(" ", text)):
+        return NOTABLE, "a game, a film or a show - never an emergency"
     if not text:
         return NONE, "nothing to read"
 

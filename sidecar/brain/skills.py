@@ -1401,6 +1401,45 @@ def say_private_stock(slots: dict, _res: dict) -> str:
     return not_listed_line(slots.get("name", "That company"))
 
 
+def say_self_assess(_slots: dict, _res: dict) -> str:
+    """His own numbers (self_report), then what is waiting on Nicholas."""
+    try:
+        import self_report
+        r = self_report.numbers(24 * 7)
+    except Exception:
+        r = {}
+    bits = []
+    if r.get("turns"):
+        bits.append(f"This week we've spoken {r['turns']} times")
+        if r.get("reflex_first_ms") is not None:
+            bits.append(f"my first word came in {self_report._tenths(r['reflex_first_ms'])} on reflexes")
+        if r.get("model_first_ms") is not None:
+            bits.append(f"and {self_report._tenths(r['model_first_ms'])} when I had to think")
+    else:
+        bits.append("We haven't spoken much this week, so my numbers are thin")
+    lead = ", ".join(bits) + "."
+    if r.get("corrections"):
+        lead += f" You corrected me {r['corrections']} time{'s' if r['corrections'] != 1 else ''} and I kept the lessons."
+    gaps = []
+    try:
+        import volatile
+        if not volatile.get("phone:calendar"):
+            gaps.append("your calendar, which needs the iCloud sign-in")
+        if not volatile.get("phone:status"):
+            gaps.append("your phone's battery and whereabouts, which need the status shortcut")
+    except Exception:
+        pass
+    try:
+        from tools import health as _health
+        if hasattr(_health, "latest") and not _health.latest():
+            gaps.append("your health data, which needs the Health shortcut")
+    except Exception:
+        pass
+    tail = (" The biggest improvements are waiting on you: " + "; ".join(gaps) + ".") if gaps else ""
+    tail += " Beyond that, a real graphics card would make every answer several times faster, sir."
+    return lead + tail
+
+
 def say_phone_status(_slots: dict, _res: dict) -> str:
     from tools import phone as _phone
     st = _phone.status()
@@ -2877,6 +2916,15 @@ SKILLS: list[Skill] = [
         "can you buy shares of stripe", "is discord a public company", "has spacex gone public yet",
         "what's the ticker symbol for openai"],
         slots=slots_private_stock, speak=say_private_stock),
+    # "HOW CAN YOU IMPROVE?" IS A QUESTION ABOUT HIM, answered from his own
+    # numbers and the known gaps - not "add adaptive learning" from the model
+    # (2026-10-26).
+    Skill("self_assess", None, [
+        "how can you improve", "how can i improve you", "what could you do better",
+        "what are your weaknesses", "how are you doing lately", "what's not working for you",
+        "what do you need from me", "how can we make you better", "what should we work on next",
+        "how have you been performing", "give me a status report on yourself"],
+        slots=lambda t: {}, speak=say_self_assess),
     # HIS PHONE, from the status its Shortcuts send (awareness, 2026-09-18)
     Skill("phone_status", None, [
         "how's my phone", "how is my phone doing", "what's my phone battery at",

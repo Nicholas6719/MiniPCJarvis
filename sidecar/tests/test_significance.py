@@ -114,6 +114,18 @@ def main() -> int:
     check("...but a road closed in Framingham still changes his day",
           tier("Route 9 closed in Framingham after water main break") == ALERT)
 
+    # From his phone, 2026-10-14..26: thirteen urgents, five of them wrong.
+    check("a scoring explosion is not a blast",
+          tier("Paul George fined after 38-point scoring explosion against Pistons",
+               "Paul George was fined after a 38-point scoring explosion against the Pistons.") not in (ALERT, URGENT))
+    check("a film is never an emergency", tier("Keanu Reeves to star in Netflix thriller inspired by Die Hard") not in (ALERT, URGENT))
+    check("...but a real explosion in his town still is",
+          tier("Explosion at a house on Meadowlark Road in Framingham causes heavy damage") in (ALERT, URGENT))
+    check("closing for the season is a calendar, not a closure",
+          tier("Marlborough's floating boardwalk to close: here's when", "The boardwalk is closing for the season.") not in (ALERT, URGENT))
+    check("Tibet is abroad", tier("7.0 earthquake strikes Tibet", "A 7.0-magnitude earthquake struck Tibet, killing at least 16 people.") != URGENT)
+    check("Mexico's Pacific coast is abroad", tier("Hurricane Trudy strengthens; warnings issued along Pacific coast of Mexico") != URGENT)
+
     # A foreign story is judged by its HEADLINE. On 2026-09-05 this one reached
     # his phone as URGENT and chased him for an acknowledgement: peace talks,
     # with the war they are about in the summary. The body of a story about a

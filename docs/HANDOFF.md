@@ -5335,6 +5335,31 @@ after a reboot on 10-06 (autostart: no debug token, so no live PATCH).
   of 28.8. The rest of the box that afternoon was his own: a Gradle/Kotlin
   daemon (4.4 GB), Steam, Claude sessions. The alert now names them.
 
+### 2026-10-26 - two quiet weeks, read from his phone (release 87)
+Nobody spoke to JARVIS 10-14..10-25; his phone got 53 briefs, 40 alerts, 13
+urgents. Found on the way in: **the proactive loop had been dead since 10-13**
+(`_memory_hogs` pasted at column 0 inside `class Proactive` swallowed every
+method after it; "'Proactive' object has no attribute 'run_checks'" 19,047
+times). Moved above the class; gated. Then his items 1-3:
+1. **Urgent news.** Five of thirteen were wrong (a "scoring explosion", a
+   "thriller inspired by Die Hard", a Pacific hurricane, a Tibet quake, a
+   Kansas crash twice). The live triggers could not be reproduced from the
+   spoken summaries, so every ALERT/URGENT decision is now LOGGED with its
+   reason and judged text (`news URGENT (headline, why): ...`) and kept 14
+   days in `news_judged` - replay that next time. Rules fixed from what
+   could be seen: METAPHOR scrub before the hazard words, ENTERTAINMENT
+   (games, films, shows) never above NOTABLE without a death, "closing for
+   the season" not a DISRUPTION, Tibet/Kyiv/Mexico/Canada/... in FOREIGN.
+2. **One event, two outlets.** `_seen_before(head, body)` and
+   `_summary_seen_before` compare what the articles SAY (town + death, or
+   half the significant words) against the summaries sent in the last 12 h
+   (`_seen_text`, persisted). The Maynard pedestrian death would have gone
+   out once.
+3. **"How can you improve?"** -> `self_assess` reflex: this week's turns and
+   first-word times, corrections kept, then what waits on him (calendar ->
+   iCloud, phone status -> shortcut, health -> shortcut) and the card.
+- Memory after the 10-23 reboot: llama-server 14.4 GB private, 5.6 GB free.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the

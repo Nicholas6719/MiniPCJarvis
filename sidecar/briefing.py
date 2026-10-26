@@ -60,6 +60,31 @@ def _in_quiet_hours(now: dt.datetime | None = None) -> bool:
     return (start <= t or t < end) if start > end else (start <= t < end)
 
 
+def _judged(story: dict, tier: str, why: str, stage: str = "headline") -> None:
+    """Log and keep every ALERT/URGENT decision with the text it was judged on."""
+    try:
+        if tier not in (ALERT, URGENT):
+            return
+        head = str(story.get("headline") or story.get("title") or "")[:160]
+        desc = str(story.get("summary") or story.get("description") or "")[:400]
+        log.info("news %s (%s, %s): %r | %s | judged: %r", tier.upper(), stage, why, head[:80],
+                 str(story.get("source") or "")[:30], desc[:160])
+        from memory.store import memory
+        memory.db.execute("CREATE TABLE IF NOT EXISTS news_judged (ts REAL, stage TEXT, tier TEXT, why TEXT, "
+                          "source TEXT, headline TEXT, text TEXT)")
+        memory.db.execute("INSERT INTO news_judged VALUES (?,?,?,?,?,?,?)",
+                          (time.time(), stage, tier, why, str(story.get("source") or "")[:60], head, desc))
+        memory.db.execute("DELETE FROM news_judged WHERE ts < ?", (time.time() - 14 * 86400,))
+        memory.db.commit()
+    except Exception:
+        try:
+            from memory.store import memory
+            memory.db.rollback()
+        except Exception:
+            pass
+        log.debug("could not record the news decision", exc_info=True)
+
+
 class Briefing:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
@@ -74,6 +99,11 @@ class Briefing:
         # breaking news. Kept on DISK, because a process restarting more often
         # than the 5-minute lane gap primed for ever and silently sent nothing.
         self._seen.update(self._load_state("seen_keys", as_dict=True))
+        # ...and the SUMMARY that went with each key, so the same event in
+        # another outlet's words is caught by what the two articles SAY (town +
+        # a death), not only by their headlines. The Maynard pedestrian death
+        # went out twice an hour apart from two desks (2026-10-17).
+        self._seen_text: dict[str, str] = self._load_state("seen_text", as_dict=True) or {}
         self._last_watch: float = 0.0
         # Two clocks: emergencies are checked more often than prices are.
         self._last_news: float = 0.0
@@ -133,6 +163,7 @@ class Briefing:
                 "day": _now().strftime("%Y-%m-%d"),
                 "done_slots": sorted(self._done_slots),
                 "seen_keys": {k: v for k, v in list(self._seen.items())[-400:]},
+                "seen_text": {k: v for k, v in list(getattr(self, "_seen_text", {}).items())[-200:]},
             }), encoding="utf-8")
         except Exception:
             log.debug("could not save briefing state", exc_info=True)
@@ -331,9 +362,13 @@ class Briefing:
             # others before himself". One event, two newsrooms, two pings.
             # _same_story already knew how to see that; it was only ever being
             # asked WITHIN a single sweep, never across them.
-            if key in self._seen or self._seen_before(head):
+            if key in self._seen or self._seen_before(head, str(story.get("summary") or story.get("description") or "")):
                 continue
             self._remember_seen(key)
+            # EVERY DECISION, WITH ITS REASON AND THE TEXT THAT WAS JUDGED. Two
+            # weeks of urgents could not be tuned afterwards because only the
+            # spoken sentence survived (2026-10-26). Logged and kept 14 days.
+            _judged(story, tier, why)
             if tier in (ALERT, URGENT):
                 # Read the piece and say what happened. He asked for exactly
                 # this: "is Jarvis reading through these like news articles and
@@ -354,10 +389,16 @@ class Briefing:
                     judged = dict(story)
                     judged["summary"] = str(said["summary"])
                     tier2, why2 = classify_news(judged)
+                    _judged(judged, tier2, why2, stage="read")
                     if tier2 not in (ALERT, URGENT):
                         log.info("demoted after reading: %r - %s", head[:60], why2)
                         continue
                     tier = tier2
+                    # the summary is what the next outlet's version is compared to
+                    self._seen_text[key] = str(said["summary"])[:300]
+                    if self._summary_seen_before(str(said["summary"]), key):
+                        log.info("same event, another outlet: %r", head[:60])
+                        continue
                 self._remember(said)
                 out.append((spoken_line(said), tier, key))
             else:
@@ -568,12 +609,28 @@ class Briefing:
     # Speech wants flowing sentences; a phone wants short lines you can scan. The
     # same text cannot be both, so it is no longer asked to be.
 
-    def _seen_before(self, headline: str) -> bool:
-        """Has he already been told this, however it was worded last time?"""
+    def _seen_before(self, headline: str, body: str = "") -> bool:
+        """Has he already been told this, however it was worded last time?
+        Headline against the headlines he was told; body against the summaries."""
         for key in self._seen:
             if not key.startswith("news:"):
                 continue
             if self._same_story(headline, key[5:]):
+                return True
+        if body:
+            return self._summary_seen_before(body, "")
+        return False
+
+    def _summary_seen_before(self, body: str, own_key: str) -> bool:
+        """The same event by what the articles SAY: a town and a death in both,
+        or half the significant words shared. Only against what was sent in
+        the last twelve hours; a second fire in the same town a week later is
+        a second fire."""
+        cutoff = time.time() - 12 * 3600
+        for key, text in getattr(self, "_seen_text", {}).items():
+            if key == own_key or not text or self._seen.get(key, 0) < cutoff:
+                continue
+            if self._same_story(body, text):
                 return True
         return False
 
