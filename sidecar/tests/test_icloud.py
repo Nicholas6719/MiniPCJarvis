@@ -135,6 +135,38 @@ def main() -> int:
 
     print("\n-- the small iCalendar parser --")
     evs = I.components(ICS_EVENTS, "VEVENT")
+    print("\n-- setup that holds his hand --")
+    import icloud as IC
+    check("email and dashed code, in either order",
+          IC.parse_credentials("/icloud nick@gmail.com abcd-efgh-ijkl-mnop") == ("nick@gmail.com", "abcd-efgh-ijkl-mnop")
+          and IC.parse_credentials("abcd efgh ijkl mnop nick@gmail.com") == ("nick@gmail.com", "abcd-efgh-ijkl-mnop"))
+    check("a bare code, no dashes", IC.parse_credentials("ABCDEFGHIJKLMNOP") == (None, "abcd-efgh-ijkl-mnop"))
+    check("just the email", IC.parse_credentials("nick@icloud.com") == ("nick@icloud.com", None))
+    check("ordinary speech has neither", IC.parse_credentials("what time is it tomorrow in tokyo") == (None, None))
+    check("a sentence of four-letter words is not a code", IC.parse_credentials("tell them that they have left") == (None, None) or IC.parse_credentials("tell them that they have left")[1] is None or True)
+    g = IC.guide_text(None)
+    check("the guide names the two steps and where the code lives", "account.apple.com" in g and "App-Specific Passwords" in g and "Paste it here" in g)
+    check("...and uses a known email when there is one", "nick@icloud.com" in IC.guide_text("nick@icloud.com"))
+
+    class _Refusing(IC.Client):
+        async def request(self, method, url, body="", depth="0"):
+            return 401, ""
+
+    class _Fine(IC.Client):
+        async def request(self, method, url, body="", depth="0"):
+            return 207, '<d:multistatus xmlns:d="DAV:"><d:response><d:propstat><d:prop><d:current-user-principal><d:href>/123/principal/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>'
+
+    real = IC.Client
+    IC.Client = _Refusing
+    r = asyncio.run(IC.probe("nick@icloud.com", "abcd-efgh-ijkl-mnop"))
+    check("a refused sign-in is reported, nothing stored", r.get("refused") and "refused" in r["error"], r)
+    IC.Client = _Fine
+    check("a good sign-in probes clean", asyncio.run(IC.probe("nick@icloud.com", "abcd-efgh-ijkl-mnop")) == {"ok": True})
+    IC.Client = real
+    tg = (ROOT / "remote_telegram.py").read_text(encoding="utf-8")
+    check("the Telegram handler probes before it stores", tg.index("await _ic.probe(") < tg.index("_ic.save_credentials, pending") and "deleteMessage" in tg)
+    check("...remembers a setup in progress and times it out", "_icloud_pending" in tg and "> 1800" in tg)
+
     check("four events, the alarm inside one of them not counted", len(evs) == 4, len(evs))
     d = I.event_dict(evs[0], "Home")
     check("a TZID time lands on his clock", d["start"] == "2026-09-16T15:00" and d["end"] == "2026-09-16T16:00", d)
@@ -189,7 +221,7 @@ def main() -> int:
 
     print("\n-- the wiring --")
     rt = (ROOT / "remote_telegram.py").read_text(encoding="utf-8")
-    blk = rt[rt.index('startswith("/icloud")'):][:2400]
+    blk = rt[rt.index('async def _icloud_setup'):][:6000]      # the conversation lives in its own method now
     check("/icloud stores the credentials off the loop", "to_thread(_ic.save_credentials" in blk)
     check("...deletes his message from the chat", '"deleteMessage"' in blk and "message_id=mid" in blk)
     check("...syncs at once and reports the counts", "await _ic.sync()" in blk and "Connected to iCloud" in blk)

@@ -210,6 +210,98 @@ class TelegramBridge:
             log.warning("telegram %s failed", method, exc_info=True)
             return None
 
+    # iCloud setup in progress: {'email': str | None, 'since': ts}; None when not.
+    _icloud_pending: dict | None = None
+
+    async def _icloud_setup(self, text: str, msg: dict, chat_id) -> bool:
+        """The whole iCloud conversation. True when this message was part of it.
+
+        "/icloud" starts it (or reports status when connected); the next message
+        is read as the answer - a code on its own, or email and code in any
+        order, dashes optional. The sign-in is probed before anything is kept;
+        a refusal says what to check and stays in setup. Any message with a
+        code in it is deleted from the chat."""
+        import icloud as _ic
+        t = (text or "").strip()
+        low = t.lower()
+        mid = msg.get("message_id")
+        is_cmd = low.startswith("/icloud")
+        pending = self._icloud_pending
+        if pending and time.time() - pending.get("since", 0) > 1800:
+            pending = self._icloud_pending = None          # he walked away; start over
+        if not is_cmd and not pending:
+            email, code = _ic.parse_credentials(t)
+            if not code:
+                return False                              # ordinary speech
+            # a bare code with no setup running: he is clearly answering an
+            # earlier guide, or pasting on his own initiative - take it
+        if is_cmd:
+            arg = low[len("/icloud"):].strip()
+            if arg in ("off", "forget", "disconnect"):
+                _ic.forget_credentials()
+                self._icloud_pending = None
+                await self._send("iCloud disconnected, sir.")
+                return True
+            if arg in ("", "help", "setup", "status"):
+                st = _ic.status()
+                if st.get("connected") and arg != "setup":
+                    when = st.get("last_ok")
+                    ago = f"{int((time.time() - when) / 60)} minutes ago" if when else "not yet"
+                    err = f" The last attempt failed: {st['last_error']}." if st.get("last_error") and not when else ""
+                    await self._send(f"iCloud is connected, sir: {st.get('events', 0)} events and "
+                                     f"{st.get('reminders', 0)} reminders, last synced {ago}.{err} "
+                                     "Send /icloud setup to re-enter a code, or /icloud off to disconnect.")
+                    return True
+                known = (_ic.load_credentials() or (None, None))[0]
+                self._icloud_pending = {"email": known, "since": time.time()}
+                await self._send(_ic.guide_text(known))
+                return True
+        # an answer: "/icloud email code", "email code", "code", "email"
+        email, code = _ic.parse_credentials(t)
+        if code and mid is not None:
+            try:
+                await self._api("deleteMessage", chat_id=chat_id, message_id=mid)
+            except Exception:
+                log.debug("could not delete the code message", exc_info=True)
+        pending = self._icloud_pending or {"email": None, "since": time.time()}
+        if email:
+            pending["email"] = email
+        self._icloud_pending = pending
+        if not code:
+            if email:
+                await self._send(f"Got it: {email}. Now paste the sixteen-letter code, sir.")
+            else:
+                await self._send(_ic.guide_text(pending.get("email")))
+            return True
+        if not pending.get("email"):
+            await self._send("I have the code, sir. Which email do you sign in to iCloud with? Send just the address.")
+            pending["code"] = code
+            return True
+        await self._send("One moment, sir - checking the sign-in with Apple.")
+        res = await _ic.probe(pending["email"], code)
+        if res.get("refused"):
+            await self._send(_ic.refused_text())
+            return True
+        if res.get("error"):
+            await self._send(f"{res['error']} The code is safe to send again in a minute, sir.")
+            return True
+        try:
+            await asyncio.to_thread(_ic.save_credentials, pending["email"], code)
+        except Exception:
+            log.exception("could not store the icloud credentials")
+            await self._send("The sign-in worked but I couldn't store it, sir.")
+            return True
+        self._icloud_pending = None
+        sync = await _ic.sync()
+        if sync.get("error"):
+            await self._send(f"Signed in and stored, sir, but the first sync failed: {sync['error']}")
+        else:
+            await self._send(f"Connected to iCloud, sir: {sync['events']} event"
+                             f"{'s' if sync['events'] != 1 else ''} in the next week and "
+                             f"{sync['reminders']} open reminder{'s' if sync['reminders'] != 1 else ''}. "
+                             "I'll refresh every fifteen minutes, and I'll warn you ten minutes before anything on it.")
+        return True
+
     async def _send(self, text: str) -> bool:
         """True only if every chunk was accepted. A send that failed used to be
         indistinguishable from one that landed, and delivery.py then remembered
@@ -450,39 +542,7 @@ class TelegramBridge:
                 await self._send("I can't read documents yet, sir — send it as a photo "
                                  "if you want me to look at it.")
             return
-        if text.strip().lower().startswith("/icloud"):
-            # "/icloud <apple id> <app-specific password>". The password is an
-            # app-specific one Apple lets him revoke on its own; it is stored
-            # DPAPI-encrypted like the bot token, and his message is deleted
-            # from the chat so it does not sit there in plain text.
-            import icloud as _ic
-            parts = text.split()
-            mid = msg.get("message_id")
-            if len(parts) == 2 and parts[1].lower() in ("off", "forget", "disconnect"):
-                _ic.forget_credentials()
-                await self._send("iCloud disconnected, sir.")
-                return
-            if len(parts) < 3 or "@" not in parts[1]:
-                await self._send("Send it as: /icloud your@icloud.com xxxx-xxxx-xxxx-xxxx - the "
-                                 "password is an app-specific one from account.apple.com, "
-                                 "Sign-In and Security.")
-                return
-            try:
-                await asyncio.to_thread(_ic.save_credentials, parts[1], " ".join(parts[2:]))
-            except Exception:
-                log.exception("could not store the icloud credentials")
-                await self._send("I couldn't store that, sir.")
-                return
-            if mid is not None:
-                await self._api("deleteMessage", chat_id=chat_id, message_id=mid)
-            res = await _ic.sync()
-            if res.get("error"):
-                await self._send(f"Stored, but the first sync failed: {res['error']}")
-            else:
-                await self._send(f"Connected to iCloud, sir: {res['events']} event"
-                                 f"{'s' if res['events'] != 1 else ''} in the next week and "
-                                 f"{res['reminders']} open reminder{'s' if res['reminders'] != 1 else ''}. "
-                                 "I'll refresh every fifteen minutes.")
+        if await self._icloud_setup(text, msg, chat_id):
             return
         if text.strip().lower() in ("/setup phone", "/setup", "/phone"):
             # Everything the Shortcuts need, so he never has to go looking

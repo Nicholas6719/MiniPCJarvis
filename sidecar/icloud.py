@@ -412,6 +412,68 @@ async def sync_loop() -> None:
         await asyncio.sleep(max(60.0, minutes * 60))
 
 
+# ---------------------------------------------------------------- setup
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_CODE = re.compile(r"\b([a-z]{4})[\s-]?([a-z]{4})[\s-]?([a-z]{4})[\s-]?([a-z]{4})\b", re.I)
+
+
+def parse_credentials(text: str) -> tuple[str | None, str | None]:
+    """(email, app-specific code) found anywhere in what he typed. The code
+    is Apple's four groups of four letters, accepted with dashes, spaces or
+    nothing between them, and returned in Apple's dashed form."""
+    t = (text or "").strip()
+    t = re.sub(r"^/icloud\b", " ", t, flags=re.I)
+    email = None
+    m = _EMAIL.search(t)
+    if m:
+        email = m.group(0).lower()
+        t = t.replace(m.group(0), " ")
+    code = None
+    m = _CODE.search(t)
+    if m:
+        groups = [g.lower() for g in m.groups()]
+        if all(g.isalpha() for g in groups):
+            code = "-".join(groups)
+    return email, code
+
+
+def guide_text(known_email: str | None) -> str:
+    """The two steps, in his hand."""
+    who = (f"I'll use {known_email} as your Apple ID; if that's wrong, send the right email with the code."
+           if known_email else
+           "Send the code with the email you sign in to iCloud with, like: you@icloud.com abcd-efgh-ijkl-mnop.")
+    return ("Let's connect your calendar and reminders, sir. Two steps.\n\n"
+            "1. On your phone open account.apple.com, sign in, then Sign-In and Security, "
+            "App-Specific Passwords, the plus sign. Name it JARVIS and copy the sixteen-letter code.\n\n"
+            f"2. Paste it here as your next message. {who}\n\n"
+            "I delete any message with a code in it the moment I've read it, and I check the "
+            "sign-in before I keep anything.")
+
+
+async def probe(email: str, password: str) -> dict:
+    """Try the sign-in without storing anything. {'ok': True} or {'error': why}."""
+    c = Client(email, password)
+    try:
+        await c.principal()
+        return {"ok": True}
+    except PermissionError as e:
+        return {"error": str(e), "refused": True}
+    except Exception as e:
+        return {"error": f"I couldn't reach iCloud: {e}"}
+    finally:
+        try:
+            await c.close()
+        except Exception:
+            pass
+
+
+def refused_text() -> str:
+    return ("Apple refused that sign-in, sir. Two things it is nearly always: the code was your normal "
+            "password rather than a NEW app-specific one (make another on account.apple.com and send "
+            "it), or the email isn't the one you sign in to iCloud with (send the right email with the "
+            "code). Send /icloud off if you'd rather stop.")
+
+
 def status() -> dict:
     return {"connected": connected(), "last_ok": _state["last_ok"], "last_error": _state["last_error"],
             "events": _state["events"], "reminders": _state["reminders"]}
