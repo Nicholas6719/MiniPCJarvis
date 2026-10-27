@@ -667,6 +667,7 @@ class Orchestrator:
                 since = prev if prev else time.time() - 12 * 3600
                 entries = delivery.entries(since)
                 self._away_since = since
+                delivery.away_since = since      # "what did I miss" reads the same window
                 # The voice says one sentence; the screen lists what reached
                 # him and what was held back, on the brief stage.
                 sections = persona.briefing_sections(entries) if gap >= persona.AWAY_S else []
@@ -677,6 +678,17 @@ class Orchestrator:
                 log.debug("no delivery ledger for the briefing", exc_info=True)
         ack = persona.wake_line(gap, time.localtime().tm_hour,
                                 getattr(self, "_last_wake_ack", None), entries)
+        if gap >= persona.AWAY_S:
+            # ...and WHAT was held, not just how many: the first sentence of up
+            # to three things that never reached him, marked told so neither
+            # the presence watcher nor "what did I miss" reads them out again.
+            try:
+                from delivery import delivery as _dv
+                held = _dv.held_line(getattr(self, "_away_since", time.time() - 12 * 3600))
+                if held:
+                    ack = ack.rstrip() + " " + held
+            except Exception:
+                log.debug("could not add what was held to the greeting", exc_info=True)
         from brain import wit
         _w = wit.remark("late", hour=time.localtime().tm_hour)
         if _w:

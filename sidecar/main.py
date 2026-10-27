@@ -99,6 +99,8 @@ async def lifespan(app: FastAPI):
     phone.register_all()          # his calendar and Reminders, the same road (2026-09-15)
     from tools import site_tools
     site_tools.register_all()     # "find me X on Amazon" opens it where he can see it (2026-09-22)
+    from tools import watch_tools
+    watch_tools.register_all()    # "tell me when the download finishes": watches that outlive the sentence
     vision_analyze.register_all() # phase 3 — reuses the existing Gemma vision model
     biometric.register_all()      # phase 4 — ADDITIVE to the spoken confirmation
     fabrication.register_all()    # phase 5 — no printer; NoPrinterBackend only
@@ -132,6 +134,7 @@ async def lifespan(app: FastAPI):
     # decides where he is and therefore whether to speak it or send it.
     from delivery import ALERT, delivery
     delivery.orchestrator = orchestrator
+    spawn(delivery.presence_watch(), name="presence-watch")   # back after an absence: say what was held, once
 
     async def _announce_alert(text: str, *, key: str = "") -> None:
         await delivery.deliver(text, tier=ALERT, key=key)
@@ -745,7 +748,8 @@ async def tasks_cancel(task_id: int, x_jarvis_token: str | None = Header(None)):
 @app.get("/memory")
 async def memory_list(x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
-    return {"memories": memory.list_all()}
+    # the folder too: the files are the truth, and the panel says where they are
+    return {"memories": memory.list_all(), "folder": str(memory.vault)}
 
 
 @app.delete("/memory/{memory_id}")

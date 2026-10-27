@@ -55,6 +55,11 @@ class Awareness:
         self.front_noted = False
         self.seen_downloads: set[str] = set()
         self.first_scan = True
+        # What landed on the LAST scan, for the standing watches ("tell me when
+        # the download finishes"): this is the only place that knows which
+        # files are new. standing.check reads it; proactive clears it.
+        self.arrived: list[str] = []
+        self._seen_loaded = False
         self.said: dict[str, float] = {}               # key -> when
         self.speak = None                              # async (text, tier, key) -> None; set by main
         self.calendar_warned: set[str] = set()
@@ -79,12 +84,44 @@ class Awareness:
             return Note("screen", f"on his screen for {mins} minutes: {title[:80]}", HOLD, f"screen:{title[:40]}")
         return None
 
+    _SEEN_KEY = "awareness:seen_downloads"
+
+    def _load_seen(self) -> None:
+        """What the folder held last time, across a restart. Without this
+        every release — and every release restarts him — treated the whole
+        Downloads folder as new, which the first-scan rule hid from the notes
+        but not from a standing watch: "tell me when the download finishes"
+        set just before a restart would have fired on a year-old file."""
+        if self._seen_loaded:
+            return
+        self._seen_loaded = True
+        try:
+            import volatile
+            got = volatile.get(self._SEEN_KEY)
+            names = (got or {}).get("value", {}).get("names") or []
+            if names:
+                self.seen_downloads.update(str(n) for n in names)
+                self.first_scan = False
+        except Exception:
+            log.debug("could not load the seen downloads", exc_info=True)
+
+    def _save_seen(self) -> None:
+        try:
+            import volatile
+            volatile.put(self._SEEN_KEY, {"names": sorted(self.seen_downloads)[-2000:]},
+                         source="awareness")
+        except Exception:
+            log.debug("could not save the seen downloads", exc_info=True)
+
     def _downloads(self) -> list[Note]:
         out: list[Note] = []
+        arrived: list[str] = []
+        changed = False
         try:
             folder = str(config.get("folders", "downloads", default="") or "")
             if not folder or not os.path.isdir(folder):
                 return out
+            self._load_seen()
             now = time.time()
             for name in os.listdir(folder):
                 p = os.path.join(folder, name)
@@ -97,14 +134,20 @@ class Awareness:
                 if name in self.seen_downloads:
                     continue
                 self.seen_downloads.add(name)
+                changed = True
                 if self.first_scan or now - st.st_mtime > 600:
                     continue
+                arrived.append(name)
                 size_mb = st.st_size / 1e6
                 out.append(Note("download", f"a download landed: {name[:60]} ({size_mb:.0f} MB)", HOLD, f"dl:{name[:40]}"))
         except Exception:
             log.debug("downloads scan failed", exc_info=True)
         finally:
             self.first_scan = False
+            if arrived:
+                self.arrived = self.arrived + arrived
+            if changed:
+                self._save_seen()
         return out
 
     def _disk(self) -> Note | None:

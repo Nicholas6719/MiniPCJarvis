@@ -49,6 +49,14 @@ EXPECTED = [
     ("generate_part",       "low",  5),
     ("slice_part",          "low",  5),
     ("printer_status",      "safe", 5),
+    # Event watches (2026-10-27): a request that outlives the sentence. LOW,
+    # not SAFE: each one leaves a row behind that will make JARVIS speak later.
+    ("watch_for_process",   "low",  6),
+    ("watch_for_download",  "low",  6),
+    ("watch_for_file",      "low",  6),
+    ("watch_for_battery",   "low",  6),
+    ("list_watches",        "low",  6),
+    ("cancel_watch",        "low",  6),
 ]
 
 
@@ -58,7 +66,7 @@ def main() -> int:
                        file_tools, handoff, health, holo_tools, input_tools, location,
                        market_tools, memory_tools, news_tools, projects, render_tools, model_tools,
                        task_tools, uia, vision_analyze, vision_tools, weather,
-                       workspace_tools, site_tools,
+                       workspace_tools, site_tools, watch_tools,
                        web_tools, windows_tools)
     import market_intel   # the market as a story (2026-09-05), sidecar-level module
     mods = (builtin, memory_tools, windows_tools, web_tools, task_tools,
@@ -67,7 +75,7 @@ def main() -> int:
             projects, location, health, vision_analyze, biometric, fabrication,
             holo_tools, render_tools, model_tools,
             documents, office, image_tools, phone,
-            workspace_tools, site_tools, market_intel)
+            workspace_tools, site_tools, watch_tools, market_intel)
     for m in mods:
         m.register_all()
 

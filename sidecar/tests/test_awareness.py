@@ -101,6 +101,41 @@ def main() -> int:
     from config import DEFAULTS
     check("switchable in config", DEFAULTS["persona"].get("wit") is True and DEFAULTS["awareness"]["enabled"] is True)
 
+    print("\n-- downloads: what landed is exposed, and the seen set survives a restart --")
+    # A TEMP folder stands in for Downloads, set in memory only (config.set
+    # would write his real config.json). A restart used to treat the whole
+    # folder as new; now the names are kept in volatile, so a watch set just
+    # before a release cannot fire on a year-old file.
+    from config import config as _cfg
+    real_dl = (_cfg.data.get("folders") or {}).get("downloads")
+    tmp = tempfile.mkdtemp()
+    _cfg.data.setdefault("folders", {})["downloads"] = tmp
+    volatile.forget(A.Awareness._SEEN_KEY)
+    try:
+        Path(tmp, "old.zip").write_text("x")
+        a = A.Awareness()
+        a._downloads()
+        check("the first scan only records what is there", a.arrived == [] and "old.zip" in a.seen_downloads, (a.arrived, a.seen_downloads))
+        Path(tmp, "fresh.iso").write_text("y")
+        a._downloads()
+        check("a new file is exposed for the standing watches", a.arrived == ["fresh.iso"], a.arrived)
+        b = A.Awareness()                    # a restart
+        b._downloads()
+        check("after a restart the old files are not new again", b.arrived == [] and b.first_scan is False, (b.arrived, b.first_scan))
+        Path(tmp, "after-restart.pdf").write_text("z")
+        b._downloads()
+        check("...and a genuinely new one still is", b.arrived == ["after-restart.pdf"], b.arrived)
+        Path(tmp, "part.crdownload").write_text("p")
+        b.arrived = []
+        b._downloads()
+        check("a partial download is not a download", b.arrived == [], b.arrived)
+    finally:
+        if real_dl is None:
+            _cfg.data.get("folders", {}).pop("downloads", None)
+        else:
+            _cfg.data["folders"]["downloads"] = real_dl
+        volatile.forget(A.Awareness._SEEN_KEY)
+
     # THE GATES SHARE ONE DATABASE: leave no fake calendar or phone behind
     # (test_briefing read "Chemistry lecture" as today's reminder, release 80).
     volatile.forget(P.KEY_CAL)

@@ -15,11 +15,15 @@ export function MemoryView() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
+  // Where the files live. The memories are markdown on disk; this table is
+  // only the index. Delete a file to forget, edit one to correct, add one to teach.
+  const [folder, setFolder] = useState("");
 
   const load = async () => {
     try {
       const r = await api("/memory");
       setMemories(r.memories);
+      setFolder(r.folder || "");
       setError("");
     } catch {
       setError("memory unavailable");
@@ -81,6 +85,11 @@ export function MemoryView() {
         />
         <button className="ghost-btn" onClick={load}>REFRESH</button>
       </div>
+      {folder && (
+        <div className="memory__ts" title="One markdown file per memory. Delete a file to forget it, edit one to correct it, add one to teach him.">
+          files: {folder}
+        </div>
+      )}
       <div className="memory__list">
         {error && <div className="memory__empty">{error}</div>}
         {!error && shown.length === 0 && (

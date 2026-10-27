@@ -341,6 +341,16 @@ DEFAULTS: dict[str, Any] = {
         # brings him back to the front from behind anything.
         "auto_sleep": True,
         "idle_sleep_minutes": 2,
+        # Quiet keyboard and mouse for this long is "away" (delivery.is_present):
+        # anything he is told after it goes to the phone, and a return after it
+        # is the moment what was held gets read back, once.
+        "away_after_seconds": 180,
+    },
+    "memory": {
+        # The memories as markdown, one file each (memory/vault.py). In his
+        # Documents on purpose, never %APPDATA%: these are his notes, not the
+        # application's state. Empty means Documents\JARVIS\Memory.
+        "vault_path": "",
     },
     # turn_model: Smart Turn v3 (pipecat-ai, BSD-2) hears whether a pause is the
     # end of a turn; audio/turn_model.py. The file lives at

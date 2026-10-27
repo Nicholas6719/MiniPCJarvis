@@ -81,6 +81,31 @@ def main() -> int:
           P.wake_line(8 * 3600, 9, None, missed))
     check("...but not on an ordinary wake", P.wake_line(30, 9, None, missed) == "Yes?")
 
+    print("\n-- 'what did I miss' is answered once --")
+    # The second asking, a minute later, used to read the same list again.
+    # What the briefing reads out is marked told; the next one says so.
+    from brain.skills import _say_briefing
+    from delivery import delivery as D
+    saved = (list(D.ledger), getattr(D, "_ledger_loaded", False), getattr(D, "away_since", 0.0))
+    try:
+        D._ledger_loaded = True
+        D.away_since = 1.0
+        D.ledger[:] = [dict(e) for e in missed]
+        first = _say_briefing()
+        check("the first asking reports what was held", "held back" in first, first)
+        second = _say_briefing()
+        check("the second says there is nothing new", second == "Nothing new since then, sir.", second)
+        D.ledger.append({"ts": 7, "outcome": "held", "subject": "news:bridge closed in natick", "text": "..."})
+        third = _say_briefing()
+        check("...until something new is held", "one thing I held back" in third and "Bridge closed" in third, third)
+        D.ledger[:] = []
+        check("nothing at all is still 'all quiet'", _say_briefing() == "Nothing while you were away, sir. All quiet.")
+        D.ledger[:] = [dict(e) for e in phone]
+        check("only the phone is not 'nothing new' either: it is all quiet",
+              _say_briefing() == "Nothing while you were away, sir. All quiet.", _say_briefing())
+    finally:
+        D.ledger[:], D._ledger_loaded, D.away_since = saved
+
     print("\n-- a follow-up never repeats the last answer --")
     # Measured live 2026-09-05: "and Chile?" -> "Lima. Santiago."; "and when was
     # it published?" -> "Herman Melville, 1851, sir." A prompt rule changed
