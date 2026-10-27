@@ -146,6 +146,18 @@ def main() -> int:
             check("...and the check is faster than a chime", med < 0.6, f"{med * 1000:.0f} ms")
         asyncio.run(run())
 
+    print("\n-- a rejected wake keeps its audio, bounded --")
+    import numpy as np
+    from audio.wake import save_rejected_wake
+    folder = Path(tempfile.mkdtemp()) / "rejected_wakes"
+    clip = np.random.default_rng(1).uniform(-0.2, 0.2, 16000 * 4).astype(np.float32)
+    paths = [save_rejected_wake(clip, 0.9, folder) for _ in range(8)]
+    kept = sorted(folder.glob("*.wav"))
+    check("a clip is written for each rejection", all(p is not None for p in paths), paths)
+    check("...two and a half seconds of it, 16-bit mono", kept and kept[-1].stat().st_size == 44 + 2 * 16000 * 2.5)
+    check("...and only the newest six are kept", len(kept) == 6, len(kept))
+    check("too little audio writes nothing", save_rejected_wake(clip[:1000], 0.9, folder) is None)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}"
           f"{f' ({len(skips)} skipped)' if skips else ''}")
     for s in skips:

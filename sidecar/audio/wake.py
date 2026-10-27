@@ -141,6 +141,40 @@ def name_in(text: str) -> bool:
     return any(_is_name(w) for w in re.findall(r"[a-z]+", (text or "").lower()))
 
 
+def save_rejected_wake(audio: np.ndarray, score: float, folder, rate: int = 16000,
+                       keep: int = 6, seconds: float = 2.5):
+    """Keep the audio a rejected wake fired on, so it can be listened to.
+
+    Writes the last `seconds` of `audio` as 16-bit mono WAV into `folder`,
+    named by time and score, and keeps only the newest `keep` clips. Returns
+    the path, or None if nothing was written. Local disk only, never logged
+    as audio, bounded: six clips of two and a half seconds.
+    """
+    import time as _t
+    import wave
+    from pathlib import Path
+    if audio is None or len(audio) < rate // 4:
+        return None
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    tail = np.asarray(audio[-int(rate * seconds):], dtype=np.float32)
+    pcm = (np.clip(tail, -1.0, 1.0) * 32767).astype("<i2")
+    now = _t.time()
+    path = folder / f"{_t.strftime('%Y%m%d-%H%M%S', _t.localtime(now))}{int(now * 1000) % 1000:03d}_{score:.2f}.wav"
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm.tobytes())
+    clips = sorted(folder.glob("*.wav"), key=lambda p: p.stat().st_mtime)
+    for old in clips[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return path
+
+
 def strip_wake_name(text: str) -> str:
     """The transcript with the wake phrase taken out, wherever the name landed.
 

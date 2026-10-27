@@ -320,6 +320,12 @@ class Speaker:
         # OUTPUT device, which hears JARVIS too — without this he would take his
         # own voice for a television and start demanding his name back.
         self.last_write_at = 0.0
+        # Clear while `wake_and_verify` is still proving the speakers are up
+        # after a dark screen; a reply that arrives meanwhile waits for it
+        # (bounded) instead of opening its own stream against the same
+        # half-awake endpoint.
+        self._settled = asyncio.Event()
+        self._settled.set()
 
     def _ensure(self, rate: int) -> sd.OutputStream:
         if self._stream is None or self._rate != rate:
@@ -378,11 +384,25 @@ class Speaker:
             import threading
 
             def _shut(s=stale) -> None:
+                # With the write lock in hand there is no writer inside this
+                # stream, so once it is closed it is no orphan at all - and
+                # leaving it on the list kept PortAudio from ever being
+                # re-initialised again after the first dark-screen wake.
+                got = self._wlock.acquire(timeout=3.0)
                 try:
-                    s.abort()
-                    s.close()
-                except Exception:
-                    pass
+                    try:
+                        s.abort()
+                        s.close()
+                    except Exception:
+                        pass
+                    if got:
+                        try:
+                            _ORPHANS.remove(s)
+                        except ValueError:
+                            pass
+                finally:
+                    if got:
+                        self._wlock.release()
             threading.Thread(target=_shut, name="jarvis-audio-stale", daemon=True).start()
         loop = asyncio.get_running_loop()
         while True:
@@ -398,6 +418,73 @@ class Speaker:
         log.info("audio: display was dark - reopened the speakers after %d ms (endpoint %s)",
                  int(waited * 1000), {True: "active", False: "still asleep", None: "unknown"}[state])
         return waited
+
+    # A chime the endpoint meter does not register went nowhere. Silence reads
+    # 0.000 exactly; the chime at any sane volume reads well above this.
+    AUDIBLE_PEAK = 0.005
+    # How long a reply will wait for the speakers to be proven up.
+    _SETTLE_WAIT_S = 9.0
+
+    async def _play_measured(self, chunk: np.ndarray, rate: int) -> float | None:
+        """Play one chunk and return the peak the default endpoint showed
+        meanwhile (None when the meter cannot be read)."""
+        from audio.output_watch import peak_sampler
+        secs = len(chunk) / float(rate)
+
+        async def _play() -> None:
+            try:
+                await self._play_now(chunk, rate)
+            except SpeakerStalled as e:
+                log.info("audio: the chime stalled while being verified: %s", e)
+
+        peak, _ = await asyncio.gather(
+            asyncio.to_thread(peak_sampler, secs + 0.3), _play())
+        return peak
+
+    async def wake_and_verify(self, chime: np.ndarray | None, chime_rate: int,
+                              rate: int, deadline: float = 8.0) -> bool:
+        """After a dark screen: reopen the speakers and PROVE the chime came out.
+
+        `reopen_when_ready` trusts WASAPI's DEVICE_STATE, and on 2026-10-27
+        15:53 that said ACTIVE 6 ms after the wake while the DisplayPort link
+        was still coming up: the stream it opened was bound to an endpoint
+        that then went away, and the chime, the greeting and "I can hear you,
+        sir" all played to nothing for a minute. The only honest check is the
+        outcome: play the chime and read the endpoint's own meter. Nothing
+        seen means nothing heard - wait, reopen, chime again, until it is
+        seen or the deadline passes. Replies wait on `_settled` meanwhile.
+        """
+        t0 = time.time()
+        tries = 0
+        self._settled.clear()
+        try:
+            while True:
+                tries += 1
+                try:
+                    await self.reopen_when_ready(rate)
+                except Exception:
+                    log.debug("could not reopen the speakers after the wake", exc_info=True)
+                if chime is None or not len(chime):
+                    return True
+                peak = await self._play_measured(chime, chime_rate)
+                if peak is None:
+                    log.info("audio: the chime was played; the endpoint meter cannot be "
+                             "read here, so it is taken on trust")
+                    return True
+                if peak >= self.AUDIBLE_PEAK:
+                    log.info("audio: the chime reached the speakers (peak %.2f) on try %d, "
+                             "%d ms after the wake", peak, tries, int((time.time() - t0) * 1000))
+                    return True
+                if time.time() - t0 + 0.8 >= deadline:
+                    log.error("audio: the chime went nowhere %d times in %.1f s (peak %.3f) - "
+                              "the speakers did not come up with the display", tries,
+                              time.time() - t0, peak)
+                    return False
+                log.info("audio: the chime went nowhere (peak %.3f) - the speakers are not "
+                         "up yet; reopening", peak)
+                await asyncio.sleep(0.8)
+        finally:
+            self._settled.set()
 
     def stop_playback(self) -> None:
         """Stop what is playing and STAY READY. Never closes the stream.
@@ -437,6 +524,16 @@ class Speaker:
     _epoch: int = 0
 
     async def play_chunk(self, chunk: np.ndarray, rate: int) -> bool:
+        """Play one chunk - after the speakers are settled (see wake_and_verify)."""
+        if not self._settled.is_set():
+            try:
+                await asyncio.wait_for(self._settled.wait(), self._SETTLE_WAIT_S)
+            except asyncio.TimeoutError:
+                log.warning("audio: the speakers were still being verified after %.0f s; "
+                            "playing anyway", self._SETTLE_WAIT_S)
+        return await self._play_now(chunk, rate)
+
+    async def _play_now(self, chunk: np.ndarray, rate: int) -> bool:
         """Play one chunk. NEVER blocks the turn forever: PortAudio's write is a
         blocking call, and when the output device disappears mid-sentence (a
         headset disconnects, the monitor speakers sleep, the default device

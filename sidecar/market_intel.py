@@ -327,7 +327,10 @@ class MarketIntel:
                 await wait_for_quiet()    # never beside one of his turns
                 async for ch in local_llm.stream(
                         [{"role": "user", "content": STORY_PROMPT.format(lines=lines)}],
-                        max_tokens=160, sampling={"temperature": 0.0}):
+                        # 400, not 160: gpt-oss reasons before it writes, and
+                        # every hourly story on 2026-10-27 spent all 160 on
+                        # 641-780 chars of reasoning and produced no sentence.
+                        max_tokens=400, sampling={"temperature": 0.0}):
                     text += ch.text
                     if ch.done:
                         break

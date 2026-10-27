@@ -143,6 +143,45 @@ def endpoint_active() -> bool | None:
         return None
 
 
+def peak_sampler(duration: float, interval: float = 0.025) -> float | None:
+    """The highest peak the default render endpoint shows over `duration` s.
+
+    None when the meter cannot be read. Called on a worker thread, with a
+    FRESH enumerator and meter for this one look (not the long-lived one
+    above): the default endpoint is exactly what changes when the monitor
+    wakes, and the point of this read is to see the endpoint Windows uses
+    NOW. On 2026-10-27 15:53 a stream opened 6 ms after the wake was bound
+    to an endpoint that reported ACTIVE and then went away as the DisplayPort
+    link came up; the chime, the greeting and the reply all "played" to it
+    and he heard nothing. A chime that this meter does not see went nowhere.
+    """
+    try:
+        from ctypes import POINTER, cast
+
+        import comtypes
+        from comtypes import CLSCTX_ALL, CoCreateInstance
+        from pycaw.constants import CLSID_MMDeviceEnumerator, EDataFlow, ERole
+        from pycaw.pycaw import IAudioMeterInformation, IMMDeviceEnumerator
+        try:
+            comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
+        except OSError:
+            pass
+        enumerator = CoCreateInstance(CLSID_MMDeviceEnumerator, IMMDeviceEnumerator,
+                                      comtypes.CLSCTX_INPROC_SERVER)
+        device = enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender.value,
+                                                    ERole.eMultimedia.value)
+        meter = cast(device.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None),
+                     POINTER(IAudioMeterInformation))
+        peak = 0.0
+        end = time.time() + max(0.05, duration)
+        while time.time() < end:
+            peak = max(peak, float(meter.GetPeakValue()))
+            time.sleep(interval)
+        return peak
+    except Exception:
+        return None
+
+
 def _scan() -> tuple[bool, str]:
     """Is sound coming out of this machine that is not ours."""
     import comtypes

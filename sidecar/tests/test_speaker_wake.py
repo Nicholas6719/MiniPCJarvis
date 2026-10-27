@@ -15,6 +15,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -41,10 +42,11 @@ def main() -> int:
     check("...and the speakers are NOT prewarmed against a sleeping endpoint",
           "if not dark:\n                        speaker.prewarm(" in block)
     i_wake = block.index("await self.wake_if_sleeping()")
-    i_reopen = block.index("await speaker.reopen_when_ready(")
+    i_reopen = block.index("await speaker.wake_and_verify(")
     i_chime = block.index('await self.play_sound("chime")')
-    check("after the display is woken, the speakers are reopened", i_wake < i_reopen)
-    check("...before the chime, which is the first sound", i_reopen < i_chime)
+    check("after the display is woken, the speakers are reopened AND the chime is verified", i_wake < i_reopen)
+    check("...before the ordinary chime, which the verified one replaces", i_reopen < i_chime
+          and "if not chimed:" in block[i_reopen:i_chime])
     check("...and a failure there cannot cost the wake", "except Exception:" in block[i_reopen:i_chime])
 
     print("\n-- the reopen itself --")
@@ -80,6 +82,83 @@ def main() -> int:
         check("...and one that never comes back is given up on at the deadline", 1.9 <= waited < 3.0, waited)
         closed, warmed, waited = asyncio.run(drill([None]))
         check("when WASAPI cannot be asked, a fixed moment is given instead", 1.4 <= waited < 2.0, waited)
+    finally:
+        OW.endpoint_active = real
+
+    print("\n-- the chime is PROVEN to have come out, or the speakers are reopened again --")
+    # 2026-10-27 15:53: WASAPI said ACTIVE 6 ms after the wake, the stream was
+    # bound to an endpoint that then went away, and nothing was heard for a
+    # minute. The outcome is what is judged now: the endpoint's own meter.
+    import numpy as np
+
+    def verifier(peaks, deadline=8.0):
+        spk = A.Speaker.__new__(A.Speaker)
+        spk._stream, spk._rate = None, None
+        spk._settled = asyncio.Event(); spk._settled.set()
+        reopened, played = [], []
+
+        async def fake_reopen(rate):
+            reopened.append(rate); return 0.0
+        async def fake_play(chunk, rate):
+            played.append(len(chunk)); return True
+        spk.reopen_when_ready = fake_reopen
+        spk._play_now = fake_play
+        seq = list(peaks)
+        OW.peak_sampler = lambda duration, interval=0.025: (seq.pop(0) if seq else 0.0)
+        chime = np.zeros(2400, dtype=np.float32)
+        return spk, reopened, played, chime, deadline
+
+    real_sampler = OW.peak_sampler
+    try:
+        spk, reopened, played, chime, dl = verifier([0.0, 0.0, 0.31])
+        ok = asyncio.run(spk.wake_and_verify(chime, 24000, 24000, deadline=dl))
+        check("two silent chimes, then one the meter saw: reported heard", ok is True)
+        check("...the speakers were reopened before every chime", reopened == [24000] * 3, reopened)
+        check("...and the chime was played each time", len(played) == 3, played)
+        check("...and replies are released afterwards", spk._settled.is_set())
+
+        spk, reopened, played, chime, dl = verifier([0.0] * 40, deadline=1.2)
+        ok = asyncio.run(spk.wake_and_verify(chime, 24000, 24000, deadline=dl))
+        check("never seen by the deadline: reported NOT heard, and it stops", ok is False and len(played) <= 2, played)
+        check("...replies are still released", spk._settled.is_set())
+
+        spk, reopened, played, chime, dl = verifier([None])
+        ok = asyncio.run(spk.wake_and_verify(chime, 24000, 24000, deadline=dl))
+        check("a meter that cannot be read is taken on trust, once", ok is True and len(played) == 1, played)
+
+        async def reply_waits():
+            spk, reopened, played, chime, dl = verifier([0.0, 0.4])
+            order = []
+            async def verify():
+                await spk.wake_and_verify(chime, 24000, 24000, deadline=dl); order.append("verified")
+            async def reply():
+                await asyncio.sleep(0.05)
+                await spk.play_chunk(np.zeros(240, dtype=np.float32), 24000); order.append("reply")
+            await asyncio.gather(verify(), reply())
+            return order
+        order = asyncio.run(reply_waits())
+        check("a reply that arrives mid-verification waits for the speakers", order == ["verified", "reply"], order)
+    finally:
+        OW.peak_sampler = real_sampler
+
+    print("\n-- a stale stream closed cleanly is no orphan --")
+    class _Stale:
+        def abort(self): pass
+        def close(self): pass
+    spk = A.Speaker.__new__(A.Speaker)
+    import threading as _th
+    spk._wlock = _th.Lock()
+    spk._stream, spk._rate = _Stale(), 24000
+    spk.prewarm = lambda rate: None
+    OW.endpoint_active = lambda: True
+    try:
+        asyncio.run(spk.reopen_when_ready(24000, timeout=1.0))
+        for _ in range(40):
+            if not any(isinstance(o, _Stale) for o in A._ORPHANS):
+                break
+            time.sleep(0.05)
+        check("the stale stream is dropped from the orphan list once closed",
+              not any(isinstance(o, _Stale) for o in A._ORPHANS), A._ORPHANS)
     finally:
         OW.endpoint_active = real
 

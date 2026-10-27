@@ -1538,6 +1538,7 @@ class Orchestrator:
                         continue
                     self._preroll = snap
                     self._listen_flag.set()
+                    chimed = False
                     if self.sm.state == State.SLEEPING:
                         # must also LEAVE the sleeping state, not just raise the window —
                         # the capture/turn path only runs from IDLE, so restoring the
@@ -1545,9 +1546,18 @@ class Orchestrator:
                         await self.wake_if_sleeping()
                         if dark:
                             # the monitor has been told to wake; give its
-                            # speakers the same courtesy before the chime
+                            # speakers the same courtesy before the chime -
+                            # and PROVE the chime came out (the endpoint
+                            # meter), reopening until it does. On 2026-10-27
+                            # a reopen 6 ms after the wake bound a stream to
+                            # an endpoint that then went away with the
+                            # DisplayPort re-link, and he heard nothing at all.
                             try:
-                                await speaker.reopen_when_ready(tts.sample_rate)
+                                from audio.sounds import RATE as _CHIME_RATE
+                                chime = (self._sounds.get("chime")
+                                         if config.get("audio", "sound_cues", default=True) else None)
+                                await speaker.wake_and_verify(chime, _CHIME_RATE, tts.sample_rate)
+                                chimed = chime is not None
                             except Exception:
                                 log.debug("could not reopen the speakers after the wake", exc_info=True)
                     else:
@@ -1559,7 +1569,8 @@ class Orchestrator:
                         # name is a deliberate approach; it brings him forward.
                         await self._surface()
                     await bus.emit("wake", score=round(score, 2))
-                    await self.play_sound("chime")
+                    if not chimed:
+                        await self.play_sound("chime")
         except asyncio.CancelledError:
             raise
         finally:
@@ -3586,7 +3597,21 @@ class Orchestrator:
         heard = (heard or "").strip()
         if name_in(heard):
             return True, heard
-        log.info("wake rejected (%.2f): heard %r, and his name is not in it", score, heard[:80])
+        # KEEP THE AUDIO. On 2026-10-27 15:54 two wakes in a row were rejected
+        # as 'Drivers.' and 'Claude.' while he stood at a dark screen saying
+        # his name; the log could not say whether the microphone was garbled
+        # or the words were. The last few rejected clips are kept on disk so
+        # the next one can be listened to.
+        clip = None
+        try:
+            from audio.wake import save_rejected_wake
+            from config import LOG_DIR
+            clip = await asyncio.to_thread(save_rejected_wake, audio, score,
+                                           LOG_DIR / "rejected_wakes")
+        except Exception:
+            log.debug("could not keep the rejected wake's audio", exc_info=True)
+        log.info("wake rejected (%.2f): heard %r, and his name is not in it%s", score,
+                 heard[:80], f" (clip {clip.name})" if clip else "")
         return False, heard
 
     async def _barge_in_watch(self) -> None:

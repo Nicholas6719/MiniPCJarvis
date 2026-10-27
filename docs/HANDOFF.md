@@ -5434,6 +5434,48 @@ Dropped with reasons: taught vocabulary (Parakeet via onnx_asr has no
 biasing input; WER 0.6 %), habit noticing, all of PCJarvis's prompt-cache
 work (done here first).
 
+### 2026-10-27 15:53 - a wake from a dark screen that he could not hear (hot-swap on 89)
+His report: display off, said the name, display came on, said the name again
+and asked - "screen stuck on standby", repeated the name, after ~15 s it
+worked but he heard nothing. The log, line by line:
+- 15:53:48 wake 0.98 -> `dark` path -> `reopen_when_ready`: "endpoint
+  active" after **6 ms**. The pre-roll was just "Hey Jarvis." -> bare-wake
+  greeting (188 min away, so a long one) played to that stream. NOTHING was
+  heard: the stream was bound to an endpoint that reported ACTIVE while the
+  DisplayPort link was still coming up and then went away with the re-link.
+  `display_is_off()` is INFERRED from idle time, not measured, and WASAPI's
+  DEVICE_STATE is not "the amplifier is up". The 09-15 fix assumed the
+  endpoint goes inactive while dark; today it did not.
+- 15:54:06 and :09: two wakes (0.86, 0.92) REJECTED - Parakeet heard
+  'Drivers.' and 'Claude.' in the 2.5 s pre-roll. Cannot tell from the log
+  whether the mic was garbled or the words were. (The HUD "stuck on
+  standby" is this: a rejected wake lights nothing, by design.)
+- 15:54:27 wake 0.96 heard properly; "I can hear you, sir." at :35 was
+  written to the same dead stream -> silent.
+Fixes (`audio/io.py`, `audio/output_watch.py`, `orchestrator.py`):
+1. **The chime is proven, not assumed.** `speaker.wake_and_verify(chime)`
+   on the dark path: reopen, play the chime, read the default render
+   endpoint's own peak meter (`peak_sampler`, fresh enumerator each look)
+   during it; 0.000 means it went nowhere -> wait 0.8 s, reopen, chime
+   again, up to 8 s. Replies wait on `speaker._settled` meanwhile (≤ 9 s)
+   so they cannot open their own stream against the half-awake endpoint.
+   Log: "audio: the chime reached the speakers (peak 0.31) on try 2, 1900
+   ms after the wake" / "...went nowhere N times". `test_speaker_wake.py`.
+2. **Orphans that closed cleanly leave the list** (`_shut` under the write
+   lock), so PortAudio re-init is possible again after a dark wake; it had
+   been refused forever after the first one.
+3. **Rejected wakes keep their audio**: `audio/wake.save_rejected_wake` ->
+   `%APPDATA%\JARVIS\logs\rejected_wakes\` (newest 6 clips, 2.5 s, 16-bit),
+   named in the rejection line. Listen to the next 'Drivers.' before
+   touching the name list (the rule stands: verified by name, never by
+   threshold).
+Also from the audit: the hourly market story spent all 160 tokens on
+reasoning every hour (no sentence) -> 400. `tests/audit_tree.py` is clean
+(22 dead module-level names reported, 5 never-read defaults; left as a
+report). Zero ERROR lines since release 89.
+NOT verified live: needs his display dark; watch for the "chime reached the
+speakers" line on his next dark-screen wake.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the
