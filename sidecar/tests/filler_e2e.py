@@ -9,7 +9,7 @@ BASE = f"http://127.0.0.1:{port}"
 
 async def one(ws, text):
     t0 = time.time()
-    httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=10)
+    httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=10)
     filler = None; filler_at = None; first = None; reflex = None; mode = None; reply = ""; tools = []
     while time.time() - t0 < 120:
         e = json.loads(await asyncio.wait_for(ws.recv(), timeout=120)); k = e.get("kind")

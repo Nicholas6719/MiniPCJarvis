@@ -19,7 +19,6 @@ Run: python tests/test_background_tasks.py
 import asyncio
 import gc
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -39,16 +38,13 @@ def check(name, cond, detail=""):
 
 def main() -> int:
     print("\n-- no task is started without somebody holding it --")
-    bare = re.compile(r"^\s*(?:asyncio|_a|loop)\.create_task\(", re.M)
-    offenders = []
-    for f in ROOT.rglob("*.py"):
-        if any(part in (".venv", "dist", "tests", "__pycache__", "build") for part in f.parts):
-            continue
-        if f.name == "events.py":
-            continue            # spawn() itself is allowed to call create_task
-        for m in bare.finditer(f.read_text(encoding="utf-8", errors="replace")):
-            line = f.read_text(encoding="utf-8", errors="replace").count("\n", 0, m.start()) + 1
-            offenders.append(f"{f.relative_to(ROOT)}:{line}")
+    # The regex that lived here matched `asyncio.create_task(` at the start of
+    # a line and nothing else: not `ensure_future`, not a task made inside a
+    # lambda, not one under another alias. audit_tree reads the AST instead -
+    # an ast.Expr whose value is the call, or any such call inside a lambda -
+    # and runs in the build; this keeps the same question in the same place.
+    import audit_tree
+    offenders = audit_tree.audit(ROOT)["UNANCHORED TASKS"]
     check("every fire-and-forget task goes through events.spawn()", not offenders,
           "; ".join(offenders[:8]))
 

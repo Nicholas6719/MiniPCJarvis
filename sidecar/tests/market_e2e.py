@@ -266,14 +266,14 @@ async def main() -> int:
                 ("check my portfolio", "watchlist"),
                 ("how is the market doing", "markets")):
             got = (await c.post(f"{BASE}/brain/classify", headers=H,
-                                json={"text": text})).json().get("skill")
+                                json={"text": text, "record": False})).json().get("skill")
             check(f"{text!r} reaches {want}", got == want, got)
 
     lt = asyncio.create_task(listen())
     await asyncio.sleep(1)
     async with httpx.AsyncClient(timeout=120) as c:
         t0 = time.time()
-        await c.post(f"{BASE}/text", headers=H, json={"text": "what's apple trading at"})
+        await c.post(f"{BASE}/text", headers=H, json={"text": "what's apple trading at", "record": False})
         reply, tools_used = "", []
         while time.time() - t0 < 90:
             for e in ev:

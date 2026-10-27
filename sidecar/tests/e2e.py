@@ -62,12 +62,12 @@ async def wait_idle(timeout: float = 90) -> bool:
 async def turn(text: str, timeout: float = 90) -> float:
     """Send a text turn, wait for completion; returns wall seconds."""
     t0 = time.time()
-    r = await api("POST", "/text", {"text": text})
+    r = await api("POST", "/text", {"text": text, "record": False})
     if not r.get("ok"):
         print(f"  [warn] turn rejected ({r}) — recovering with /interrupt")
         await api("POST", "/interrupt")
         await wait_idle(15)
-        r = await api("POST", "/text", {"text": text})
+        r = await api("POST", "/text", {"text": text, "record": False})
         if not r.get("ok"):
             return -1.0
     await asyncio.sleep(1.5)
@@ -219,7 +219,7 @@ async def main() -> None:
            bool(vcalls) and len(reply) > 10, f"{secs:.1f}s — {reply[:70]}")
 
     # 11. interruption mid-speech
-    await api("POST", "/text", {"text": "Count slowly from one to thirty, saying each number."})
+    await api("POST", "/text", {"text": "Count slowly from one to thirty, saying each number.", "record": False})
     reached = await wait_state({"speaking"}, timeout=60)
     if reached == "speaking":
         await api("POST", "/interrupt")

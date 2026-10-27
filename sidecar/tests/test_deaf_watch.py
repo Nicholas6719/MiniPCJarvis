@@ -98,6 +98,108 @@ def main() -> int:
     check("WAITING for an answer is not being stuck",
           asyncio.run(left_alone(State.WAITING)) == State.WAITING)
 
+    # --- a muted microphone is said, once per episode --------------------------
+    # The endpoint keeps delivering frames - of zeros - so "capturing" and "frames
+    # arriving" both read healthy while the wake word never fires. The endpoint's
+    # mute flag is read on its own COM thread; here it is a stub, and the line
+    # is judged by where it LANDS: delivery.deliver, the normal spoken path.
+    print("\n-- a muted microphone is said once --")
+    import time as _time
+    import delivery as _dmod
+    from audio import capture_mute
+    from audio.io import mic, speaker
+
+    said = []
+    real_deliver = _dmod.delivery.deliver
+    real_present = _dmod.is_present
+    real_read = capture_mute.capture_muted
+    real_stream, real_frame, real_sound = mic._stream, mic.last_frame_at, mic.last_sound_at
+    real_silent = speaker.silent_until
+
+    async def fake_deliver(text, tier="notable", **kw):
+        said.append((text, tier, kw.get("key")))
+        return {"delivered": "spoken", "tier": tier}
+
+    reads = []
+
+    def read_from(answer):
+        def stub(device_name=None, timeout=0):
+            reads.append(device_name)
+            return answer
+        capture_mute.capture_muted = stub
+
+    async def tick(answer, *, silent_for=0.0, test_mute=False):
+        read_from(answer)
+        now = _time.time()
+        mic._stream = object()                       # "a stream is open"
+        mic.last_frame_at = now                      # frames keep arriving
+        mic.last_sound_at = now - silent_for
+        speaker.silent_until = now + 60 if test_mute else 0.0
+        orc._mute_last_read = 0.0                    # the poll is due
+        return await orc._mute_check()
+
+    _dmod.delivery.deliver = fake_deliver
+    _dmod.is_present = lambda: True
+    orc._mute_said = False
+    try:
+        spoke = asyncio.run(tick(True))
+        check("the endpoint says muted: he is told", spoke and len(said) == 1, said)
+        check("...in the persona's words",
+              said and said[0][0] == "Your microphone is muted at the system level, sir.", said)
+        check("...as an ALERT through delivery, keyed for dedup",
+              said and said[0][1] == _dmod.ALERT and said[0][2] == "mic-muted", said)
+        check("the read asked about the device we listen on", reads and reads[-1] == mic.device_name, reads)
+
+        spoke = asyncio.run(tick(True))
+        check("still muted a minute later: not said again", not spoke and len(said) == 1, said)
+
+        spoke = asyncio.run(tick(False))
+        check("unmuted: nothing said, the episode is over", not spoke and len(said) == 1, said)
+
+        spoke = asyncio.run(tick(True))
+        check("muted again: a new episode, said once more", spoke and len(said) == 2, said)
+
+        n = len(said)
+        spoke = asyncio.run(tick(True, test_mute=True))
+        check("under the test mute (/debug/silence) it never fires", not spoke and len(said) == n, said)
+        check("...and the endpoint was not even asked", len(reads) == 4, reads)
+
+        # The read cannot tell (no pycaw, a device mid re-enumeration): a minute
+        # of exact digital silence with frames flowing is the same verdict.
+        orc._mute_said = False
+        n = len(said)
+        spoke = asyncio.run(tick(None, silent_for=10))
+        check("unreadable and sound was recent: nothing", not spoke and len(said) == n, said)
+        spoke = asyncio.run(tick(None, silent_for=90))
+        check("unreadable and 90 s of zeros: said", spoke and len(said) == n + 1, said)
+        spoke = asyncio.run(tick(None, silent_for=120))
+        check("...once", not spoke and len(said) == n + 1, said)
+
+        # Nobody at the machine: the line waits for him rather than going to his phone.
+        orc._mute_said = False
+        _dmod.is_present = lambda: False
+        n = len(said)
+        spoke = asyncio.run(tick(True))
+        check("not present: held for when he is here", not spoke and len(said) == n, said)
+        _dmod.is_present = lambda: True
+        spoke = asyncio.run(tick(True))
+        check("...and said the moment he is", spoke and len(said) == n + 1, said)
+    finally:
+        _dmod.delivery.deliver = real_deliver
+        _dmod.is_present = real_present
+        capture_mute.capture_muted = real_read
+        mic._stream, mic.last_frame_at, mic.last_sound_at = real_stream, real_frame, real_sound
+        speaker.silent_until = real_silent
+        orc._mute_said = False
+
+    # the frame path keeps the clock honest: zeros do not count as sound
+    import numpy as np
+    t0 = mic.last_sound_at = 1.0
+    mic._put(np.zeros(1024, dtype=np.float32))
+    check("a block of zeros is not sound", mic.last_sound_at == t0)
+    mic._put(np.full(1024, 0.01, dtype=np.float32))
+    check("a block with signal is", mic.last_sound_at > t0)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

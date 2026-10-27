@@ -13,13 +13,13 @@ async def main():
     httpx.post(BASE + "/debug/silence", headers=H, json={"seconds": 0}, timeout=10)
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={tok}", max_size=None) as ws:
         # a fact he will read back containing his own name, twice
-        httpx.post(BASE + "/text", headers=H, json={"text": "remember that my assistant is called Jarvis and I say Jarvis a lot"}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": "remember that my assistant is called Jarvis and I say Jarvis a lot", "record": False}, timeout=15)
         t0 = time.time()
         while time.time() - t0 < 60:
             if json.loads(await asyncio.wait_for(ws.recv(), timeout=60)).get("kind") == "turn_done":
                 break
         await asyncio.sleep(1)
-        httpx.post(BASE + "/text", headers=H, json={"text": "say this sentence out loud exactly: Jarvis is my name, and Jarvis never interrupts Jarvis."}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": "say this sentence out loud exactly: Jarvis is my name, and Jarvis never interrupts Jarvis.", "record": False}, timeout=15)
         t0, interrupted, wakes, reply = time.time(), False, 0, ""
         while time.time() - t0 < 120:
             e = json.loads(await asyncio.wait_for(ws.recv(), timeout=120))

@@ -893,6 +893,60 @@ class Orchestrator:
         if brave_web.available:
             spawn(brave_web.warmup())
 
+    # A MUTED MICROPHONE IS SAID, ONCE. The endpoint keeps delivering frames -
+    # of zeros - so every watch here saw a healthy device and the wake word
+    # simply never fired. One line per mute episode, through the normal
+    # delivery path; nothing again until it has been unmuted and muted anew.
+    MUTE_LINE = "Your microphone is muted at the system level, sir."
+    MUTE_SILENT_S = 60.0          # exact digital silence this long is itself a mute
+    MUTE_POLL_S = 60.0            # how often the endpoint is asked while sound flows
+    MUTE_POLL_SILENT_S = 15.0     # ...and while nothing has come in
+    _mute_said = False
+    _mute_last_read = 0.0
+
+    async def _mute_check(self) -> bool:
+        """Ask the endpoint (audio/capture_mute.py) and speak once per episode.
+        Returns True on the tick that spoke. Never raises."""
+        now = time.time()
+        if speaker.silent_until > now:
+            return False              # the test mute: deliberate, not a fault
+        if mic._stream is None or not mic.last_frame_at:
+            return False              # nothing open to be muted; the device watch owns that
+        silent = now - (mic.last_sound_at or mic.last_frame_at) > self.MUTE_SILENT_S
+        if now - self._mute_last_read < (self.MUTE_POLL_SILENT_S if silent else self.MUTE_POLL_S):
+            return False
+        self._mute_last_read = now
+        from audio import capture_mute
+        try:
+            read = await asyncio.to_thread(capture_mute.capture_muted, mic.device_name)
+        except Exception:
+            log.debug("mute read failed", exc_info=True)
+            read = None
+        muted = read if read is not None else silent
+        if not muted:
+            if self._mute_said:
+                log.info("microphone unmuted")
+                from delivery import delivery
+                delivery._last.pop("mic-muted", None)   # the next episode is a new message
+                await bus.emit("boot", summary="microphone unmuted")
+            self._mute_said = False
+            return False
+        if self._mute_said:
+            return False
+        from delivery import delivery, is_present, ALERT
+        if not is_present():
+            return False              # it only matters when he is here to hear it
+        self._mute_said = True
+        log.warning("microphone is muted at the system level (%s)",
+                    "endpoint mute" if read else f"digital silence for {self.MUTE_SILENT_S:.0f}s")
+        await bus.emit("boot", summary="microphone muted at the system level")
+        r = await delivery.deliver(self.MUTE_LINE, ALERT, key="mic-muted",
+                                   subject="microphone muted")
+        if r.get("delivered") in ("nothing", "held") and r.get("why") != "said recently":
+            self._mute_said = False   # not said (budget, mid-turn): try again next tick
+            return False
+        return True
+
     async def _device_watch(self) -> None:
         """Hot-plug: always use the webcam mic when present, fall back to the
         onboard mic when it's gone. Checks Windows' endpoint list (independent
@@ -937,6 +991,9 @@ class Orchestrator:
             if speaker.silent_until > time.time():
                 continue
             try:
+                # Frames of zeros are frames: a system-level mute passes every
+                # check below. Asked first, said once (_mute_check).
+                await self._mute_check()
                 # self-heal: if the stream is open but no audio has arrived for
                 # 6 s (e.g. an exclusive-mode app yanked the device), reopen it
                 if (mic._stream is not None and mic.last_frame_at

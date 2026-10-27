@@ -774,6 +774,8 @@ async def debug_silence(body: dict, x_jarvis_token: str | None = Header(None)):
         raise HTTPException(403, "debug endpoints disabled")
     from audio.io import speaker
     import time as _t
+    # This clock is also what recording.py reads: while it is in the future
+    # no turn writes to his transcript or turn_stats. Only tests set it.
     speaker.silent_until = _t.time() + float(body.get("seconds", 600))
     # ...and the phone. A test render finished while he was out went to
     # Telegram (2026-09-05); a mute that covered only the speaker was not a
@@ -1437,6 +1439,18 @@ async def text_input(body: dict, x_jarvis_token: str | None = Header(None)):
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "text required")
+    # `record: false` is how a test suite says "this exchange is not his". The
+    # flag is a contextvar: the spawned turn copies it, and every transcript or
+    # turn_stats write under it is skipped (recording.py). Default: his, recorded.
+    import recording as _rec
+    _rec_token = _rec.set_recording(body.get("record", True) not in (False, 0, "false", "no"))
+    try:
+        return await _text_turn(text)
+    finally:
+        _rec.reset(_rec_token)
+
+
+async def _text_turn(text: str) -> dict:
     from tools.registry import registry as _registry
     if _registry.has_pending:
         if await orchestrator.try_voice_confirmation(text):

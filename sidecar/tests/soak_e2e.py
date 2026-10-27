@@ -172,7 +172,7 @@ async def main() -> int:
                 start_rss = rss_mb(before[0])
             try:
                 await once("post", f"{BASE}/text", headers=H,
-                           json={"text": "what time is it"})
+                           json={"text": "what time is it", "record": False})
                 now = time.time()
                 if now - last_diag > 30:       # COM: audio sessions, if enabled
                     await once("get", f"{BASE}/diagnostics", headers=H)

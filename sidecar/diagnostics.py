@@ -77,6 +77,22 @@ async def run_diagnostics() -> list[dict]:
     else:
         add("Microphone", "warn", f"{mic.device_name} — webcam mic not detected, using fallback",
             repairable=True)
+    # "capturing" says a stream is open; a muted endpoint keeps one open and
+    # sends zeros. The endpoint's own mute flag is the only check that sees it
+    # (audio/capture_mute.py, COM on its own thread).
+    if mic._stream is not None:
+        try:
+            from audio.capture_mute import capture_muted
+            muted = await asyncio.to_thread(capture_muted, mic.device_name)
+        except Exception:
+            muted = None
+        if muted:
+            add("Microphone Mute", "error", "muted at the system level — he cannot be heard",
+                repairable=False)
+        elif muted is None:
+            add("Microphone Mute", "warn", "could not read the endpoint's mute state")
+        else:
+            add("Microphone Mute", "ok", "not muted")
 
     # Wake word
     from audio.wake import wake

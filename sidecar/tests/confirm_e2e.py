@@ -39,7 +39,7 @@ async def run(ws, text, answer=None, timeout=200):
         except asyncio.TimeoutError:
             break
     t0 = time.time()
-    httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=15)
+    httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=15)
     ev = {"confirm": None, "waiting": False, "reply": "", "answered": None, "tools": []}
     while time.time() - t0 < timeout:
         try:
@@ -51,7 +51,7 @@ async def run(ws, text, answer=None, timeout=200):
             ev["confirm"] = e.get("tool")
             if answer is not None:
                 await asyncio.sleep(3.0)
-                ev["answered"] = httpx.post(BASE + "/text", headers=H, json={"text": answer}, timeout=15).json()
+                ev["answered"] = httpx.post(BASE + "/text", headers=H, json={"text": answer, "record": False}, timeout=15).json()
         elif k == "state" and e.get("state") == "waiting":
             ev["waiting"] = True
         elif k == "tool_call" and e.get("status") == "pending":

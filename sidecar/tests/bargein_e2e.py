@@ -33,7 +33,7 @@ async def main():
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={tok}", max_size=None) as ws:
         for i in range(rounds):
             await wait_idle()
-            httpx.post(BASE + "/text", headers=H, json={"text": "explain how a jet engine works in detail, at least eight sentences"}, timeout=15)
+            httpx.post(BASE + "/text", headers=H, json={"text": "explain how a jet engine works in detail, at least eight sentences", "record": False}, timeout=15)
             t0, spoke_at, injected_at, interrupted, deltas_after, total_deltas = time.time(), None, None, None, 0, 0
             while time.time() - t0 < 150:
                 e = json.loads(await asyncio.wait_for(ws.recv(), timeout=150))

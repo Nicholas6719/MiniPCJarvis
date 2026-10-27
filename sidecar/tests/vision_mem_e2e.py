@@ -17,7 +17,7 @@ def sampler():
 
 async def turn(ws, text):
     t0 = time.time()
-    httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=10)
+    httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=10)
     reply = ""; tools = []
     while time.time() - t0 < 180:
         e = json.loads(await asyncio.wait_for(ws.recv(), timeout=180)); k = e.get("kind")

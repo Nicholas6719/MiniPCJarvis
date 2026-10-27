@@ -16,6 +16,9 @@ log = logging.getLogger("jarvis.audio")
 
 MIC_RATE = 16000
 MIC_BLOCK = 1024  # 64 ms
+# Below this peak a block is digital silence: a muted endpoint sends exact
+# zeros, a live room never sits under -80 dBFS for a minute.
+DIGITAL_SILENCE = 1e-4
 
 
 def refresh_devices() -> bool:
@@ -130,6 +133,8 @@ class Microphone:
         self.device_name: str = "not started"
         self.using_preferred: bool = False
         self.last_frame_at: float = 0.0
+        # ...and the last frame that was not digital silence (see _put).
+        self.last_sound_at: float = 0.0
         # True only when the last start() could not open ANY device. The device
         # watch retries on this, not on "no stream open": a stream is also
         # closed, deliberately and briefly, while a debug utterance is fed.
@@ -195,11 +200,19 @@ class Microphone:
             log.warning("could not open %s (%s) — falling back to system default", name, e)
             self._stream = _open(None)
             self.device_name, self.using_preferred = "system default", False
+        import time as _t
+        self.last_sound_at = _t.time()   # a fresh stream gets its minute before it is called silent
         log.info("microphone started")
 
     def _put(self, block: np.ndarray) -> None:
         import time as _t
         self.last_frame_at = _t.time()
+        # A muted endpoint keeps delivering frames - of exact zeros. Frames
+        # "arriving" is what every watch judged the microphone by, so a mute
+        # looked like a dead wake word. One max() per 64 ms block is the
+        # cheapest honest answer to "is anything actually coming in".
+        if block.size and float(abs(block).max()) > DIGITAL_SILENCE:
+            self.last_sound_at = self.last_frame_at
         for q in list(self._subs):
             try:
                 q.put_nowait(block)

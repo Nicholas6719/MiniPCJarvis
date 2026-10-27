@@ -64,7 +64,7 @@ async def main():
 
     async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={tok}", max_size=None) as ws:
         # ---------- in-app navigation proof ----------
-        httpx.post(BASE + "/text", headers=H, json={"text": "open youtube"}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": "open youtube", "record": False}, timeout=15)
         nav, t0 = None, time.time()
         while time.time() - t0 < 90:
             e = json.loads(await asyncio.wait_for(ws.recv(), timeout=90))
@@ -79,7 +79,7 @@ async def main():
         rec("...and not in JARVIS's hidden browser", nav is None, nav)
 
         # ---------- barge-in interrupt (name-only) ----------
-        httpx.post(BASE + "/text", headers=H, json={"text": "explain how a jet engine works in detail"}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": "explain how a jet engine works in detail", "record": False}, timeout=15)
         t0, spoke_at, interrupted, deltas_after = time.time(), None, False, 0
         while time.time() - t0 < 120:
             e = json.loads(await asyncio.wait_for(ws.recv(), timeout=120))
@@ -100,7 +100,7 @@ async def main():
 
         # ---------- close an app through the app (Store app, safe) ----------
         await wait_idle()
-        r = httpx.post(BASE + "/text", headers=H, json={"text": "open calculator"}, timeout=15).json()
+        r = httpx.post(BASE + "/text", headers=H, json={"text": "open calculator", "record": False}, timeout=15).json()
         rec("app accepts a new turn right after an interrupt", r.get("ok"), r)
         t0 = time.time()
         while time.time() - t0 < 60:
@@ -109,7 +109,7 @@ async def main():
         await asyncio.sleep(6)
         running = [p.pid for p in psutil.process_iter(["name"]) if "calc" in (p.info["name"] or "").lower()]
         await wait_idle()
-        httpx.post(BASE + "/text", headers=H, json={"text": "close calculator"}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": "close calculator", "record": False}, timeout=15)
         reply, t0 = "", time.time()
         while time.time() - t0 < 60:
             e = json.loads(await asyncio.wait_for(ws.recv(), timeout=60))

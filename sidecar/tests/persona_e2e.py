@@ -24,7 +24,7 @@ TURNS = [
 async def one(ws, text):
     t0 = time.time()
     for _ in range(60):
-        r = httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=10).json()
+        r = httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=10).json()
         if r.get("ok"):
             break
         await asyncio.sleep(1)

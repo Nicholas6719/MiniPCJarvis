@@ -59,7 +59,7 @@ async def turn(c, ev, text) -> dict:
     """Say one thing; return what he did about it."""
     n0 = len(ev)
     t0 = time.time()
-    await c.post(f"{BASE}/text", headers=H, json={"text": text})
+    await c.post(f"{BASE}/text", headers=H, json={"text": text, "record": False})
     got = {"reply": "", "tools": [], "first": None, "asked": False}
     done = False
     while time.time() - t0 < 90 and not done:

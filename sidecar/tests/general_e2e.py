@@ -19,7 +19,7 @@ CASES = [
 
 async def one(ws, text):
     t0 = time.time()
-    httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=10)
+    httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=10)
     mode = None; first = None; reply = ""; tools = []
     while time.time() - t0 < 120:
         e = json.loads(await asyncio.wait_for(ws.recv(), timeout=120)); k = e.get("kind")

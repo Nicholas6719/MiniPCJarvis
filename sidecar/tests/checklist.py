@@ -43,7 +43,7 @@ class Turn:
                 pass
             await asyncio.sleep(1)
         t0 = time.time()
-        httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=15)
         ev = {"reflex": None, "mode": None, "tools": [], "reply": "", "filler": None,
               "first": None, "files": None, "media": None, "browser": None, "web": None,
               "learned": [], "confirm": None}

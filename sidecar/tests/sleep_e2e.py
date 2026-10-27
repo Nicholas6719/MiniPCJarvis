@@ -87,11 +87,11 @@ async def main() -> int:
     # follows is what made this the one suite that failed in a batch and passed
     # alone.
     if state() == "sleeping":
-        httpx.post(BASE + "/text", headers=H, json={"text": "wake up"}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": "wake up", "record": False}, timeout=15)
         await wait_state("idle", 45)
         await asyncio.sleep(3)
     was = httpx.get(BASE + "/health", headers=H, timeout=10).json().get("state")
-    r = httpx.post(BASE + "/text", headers=H, json={"text": "that's all for now"}, timeout=15)
+    r = httpx.post(BASE + "/text", headers=H, json={"text": "that's all for now", "record": False}, timeout=15)
     ok = await wait_state("sleeping", 60)
     now = httpx.get(BASE + "/health", headers=H, timeout=10).json().get("state")
     check("'that's all for now' puts him to sleep", ok,
@@ -121,9 +121,9 @@ async def main() -> int:
     check(f"and he answers the question ({said.strip()[:40]!r})", bool(said.strip()))
 
     # --- typing to him while asleep must work too, not answer "busy" ---
-    httpx.post(BASE + "/text", headers=H, json={"text": "go to sleep"}, timeout=15)
+    httpx.post(BASE + "/text", headers=H, json={"text": "go to sleep", "record": False}, timeout=15)
     await wait_state("sleeping", 60)
-    r = httpx.post(BASE + "/text", headers=H, json={"text": "what time is it"}, timeout=15).json()
+    r = httpx.post(BASE + "/text", headers=H, json={"text": "what time is it", "record": False}, timeout=15).json()
     check("typing while asleep is accepted, not refused as busy", r.get("ok") is True)
     await wait_state("idle", 90)
 
@@ -134,7 +134,7 @@ async def main() -> int:
                 json={"presence": {"auto_sleep": True, "idle_sleep_minutes": 0.15}},
                 timeout=10)
     try:
-        httpx.post(BASE + "/text", headers=H, json={"text": "what time is it"}, timeout=15)
+        httpx.post(BASE + "/text", headers=H, json={"text": "what time is it", "record": False}, timeout=15)
         await wait_state("idle", 90)
         check("he goes to sleep by himself once he is not needed",
               await wait_state("sleeping", 60))

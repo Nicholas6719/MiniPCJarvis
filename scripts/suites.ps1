@@ -57,7 +57,7 @@ while ((Get-Date) -lt $deadline) {
 # and make it answer once, so the model and caches are warm before anything is judged
 try {
     Invoke-RestMethod "http://127.0.0.1:$port/text" -Method Post -Headers @{'X-Jarvis-Token'=$tok} `
-        -ContentType 'application/json' -Body (@{ text = "what time is it" } | ConvertTo-Json) -TimeoutSec 120 | Out-Null
+        -ContentType 'application/json' -Body (@{ text = "what time is it"; record = $false } | ConvertTo-Json) -TimeoutSec 120 | Out-Null
     Start-Sleep 8
 } catch { }
 

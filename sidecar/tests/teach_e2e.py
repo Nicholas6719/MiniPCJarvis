@@ -10,7 +10,7 @@ BASE = f"http://127.0.0.1:{port}"
 
 async def turn(ws, text):
     t0 = time.time()
-    httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=10)
+    httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=10)
     reflex = None; mode = None; reply = ""; tools = []; learned = []
     while time.time() - t0 < 120:
         e = json.loads(await asyncio.wait_for(ws.recv(), timeout=120)); k = e.get("kind")

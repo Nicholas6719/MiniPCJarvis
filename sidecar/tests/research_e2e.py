@@ -44,7 +44,7 @@ SHRUG = re.compile(
 
 async def run(ws, text):
     t0 = time.time()
-    r = httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=20).json()
+    r = httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=20).json()
     if not r.get("ok"):
         return {"text": text, "error": f"refused: {r}", "reply": "", "tools": [],
                 "errors": [], "secs": 0, "first": None}

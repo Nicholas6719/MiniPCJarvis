@@ -8,6 +8,7 @@ import time
 import numpy as np
 
 from config import open_db
+from recording import recording as _recording
 
 log = logging.getLogger("jarvis.memory")
 
@@ -115,6 +116,8 @@ class MemoryStore:
         sentence 'takes 4.5 s' with its first word at 160 ms. first_ms is the
         time to that first word, the number that is actually felt; the token
         counts say what the model spent (2026-09-18)."""
+        if not _recording():
+            return             # a test's turn: his numbers stay his (recording.py)
         try:
             self._turn_stats_columns()
             self.db.execute("INSERT INTO turn_stats (ts, path, skill, latency_ms, first_ms, "
@@ -306,6 +309,8 @@ class MemoryStore:
         for hours. Writing the history is bookkeeping. Losing it costs him a
         transcript; letting it raise costs him the assistant.
         """
+        if not _recording():
+            return             # a test's turn never enters his history (recording.py)
         if role == "assistant":
             # The model still slips markdown out now and then ("*Moby Dick*");
             # the ear never heard it and the screen should not read it either.

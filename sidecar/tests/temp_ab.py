@@ -51,7 +51,7 @@ CASES = [
 
 
 async def one(ws, text):
-    httpx.post(BASE + "/text", headers=H, json={"text": text}, timeout=15)
+    httpx.post(BASE + "/text", headers=H, json={"text": text, "record": False}, timeout=15)
     r = ""
     t0 = time.time()
     while time.time() - t0 < 150:

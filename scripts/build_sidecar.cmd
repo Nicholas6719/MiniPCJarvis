@@ -20,6 +20,7 @@ REM those have escaped now, and one of them woke him at midnight. The build is t
 REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\check_stray_tasks.py || (echo STRAY SCHEDULED TASK & exit /b 1)
 .venv\Scripts\python.exe tests\check_names.py || (echo NAME CHECK FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\audit_tree.py || (echo TREE AUDIT FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\seed_collisions.py || (echo SEED CLASH FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_canon_erasure.py || (echo CANON ERASURE FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_evolution_wiring.py || (echo EVOLUTION WIRING FAILED & exit /b 1)
@@ -94,6 +95,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_perfect2.py || (echo PERFECT2 TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_perfect3.py || (echo PERFECT3 TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_faster.py || (echo FASTER TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_recording.py || (echo RECORDING TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_turn_model.py || (echo TURN MODEL TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_awareness.py || (echo AWARENESS TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_site_find.py || (echo SITE FIND TEST FAILED & exit /b 1)
