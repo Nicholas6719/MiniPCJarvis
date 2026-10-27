@@ -200,7 +200,11 @@ def _is_new_file(path: str, since: float) -> bool:
         return False
     # Written OR created since the watch was set: on Windows st_ctime is the
     # creation time, so a year-old file copied in still counts as appearing.
-    return os.path.isfile(path) and max(st.st_mtime, st.st_ctime) >= float(since)
+    # One second of grace: NTFS stamps files from the coarse system tick,
+    # time.time() reads the precise clock, and a file written right after
+    # the watch was set stamped up to 16 ms EARLIER than the watch (the gate
+    # caught it on 2026-10-27). A file an hour old is still an hour old.
+    return os.path.isfile(path) and max(st.st_mtime, st.st_ctime) >= float(since) - 1.0
 
 
 def check(arrived: list[str] | None = None, *, battery=None,
