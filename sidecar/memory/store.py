@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import time
+from collections import deque
 from datetime import date
 from pathlib import Path
 
@@ -97,6 +98,9 @@ class MemoryStore:
     def __init__(self) -> None:
         self.db = open_db()
         self.db.executescript(_SCHEMA)
+        # unrecorded (a test's) turns, readable but never written; see log_turn
+        self._scratch: deque = deque(maxlen=200)
+        self._scratch_id = 10 ** 9
         # migration: pinned flag
         cols = [r[1] for r in self.db.execute("PRAGMA table_info(memories)")]
         if "pinned" not in cols:
@@ -728,7 +732,15 @@ class MemoryStore:
         transcript; letting it raise costs him the assistant.
         """
         if not _recording():
-            return             # a test's turn never enters his history (recording.py)
+            # A test's turn never enters his history (recording.py). It still
+            # needs to be READABLE: the facts suite finds its own answer by
+            # reading the transcript back. So it goes into a scratch ring in
+            # memory, with ids that cannot collide with the table's, and
+            # vanishes with the process.
+            self._scratch_id += 1
+            self._scratch.append({"id": self._scratch_id, "ts": time.time(),
+                                  "role": role, "content": content})
+            return
         if role == "assistant":
             # The model still slips markdown out now and then ("*Moby Dick*");
             # the ear never heard it and the screen should not read it either.
@@ -776,13 +788,16 @@ class MemoryStore:
             log.info("pruned old rows: %s", out)
         return out
 
-    def recent_transcript(self, n: int = 12) -> list[dict]:
+    def recent_transcript(self, n: int = 12, scratch: bool = False) -> list[dict]:
         # id and ts ride along: anything that needs to know WHICH turn a row
         # belongs to cannot use content alone (the same question recurs), and
         # counting rows breaks silently once the window is full.
         # Same reasoning as log_turn: a damaged transcript must cost him his
         # history, not his ability to hold a conversation. He would rather be
         # answered without context than not answered at all.
+        if scratch:
+            # the unrecorded turns (a test's), newest last, same shape
+            return list(self._scratch)[-n:]
         try:
             rows = self.db.execute(
                 "SELECT id, ts, role, content FROM transcript ORDER BY id DESC LIMIT ?", (n,)

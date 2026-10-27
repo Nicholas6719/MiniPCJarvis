@@ -27,7 +27,9 @@ def check(name, cond, detail=""):
 
 
 def _rows():
-    return req("GET", "/transcript?limit=60")["transcript"]
+    # This suite's turns are not his (record:false), so they never reach the
+    # transcript table; the scratch ring holds them with the same row shape.
+    return req("GET", "/transcript?limit=60&scratch=1")["transcript"]
 
 
 _answer = ""
@@ -47,7 +49,7 @@ def say(text):
             break
         time.sleep(2)
     max_id_before = max([r["id"] for r in _rows()] or [0])
-    req("POST", "/text", {"text": text})
+    req("POST", "/text", {"text": text, "record": False})
     t0 = time.time()
     for _ in range(360):
         time.sleep(0.5)      # fine-grained: a fact turn is ~0.3 s + speech

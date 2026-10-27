@@ -1268,10 +1268,13 @@ async def debug_inject_audio(body: dict, x_jarvis_token: str | None = Header(Non
 
 
 @app.get("/transcript")
-async def transcript(limit: int = 30, x_jarvis_token: str | None = Header(None)):
+async def transcript(limit: int = 30, scratch: int = 0,
+                     x_jarvis_token: str | None = Header(None)):
     _auth(x_jarvis_token)
-    # the History pane asks for 200; cap so a bad param can't drag the whole DB out
-    return {"transcript": memory.recent_transcript(max(1, min(500, limit)))}
+    # the History pane asks for 200; cap so a bad param can't drag the whole DB out.
+    # scratch=1 reads the unrecorded turns instead (a suite reading its own
+    # answer back under record:false or the test mute); never his history.
+    return {"transcript": memory.recent_transcript(max(1, min(500, limit)), scratch=bool(scratch))}
 
 
 @app.get("/holo/geometry")

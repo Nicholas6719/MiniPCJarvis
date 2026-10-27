@@ -80,6 +80,13 @@ def _checks(memory, counts, one_turn) -> int:
     after = counts()
     check("transcript count unchanged", after == before, (before, after))
     check("...and the flag is back on afterwards", recording.recording() is True)
+    # ...but the suite that asked can still read its own answer back
+    scratch = memory.recent_transcript(10, scratch=True)
+    check("the unrecorded turn is readable from the scratch ring",
+          len(scratch) >= 2 and scratch[-1]["content"] == "noted, a test's"
+          and scratch[-1]["id"] > 10 ** 9 and scratch[-2]["role"] == "user", scratch[-2:])
+    check("...and the real transcript does not hold it",
+          not any(r["content"] == "noted, a test's" for r in memory.recent_transcript(50)))
 
     print("\n-- the flag crosses into the spawned turn, the way /text uses it --")
     import events
