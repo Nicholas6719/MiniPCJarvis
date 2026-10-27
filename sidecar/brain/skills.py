@@ -697,15 +697,46 @@ _WATCH_METRIC = [("cpu", r"\bcpu\b|\bprocessor\b"), ("ram", r"\bram\b|\bmemory\b
 _WATCH_HEAD = re.compile(r"\b(?:tell me|let me know|warn me|alert me|notify me|ping me|say something)\b")
 
 
+# EVENTS, not thresholds. "Tell me when the download finishes" has no number in
+# it and nothing to compare: it is a one-shot watch (standing.py), and each
+# extractor below REFUSES anything that is not its kind so the router's
+# refusal chain hands the sentence to the next skill rather than the model.
+_WATCH_ANY = re.compile(r"\bwatch\b|\bkeep an eye on\b|\bwatch(?:ing)? for\b")
+_FINISH = re.compile(r"\b(?:finish(?:es|ed)?|is (?:finished|done|complete|over|through)|(?:has|have) finished|"
+                     r"done|completes?|completed|ends?|ended|wraps up|exits?|closes|stops running|stops|quits)\b")
+_DL_WORDS = re.compile(r"\bdownload(?:s|ing|ed)?\b")
+_FILE_WORDS = re.compile(r"\b(?:file|appears|shows up|lands|arrives|turns up|comes in)\b")
+_CHARGE_WORDS = re.compile(r"\b(?:battery|charged|charge|charging|hits|reaches|percent)\b")
+_THRESHOLD = re.compile(r"\b(?:above|over|exceeds|more than|higher than|below|under|drops below|less than|lower than|falls under|drops|falls|passes)\b\s*(\d{1,4})")
+_BELOW = re.compile(r"\b(?:below|under|drops|falls|less than|lower than|dies|dying|low)\b")
+_CANCEL = re.compile(r"\b(?:stop|cancel|never mind|nevermind|quit|forget)\b")
+
+
+def _is_event_watch(t: str) -> bool:
+    if not (_WATCH_HEAD.search(t) or _WATCH_ANY.search(t)):
+        return False
+    if _THRESHOLD.search(t) or _CANCEL.search(t):
+        return False
+    if re.match(r"^(?:download|get|grab|fetch|save|install|run|start|open)\b", t):
+        return False                # an ORDER that ends "...and tell me when it's done"
+    return bool(_FINISH.search(t) or _DL_WORDS.search(t) or _FILE_WORDS.search(t)
+                or re.search(r"\b(?:charged|fully charged|full)\b", t)
+                or re.search(r"\bbattery\b.*\b(?:hits|reaches|gets to|is at)\b\s*\d", t))
+
+
 def slots_watch(t: str) -> dict | None:
     if not _WATCH_HEAD.search(t) and not re.search(r"\bwatch\b|\bkeep an eye on\b", t):
         return None
+    if _is_event_watch(t):
+        return None                 # a finish, a download, a file, a charge: not mine
     metric = next((m for m, pat in _WATCH_METRIC if re.search(pat, t)), None)
     if not metric:
         return None
-    m = re.search(r"\b(above|over|exceeds|more than|higher than|hits|reaches|below|under|drops below|less than|lower than|falls under)\b\s*(\d{1,4})", t)
+    m = re.search(r"\b(above|over|exceeds|more than|higher than|hits|reaches|passes|below|under|drops below|less than|lower than|falls under)\b\s*(\d{1,4})", t)
     if not m:
         return None
+    if metric == "battery" and m.group(1) in ("hits", "reaches"):
+        return None                 # "when the battery hits 80" is a charge event, once
     op = "<" if m.group(1) in ("below", "under", "drops below", "less than", "lower than", "falls under") else ">"
     out = {"metric": metric, "op": op, "value": int(m.group(2))}
     h = re.search(r"\bfor\s+(\d{1,3})\s*(?:minutes?|mins?)\b", t)
@@ -718,12 +749,153 @@ def say_watch(slots: dict, res: dict) -> str:
     return "Okay. " + str(res.get("watching", "I'll keep an eye on it.")) if "error" not in res else "I couldn't set that up."
 
 
+_IT_WORDS = re.compile(r"^(?:it|it's|its|that|that's|this|the|my|that one|this one|the thing|everything|stuff|all)$")
+
+
+def _event_target(t: str, stop: re.Pattern) -> str:
+    """The thing between 'when/once/after/if' and the verb that says it is
+    over: 'tell me when handbrake finishes' -> 'handbrake'; 'the build is
+    done' -> 'build'. Empty when it is only 'it'."""
+    m = re.search(r"\b(?:when|once|after|if|whenever)\s+(.+?)\s*(?=" + stop.pattern + r")", t)
+    if not m:
+        m = re.search(r"\b(?:on|for)\s+(.+?)\s*(?=" + stop.pattern + r"|$)", t)
+    if not m:
+        return ""
+    name = m.group(1).strip()
+    name = re.sub(r"^(?:the|my|that|this|our|a|an)\s+", "", name)
+    name = re.sub(r"\s+(?:is|has|have|gets|get|are|will be|finally|actually)\s*$", "", name).strip()
+    name = re.sub(r"\b(?:program|process|app|application|job|task|thing)\s*$", "", name).strip()
+    if not name or _IT_WORDS.match(name):
+        return ""
+    return name[:40]
+
+
+def slots_watch_process(t: str) -> dict | None:
+    if not _is_event_watch(t) or _DL_WORDS.search(t) or _CHARGE_WORDS.search(t):
+        return None
+    if _FILE_WORDS.search(t) and not _FINISH.search(t):
+        return None
+    if not _FINISH.search(t):
+        return None
+    name = _event_target(t, _FINISH)
+    if not name:
+        return None                 # "tell me when it's done" with no 'it': the model may ask
+    return {"name": name}
+
+
+def say_watch_process(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return str(res["error"]) if res["error"].endswith("sir.") else "I couldn't set that up, sir."
+    return str(res.get("watching") or "I'll keep an eye on it, sir.")
+
+
+def slots_watch_download(t: str) -> dict | None:
+    if not _is_event_watch(t) or not _DL_WORDS.search(t):
+        return None
+    if _FOLDER_WORD.search(t) and _FILE_WORDS.search(t):
+        return None                 # "a file appears IN downloads" is a folder watch
+    name = ""
+    m = re.search(r"\bwhen\s+(?:the\s+|my\s+)?(.+?)\s+(?:finishes|is done|has finished|completes|is finished|lands|arrives|comes in)\s+downloading\b", t)
+    if m:
+        name = m.group(1).strip()
+    else:
+        m = re.search(r"\bdownload(?:ing)?\s+of\s+(?:the\s+)?([a-z0-9 ._-]{2,40}?)\s+(?:finishes|is done|has finished|completes|is finished|lands|arrives)", t)
+        if m:
+            name = m.group(1).strip()
+    if _IT_WORDS.match(name) or name in ("download", "downloads", "my download", "the download", "file", "that file", "the file"):
+        name = ""
+    return {"name": name}
+
+
+def say_watch_download(slots: dict, res: dict) -> str:
+    return str(res.get("watching") or "I'll keep an eye on the downloads, sir.") if "error" not in res else "I couldn't set that up, sir."
+
+
+_FOLDER_WORD = re.compile(r"\b(?:in|into|on|to)\s+(?:my\s+|the\s+)?(downloads|download folder|documents|desktop|pictures|photos)\b")
+
+
+def slots_watch_file(t: str) -> dict | None:
+    if not _is_event_watch(t) or _CHARGE_WORDS.search(t):
+        return None
+    if not _FILE_WORDS.search(t):
+        return None
+    f = _FOLDER_WORD.search(t)
+    if not f:
+        return None
+    if _DL_WORDS.search(t) and not f.group(1).startswith("download"):
+        return None                 # "...finishes downloading" is the download watch's
+    folder = f.group(1).split()[0]
+    m = re.search(r"\b(?:when|once|if|whenever)\s+(?:a\s+|an\s+|the\s+|my\s+)?(.+?)\s+(?:appears|shows up|lands|arrives|turns up|comes in|is in|gets)\b", t)
+    pattern = (m.group(1).strip() if m else "")
+    pattern = re.sub(r"\b(?:file|something|anything|new file|a file)\b", "", pattern).strip(" .,")
+    pattern = re.sub(r"\s+(?:called|named)\s*$", "", pattern).strip()
+    named = re.search(r"\b(?:called|named)\s+([a-z0-9._ -]{2,40}?)\s+(?:appears|shows up|lands|arrives|turns up)", t)
+    if named:
+        pattern = named.group(1).strip()
+    if _IT_WORDS.match(pattern) or pattern in ("new", "a new"):
+        pattern = ""                # "a file", "something": any new file there
+    return {"pattern": pattern[:60], "folder": folder}
+
+
+def say_watch_file(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return str(res["error"]) if str(res["error"]).endswith(".") else "I couldn't set that up, sir."
+    return str(res.get("watching") or "I'll keep an eye on that folder, sir.")
+
+
+def slots_watch_battery(t: str) -> dict | None:
+    if not (_WATCH_HEAD.search(t) or _WATCH_ANY.search(t)):
+        return None
+    if _THRESHOLD.search(t) or _BELOW.search(t):
+        return None                 # falling levels are the metric rule's
+    if not re.search(r"\b(?:battery|charged|charge|charging)\b", t):
+        return None
+    if re.search(r"\bphone\b", t):
+        return None                 # his phone's battery is the phone's business (awareness)
+    m = re.search(r"\b(\d{1,3})\s*(?:%|percent)?\b", t)
+    if m and re.search(r"\b(?:hits|reaches|gets to|is at|at|to)\s+" + m.group(1), t):
+        return {"percent": max(1, min(100, int(m.group(1))))}
+    if re.search(r"\b(?:charged|full|fully|done charging|finished charging|topped up)\b", t):
+        return {"percent": 100}
+    return None
+
+
+def say_watch_battery(slots: dict, res: dict) -> str:
+    if "error" in res:
+        return str(res["error"]) if str(res["error"]).endswith("sir.") else "I couldn't set that up, sir."
+    return str(res.get("watching") or "I'll keep an eye on the battery, sir.")
+
+
+def slots_watch_list(t: str) -> dict | None:
+    if not re.search(r"\b(?:watching|waiting|keeping an eye|keep an eye|monitoring|keeping track|watches|watch list|watching for|looking out for)\b", t):
+        return None
+    if re.search(r"\b(?:tell me|let me know|warn me|alert me|notify me|ping me)\s+(?:when|if|once)\b", t):
+        return None                 # setting one, not asking about them
+    if _CANCEL.search(t):
+        return None                 # dropping one is unwatch's
+    return {}
+
+
+def say_watch_list(_s: dict, res: dict) -> str:
+    return str(res.get("spoken") or "I'm not watching for anything at the moment, sir.")
+
+
 def slots_unwatch(t: str) -> dict | None:
-    if not re.search(r"\b(?:stop|quit|cancel|forget about)\b.*\b(?:watching|monitoring|alert|alerts|warning|telling me|rule|rules)\b", t) and \
-            not re.search(r"\bstop (?:watching|monitoring)\b", t):
+    if not re.search(r"\b(?:stop|quit|cancel|forget about)\b.*\b(?:watching|monitoring|alert|alerts|warning|telling me|rule|rules|watch|waiting)\b", t) and \
+            not re.search(r"\bstop (?:watching|monitoring|waiting)\b", t) and \
+            not re.search(r"\b(?:never mind|forget)\b.*\b(?:download|build|battery|watch)\b", t):
         return None
     metric = next((m for m, pat in _WATCH_METRIC if re.search(pat, t)), None)
-    return {"metric": metric}
+    out: dict = {"metric": metric}
+    if not metric:
+        # an EVENT watch, named: "stop watching for the download", "cancel
+        # the handbrake watch". Nothing named means everything.
+        m = re.search(r"\b(?:watching|waiting|monitoring|about|cancel|forget about)\s+(?:for\s+|on\s+)?(?:the\s+|my\s+|that\s+)?([a-z0-9 ._-]{2,40}?)\s*(?:watch|alert|rule|finishing|finish|one)?\s*$", t)
+        name = (m.group(1).strip() if m else "")
+        name = re.sub(r"\b(?:everything|all of it|all of them|them all|all)\b", "", name).strip()
+        if name and not _IT_WORDS.match(name):
+            out["watch"] = name
+    return out
 
 
 def say_unwatch(slots: dict, res: dict) -> str:
@@ -2445,13 +2617,32 @@ def slots_stats(t: str) -> dict:
     "How much disk space is left" was answered "CPU is at 18 percent, memory
     at 81 percent, with about 1.7 terabytes free" (2026-09-06)."""
     s = (t or "").lower()
+    out: dict = {}
     if re.search(r"\b(?:disk|drive|storage|space|room)\b", s):
-        return {"focus": "disk"}
-    if re.search(r"\b(?:memory|ram)\b", s):
-        return {"focus": "memory"}
-    if re.search(r"\b(?:cpu|processor|load)\b", s):
-        return {"focus": "cpu"}
-    return {}
+        out["focus"] = "disk"
+    elif re.search(r"\b(?:memory|ram)\b", s):
+        out["focus"] = "memory"
+    elif re.search(r"\b(?:cpu|processor|load)\b", s):
+        out["focus"] = "cpu"
+    elif re.search(r"\bbattery\b", s):
+        out["focus"] = "battery"
+    # A PERIOD makes it a trend, not a reading: "this week", "today", "has
+    # memory been climbing". Answered from the readings history (store.py),
+    # which also says honestly when there is nothing earlier to compare.
+    period = _stats_period(s)
+    if period:
+        out["period"] = period
+    return out
+
+
+def _stats_period(s: str) -> float | None:
+    if re.search(r"\b(?:this week|the week|past week|last week|over the week|all week|weekly|(?:last|past) (?:7|seven) days)\b", s):
+        return 7.0
+    if re.search(r"\b(?:today|this morning|this afternoon|all day|since this morning|the last (?:24|twenty.four) hours)\b", s):
+        return 1.0
+    if re.search(r"\b(?:climbing|rising|creeping|going up|trending|trend|lately|recently|been (?:high|low|busy|tight|getting)|getting worse|over time|these days|been like|compared)\b", s):
+        return 7.0
+    return None
 
 
 def say_stats(slots: dict, res: dict) -> str:
@@ -2459,6 +2650,21 @@ def say_stats(slots: dict, res: dict) -> str:
     space = f"{free / 1000:.1f} terabytes" if free >= 1000 else f"{round(free)} gigabytes"
     cpu = float(res.get("cpu_percent", 0) or 0)
     focus = (slots or {}).get("focus")
+    period = (slots or {}).get("period")
+    if period:
+        try:
+            from memory.store import memory as _mem
+            field = {"disk": "disk_free_gb", "memory": "ram_pct", "cpu": "cpu",
+                     "battery": "battery"}.get(focus or "memory", "ram_pct")
+            return _mem.readings_trend(field, days=float(period))
+        except Exception:
+            pass        # fall through to the live reading
+    if focus == "battery":
+        b = res.get("battery") or {}
+        if isinstance(b, dict) and b.get("percent") is not None:
+            return (f"The battery is at {round(float(b['percent']))} percent"
+                    + (", plugged in." if b.get("plugged") else ", on battery."))
+        return "There's no battery on this machine, sir."
     if focus == "disk":
         return f"About {space} free on the C drive."
     if focus == "memory":
@@ -2470,6 +2676,38 @@ def say_stats(slots: dict, res: dict) -> str:
     load = "CPU is idle" if cpu < 1 else f"CPU is at {round(cpu)} percent"
     return (f"{load}, memory at "
             f"{round(res.get('ram_percent', 0))} percent, with about {space} free.")
+
+
+def slots_been_doing(t: str) -> dict | None:
+    """'What have I been doing today', 'where has my day gone': the apps in
+    front, by the minute, from the readings history. Never 'what did I SAY'
+    or 'what did YOU do' — those are the transcript's and the ledger's."""
+    if re.search(r"\b(?:you|jarvis)\s+(?:been doing|done|do)\b|\bwhat did you\b|\bwhat have you\b", t):
+        return None
+    if not re.search(r"\b(?:i|i've|ive|my)\b", t):
+        return None
+    if re.search(r"\b(?:say|said|tell|told|ask|asked|miss|missed)\b", t):
+        return None
+    if not re.search(r"\b(?:doing|done|working on|up to|my day|day gone|day go|spent|been in|been on)\b", t):
+        return None                 # "how much ram am i using" has an i in it too
+    hours = 8.0
+    if re.search(r"\b(?:this morning)\b", t):
+        hours = 5.0
+    elif re.search(r"\b(?:this afternoon|last few hours|past few hours)\b", t):
+        hours = 4.0
+    elif re.search(r"\b(?:last hour|past hour|this hour)\b", t):
+        hours = 1.0
+    elif re.search(r"\b(?:today|all day|my day|the day|so far)\b", t):
+        hours = 16.0
+    return {"hours": hours}
+
+
+def say_been_doing(slots: dict, _r: dict) -> str:
+    try:
+        from memory.store import memory as _mem
+        return _mem.app_minutes(hours=float((slots or {}).get("hours") or 8.0))
+    except Exception:
+        return "I haven't been keeping track, sir."
 
 
 def say_windows(_: dict, res: dict) -> str:
@@ -2498,6 +2736,8 @@ class Skill:
 
 
 _LABELS = {"ui": "change the view", "read_site": "read the site", "weather": "check the weather", "watch": "watch the system", "unwatch": "stop watching", "switch": "switch windows", "folder": "open the folder", "find_file": "find the file", "volume_set": "set the volume", "screenshot": "take a screenshot", "open_app": "open the app",
+           "watch_process": "tell you when it finishes", "watch_download": "watch the download", "watch_file": "watch for the file",
+           "watch_battery": "watch the battery", "watch_list": "list the watches", "been_doing": "say what you've been doing",
            "close_app": "close the app", "open_site": "open the site", "images": "find pictures",
            "search": "search the web", "screen": "look at the screen", "reminder": "set a reminder",
            "remember": "remember it", "stats": "check the system", "windows": "list your windows",
@@ -2772,20 +3012,26 @@ from brain import protocols as _protocols   # noqa: E402  (pure text, no cycle)
 
 def _say_briefing() -> str:
     """Since he last spoke to JARVIS after a long gap — or the last twelve
-    hours — from the delivery ledger."""
-    import time as _t
+    hours — from the delivery ledger. Told ONCE: what this reads out is marked
+    consumed, so asking again a minute later gets "nothing new" rather than
+    the same list, and what the greeting or the presence watcher already read
+    back is not read a second time here."""
     from brain import persona
     try:
         from delivery import delivery
-        from brain.router import brain          # noqa: F401  (import order guard)
-        import orchestrator as _o
-        orch = getattr(_o, "orchestrator", None)
-        since = getattr(orch, "_away_since", 0.0) or (_t.time() - 12 * 3600)
-        entries = [e for e in delivery.ledger if e.get("ts", 0) >= since]
+        fresh, told = delivery.catch_up()
     except Exception:
-        entries = []
-    line = persona.briefing(entries)
-    return line or "Nothing while you were away, sir. All quiet."
+        fresh, told = [], []
+    line = persona.briefing(fresh)
+    if line:
+        try:
+            delivery.consume(fresh)
+        except Exception:
+            pass
+        return line
+    if persona.briefing(told):
+        return "Nothing new since then, sir."
+    return "Nothing while you were away, sir. All quiet."
 
 
 def _say_protocols() -> str:
@@ -3612,8 +3858,21 @@ SKILLS: list[Skill] = [
         "how much disk space do i have",
         # the film's phrasing, his on 2026-09-04
         "what are the systems", "systems check", "how are the systems",
-        "systems status"],
+        "systems status",
+        # a PERIOD: the readings history answers, with a baseline or an honest
+        # "nothing earlier to compare against yet"
+        "has memory been climbing", "how has memory been this week", "how has the cpu been today",
+        "is memory getting worse", "has ram been high lately", "how has disk space been this week",
+        "what has memory been like today", "is the cpu trending up", "how's memory been over the week",
+        "has the battery been draining faster lately"],
         slots=slots_stats, speak=say_stats),
+    Skill("been_doing", None, [
+        "what have i been doing today", "what have i been working on today", "where has my day gone",
+        "what have i been doing", "what have i been up to", "what did i do today",
+        "what have i spent my day on", "what have i been doing this afternoon",
+        "what was i doing this morning", "what have i been working on", "where did my day go",
+        "what have i been in all day", "what have i been doing for the last hour"],
+        slots=slots_been_doing, speak=say_been_doing),
     Skill("windows", "list_windows", [
         "what windows are open", "what do i have open", "list my open windows",
         "what apps are running", "which windows are open right now", "what's open",
@@ -3974,9 +4233,55 @@ SKILLS: list[Skill] = [
         "alert me if cpu stays above 95 for 5 minutes", "keep an eye on memory and tell me if it passes 95",
         "ping me when ram exceeds 90 percent", "let me know if the battery falls under 15"],
         slots=slots_watch, speak=say_watch),
+    # EVENTS, not thresholds (2026-10-27): a request that outlives the sentence.
+    # One skill per kind, each refusing the others', so the router's refusal
+    # chain lands "tell me when the download finishes" on the right tool.
+    Skill("watch_process", "watch_for_process", [
+        "tell me when handbrake finishes", "let me know when the build is done",
+        "tell me when the render finishes", "let me know when blender is finished",
+        "ping me when the export completes", "tell me when the installer is done",
+        "tell me once the build finishes", "let me know when the encode is finished",
+        "notify me when the backup is done", "tell me when handbrake has finished",
+        "warn me when the compile finishes", "let me know when steam finishes updating",
+        "tell me when the upload is done"],
+        slots=slots_watch_process, speak=say_watch_process),
+    Skill("watch_download", "watch_for_download", [
+        "tell me when the download finishes", "let me know when that download is done",
+        "tell me when my download is finished", "ping me when the download completes",
+        "let me know when the file finishes downloading", "tell me when the download lands",
+        "notify me when the download has finished", "tell me once the download is done",
+        "let me know when the iso finishes downloading", "tell me when the next download finishes",
+        "watch for the download to finish"],
+        slots=slots_watch_download, speak=say_watch_download),
+    Skill("watch_file", "watch_for_file", [
+        "tell me when a file appears in downloads", "let me know when the report shows up in documents",
+        "tell me when the pdf lands in my downloads", "ping me when invoice shows up in downloads",
+        "let me know when a new file appears on the desktop", "tell me when the export appears in documents",
+        "watch for the stl to land in downloads", "notify me when the photo arrives in pictures",
+        "tell me when the zip shows up in my downloads", "let me know when something lands in documents"],
+        slots=slots_watch_file, speak=say_watch_file),
+    Skill("watch_battery", "watch_for_battery", [
+        "tell me when the battery hits 80 percent", "let me know when it's charged",
+        "tell me when the battery is fully charged", "ping me when the battery reaches 90",
+        "let me know when the laptop is charged", "tell me when it's done charging",
+        "tell me when the battery gets to 100", "let me know when the battery is full",
+        "notify me when the battery hits 50 percent", "tell me once it's fully charged",
+        "warn me when the battery reaches 70 percent"],
+        slots=slots_watch_battery, speak=say_watch_battery),
+    Skill("watch_list", "list_watches", [
+        "what are you watching for", "what are you keeping an eye on", "what are you waiting on",
+        "anything you're watching for me", "what have i asked you to watch", "are you watching for anything",
+        "what are you monitoring for me", "what are you looking out for", "what are you keeping track of",
+        "list what you're watching", "is there anything you're waiting for", "what watches are set"],
+        slots=slots_watch_list, speak=say_watch_list),
     Skill("unwatch", "unwatch_metric", [
         "stop watching the cpu", "stop monitoring memory", "cancel the disk space alert",
-        "stop telling me about the battery", "forget about the cpu rule", "stop watching everything"],
+        "stop telling me about the battery", "forget about the cpu rule", "stop watching everything",
+        # event watches go the same way: the tool drops whichever kind is named
+        "stop watching for the download", "cancel the handbrake watch", "never mind the download",
+        "stop waiting on the build", "forget about the download", "cancel that watch",
+        "stop watching for the file", "stop watching for the battery", "cancel all my watches",
+        "never mind about the build"],
         slots=slots_unwatch, speak=say_unwatch),
     Skill("weather", "get_weather", [
         # added 2026-09-17 from the untested-phrasings battery
@@ -4161,6 +4466,12 @@ CONFIRM_AS = {
     "render_how": "check how the render is going",
     "images": "show you pictures of that",
     "model_find": "look for a model of that",
+    "watch_process": "tell you when that finishes",
+    "watch_download": "tell you when the download finishes",
+    "watch_file": "tell you when that file appears",
+    "watch_battery": "tell you when the battery is charged",
+    "watch_list": "say what I'm watching for",
+    "been_doing": "say what you've been doing",
 }
 
 
@@ -4243,7 +4554,7 @@ QUERY_SKILLS = frozenset({
     "quote", "analyst", "markets", "market_take", "watchlist", "earnings", "stock_context",
     "news", "breaking", "general", "recall", "protocols", "briefing", "tasks", "reminders",
     "battery", "volume_get", "where_am_i", "screen", "read_screen", "camera", "face",
-    "health", "agenda", "phone_reminders",
+    "health", "agenda", "phone_reminders", "watch_list", "been_doing",
 })
 
 

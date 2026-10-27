@@ -349,6 +349,41 @@ def main() -> int:
               not (a and a[0].name == "holo_edit"),
               "an edit is not undone by looking away")
 
+        print("\n-- a request that outlives the sentence lands on the right watch --")
+        # None of these are seeds. A wrong landing here is the unforgivable
+        # kind: "tell me when the battery hits 80" set as a standing RULE
+        # would nag every hour instead of speaking once.
+        for said, want in (
+            ("tell me when handbrake is finished", "watch_process"),
+            ("let me know once the render has finished", "watch_process"),
+            ("let me know when my download has finished", "watch_download"),
+            ("tell me when that download is complete", "watch_download"),
+            ("tell me when the battery gets to 80 percent", "watch_battery"),
+            ("let me know when the laptop is fully charged", "watch_battery"),
+            ("what are you keeping an eye on for me", "watch_list"),
+            ("let me know if memory goes over 90 percent", "watch"),
+            ("tell me if the battery drops under 15 percent", "watch"),
+            ("what have i been up to today", "been_doing"),
+            ("where has my day gone", "been_doing"),
+            ("has memory been creeping up this week", "stats"),
+        ):
+            r = await brain.decide(said, context=empty)
+            landed = r[0].name if r else (brain.unsure or {}).get("skill")
+            check(f"{said!r} -> {want}", landed == want,
+                  f"landed {landed} (args {r and r[1]})")
+        r = await brain.decide("tell me when the battery hits 80 percent", context=empty)
+        check("a charge event is a one-shot watch with its level",
+              bool(r) and r[0].name == "watch_battery" and r[1].get("percent") == 80,
+              f"{r and r[0].name} {r and r[1]}")
+        r = await brain.decide("tell me when handbrake finishes", context=empty)
+        check("...and a finish names the program",
+              bool(r) and r[0].name == "watch_process" and r[1].get("name") == "handbrake",
+              f"{r and r[0].name} {r and r[1]}")
+        r = await brain.decide("stop watching for the download", context=empty)
+        check("cancelling an event watch names it to the one unwatch tool",
+              bool(r) and r[0].name == "unwatch" and r[1].get("watch") == "download",
+              f"{r and r[0].name} {r and r[1]}")
+
         # EVERY SKILL, not every entry in the table. The old form iterated
         # CONFIRM_AS itself, so it only ever checked names that already had a
         # phrase — a test that could not fail while "Did you mean wakeack,

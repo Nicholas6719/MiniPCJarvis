@@ -91,6 +91,21 @@ SUBSYSTEMS: dict[str, list[str]] = {
         "summarize this", "rewrite this to be more formal", "make this shorter",
         "translate this into spanish", "put this in italian", "simplify this",
     ],
+    # EVENT watches (2026-10-27). The threshold canon folds "tell me when
+    # memory goes above 90" onto "tell me if METRIC goes above N", and it used
+    # to swallow a charge EVENT with it: "tell me when the battery hits 80"
+    # lost the words that said it was a one-shot watch, not a standing rule.
+    "download": [
+        "tell me when the download finishes", "let me know when that download is done",
+        "tell me when my download has finished",
+    ],
+    "finishes": ["tell me when handbrake finishes", "let me know when the build finishes"],
+    "charged": ["let me know when it's charged", "tell me when the battery is fully charged"],
+    "charging": ["tell me when it's done charging"],
+    "hits": ["tell me when the battery hits 80 percent"],
+    "reaches": ["let me know when the battery reaches 90"],
+    "doing": ["what have i been doing today", "what have i been doing"],
+    "climbing": ["has memory been climbing"],
 }
 
 
@@ -112,6 +127,9 @@ def main() -> int:
         ("close chrome", "chrome", "close APP"),
         ("look up the population of tokyo", "tokyo", "search the web for THING"),
         ("remember that i park in the north garage", "garage", "remember that FACT"),
+        # the threshold RULE still folds: a number and a metric are slot values
+        ("let me know when memory goes above 90", "memory", "tell me if METRIC goes above N"),
+        ("tell me when the battery is under 20 percent", "20", "tell me if METRIC goes above N"),
     ]:
         canon = _norm(said)
         check(f"{said!r} still collapses to a shape", gone not in canon,

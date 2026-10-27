@@ -274,6 +274,86 @@ def main() -> int:
         _rt.telegram = real_tg
         _D.delivery._sent[:] = real_sent
 
+    # --- on return, say what was held. Once. --------------------------------
+    # What could not reach him (no phone paired, Telegram refused) sits in the
+    # ledger as "held". When he comes back it is read out — the first sentence
+    # of up to three things — and then marked, so neither the presence
+    # watcher a minute later nor "what did I miss" reads it again.
+    print("\n-- on return, what was held is said once --")
+    real_quiet = dv._in_quiet_hours
+    dv._in_quiet_hours = lambda: False
+    real_sent = list(dv.delivery._sent)
+    dv.delivery._sent.clear()
+    try:
+        orch, tg = setup(present=False, telegram=False)
+        t0 = time.time()
+        asyncio.run(dv.delivery.deliver("The disk is down to 9 gigabytes. Worth clearing some space.",
+                                        dv.ALERT, key="held-test:1"))
+        asyncio.run(dv.delivery.deliver("HandBrake has finished, sir.", dv.ALERT, key="held-test:2"))
+        asyncio.run(dv.delivery.deliver("Evacuate now.", dv.URGENT, key="held-test:3"))
+        held = [e for e in dv.delivery.entries(t0) if e.get("outcome") == "held"]
+        check("three things were held while he was away", len(held) == 3, held)
+        check("...each with a row id for marking later", all(e.get("id") for e in held), held)
+        # the phone: a message that reached it is never read back
+        orch, tg = setup(present=False, telegram=True)
+        asyncio.run(dv.delivery.deliver("Markets are down, sir.", dv.ALERT, key="held-test:4"))
+        # he is back
+        orch, tg = setup(present=True)
+        r = asyncio.run(dv.delivery.replay_held(t0))
+        check("back at the desk: the held things are spoken", r.get("delivered") == "spoken", r)
+        said = orch.said[-1] if orch.said else ""
+        check("...first sentences only", "The disk is down to 9 gigabytes." in said and "Worth clearing" not in said, said)
+        check("...the finished build too", "HandBrake has finished, sir." in said, said)
+        check("...never the emergency", "Evacuate" not in said, said)
+        check("...never what reached his phone", "Markets" not in said, said)
+        check("...and marked told", all(e.get("replayed") for e in held if e.get("tier") != dv.URGENT), held)
+        from memory.store import memory as _m
+        rows = {e["id"]: e for e in _m.recent_deliveries(t0)}
+        check("...on disk as well, so a restart does not forget he was told",
+              all(rows[e["id"]]["replayed"] for e in held if e.get("tier") != dv.URGENT), rows)
+        orch, tg = setup(present=True)
+        r = asyncio.run(dv.delivery.replay_held(t0))
+        check("a second return says nothing", r.get("delivered") == "nothing" and orch.said == [], (r, orch.said))
+        # ...and even if the marking had failed, the key blocks a re-read
+        for e in held:
+            e["replayed"] = False
+        orch, tg = setup(present=True)
+        dv.delivery._last[f"held:{int(held[1]['ts'])}"] = (time.time(), dv.ALERT)
+        r = asyncio.run(dv.delivery.replay_held(t0))
+        check("...and _too_soon blocks it on the key regardless", r.get("why") == "said recently" and orch.said == [], (r, orch.said))
+        check("the ledger keeps up to 300 characters now, not 160",
+              _m.db.execute("SELECT MAX(LENGTH(text)) FROM deliveries").fetchone() is not None)
+
+        # the greeting path claims the same key and stands the watcher down
+        orch, tg = setup(present=False, telegram=False)
+        t1 = time.time()
+        asyncio.run(dv.delivery.deliver("Your print finished, sir.", dv.ALERT, key="held-test:5"))
+        dv.delivery.note_presence(False, now=t1)
+        dv.delivery.note_presence(True, now=t1 + 400)
+        dv.delivery.note_presence(True, now=t1 + 430)
+        line = dv.delivery.held_line(t1)
+        check("the wake greeting gets the held line", line.startswith("Namely: Your print finished, sir."), line)
+        check("...and the watcher's pending return is consumed with it", dv.delivery.take_return() is None)
+        orch, tg = setup(present=True)
+        r = asyncio.run(dv.delivery.replay_held(t1))
+        check("...so nothing is read twice", r.get("delivered") == "nothing" and orch.said == [], (r, orch.said))
+
+        print("\n-- the presence watcher: two samples make a return --")
+        d = dv.Delivery()
+        t = 1000.0
+        check("present from the start is not a return", not d.note_presence(True, now=t) and not d.note_presence(True, now=t + 30))
+        d.note_presence(False, now=t + 60)
+        check("one keystroke on the way past is not a return", not d.note_presence(True, now=t + 600))
+        check("...the second sample is", d.note_presence(True, now=t + 630))
+        away = d.take_return()
+        check("take_return says how long, once", away is not None and abs(away - 570) < 1, away)
+        check("...and only once", d.take_return() is None)
+        check("...and the catch-up window starts when he left", abs(d.away_since - (t + 60)) < 1, d.away_since)
+    finally:
+        dv._in_quiet_hours = real_quiet
+        dv.delivery._sent[:] = real_sent
+        sys.modules.pop("remote_telegram", None)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

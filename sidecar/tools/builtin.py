@@ -837,9 +837,21 @@ def watch_metric(metric: str, op: str, value: float, for_min: int = 0, message: 
     return {"watching": f"I'll tell you if {proactive.describe(rule)}.", "rules": len(proactive.rules())}
 
 
-def unwatch_metric(metric: str | None = None) -> dict:
+def unwatch_metric(metric: str | None = None, watch: str = "") -> dict:
+    """Stop watching. A metric drops its threshold rules; `watch` names an
+    event watch ("the download", "handbrake") from standing.py; neither
+    drops everything — the rules AND every standing watch."""
     from proactive import proactive
-    return {"removed": proactive.remove_rules(metric)}
+    import standing
+    removed = 0
+    if metric:
+        removed += proactive.remove_rules(metric)
+    elif (watch or "").strip():
+        removed += len(standing.cancel(watch))
+    else:
+        removed += proactive.remove_rules(None)
+        removed += len(standing.cancel(""))
+    return {"removed": removed}
 
 
 def register_all() -> None:
@@ -856,8 +868,10 @@ def register_all() -> None:
         risk=Risk.LOW, handler=watch_metric))
     registry.register(Tool(
         name="unwatch_metric",
-        description="Remove standing metric alerts (all, or for one metric).",
-        parameters={"type": "object", "properties": {"metric": {"type": "string"}}, "required": []},
+        description="Stop watching: remove metric alerts (all, or for one metric), or one event "
+                    "watch named by `watch` (e.g. 'download', 'handbrake'); with neither, everything.",
+        parameters={"type": "object", "properties": {"metric": {"type": "string"},
+                                                     "watch": {"type": "string"}}, "required": []},
         risk=Risk.LOW, handler=unwatch_metric))
     registry.register(Tool(
         name="get_system_stats",

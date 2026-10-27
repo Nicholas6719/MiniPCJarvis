@@ -198,11 +198,97 @@ class Proactive:
             if await self._fire("rule:" + key, text, cooldown_h=float(r.get("cooldown_h", 1))):
                 self._rule_since[key] = now
 
+    # ---------- standing watches ("tell me when the download finishes") ----------
+
+    async def run_standing(self) -> None:
+        """Every event watch that has just come true goes to delivery DIRECTLY,
+        not through _fire: _allowed applies quiet hours and the two-an-hour
+        cap, and those are for remarks nobody asked for. He asked for these.
+        delivery still decides speech or phone, still dedups by key, and its
+        own ceiling from the 2,600-message night still stands."""
+        try:
+            import standing
+            arrived: list[str] = []
+            try:
+                import awareness as _aw
+                arrived, _aw.awareness.arrived = list(_aw.awareness.arrived), []
+            except Exception:
+                log.debug("no downloads list for the standing watches", exc_info=True)
+            hits = await asyncio.to_thread(standing.check, arrived)
+        except Exception:
+            log.debug("standing watches failed", exc_info=True)
+            return
+        if not hits:
+            return
+        from delivery import ALERT, delivery
+        for text, key in hits:
+            try:
+                log.info("standing watch fired: %s", text)
+                await bus.emit("proactive", alert=key, text=text)
+                await delivery.deliver(text, ALERT, key=key, subject="watch")
+            except Exception:
+                log.exception("could not deliver a standing watch")
+
+    # ---------- readings history (store.py: readings / app_context) ----------
+
+    _last_reading = 0.0
+
+    def _record_readings(self, vm, disk) -> None:
+        """One row a minute, so "has memory been climbing" has an answer.
+        Non-blocking: cpu_percent(interval=None) is the average since the last
+        call, and the app is the exe NAME only, never the window title."""
+        now = time.time()
+        if now - self._last_reading < 55:
+            return
+        self._last_reading = now
+        try:
+            from memory.store import memory
+            batt = None
+            plugged = None
+            try:
+                b = psutil.sensors_battery()
+                if b:
+                    batt, plugged = float(b.percent), bool(b.power_plugged)
+            except Exception:
+                pass
+            memory.record_reading(
+                cpu=float(psutil.cpu_percent(interval=None)),
+                ram_pct=float(vm.percent) if vm is not None else None,
+                disk_free_gb=round(disk.free / 1e9, 1) if disk is not None else None,
+                battery=batt, plugged=plugged)
+            exe = ""
+            try:
+                from tools.windows_tools import foreground_app
+                exe = str((foreground_app() or {}).get("exe") or "")
+            except Exception:
+                exe = ""
+            if exe:
+                memory.record_app(exe)
+        except Exception:
+            log.debug("could not record a reading", exc_info=True)
+
+    def _against_last_week(self, pct: float) -> str:
+        """', up 9 points on last week' — only when there is a week to compare
+        against. A number with no baseline is a readout."""
+        try:
+            from memory.store import memory
+            base = memory.readings_baseline("ram_pct", days=7)
+            if base is None:
+                return ""
+            diff = int(round(float(pct) - base))
+            if abs(diff) < 3:
+                return ", about where it was last week"
+            return f", {'up' if diff > 0 else 'down'} {abs(diff)} points on last week"
+        except Exception:
+            return ""
+
     # ---------- checks ----------
 
     async def run_checks(self) -> None:
         await self.run_rules()
+        await self.run_standing()
         # disk space
+        disk = None
         try:
             disk = psutil.disk_usage("C:\\")
             free_gb = disk.free / 1e9
@@ -219,6 +305,7 @@ class Proactive:
             log.debug("disk check failed", exc_info=True)
 
         # sustained RAM pressure (what is holding it is in the sentence)
+        vm = None
         try:
             vm = psutil.virtual_memory()
             if vm.percent >= float(self._cfg("ram_percent_warn", 94)):
@@ -229,11 +316,14 @@ class Proactive:
                 # the wrong things.
                 await self._fire(
                     "ram_high",
-                    f"Memory is at {int(vm.percent)} percent{_memory_hogs()}. "
-                    "Things may slow down.",
+                    f"Memory is at {int(vm.percent)} percent{_memory_hogs()}"
+                    f"{self._against_last_week(vm.percent)}. Things may slow down.",
                     cooldown_h=2)
         except Exception:
             log.debug("memory check failed", exc_info=True)
+
+        # one row a minute: readings history and the app in front (store.py)
+        self._record_readings(vm, disk)
 
         # continuous work session → break suggestion
         try:

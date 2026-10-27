@@ -252,7 +252,7 @@ class Delivery:
             row = {"ts": time.time(), "tier": r.get("tier", tier),
                    "outcome": outcome, "why": r.get("why", ""),
                    "subject": (subject or key or "").strip(),
-                   "text": (text or "").strip()[:160]}
+                   "text": (text or "").strip()[:300], "replayed": False}
             self._load_ledger()
             self.ledger.append(row)
             del self.ledger[:-200]
@@ -260,7 +260,7 @@ class Delivery:
             # empty "what did I miss".
             try:
                 from memory.store import memory
-                memory.log_delivery(row)
+                row["id"] = memory.log_delivery(row)
             except Exception:
                 log.debug("could not persist a delivery", exc_info=True)
         return r
@@ -284,6 +284,143 @@ class Delivery:
         """What was said, sent or held since `since` - restarts included."""
         self._load_ledger()
         return [e for e in self.ledger if e.get("ts", 0) >= since]
+
+    # ------------------------------------------------------------ told once
+    def consume(self, entries: list[dict]) -> int:
+        """He has now been told about these. In memory and on disk, so a second
+        "what did I miss" says "nothing new" instead of reading them again."""
+        n = 0
+        for e in entries:
+            if e.get("replayed"):
+                continue
+            e["replayed"] = True
+            n += 1
+            rid = e.get("id")
+            if rid is not None:
+                try:
+                    from memory.store import memory
+                    memory.mark_delivery(int(rid), True)
+                except Exception:
+                    log.debug("could not mark delivery %s", rid, exc_info=True)
+        return n
+
+    def catch_up(self) -> tuple[list[dict], list[dict]]:
+        """For "what did I miss": (entries not yet told, entries already told).
+        The window is since he went away, or twelve hours."""
+        since = float(getattr(self, "away_since", 0.0) or 0.0) or (time.time() - 12 * 3600)
+        all_since = self.entries(since)
+        fresh = [e for e in all_since if not e.get("replayed")]
+        told = [e for e in all_since if e.get("replayed")]
+        return fresh, told
+
+    def _take_held(self, since: float, lead: str = "") -> tuple[str, str]:
+        """What was held back since `since` and never reached him, as at most
+        three first sentences, marked replayed before anything is spoken.
+        Returns (text, key); ("", "") when there is nothing.
+
+        Held means held: not what reached his phone, not what was spoken to
+        the room, not a test mute, and never URGENT — an emergency is chased
+        on its own terms and is not read back as a courtesy."""
+        self._load_ledger()
+        rows = [e for e in self.ledger
+                if e.get("ts", 0) >= since and e.get("outcome") == "held"
+                and not e.get("replayed") and e.get("tier") != URGENT
+                and "test" not in str(e.get("why") or "")]
+        if not rows:
+            return "", ""
+        rows = rows[-3:]
+        parts = []
+        for e in rows:
+            first = re.split(r"(?<=[.!?])\s+", str(e.get("text") or "").strip(), maxsplit=1)[0]
+            first = first.strip().rstrip(".!?")
+            if first:
+                parts.append(first + ".")
+        self.consume(rows)
+        if not parts:
+            return "", ""
+        if not lead:
+            lead = "While you were out, sir: " if len(parts) > 1 else "While you were out, sir, "
+        key = f"held:{int(rows[-1].get('ts', 0))}"
+        text = lead + " ".join(parts)
+        return text[0].upper() + text[1:], key
+
+    def held_line(self, since: float) -> str:
+        """The same, for a caller that is already speaking (the wake
+        acknowledgement, which has just said how many things were held):
+        claims the dedup key so the watcher cannot read the same three things
+        out a minute later."""
+        text, key = self._take_held(since, lead="Namely: ")
+        if text:
+            self._too_soon(key, ALERT)          # claim before you speak
+            self.take_return()                  # ...and the watcher stands down
+        return text
+
+    async def replay_held(self, since: float) -> dict:
+        """Say what was held, once, through the normal path. `_too_soon` on the
+        `held:<ts>` key blocks a second reading even if the marking failed."""
+        text, key = self._take_held(since)
+        if not text:
+            return {"delivered": "nothing", "why": "nothing held"}
+        return await self.deliver(text, ALERT, key=key, subject="held")
+
+    # ------------------------------------------------------------ the return
+    # A 30-second presence watcher, so a return after an absence is a moment
+    # JARVIS can act on rather than one he only notices when spoken to.
+    # Two consecutive present samples before "back": one keystroke on the way
+    # past the desk is not a return.
+    _present_streak = 0
+    _away_started: float | None = None
+    _returned: tuple[float, float] | None = None     # (returned_at, away_for)
+
+    def note_presence(self, present: bool, now: float | None = None) -> bool:
+        """Feed one sample. True on the sample that completes a return."""
+        now = now or time.time()
+        if present:
+            self._present_streak += 1
+            if self._present_streak >= 2 and self._away_started is not None:
+                away_for = now - self._away_started
+                self._away_started = None
+                self._returned = (now, away_for)
+                self.away_since = now - away_for
+                log.info("he is back after %.0f minutes away", away_for / 60)
+                return True
+            return False
+        self._present_streak = 0
+        if self._away_started is None:
+            self._away_started = now
+        return False
+
+    def take_return(self) -> float | None:
+        """Seconds he was away, exactly once per return; None otherwise."""
+        r = self._returned
+        self._returned = None
+        return r[1] if r else None
+
+    async def presence_watch(self, every: float = 30.0) -> None:
+        """Runs for the life of the process (events.spawn). On a return after
+        at least presence.away_after_seconds, with him idle and the hour not
+        quiet, what was held while he was out is read back, once."""
+        while True:
+            try:
+                await asyncio.sleep(every)
+                if not self.note_presence(is_present()):
+                    continue
+                away_for = self.take_return()
+                if away_for is None:
+                    continue
+                away_after = float(config.get("presence", "away_after_seconds", default=180))
+                if away_for < away_after or _in_quiet_hours():
+                    continue
+                orch = self.orchestrator
+                if orch is not None:
+                    from state_machine import State
+                    if orch.sm.state is not State.IDLE:
+                        continue
+                await self.replay_held(time.time() - away_for)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.debug("presence watch tick failed", exc_info=True)
 
     async def _deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
                        subject: str = "", written: str = "",

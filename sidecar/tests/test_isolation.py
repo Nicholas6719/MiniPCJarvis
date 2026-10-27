@@ -82,6 +82,23 @@ def main() -> int:
     release.set()
     del stuck
 
+    # --- the memory vault under test is never his real one -------------------
+    # The memories are markdown files in Documents\JARVIS\Memory (vault.py).
+    # A gate that could reach that folder could delete what he knows. Under
+    # JARVIS_DB the folder is beside the gate database, and nowhere else.
+    from pathlib import Path
+    from memory import vault
+    folder = vault.default_folder()
+    real = Path.home() / "Documents" / "JARVIS" / "Memory"
+    check("the vault path under test is not the real one",
+          folder.resolve() != real.resolve() and not str(folder.resolve()).startswith(str(real.resolve())),
+          str(folder))
+    check("...and sits beside the gate database",
+          str(folder.resolve()).startswith(str(Path(os.environ["JARVIS_DB"]).resolve().parent)), str(folder))
+    from config import APP_DIR
+    check("...and is not under the application's own %APPDATA% folder",
+          not str(folder.resolve()).startswith(str(Path(APP_DIR).resolve())), str(folder))
+
     # --- a failed background task is reported, not swallowed ----------------
     from events import spawn
 
