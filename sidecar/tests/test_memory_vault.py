@@ -43,10 +43,19 @@ def main() -> int:
     check("the vault under test is not his real one", folder != real and not str(folder).startswith(str(real)), folder)
     check("...and is not in %APPDATA% either", "AppData\\Roaming" not in str(folder), folder)
 
+    # The gates share one database, and it OUTLIVES a build: the second build
+    # of 2026-10-27 found this gate's own rows from the first (the coffee row
+    # below, never taken back), migrated them into the fresh temp vault, and
+    # eight checks failed on a file this run never wrote. Judge only what this
+    # run adds; take back what the last one left.
+    for m in M.list_all():
+        if any(w in m["content"] for w in ("kettle", "coffee black", "bike lock")):
+            M.forget(m["id"])
+
     print("\n-- learning writes a file --")
     mid = asyncio.run(M.remember("The kettle is in the garage.", category="fact"))
     check("README is written with the first memory", (folder / "README.md").exists())
-    names = _files(folder)
+    names = [n for n in _files(folder) if "kettle" in n]
     check("one file, named after the words", names == ["the-kettle-is-in-the-garage.md"], names)
     parsed = V.parse(folder / names[0])
     check("...carrying its id, category, created, source, pinned, confidence",
@@ -135,6 +144,9 @@ def main() -> int:
           (fresh / "README.md").exists() and "he-takes-his-coffee-black.md" in _files(fresh), _files(fresh))
     check("...and nothing was forgotten in the move", any("coffee" in m["content"] for m in rows))
     check("...pinned included", "pinned: true" in (fresh / "he-takes-his-coffee-black.md").read_text(encoding="utf-8"))
+    for m in rows:
+        if "coffee black" in m["content"]:
+            M.forget(m["id"])          # leave the shared database as it was found
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
