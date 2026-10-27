@@ -295,22 +295,61 @@ def media_control(action: str) -> dict:
 
 # ---------- clipboard ----------
 
+CLIPBOARD_CAP = 4000
+# What he hears when the clipboard cannot be opened. The Windows error for a
+# locked screen is "OpenClipboard (WinError 0: The operation completed
+# successfully)" - untrue and unspeakable - so it is translated here, once.
+CLIPBOARD_UNREACHABLE = "I can't reach the clipboard; the screen may be locked."
+
+
+def _open_clipboard(win32clipboard) -> Exception | None:
+    """OpenClipboard with three quick tries. None on success, the last error otherwise.
+
+    The clipboard belongs to the interactive desktop, so a locked screen
+    fails outright; it also fails transiently whenever another program has
+    it open, which is common and passes in milliseconds. Two short retries
+    separate the two, so "empty" is never reported for "unreachable".
+    """
+    import time as _t
+    last: Exception | None = None
+    for attempt in range(3):
+        try:
+            win32clipboard.OpenClipboard()
+            return None
+        except Exception as e:
+            last = e
+            _t.sleep(0.15 * (attempt + 1))
+    return last
+
+
+def _clipboard_error(exc: Exception | None) -> dict:
+    from tools.input_tools import _locked
+    log.debug("clipboard unreachable: %s", exc)
+    return {"error": CLIPBOARD_UNREACHABLE, "locked": bool(_locked())}
+
+
 def get_clipboard() -> dict:
     import win32clipboard
-    win32clipboard.OpenClipboard()
+    failed = _open_clipboard(win32clipboard)
+    if failed is not None:
+        return _clipboard_error(failed)
     try:
         try:
             data = win32clipboard.GetClipboardData(win32clipboard.CF_UNICODETEXT)
         except TypeError:
             return {"text": None, "note": "clipboard holds non-text content"}
-        return {"text": data[:4000], "truncated": len(data) > 4000}
+        data = data or ""
+        return {"text": data[:CLIPBOARD_CAP], "truncated": len(data) > CLIPBOARD_CAP,
+                "length": len(data)}
     finally:
         win32clipboard.CloseClipboard()
 
 
 def set_clipboard(text: str) -> dict:
     import win32clipboard
-    win32clipboard.OpenClipboard()
+    failed = _open_clipboard(win32clipboard)
+    if failed is not None:
+        return _clipboard_error(failed)
     try:
         win32clipboard.EmptyClipboard()
         win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
@@ -321,12 +360,17 @@ def set_clipboard(text: str) -> dict:
 
 # ---------- screenshot / url / power ----------
 
+# The title of JARVIS's own top-level window(s). Shared with uia.click_control,
+# which must never click inside it.
+OWN_WINDOW_TITLE = "JARVIS"
+
+
 def _our_windows() -> list[int]:
     """Top-level windows belonging to the JARVIS app itself."""
     hits = []
 
     def cb(hwnd, _):
-        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd).strip() == "JARVIS":
+        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd).strip() == OWN_WINDOW_TITLE:
             hits.append(hwnd)
         return True
 
@@ -384,11 +428,47 @@ def take_screenshot(monitor: int = 0, hide_self: bool = True,
         with mss.mss() as sct:
             mon = sct.monitors[monitor] if monitor < len(sct.monitors) else sct.monitors[0]
             img = sct.grab(mon)
+            # Windows refuses to capture the secure desktop, so a locked
+            # session - or a display that has powered down - comes back as
+            # one flat colour on every capture path there is. The file would
+            # still write with a plausible size, and "screenshot saved" for a
+            # black rectangle is the same confident lie as a PDF that was never
+            # made. One colour across the whole frame does not happen on a
+            # screen in use, so the frame is checked before anything is said.
+            if _uniform_frame(img.rgb):
+                return {"error": BLANK_CAPTURE, "folder": str(folder)}
             mss.tools.to_png(img.rgb, img.size, output=str(path))
     finally:
         for hwnd in hidden:
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    return {"path": str(path), "width": img.size[0], "height": img.size[1]}
+    # Confirm from the disk, not from the call: the file he will go looking for.
+    try:
+        size = path.stat().st_size if path.exists() else 0
+    except OSError:
+        size = 0
+    if size <= 0:
+        return {"error": f"the capture was not written to {folder}", "folder": str(folder)}
+    return {"path": str(path), "folder": str(folder), "bytes": size,
+            "width": img.size[0], "height": img.size[1]}
+
+
+BLANK_CAPTURE = "blank capture: the screen is locked or off"
+
+
+def _uniform_frame(rgb: bytes, step: int = 64) -> bool:
+    """True when every sampled pixel is the same colour.
+
+    `rgb` is packed 24-bit; every `step`-th pixel is read per channel, which is
+    a few thousand bytes on a 4K frame and settles the question - a real
+    desktop has at least a cursor, a taskbar and some text in it."""
+    if not rgb:
+        return True
+    stride = 3 * max(1, int(step))
+    for channel in range(3):
+        sample = rgb[channel::stride]
+        if sample and min(sample) != max(sample):
+            return False
+    return True
 
 
 def open_url(url: str) -> dict:
@@ -852,14 +932,44 @@ def exit_sleep_mode() -> dict:
 
 
 def lock_computer() -> dict:
-    ctypes.windll.user32.LockWorkStation()
+    # LockWorkStation returns a BOOL. It used to be ignored and "Locking."
+    # spoken regardless; a session that cannot lock (already on the secure
+    # desktop, or a policy that forbids it) now says so.
+    try:
+        ok = bool(ctypes.windll.user32.LockWorkStation())
+    except Exception as e:
+        return {"error": f"LockWorkStation failed: {e}", "locked": False}
+    if not ok:
+        err = ctypes.get_last_error() if hasattr(ctypes, "get_last_error") else 0
+        return {"error": f"Windows refused to lock the session (LockWorkStation "
+                         f"returned FALSE, error {err})", "locked": False}
     return {"locked": True}
+
+
+def _suspend() -> dict:
+    """SetSuspendState(hibernate=0, force=1, wakeEvents=0), and what it said.
+
+    This used to spawn `rundll32 powrprof.dll,SetSuspendState` and report
+    "sleeping now" without waiting to find out - rundll32 cannot return a
+    result and its parameter parsing for this call is a documented quirk, so
+    the PC could stay awake while JARVIS said it was asleep. Called directly,
+    the BOOL is the truth: FALSE means Windows declined (a driver vetoed it,
+    or sleep is unavailable on this hardware)."""
+    try:
+        ok = bool(ctypes.windll.powrprof.SetSuspendState(0, 1, 0))
+    except Exception as e:
+        return {"error": f"SetSuspendState failed: {e}", "action": "sleep"}
+    if not ok:
+        return {"error": "Windows refused to sleep (SetSuspendState returned FALSE)",
+                "action": "sleep"}
+    return {"action": "sleep", "note": "now", "accepted": True}
 
 
 def power_action(action: str) -> dict:
     import subprocess
+    if action == "sleep":
+        return _suspend()
     cmds = {
-        "sleep": ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
         "shutdown": ["shutdown", "/s", "/t", "10"],
         "restart": ["shutdown", "/r", "/t", "10"],
     }

@@ -937,10 +937,73 @@ def say_media(slots: dict, res: dict) -> str:
 
 
 def say_clipboard(_: dict, res: dict) -> str:
+    # UNREACHABLE IS NOT EMPTY. A locked screen made OpenClipboard fail, and
+    # this said "Your clipboard is empty." over the error - a confident answer
+    # to a question it could not read. The tool now says which it was.
+    if "error" in res:
+        return "I can't reach the clipboard; the screen may be locked."
     text = str(res.get("text") or "").strip()
     if not text:
+        if res.get("note"):
+            return "Your clipboard holds something that isn't text."
         return "Your clipboard is empty."
     return "Your clipboard has: " + (text[:200] + ("..." if len(text) > 200 else ""))
+
+
+# "THIS" IS THE CLIPBOARD (or the Word selection). A sentence that names
+# something else - "fix this bug", "summarise this article", "translate my
+# essay" - is not the clipboard, and the model should have it instead.
+_THIS = re.compile(r"\b(?:this|that|it|what i (?:just )?copied|my clipboard|the clipboard)\b")
+_THIS_IS_SOMETHING_ELSE = re.compile(
+    r"\b(?:this|that)\s+(?:bug|error|code|function|file|article|page|site|website|"
+    r"document|essay|email|message|chat|paragraph|section|sentence|word|line|"
+    r"image|picture|video|screen|window|model|render|part|project|problem|issue)\b")
+
+
+def slots_this(t: str) -> dict | None:
+    if not _THIS.search(t) or _THIS_IS_SOMETHING_ELSE.search(t):
+        return None
+    return {}
+
+
+_STYLE = re.compile(
+    r"\b(?:to be|to sound|so (?:it|that it)(?:'s| is| sounds)|sound|more|less)\s+"
+    r"(?P<style>[a-z][a-z -]{2,40}?)\s*[.!?]*$")
+_STYLE_WORD = re.compile(
+    r"\b(?P<style>formal|informal|casual|friendlier|friendly|polite|professional|"
+    r"shorter|longer|simpler|clearer|concise|warmer|firmer|softer|plainer|"
+    r"less angry|more polite|more formal|more casual|more professional)\b")
+
+
+def slots_rewrite(t: str) -> dict | None:
+    if slots_this(t) is None:
+        return None
+    m = _STYLE.search(t) or _STYLE_WORD.search(t)
+    style = (m.group("style").strip() if m else "")
+    for verb in ("simplify", "simplifies"):
+        if verb in t and not style:
+            style = "simpler"
+    if "shorter" in t and not style:
+        style = "shorter"
+    return {"style": style} if style else {}
+
+
+_LANGUAGE = re.compile(
+    r"\b(?:into|to|in)\s+(?P<lang>[a-z]+(?:\s+(?:chinese|creole))?)\s*[.!?]*$")
+_NOT_A_LANGUAGE = {"me", "it", "this", "that", "words", "english words", "plain",
+                   "text", "speech", "the", "a", "an"}
+
+
+def slots_translate(t: str) -> dict | None:
+    if slots_this(t) is None:
+        return None
+    m = _LANGUAGE.search(t)
+    if not m:
+        return {}                      # the tool asks which language
+    lang = m.group("lang").strip()
+    if lang in _NOT_A_LANGUAGE:
+        return {}
+    return {"language": lang}
 
 
 def slots_screenshot(t: str) -> dict | None:
@@ -2280,6 +2343,13 @@ def say_close(slots: dict, res: dict) -> str:
 
 def say_screenshot(slots: dict, res: dict) -> str:
     if "error" in res:
+        err = str(res.get("error") or "")
+        # The tool's own reason, when it has one worth hearing: a blank frame
+        # means the screen was locked or off, and "I couldn't" hid that.
+        if err.startswith("blank capture"):
+            return "That came out blank; the screen is locked or off, so there's nothing to capture."
+        if "not written" in err or "cannot use folder" in err:
+            return f"I couldn't save the screenshot: {err}"
         return "I couldn't take the screenshot."
     where = slots.get("destination")
     if where:
@@ -3576,6 +3646,42 @@ SKILLS: list[Skill] = [
         "what's on my clipboard", "read my clipboard", "what did i copy", "what's in the clipboard",
         "read me what i just copied", "show me my clipboard"],
         speak=say_clipboard),
+    # WORKING ON "THIS": the clipboard, or the Word selection when there is
+    # one (tools/text_tools.py). The tool still calls the model to do the
+    # work, so the reflex saves only the tool-selection round trip - about a
+    # second, on phrases he will use often. `speak=None`: the tool's own short
+    # confirmation is the line; the text itself is never read back.
+    # Deliberately "this"/"that"/"it": a bare "proofread my essay" is the open
+    # document, and "translate hello to spanish" (a general seed) has no
+    # "this" in it. "what does this say" stays the SCREEN'S.
+    Skill("proofread", "proofread_clipboard", [
+        "proofread this", "fix this", "tidy this up", "proofread that",
+        "fix the spelling in this", "check this for typos", "correct this",
+        "proofread what i copied", "fix the grammar in that", "spell check this",
+        "clean this up for me", "fix this up"],
+        slots=slots_this, speak=None),
+    Skill("rewrite", "rewrite_clipboard", [
+        "rewrite this to be more formal", "rewrite this to be friendlier",
+        "make this sound more professional", "make this shorter", "rewrite this",
+        "make this clearer", "simplify this", "rewrite that so it's more polite",
+        "make this more casual", "rephrase this", "reword this",
+        "make this sound less angry"],
+        slots=slots_rewrite, speak=None),
+    Skill("summarise", "summarise_clipboard", [
+        "summarise this", "summarize this", "give me the gist of this",
+        "sum this up", "summarise what i copied", "tl;dr this",
+        "give me the short version of this", "summarise that for me",
+        "what's the gist of this", "boil this down",
+        "give me the gist of what's on my clipboard", "what's the gist of what i copied",
+        "summarise what i just copied"],
+        slots=slots_this, speak=None),
+    Skill("translate", "translate_clipboard", [
+        "translate this into spanish", "translate this to french",
+        "translate what i copied into german", "put this in italian",
+        "translate that into japanese", "translate this into english",
+        "say this in portuguese", "turn this into spanish",
+        "translate this to mandarin", "translate it into korean"],
+        slots=slots_translate, speak=None),
     # WORKING IN THE DOCUMENT HE ALREADY HAS OPEN. Deliberately naming the
     # document or the sheet: a bare "what does this say" is the SCREEN, and
     # `look at this` belongs to that skill. These say which thing they mean.

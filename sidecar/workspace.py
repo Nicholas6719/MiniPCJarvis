@@ -48,7 +48,11 @@ from config import config
 
 log = logging.getLogger("jarvis.workspace")
 
-DEFAULT_ROOT = r"C:\Users\nicho\Documents\J.A.R.V.I.S"
+# His real Documents folder (folders.py: the local one, as he keeps it), not
+# a path typed in for one machine. config "workspace.root" still overrides it.
+from folders import save_folder  # noqa: E402
+
+DEFAULT_ROOT = str(save_folder("documents") / "J.A.R.V.I.S")
 
 # Where a project keeps things. Fixed names, because he should be able to open
 # any project folder and find the same shape without being told.

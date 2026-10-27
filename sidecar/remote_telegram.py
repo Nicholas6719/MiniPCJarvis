@@ -887,7 +887,13 @@ class TelegramBridge:
                     try:
                         shot = await registry.execute("take_screenshot", {})
                         got = (shot or {}).get("result") or {}
-                        if isinstance(got, dict) and got.get("path"):
+                        # A BLANK CAPTURE IS NOT A PHOTO. With the screen locked
+                        # the tool now answers {"error": "blank capture..."} and
+                        # no path; nothing is sent, and the line he gets says
+                        # what happened instead of showing a black rectangle.
+                        if isinstance(got, dict) and got.get("error"):
+                            log.info("no photo for the phone: %s", got["error"])
+                        elif isinstance(got, dict) and got.get("path"):
                             c["screenshot"] = got["path"]
                     except Exception:
                         log.warning("could not photograph the result", exc_info=True)

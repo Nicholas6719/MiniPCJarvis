@@ -114,6 +114,9 @@ CONFIRM_PHRASE = {
     "power_action": lambda a: f"{a.get('action', 'that').capitalize()} the computer?",
     "lock_computer": lambda a: "Lock the computer?",
     "browser_submit": lambda a: "Submit that form?",
+    # Name the target. Without an entry this asked "Should I run browser
+    # click?", which says nothing about WHAT would be clicked.
+    "browser_click": lambda a: f"Click \"{str(a.get('target', 'that'))[:60]}\" on the page?",
     # remote hands (R2): say exactly what will be typed/pressed/clicked
     "type_text": lambda a: f"Type \"{str(a.get('text', ''))[:60]}\""
                            + (f" into {a['window']}" if a.get("window") else "")
@@ -3395,6 +3398,19 @@ class Orchestrator:
                 if result.get("declined") or result.get("unconfirmed"):
                     # the user said no (or nothing): acknowledge and stop - never re-ask
                     line = "Alright, leaving it." if result.get("declined") else "I didn't get a yes, so I left it alone."
+                    await bus.emit("assistant_delta", text=line)
+                    await speak_queue.put(clean_for_speech(line))
+                    return (full_text + " " + line).strip()
+                # A CLICK REFUSED OUTRIGHT (tools/refusals.py): "Buy now",
+                # "Delete account", "Don't save". The tool's own sentence is
+                # the answer - handed back to the model it would try the next
+                # button, or ask him whether it should, and the owner's rule
+                # is that no yes overrides this one.
+                inner = result.get("result")
+                if isinstance(inner, dict) and inner.get("refused"):
+                    line = str(inner.get("error") or
+                               f"I won't click '{inner.get('control', 'that')}' myself, sir. "
+                               f"That one is yours.")
                     await bus.emit("assistant_delta", text=line)
                     await speak_queue.put(clean_for_speech(line))
                     return (full_text + " " + line).strip()

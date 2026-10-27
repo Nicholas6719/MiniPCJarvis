@@ -99,6 +99,8 @@ async def lifespan(app: FastAPI):
     phone.register_all()          # his calendar and Reminders, the same road (2026-09-15)
     from tools import site_tools
     site_tools.register_all()     # "find me X on Amazon" opens it where he can see it (2026-09-22)
+    from tools import text_tools
+    text_tools.register_all()     # "proofread this": the clipboard, through the local model
     vision_analyze.register_all() # phase 3 — reuses the existing Gemma vision model
     biometric.register_all()      # phase 4 — ADDITIVE to the spoken confirmation
     fabrication.register_all()    # phase 5 — no printer; NoPrinterBackend only

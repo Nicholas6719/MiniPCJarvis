@@ -299,6 +299,39 @@ def main() -> int:
               or brain.unsure is not None,
               "no last skill means it decides on the words alone")
 
+        print("\n-- 'this' is the clipboard (tools/text_tools.py) --")
+        # Not seed phrases. The reflex saves the tool-selection round trip on
+        # phrases he will say often; the tool still does the work.
+        for said, want in (("can you proofread this for me", "proofread"),
+                           ("tidy this up a bit", "proofread"),
+                           ("fix the typos in this", "proofread"),
+                           ("make this a bit more formal", "rewrite"),
+                           ("rewrite this so it sounds friendlier", "rewrite"),
+                           ("give me the gist of what i copied", "summarise"),
+                           ("sum this up for me", "summarise"),
+                           ("translate this into spanish for me", "translate"),
+                           ("put this into french", "translate")):
+            r = await brain.decide(said, context=empty)
+            check(f"{said!r} -> {want}", bool(r) and r[0].name == want,
+                  f"{r and r[0].name}@{r and round(r[2], 2)} unsure={(brain.unsure or {}).get('skill')}")
+        r = await brain.decide("translate this into spanish for me", context=empty)
+        check("...and the language rides along as a slot",
+              bool(r) and r[1].get("language") == "spanish", str(r and r[1]))
+        r = await brain.decide("make this a bit more formal", context=empty)
+        check("...and so does the style",
+              bool(r) and "formal" in r[1].get("style", ""), str(r and r[1]))
+        # What must NOT be the clipboard: a named thing is the model's.
+        for said in ("fix this bug in my code", "summarise this article for me",
+                     "proofread my essay", "translate hello to spanish"):
+            r = await brain.decide(said, context=empty)
+            landed = r[0].name if r else None
+            check(f"{said!r} is not a clipboard tool",
+                  landed not in ("proofread", "rewrite", "summarise", "translate"), str(landed))
+        # ...and the screen keeps its own sentence.
+        r = await brain.decide("what does this say", context=empty)
+        check("'what does this say' is still the screen, not a summary",
+              not r or r[0].name != "summarise", str(r and r[0].name))
+
         print("\n-- the screen decides what an ambiguous sentence means --")
         a = await brain.decide("make it bigger", context=stage)
         b = await brain.decide("make it bigger", context=empty)

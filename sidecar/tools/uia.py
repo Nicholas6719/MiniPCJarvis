@@ -20,6 +20,7 @@ import logging
 import re
 
 from events import bus
+from tools import refusals
 from tools.registry import Risk, Tool, registry, run_in_tool_pool
 
 log = logging.getLogger("jarvis.uia")
@@ -347,6 +348,28 @@ async def list_controls(window: str = "", clickable_only: bool = True,
             "controls": items[:max(1, min(80, limit))]}
 
 
+def _foreground_title() -> str:
+    """The title of the window in front; separate so a gate can stand in for it."""
+    try:
+        import win32gui
+        return (win32gui.GetWindowText(win32gui.GetForegroundWindow()) or "").strip()
+    except Exception:
+        return ""
+
+
+def _own_window(window: str | None) -> bool:
+    """Would this click land in JARVIS's own window?
+
+    He names a window, or the foreground one is taken; either way a click
+    into the HUD is JARVIS pressing his own buttons - a confirmation, a
+    settings toggle, a dismissal - on the model's say-so. Never."""
+    from tools.windows_tools import OWN_WINDOW_TITLE
+    own = OWN_WINDOW_TITLE.lower()
+    if window and window.strip():
+        return window.strip().lower() == own
+    return _foreground_title().lower() == own
+
+
 async def click_control(name: str, window: str = "", double: bool = False) -> dict:
     """Click the control called `name` — by its real identity, not coordinates."""
     from tools.input_tools import _locked
@@ -354,6 +377,9 @@ async def click_control(name: str, window: str = "", double: bool = False) -> di
         return {"error": "the PC is locked — Windows blocks clicking until it's unlocked"}
     if not (name or "").strip():
         return {"error": "which control should I click?"}
+    if _own_window(window):
+        return {"error": "that's my own window, sir — I don't click in it. Say what you'd "
+                         "like changed and I'll do it directly.", "own_window": True}
     try:
         found = await run_in_tool_pool(_collect, window or None)
     except Exception as e:
@@ -367,6 +393,13 @@ async def click_control(name: str, window: str = "", double: bool = False) -> di
     if best_score < 0.55:
         near = ", ".join(c["name"] for _, c in ranked[:5])
         return {"error": f"I don't see a control called {name}. The closest are: {near}"}
+    # THE MATCHED CONTROL'S REAL NAME, not his words. "Click the yellow button"
+    # can resolve to "Buy now"; the request says nothing, the control says it
+    # all. Refused outright - no confirmation overrides this (refusals.py).
+    hit = refusals.is_dangerous(best["name"])
+    if hit:
+        log.info("refusing to click %r (%s) in %s", best["name"], hit, window or "foreground")
+        return refusals.refusal(best["name"], hit)
     # Prefer the control's own Invoke: it works even when something overlaps it.
     def _invoke() -> bool:
         import comtypes
