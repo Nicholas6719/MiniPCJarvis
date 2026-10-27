@@ -5360,6 +5360,80 @@ times). Moved above the class; gated. Then his items 1-3:
    iCloud, phone status -> shortcut, health -> shortcut) and the card.
 - Memory after the 10-23 reboot: llama-server 14.4 GB private, 5.6 GB free.
 
+### 2026-10-27 - what PCJarvis knew that we did not (release 89)
+His sibling project (github.com/Nicholas6719/PCJarvis, a 7B on a Yoga, last
+commit 08-20) was read end to end and compared lead by lead; the report is in
+the 10-27 chat (artifact "PCJarvis Takeaways"). Most of its hard lessons we
+had first (task anchoring, stable prefix, text-only history, away -> phone).
+Ten items were built, three worktrees in parallel, merged here:
+1. **Tests leave his history alone.** `/text {record:false}` sets a
+   contextvar (`recording.py`); `log_turn`/`log_turn_stat` return early, so
+   day_memory and `self_assess` no longer count suite turns as his. Every
+   e2e driver and the suites.ps1 warm-up pass it; `/debug/silence` implies
+   it. `facts_e2e.py` still records on purpose (it anchors on its own row).
+2. **Honest failures.** `take_screenshot` says "blank capture: the screen is
+   locked or off" on a uniform frame and writes nothing; `say_clipboard`
+   no longer says "empty" on an error (3 retries, locked-screen wording);
+   sleep calls `SetSuspendState` and reports its BOOL (it returns on WAKE);
+   `read_file` names the root it matched and "first N of M characters".
+   NEW `folders.py` (SHGetKnownFolderPath): the read sandbox in
+   `builtin.py` had been built from the UNREDIRECTED `~\Desktop`, so a file
+   on his real OneDrive Desktop was rejected. Note: Windows registers
+   Documents under OneDrive here too; `save_folder()` keeps Documents local
+   on purpose, only Desktop follows the redirect.
+3. **Event watches** (`standing.py`, `tools/watch_tools.py`): "tell me when
+   the download / HandBrake / the build finishes", "when the battery hits
+   80". Kept in `standing_watches`, 7-day expiry; a process watch ARMS only
+   after it has seen the exe (so a watch set before the build starts
+   works; he says "I don't see X running yet"); fired rows are deleted
+   before the sentence is returned; delivered via `delivery.deliver(ALERT,
+   key="watch:<id>")` directly, never `_fire` (quiet hours and the 2/hour
+   cap must not drop a requested report). `awareness.arrived` feeds
+   download watches; `seen_downloads` now persists in volatile.
+4. **Refusals** (`tools/refusals.py`): buy / checkout / add to cart /
+   delete account / uninstall / format... are REFUSED outright on the
+   matched control's REAL name, in `uia.click_control` and
+   `browser/session.click` alike; no yes overrides it, he says "That one is
+   yours." `click_control` will not touch his own window. `browser_click`'s
+   confirm phrase finally names the target. Decisions in the gate: bare
+   Delete/Save/Send allowed, "Format Painter" allowed, PayPal refused.
+5. **Held items are SAID on return, once.** `delivery.presence_watch`
+   (30 s, two-sample debounce) + `take_return()`; `replay_held()` speaks up
+   to three first sentences of ledger rows with outcome `held`, keyed
+   `held:<ts>`, marks them `replayed` (new `deliveries.replayed`, rowid).
+   `_wake_ack_line` appends `held_line()`; "what did I miss" twice ->
+   "Nothing new since then, sir." Never URGENT, never what reached Telegram.
+6. **Readings** (`readings`, `app_context`, 14 days, once a minute from
+   `run_checks`; exe NAME only, never titles): "has memory been climbing
+   this week", "what have I been doing today" (`been_doing` reflex); the
+   RAM alert adds "up N points on last week" once there is a week. Without
+   a baseline he says so instead of implying a trend.
+7. **Clipboard "this"** (`tools/text_tools.py`): proofread / rewrite /
+   summarise / translate the clipboard on the local model; result back on
+   the clipboard (a Word selection is replaced in place), summary spoken;
+   4,000-char cap; the text never reaches a log or Telegram.
+8. **`tests/audit_tree.py`** after check_names: FAILS on an orphaned method
+   (a `self` def whose parent is a function: the `_memory_hogs` paste),
+   a bare `create_task`/`ensure_future` (replaces the regex in
+   test_background_tasks), a `config.get` with no default; REPORTS dead
+   module-level names (22 today) and never-read defaults (5).
+9. **Muted microphone** (`audio/capture_mute.py`, `_mute_check` in the
+   device watch): `IAudioEndpointVolume.GetMute` on its own COM thread every
+   60 s, or 60 s of exact-zero frames; said once per episode, never under
+   the test mute, held while he is away. A muted mic is otherwise
+   indistinguishable from a dead wake word.
+10. **Memories are markdown** (`memory/vault.py`): one file per memory in
+    `Documents\JARVIS\Memory`, DB is the index; synced on a names+mtime+size
+    fingerprint before every search/list (no file opened when unchanged);
+    delete = forget, edit = correct, add = teach; migrated on first run;
+    the HUD shows the folder. ONLY `memories` - facts and volatile stay in
+    the DB (hand-editing a verified fact would bypass its sources; a
+    reading without its timestamp is noise). Gates use a temp vault beside
+    JARVIS_DB; `test_isolation` asserts it is never the real folder.
+Dropped with reasons: taught vocabulary (Parakeet via onnx_asr has no
+biasing input; WER 0.6 %), habit noticing, all of PCJarvis's prompt-cache
+work (done here first).
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the
