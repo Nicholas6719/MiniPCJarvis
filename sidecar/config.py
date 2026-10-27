@@ -21,14 +21,20 @@ LOG_DIR.mkdir(exist_ok=True)
 # measures the code as written rather than whatever the live brain has learned.
 DB_PATH = Path(os.environ.get("JARVIS_DB") or (APP_DIR / "jarvis.db"))
 
+from folders import save_folder  # noqa: E402  (ctypes only; no config import)
+
 DEFAULTS: dict[str, Any] = {
     "general": {"first_run_complete": False},
-    # the user's real folders (Desktop is OneDrive-redirected on this PC)
+    # His real folders, resolved rather than typed in (folders.py): the
+    # Desktop follows Windows' OneDrive redirect because that is the one on
+    # screen; Documents, Downloads and Pictures stay on the local drive, as he
+    # keeps them. A literal path is right for exactly one machine; a
+    # config.json entry still wins over these.
     "folders": {
-        "desktop": r"C:\Users\nicho\OneDrive\Desktop",
-        "documents": r"C:\Users\nicho\Documents",
-        "downloads": r"C:\Users\nicho\Downloads",
-        "pictures": r"C:\Users\nicho\Pictures",
+        "desktop": str(save_folder("desktop")),
+        "documents": str(save_folder("documents")),
+        "downloads": str(save_folder("downloads")),
+        "pictures": str(save_folder("pictures")),
     },
     "llm": {
         "server_binary": r"C:\AI\llama.cpp\llama-server.exe",

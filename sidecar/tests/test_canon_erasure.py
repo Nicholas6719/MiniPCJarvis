@@ -82,6 +82,15 @@ SUBSYSTEMS: dict[str, list[str]] = {
     "screen": ["look at my screen", "what's on my screen", "describe my screen"],
     "music": ["put on some music", "play some music"],
     "volume": ["turn the volume down", "set the volume"],
+    # "THIS" IS THE CLIPBOARD (tools/text_tools.py). The word is the whole
+    # difference between "proofread this" (the clipboard) and "proofread my
+    # essay" (the model), so a rewrite that drops it sends the clipboard
+    # tools' phrasings to the model every time.
+    "this": [
+        "proofread this", "fix this", "tidy this up", "summarise this",
+        "summarize this", "rewrite this to be more formal", "make this shorter",
+        "translate this into spanish", "put this in italian", "simplify this",
+    ],
 }
 
 

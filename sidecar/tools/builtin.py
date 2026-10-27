@@ -17,9 +17,24 @@ from tools.registry import Risk, Tool, registry
 log = logging.getLogger("jarvis.tools.builtin")
 
 _HOME = Path.home()
-_ALLOWED_READ_ROOTS = [
-    _HOME / "Documents", _HOME / "Downloads", _HOME / "Desktop", _HOME / "Pictures",
-]
+
+
+def _read_roots() -> dict[str, Path]:
+    """Where read_file may look: his REAL Desktop, Documents, Downloads, Pictures.
+
+    This used to be the home folder plus "Desktop" - the unredirected one. On
+    this PC the Desktop lives under OneDrive, so "read desktop/notes.txt"
+    looked in a folder he never uses, found nothing, and the sandbox check then
+    rejected the real path as "outside allowed folders". The configured
+    folders (which default to the resolved ones, see folders.py) are the
+    truth; the resolved folders fill any the config does not name.
+    """
+    from folders import save_folder
+    from tools.file_tools import roots
+    out = dict(roots())
+    for key in ("desktop", "documents", "downloads", "pictures"):
+        out.setdefault(key, save_folder(key))
+    return out
 
 # Friendly-name launch table; anything else falls through to PATH lookup.
 _APP_ALIASES = {
@@ -764,30 +779,50 @@ def _within(path, root) -> bool:
 
 
 def read_file(path: str, max_chars: int = 4000) -> dict:
-    p = Path(path).expanduser()
+    roots = _read_roots()
+    raw = (path or "").strip().strip('"')
+    p = Path(raw).expanduser()
+    matched = ""                      # which root a relative name resolved under
     if not p.is_absolute():
-        for root in _ALLOWED_READ_ROOTS:
-            cand = root / path
-            if cand.exists():
-                p = cand
-                break
+        # "desktop/notes.txt" names its root; "notes.txt" is looked for in each.
+        key = raw.replace("\\", "/").split("/", 1)[0].lower()
+        if key in roots and "/" in raw.replace("\\", "/"):
+            p = roots[key] / raw.replace("\\", "/").split("/", 1)[1]
+            matched = key
+        else:
+            for name, root in roots.items():
+                cand = root / raw
+                if cand.exists():
+                    p, matched = cand, name
+                    break
     try:
         p = p.resolve()
     except OSError:
         return {"error": "invalid path"}
-    if not any(_within(p, r) for r in _ALLOWED_READ_ROOTS):
-        return {"error": f"reading outside allowed folders (Documents/Downloads/Desktop/Pictures) "
-                         f"is not permitted: {p}"}
+    if not any(_within(p, r) for r in roots.values()):
+        allowed = ", ".join(f"{k} ({v})" for k, v in roots.items())
+        return {"error": f"reading outside allowed folders is not permitted: {p}. "
+                         f"Allowed: {allowed}"}
     if not p.exists() or not p.is_file():
-        return {"error": f"file not found: {p}"}
+        where = f" (looked under {matched})" if matched else ""
+        return {"error": f"file not found: {p}{where}"}
     if p.stat().st_size > 5_000_000:
         return {"error": "file too large to read directly"}
     try:
         text = p.read_text("utf-8", errors="replace")
     except Exception as e:
         return {"error": f"could not read file: {e}"}
-    truncated = len(text) > max_chars
-    return {"path": str(p), "truncated": truncated, "content": text[:max_chars]}
+    max_chars = max(1, int(max_chars or 4000))
+    total = len(text)
+    truncated = total > max_chars
+    out = {"path": str(p), "truncated": truncated, "content": text[:max_chars],
+           "chars": total, "shown": min(total, max_chars)}
+    if matched:
+        out["root"] = matched            # say WHERE it was found, not just that it was
+    if truncated:
+        # "first 4,000 of 61,200 characters": the honest size of what he got.
+        out["note"] = f"first {max_chars:,} of {total:,} characters"
+    return out
 
 
 def watch_metric(metric: str, op: str, value: float, for_min: int = 0, message: str = "") -> dict:

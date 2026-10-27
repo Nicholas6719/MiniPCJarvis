@@ -15,8 +15,28 @@ import base64
 import logging
 
 from events import bus
+from tools import refusals
 
 log = logging.getLogger("jarvis.browser")
+
+
+async def _element_label(locator) -> str:
+    """What the matched element actually SAYS: its text, else its accessible
+    name, else the value of an <input type=submit>. Short timeouts: the element
+    was just found, and a stall here must not cost the click its budget."""
+    for getter in (
+        lambda: locator.inner_text(timeout=1500),
+        lambda: locator.get_attribute("aria-label", timeout=800),
+        lambda: locator.get_attribute("value", timeout=800),
+        lambda: locator.get_attribute("title", timeout=800),
+    ):
+        try:
+            got = await getter()
+        except Exception:
+            continue
+        if got and str(got).strip():
+            return " ".join(str(got).split())[:120]
+    return ""
 
 MAX_TEXT = 3000
 SHOT_W, SHOT_H = 1200, 900
@@ -125,7 +145,16 @@ class BrowserSession:
         return await self._act("evaluate", fn)
 
     async def click(self, target: str) -> dict:
-        """Click by visible text / accessible name; falls back to CSS selector."""
+        """Click by visible text / accessible name; falls back to CSS selector.
+
+        A purchase or a destructive control is refused OUTRIGHT (tools/refusals.py),
+        and it is judged on the matched element's REAL label, read before the
+        click - not on the words he used, which may be "the yellow button"."""
+        # His own words first: cheap, and it needs no page at all.
+        hit = refusals.is_dangerous(target)
+        if hit:
+            return refusals.refusal(target, hit)
+
         async def fn(page):
             tried = []
             for locator in (
@@ -134,11 +163,26 @@ class BrowserSession:
                 page.get_by_text(target, exact=False),
                 page.locator(target),
             ):
+                first = locator.first
                 try:
-                    await locator.first.click(timeout=4000)
+                    if await locator.count() == 0:
+                        tried.append("no match")
+                        continue
+                except Exception as e:          # a CSS-invalid fallback selector
+                    tried.append(str(e).split("\n")[0][:80])
+                    continue
+                label = await _element_label(first)
+                hit = refusals.is_dangerous(label)
+                if hit:
+                    log.info("refusing to click %r (%s) on %s", label, hit, page.url)
+                    out = refusals.refusal(label, hit)
+                    out["url"] = page.url
+                    return out
+                try:
+                    await first.click(timeout=4000)
                     await page.wait_for_timeout(900)
                     obs = await self.observe()
-                    obs["clicked"] = target
+                    obs["clicked"] = label or target
                     return obs
                 except Exception as e:
                     tried.append(str(e).split("\n")[0][:80])
