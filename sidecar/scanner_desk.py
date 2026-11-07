@@ -75,7 +75,7 @@ SENT = ("spoken", "telegram")
 # said at the PC only when he is idle, never cutting into what he is doing.
 FYI = "fyi"
 _RANK = {"": 0, "notable": 1, FYI: 1, ALERT: 2, URGENT: 3}
-_DAILY_CAP = {URGENT: 4, ALERT: 8, FYI: 30}
+_DAILY_CAP = {URGENT: 4, ALERT: 8, FYI: 80}       # FYI raised with medical and police calls
 SAID_KEEP = 10            # transmissions kept per incident: the dispatch and its follow-ups
 
 
@@ -533,6 +533,10 @@ class ScannerDesk:
         if now - self._last_retry >= 60:
             self._last_retry = now
             await self._retry_pending()
+            try:
+                await self._morning_summary(now)
+            except Exception:
+                self._log_every("morning", 3600, logging.WARNING, "scanner: the morning summary failed", exc=True)
         if now - self._last_prune >= 86400:
             self._last_prune = now
             store.prune(now)
@@ -1006,8 +1010,8 @@ class ScannerDesk:
         incident, and its message read "2 vehicles; hit and run; 1 vehicle".
         Only crashes and police calls: a fire is long, and "another report of
         heavy smoke" is the same fire getting worse, not a second one."""
-        if inc.get("family") not in ("traffic", "police"):
-            return False
+        if inc.get("family") not in ("traffic", "police", "ems"):
+            return False                 # medical calls are short too; fires are not
         if reading.types and self._ANOTHER.search(text or ""):
             return True
         return now - float(inc["last_ts"]) > self.SHORT_CALL_S
@@ -1173,7 +1177,15 @@ class ScannerDesk:
                 return None, why
             tier = FYI
         if self.quiet_hours() and not (tier == URGENT and town == home):
-            return None, f"quiet hours ({why})"
+            # HIS NIGHT (his answer, 2026-11-07: "send silently plus in morning
+            # summary"): everything still goes, silently - the quiet feed is
+            # never spoken at night (notify_policy.NIGHT_SILENT) and danger
+            # outside Framingham loses its sound. Danger in Framingham itself
+            # still wakes him. scanner.night = "hold" restores holding.
+            if str(_cfg("night", "silent")) == "hold":
+                return None, f"quiet hours ({why})"
+            if tier == URGENT:
+                tier, why = ALERT, f"{why} (at night, silently: not in his own town)"
         caps = _cfg("max_per_day", {}) or {}
         cap = int(caps.get(tier, _DAILY_CAP[tier])) if isinstance(caps, dict) else _DAILY_CAP[tier]
         used = store.sent_count(tier, now - 86400)
@@ -1602,6 +1614,76 @@ class ScannerDesk:
             except OSError:
                 pass
 
+    # ------------------------------------------------------------ the morning summary
+    MORNING_KEY = "scanner:morning"
+
+    async def _morning_summary(self, now: float) -> bool:
+        """One silent message at the end of his night listing what the radio
+        carried (his answer, 2026-11-07: "send silently plus in morning
+        summary"). Once a day, claimed before it is sent so a restart cannot
+        send it twice; not after noon (a summary at 3 PM is not a morning).
+        True when it went out."""
+        if not _cfg("morning_summary", True):
+            return False
+        try:
+            hh, mm = (int(x) for x in str(_cfg("morning_summary_at", "08:00")).split(":"))
+        except ValueError:
+            return False
+        t = dt.datetime.fromtimestamp(now)
+        due = t.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if t < due or t.hour >= 12:
+            return False
+        day = t.strftime("%Y-%m-%d")
+        import volatile
+        if (volatile.get(self.MORNING_KEY) or {}).get("value", {}).get("day") == day:
+            return False
+        if not volatile.put(self.MORNING_KEY, {"day": day}, source="scanner"):
+            return False                        # claim first: no claim, no message
+        start = due.timestamp() - float(_cfg("night_hours", 10)) * 3600
+        spoken, written = self.night_summary(start, due.timestamp())
+        r = await self._deliver(spoken, ALERT, key=f"scanner-night:{day}",
+                                subject="scanner-fyi: the night's calls", written=written)
+        log.info("scanner: morning summary -> %s: %s", r.get("delivered"), spoken)
+        return str(r.get("delivered")) in SENT
+
+    def night_summary(self, start: float, end: float) -> tuple[str, str]:
+        """(spoken, written) for the night between start and end."""
+        home = home_town().name
+        head = f"SCANNER - overnight, {_hm(start)} to {_hm(end)}"
+        hits = store.hits_since(start, until=end)
+        if not hits:
+            msg = ("The scanner console was offline overnight, so I have nothing from the radio."
+                   if self.up is False else "Nothing on the scanner overnight, sir.")
+            return msg, f"{head}\n{msg}"
+        incs = [i for i in store.incidents_since(start) if float(i["first_ts"]) < end
+                and (i.get("types") or i.get("burst"))]
+        incs.sort(key=lambda i: float(i["first_ts"]))
+        calls = [i for i in incs if i.get("types")]
+        busy = [i for i in incs if i.get("burst") and not i.get("types")]
+        n = len(hits)
+        lines = [head, f"{n} transmissions heard; " + (f"{len(calls)} call{'s' if len(calls) != 1 else ''}:"
+                                                        if calls else "nothing worth a message.")]
+        for i in calls[:25]:
+            town = i.get("town") or "?"
+            dist = "home" if town == home else f"{float(i.get('miles') or 0):.0f} mi"
+            facts = "; ".join([d for d in (i.get("details") or []) if d != "units on scene"][:3])
+            lines.append(f"{_hm(float(i['first_ts']))}  {_cap(i.get('label') or 'a call')}"
+                         + (f" - {i['address']}" if i.get("address") else "") + f", {town} ({dist})"
+                         + (f" - {facts}" if facts else ""))
+        if len(calls) > 25:
+            lines.append(f"...and {len(calls) - 25} more")
+        if busy:
+            lines.append("Busy spells: " + ", ".join(
+                f"{rules.parse_label(i.get('channel') or '').spoken} {_hm(float(i['first_ts']))}" for i in busy[:6]))
+        if calls:
+            said = [f"{i.get('label')} in {i.get('town')}" if i.get("town") != home else f"{i.get('label')} here"
+                    for i in calls[:3]]
+            joined = said[0] if len(said) == 1 else ", ".join(said[:-1]) + f" and {said[-1]}"
+            spoken = f"Overnight on the scanner, sir: {joined}" + (f", and {len(calls) - 3} more" if len(calls) > 3 else "") + "."
+        else:
+            spoken = f"A quiet night on the scanner, sir: {n} transmissions, nothing worth a message."
+        return spoken, "\n".join(lines)[:self.MAX_WRITTEN]
+
     # ------------------------------------------------------------ for the briefs
     def _worth(self, inc: dict) -> bool:
         types = set(inc.get("types") or [])
@@ -1753,16 +1835,18 @@ class ScannerDesk:
                     s += ", now over"
                 items.append(s)
             line = f"In {t.name}, {dist}: " + "; and ".join(items) + "."
-            more = self._spoken_details(incs[0]).strip()       # only what was heard, word for word
+            # the newest real call's facts (a busy spell has none to give)
+            top = next((i for i in incs if i.get("types")), incs[0])
+            more = self._spoken_details(top).strip()       # only what was heard, word for word
             if more:
                 line += " " + (more if more.endswith(".") else more + ".")
             if hits:
                 line += f" {len(hits)} call{'s' if len(hits) != 1 else ''} from there in the last hour."
             card = [_cap(x) for x in items]
-            if incs[0].get("units"):
-                card.insert(1, "Units: " + ", ".join(incs[0]["units"][:6]))
-            if incs[0].get("details"):
-                card.insert(1, "Known: " + "; ".join(incs[0]["details"][:4]))
+            if top.get("units"):
+                card.insert(1, "Units: " + ", ".join(top["units"][:6]))
+            if top.get("details"):
+                card.insert(1, "Known: " + "; ".join(top["details"][:4]))
             await self._query_card(t.name, card)
             return line
         if hits:

@@ -94,7 +94,13 @@ KINDS: dict[str, Kind] = {k.key: k for k in (
     Kind("robbery", "a robbery", "police", 6, False),
     Kind("missing_person", "a missing person", "police", 5, False),
     Kind("break_in", "a break-in", "police", 4, False),
-    Kind("disturbance", "a disturbance", "police", 2, False),
+    # His police calls (2026-11-07, his answer: "Medical calls, Police calls"):
+    # each reaches him quietly from anywhere in his radius (severity 3).
+    Kind("larceny", "a theft report", "police", 3, False),
+    Kind("suspicious", "suspicious activity", "police", 3, False),
+    Kind("disturbance", "a disturbance", "police", 3, False),
+    Kind("welfare_check", "a well-being check", "police", 3, False),
+    Kind("traffic_stop", "a traffic stop", "police", 3, False),
     Kind("entrapment", "a crash with entrapment", "traffic", 9, True),
     Kind("pedestrian_struck", "a pedestrian struck", "traffic", 7, False),
     Kind("rollover", "a rollover crash", "traffic", 6, False),
@@ -102,6 +108,14 @@ KINDS: dict[str, Kind] = {k.key: k for k in (
     Kind("mva", "a crash", "traffic", 3, False),
     Kind("cardiac_arrest", "a cardiac arrest", "ems", 5, False),
     Kind("overdose", "an overdose", "ems", 4, False),
+    # His medical calls (2026-11-07): the complaint is the detail he wants.
+    Kind("unconscious", "someone unconscious", "ems", 4, False),
+    Kind("breathing", "someone having trouble breathing", "ems", 4, False),
+    Kind("chest_pain", "a chest pain call", "ems", 4, False),
+    Kind("stroke", "a possible stroke", "ems", 4, False),
+    Kind("seizure", "a seizure", "ems", 3, False),
+    Kind("fall", "a fall", "ems", 3, False),
+    Kind("medical", "a medical call", "ems", 3, False),
 )}
 TRAFFIC = {"entrapment", "pedestrian_struck", "rollover", "mva"}
 # A burst on a fire channel is a kind with no words behind it.
@@ -172,8 +186,15 @@ PATTERNS: dict[str, re.Pattern] = {
     "break_in": _P(r"\b(?:b ?(?:and|&|n) ?e|breaking and entering|break[- ]?in|burglary|burglar alarm"
                    r"|house break|forced entry|broke into|breaking into)\b"),
     "disturbance": _P(r"\b(?:disturbance|fight|fighting|domestic|assault(?:ed)?|altercation|disorderly"
-                      r"|shoplift(?:ing|er)?|larceny|suspicious (?:person|vehicle|activity|male|female|party)"
-                      r"|noise complaint|trespass(?:ing)?)\b"),
+                      r"|noise complaint|trespass(?:ing)?|unwanted (?:party|guest|person))\b"),
+    "larceny": _P(r"\b(?:larceny|shoplift(?:ing|er|ed)?|theft|stolen|steal(?:ing)?|pick ?pocket(?:ed)?"
+                  r"|(?:took|grabbed|snatched) (?:her|his|my|a|the) (?:purse|wallet|phone|bag|bike|package))\b"),
+    "suspicious": _P(r"\bsuspicious (?:person|vehicle|activity|male|female|party|car|individual|circumstances"
+                     r"|subject|people|truck|van)\b|\bsuspicious(?:ly)? (?:looking|acting)\b|\bprowler\b"),
+    "welfare_check": _P(r"\b(?:well[- ]?being check|wellness check|welfare check|check (?:on )?(?:the )?"
+                        r"(?:well[- ]?being|welfare)|check on (?:a|an|the) (?:elderly|resident|party|male|female))\b"),
+    "traffic_stop": _P(r"\b(?:traffic stop|motor vehicle stop|m ?v stop|car stop|vehicle stop|pulled (?:over|him over"
+                       r"|her over|a car over|a vehicle over)|stopping a (?:car|vehicle))\b"),
     "entrapment": _P(r"\b(?:entrapment|entrapped|trapped|pinned (?:in|under)|extrication|extricate|jaws of life"
                      r"|cut (?:him|her|them) out|heavy rescue)\b"),
     "pedestrian_struck": _P(r"\b(?:pedestrian (?:struck|hit|down|versus|vs\.?|accident)|ped (?:struck|hit|versus)"
@@ -196,12 +217,27 @@ PATTERNS: dict[str, re.Pattern] = {
     "cardiac_arrest": _P(r"\b(?:cardiac arrest|cpr (?:in progress|being done|started)|(?:performing|doing|started) cpr"
                          r"|not breathing|no pulse|pulseless|full arrest|code (?:blue|99)|apneic)\b"),
     "overdose": _P(r"\b(?:overdose|over dose|narcan|naloxone|possible o ?d)\b"),
+    "unconscious": _P(r"\b(?:unconscious|unresponsive|passed out|syncop(?:e|al)|fainted|fainting)\b"),
+    "breathing": _P(r"\b(?:difficulty breathing|trouble breathing|shortness of breath|short of breath"
+                    r"|respiratory (?:distress|problems?|issues?)|can(?:not|'t) breathe|labored breathing"
+                    r"|having (?:a hard time|trouble) breathing|asthma attack)\b"),
+    "chest_pain": _P(r"\b(?:chest pains?|heart attack|cardiac (?:symptoms|issue|problem|complaint))\b"),
+    "stroke": _P(r"\b(?:stroke|cva|slurred speech|facial droop|stroke symptoms)\b"),
+    "seizure": _P(r"\b(?:seiz(?:ure|ures|ing)|convuls(?:ion|ions|ing))\b"),
+    "fall": _P(r"\b(?:fell|fallen|has fallen|(?:a|the) fall\b(?! (?:alarm|season))|fall victim|slip(?:ped)? and fell"
+               r"|lift assist|fell down)\b"),
+    "medical": _P(r"\b(?:medical (?:call|emergency|aid|alarm|assist(?:ance)?)|for a medical|ems call|sick (?:person"
+                  r"|party|male|female|child)|abdominal pains?|allergic reaction|diabetic(?: emergency| problem)?"
+                  r"|bleeding|laceration|psych(?:iatric)? (?:emergency|eval(?:uation)?)|mental health"
+                  r"|emotionally disturbed|intoxicated (?:person|party|male|female)|nose ?bleed"
+                  r"|dizz(?:y|iness)|vomiting|back pain|head injury)\b"),
 }
 
 # Read BEFORE anything is matched: "no entrapment", "nobody is trapped",
 # "negative for fire extension" must not read as the thing they deny.
 _NEGATED = (r"(?:entrapment|entrapped|trapped|injur\w*|injuries|fire|smoke|flames?|extension|hazards?|shots?|"
-            r"weapons?|gun|knife|pursuit)")
+            r"weapons?|gun|knife|pursuit|unconscious|unresponsive|chest pains?|seizures?|bleeding|stolen|"
+            r"suspicious|breathing problems?|difficulty breathing|trouble breathing)")
 _NEG = re.compile(
     r"\b(?:no|negative(?: for)?|not|nobody|no one|without|nothing)\s+"
     r"(?:(?:a|an|the|any|one|more|further|visible|working|reported|is|are|was|were|signs? of|"

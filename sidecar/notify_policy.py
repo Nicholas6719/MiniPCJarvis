@@ -39,7 +39,11 @@ HIS_OWN = frozenset({"reminder", "watch"})
 # scanner calls in an hour must not spend the room his reminders need
 # (delivery._over_budget; review of 2026-11-07)
 OWN_CEILING = frozenset({"scanner_fyi"})
-DEFAULT_QUIET_PER_HOUR = 8
+DEFAULT_QUIET_PER_HOUR = 12
+# kinds never SPOKEN inside his quiet hours, even with him at the PC: the
+# scanner's night calls go to his phone silently (his answer, 2026-11-07:
+# "send silently plus in morning summary")
+NIGHT_SILENT = frozenset({"scanner_fyi"})
 DEFAULT_DAILY_SOUNDS = 5
 
 

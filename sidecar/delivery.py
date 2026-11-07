@@ -557,6 +557,8 @@ class Delivery:
             await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
             return {"delivered": "held for the next brief", "tier": tier}
 
+        if present and kind in notify_policy.NIGHT_SILENT and _in_quiet_hours():
+            present = False                     # at night it waits on his phone, unspoken
         if present:
             spoke = await self._speak(text, interrupt=notify_policy.interrupts(tier, kind))
             if spoke:

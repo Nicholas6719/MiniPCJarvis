@@ -378,7 +378,15 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         ("a reported structure fire in Wayland", inc("Wayland", ["structure_fire"]), SD.FYI),
         ("a fire alarm in Framingham, his own town", inc("Framingham", ["alarm"]), SD.FYI),
         ("a fire alarm in Natick: routine elsewhere", inc("Natick", ["alarm"]), None),
-        ("a disturbance in Natick: routine elsewhere", inc("Natick", ["disturbance"]), None),
+        # his police and medical calls (his answer, 2026-11-07)
+        ("a disturbance in Natick", inc("Natick", ["disturbance"]), SD.FYI),
+        ("a theft report in Wellesley", inc("Wellesley", ["larceny"]), SD.FYI),
+        ("suspicious activity in Hudson", inc("Hudson", ["suspicious"]), SD.FYI),
+        ("a traffic stop in Wayland", inc("Wayland", ["traffic_stop"]), SD.FYI),
+        ("a well-being check in Natick", inc("Natick", ["welfare_check"]), SD.FYI),
+        ("a chest pain call in Sudbury", inc("Sudbury", ["chest_pain"]), SD.FYI),
+        ("a fall in Framingham", inc("Framingham", ["fall"]), SD.FYI),
+        ("a medical call in Leominster, out of range", inc("Leominster", ["medical"]), None),
         ("a crash heard once, unclearly", inc("Sudbury", ["mva"], said=shaky1), None),
         ("...heard twice, it is believed", inc("Sudbury", ["mva"], said=shaky2), SD.FYI),
         ("...or once, unclearly, with a second transmission agreeing",
@@ -398,14 +406,22 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     got, why = desk.decide(inc("Natick", ["alarm"]))
     check("...and why it is not", "routine" in why, why)
     quiet[0] = True
+    # HIS NIGHT (his answer, 2026-11-07): "send silently plus in morning summary"
     got, _ = desk.decide(inc("Framingham", ["working_fire"]))
-    check("quiet hours: an URGENT in his own town still reaches him", got == URGENT)
+    check("night: danger in his own town still wakes him (URGENT)", got == URGENT)
     got, why = desk.decide(inc("Natick", ["working_fire"]))
-    check("quiet hours: an URGENT one town over waits", got is None and "quiet" in why, why)
+    check("night: danger one town over still goes - silently, as an ALERT" if near_natick == URGENT
+          else "night: danger one town over goes as an ALERT", got == ALERT and (
+              "silently" in why if near_natick == URGENT else True), why)
     got, why = desk.decide(inc("Wellesley", ["mva"], ["Route 9"]))
-    check("quiet hours: an ALERT waits", got is None and "quiet" in why, why)
+    check("night: an ALERT goes", got == ALERT, why)
     got, why = desk.decide(inc("Natick", ["mva"]))
-    check("quiet hours: the quiet feed waits too (no pile of crashes at dawn)", got is None and "quiet" in why, why)
+    check("night: the quiet feed goes (never spoken - notify_policy.NIGHT_SILENT)", got == SD.FYI, why)
+    config.data.setdefault("scanner", {})["night"] = "hold"
+    got, why = desk.decide(inc("Natick", ["mva"]))
+    check("...and scanner.night = 'hold' brings back holding everything till morning",
+          got is None and "quiet" in why, why)
+    config.data["scanner"].pop("night", None)
     quiet[0] = False
     config.data.setdefault("scanner", {})["fyi"] = False
     got, why = desk.decide(inc("Natick", ["mva"]))
@@ -583,10 +599,11 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           and loud()[0]["key"] == f"scanner:{fire['id']}", calls["deliver"])
     check("the model was asked without waiting for a quiet moment (URGENT), and never for the quiet line "
           "(it invents details from weak audio)", calls["summ"] == [True], calls["summ"])
+    clip_of = lambda words: [c for c in calls["clip"] if words in c[2]]
     check("he was away, so the transmission itself went to his phone",
-          len(calls["clip"]) == 2 and calls["clip"][0][1] and "smoke showing" in calls["clip"][0][2], calls["clip"])
-    check("...and the quiet call's recording went too", len(calls["clip"]) == 2 and "gas leak" in calls["clip"][1][2],
-          calls["clip"])
+          len(clip_of("smoke showing")) == 1 and clip_of("smoke showing")[0][1], calls["clip"])
+    check("...and the quiet calls' recordings went too (the gas leak, the Waltham disturbance)",
+          len(clip_of("gas leak")) == 1 and len(clip_of("a disturbance")) == 1, calls["clip"])
     check("...and the clip files were cleaned up", calls["clip"] and not any(Path(c[0]).exists() for c in calls["clip"]))
     want_mid = 7000 + calls["deliver"].index(g[0]) + 1 if g else -1
     check("the message ids came back and were kept, so the call's message can grow",
@@ -614,7 +631,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     await desk.settle()
     check("the stand-down closed it", S.incident(fire["id"])["status"] == "over"
           and S.hit(h7)["incident_id"] == fire["id"])
-    check("...and nothing more was sent", len(loud()) == 2 and len(quiet_feed()) == 1, calls["deliver"])
+    gas_lines = lambda: [c for c in quiet_feed() if c["key"] == f"scanner-fyi:{gas['id']}"]
+    check("...and nothing more was sent", len(loud()) == 2 and len(gas_lines()) == 1, calls["deliver"])
     check("a different street in the same town is a different incident",
           S.incident(S.hit(h4)["incident_id"])["id"] != fire["id"])
 
@@ -634,7 +652,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     new_edits = calls["edit"][edits_before:]
     check("...and his message for that call is edited (silently) - not a second message",
           new_edits and new_edits[-1][0] == gas2["msg_id"] and "transported to Emerson" in new_edits[-1][1]
-          and "Tower 1 on scene" in new_edits[-1][1] and len(quiet_feed()) == 1, new_edits[-1:])
+          and "Tower 1 on scene" in new_edits[-1][1] and len(gas_lines()) == 1, new_edits[-1:])
     ann8 = next((a for a in console.annotations if a["id"] == h8), {})
     check("...and the console shows which call it belongs to", "context" in (ann8.get("tags") or [])
           and str(ann8.get("incident") or "").startswith(f"JARVIS #{gas['id']}"), ann8)
@@ -1136,16 +1154,18 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           and lw.splitlines()[-1].startswith("First heard"), (len(lw), lw.count('  "')))
     import delivery as DV2
     saved = (list(DV2.delivery._sent), list(DV2.delivery._quiet_sent))
+    import notify_policy as NP2
+    qcap = int(config.get("proactive", "max_quiet_per_hour", default=NP2.DEFAULT_QUIET_PER_HOUR))
     try:
         DV2.delivery._sent.clear()
-        DV2.delivery._quiet_sent[:] = [time.time()] * 8
+        DV2.delivery._quiet_sent[:] = [time.time()] * qcap
         check("review: the quiet feed has its own hourly ceiling...",
-              DV2.delivery.has_budget(ALERT, "scanner_fyi") is False)
+              DV2.delivery.has_budget(ALERT, "scanner_fyi") is False, qcap)
         check("...which never spends the room his reminders need", DV2.delivery.has_budget(ALERT) is True
               and DV2.delivery.has_budget(ALERT, "reminder") is True)
         DV2.delivery.note_sent("scanner_fyi")
         check("...and a quiet call's recording is counted there, not in the shared ceiling",
-              len(DV2.delivery._sent) == 0 and len(DV2.delivery._quiet_sent) == 9)
+              len(DV2.delivery._sent) == 0 and len(DV2.delivery._quiet_sent) == qcap + 1)
     finally:
         DV2.delivery._sent[:], DV2.delivery._quiet_sent[:] = saved
     import remote_telegram as RT2
@@ -1169,6 +1189,94 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         RT2.telegram._urgent.pop("gate1234", None)
         RT2.telegram._api = real_api2
         config.data["remote"] = real_remote2
+
+    print("\n-- his medical and police calls, his night (his answers, 2026-11-07) --")
+    for text, want in (
+            ("RP wants to report her phone being stolen out of a car.", "larceny"),
+            ("Shoplifter in custody at the Target, Worcester Road.", "larceny"),
+            ("Report of a suspicious male checking car doors on Elm Street.", "suspicious"),
+            ("Car 4, motor vehicle stop, Route 9 at Speen Street.", "traffic_stop"),
+            ("Can you do a well-being check at 12 Oak Street, elderly resident not answering.", "welfare_check"),
+            ("Engine 2, Rescue 1 for an unresponsive male in the parking lot.", "unconscious"),
+            ("Respond to 40 Main Street for a 70 year old with difficulty breathing.", "breathing"),
+            ("Ambulance 1 for chest pains, 58 year old male.", "chest_pain"),
+            ("Possible stroke, slurred speech, 14 Pine Road.", "stroke"),
+            ("Child having a seizure at the playground.", "seizure"),
+            ("Elderly female fell in the bathroom, lift assist.", "fall"),
+            ("Engine 1 for a medical call, abdominal pain.", "medical")):
+        rd = R.read(text, "Natick")
+        check(f"read as {want}: {text[:46]!r}", want in rd.types and not rd.danger, rd.types)
+    for text, nope in (("Patient is not unconscious, alert and talking.", "unconscious"),
+                       ("Nothing stolen, door was left open.", "larceny"),
+                       ("No chest pains, just a fall.", "chest_pain"),
+                       ("Fire alarm, the fall alarm on the third floor.", "fall")):
+        rd = R.read(text, "Natick")
+        check(f"not read as {nope}: {text[:46]!r}", nope not in rd.types, rd.types)
+    # the morning summary: yesterday's night, planted, summarised once
+    yday = dt.datetime.fromtimestamp(now) - dt.timedelta(days=1)
+    eight = yday.replace(hour=8, minute=0, second=0, microsecond=0)
+    night = eight.timestamp() - 7 * 3600                  # 1 AM
+    for k in range(5):
+        S.log_hit({"id": BASE + 7300 + k, "ts": night + k * 600, "end_ts": night + k * 600 + 3, "duration": 3,
+                   "name": "Maynard FD", "town": "Maynard", "agency": "FD"})
+    S.create_incident({"first_ts": night, "last_ts": night + 300, "town": "Maynard", "miles": 9.0,
+                       "agency": "FD", "channel": "Maynard FD", "family": "ems", "kind": "chest_pain",
+                       "label": "a chest pain call", "severity": 4, "types": ["chest_pain"],
+                       "address": "14 Pine Rd", "street": "pine rd", "roads": [], "units": ["Ambulance 1"],
+                       "details": ["transported to Emerson"], "said": [], "hits": 2, "status": "over"})
+    import volatile
+    kept_morning = volatile.get(SD.ScannerDesk.MORNING_KEY)
+    msent: list = []
+
+    async def morning_deliver(text, tier, key="", subject="", written=""):
+        msent.append((text, tier, key, subject, written))
+        return {"delivered": "telegram", "tier": tier}
+    mdesk = SD.ScannerDesk()
+    mdesk.deliverer = morning_deliver
+    try:
+        volatile.put(SD.ScannerDesk.MORNING_KEY, {"day": ""}, source="gate")
+        early = await mdesk._morning_summary(eight.timestamp() - 600)
+        first_ = await mdesk._morning_summary(eight.timestamp() + 300)
+        again = await mdesk._morning_summary(eight.timestamp() + 900)
+    finally:
+        if kept_morning:
+            volatile.put(SD.ScannerDesk.MORNING_KEY, kept_morning.get("value") or {}, source="gate")
+        else:
+            volatile.forget(SD.ScannerDesk.MORNING_KEY)
+    check("the morning summary waits for 8 AM", early is False)
+    check("...goes once at 8, quietly (the quiet feed's kind) under a key for the day",
+          first_ is True and len(msent) == 1 and msent[0][3].startswith("scanner-fyi")
+          and msent[0][2] == f"scanner-night:{eight.strftime('%Y-%m-%d')}", msent)
+    check("...and never twice in a morning", again is False and len(msent) == 1, len(msent))
+    mw = msent[0][4] if msent else ""
+    check("...listing the night's calls with the place, the distance and what was heard",
+          "SCANNER - overnight" in mw and "A chest pain call - 14 Pine Rd, Maynard (9 mi) - transported to Emerson" in mw
+          and msent[0][0].startswith("Overnight on the scanner, sir: a chest pain call in Maynard"), msent[:1])
+    import delivery as DV3
+    spoke: list = []
+    real3 = (DV3._in_quiet_hours, DV3.is_present, DV3.delivery._speak, RT2.telegram)
+
+    async def no_speak(text, interrupt):
+        spoke.append(text)
+        return True
+
+    class TG3:
+        last_sent_id = None
+
+        async def send_proactive(self, text, tier="notable", subject="", silent=False, buttons=None):
+            self.silent = silent
+            return True
+    DV3._in_quiet_hours, DV3.is_present, DV3.delivery._speak = (lambda: True), (lambda: True), no_speak
+    RT2.telegram = TG3()
+    config.data.setdefault("remote", {})["telegram_chat_id"] = 123
+    try:
+        r3 = await DV3.delivery._deliver("From the scanner: a crash in Sudbury.", ALERT,
+                                         key=f"scanner-fyi:night-{time.time()}", subject="scanner-fyi: a crash - Sudbury")
+    finally:
+        DV3._in_quiet_hours, DV3.is_present, DV3.delivery._speak, RT2.telegram = real3
+        config.data["remote"] = real_remote2
+    check("at night a quiet call is never spoken, even with him at the PC: it waits on his phone, silent",
+          not spoke and r3.get("delivered") == "telegram" and RT2.telegram is real3[3], (spoke, r3))
 
     print("\n-- the daily cap --")
     cap = int(config.get("scanner", "max_per_day", default={}).get("urgent", 4))
