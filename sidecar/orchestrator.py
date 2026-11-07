@@ -47,6 +47,15 @@ from tools.shortlist import shortlist
 log = logging.getLogger("jarvis.orchestrator")
 
 
+def _mem_percent() -> str:
+    """System memory in use, for a log line. Never raises."""
+    try:
+        import psutil
+        return str(int(psutil.virtual_memory().percent))
+    except Exception:
+        return "?"
+
+
 def _display_off() -> bool:
     """Is the screen dark? Never raises - unknown is treated as lit."""
     try:
@@ -1077,6 +1086,27 @@ class Orchestrator:
 
     PROBE_EVERY = 600.0
     _probe_at = 0.0
+    # how long a RUNNING but unanswering model server is waited on before it
+    # is replaced (see _llm_watchdog)
+    LLM_PATIENCE_S = 300.0
+
+    @staticmethod
+    def llm_recovery_action(running: bool, answered: bool, slow_since: float | None,
+                            now: float, patience: float) -> tuple[str, float | None]:
+        """What the watchdog does after a quick /health miss: (action, slow_since).
+
+        "ok" - it answered the patient second look; "wait" - it is running
+        and has been slow for less than `patience`; "replace" - running but
+        silent for `patience`; "restart" - the process has exited.
+        """
+        if answered:
+            return "ok", None
+        if not running:
+            return "restart", None
+        since = slow_since or now
+        if now - since < patience:
+            return "wait", since
+        return "replace", None
     _probe_failures = 0
 
     @staticmethod
@@ -1136,7 +1166,30 @@ class Orchestrator:
                     self._last_prompt_warm = time.time()
                     await self._warm_prompts()
                 continue
-            log.warning("llama-server unhealthy — attempting recovery")
+            # SLOW IS NOT DEAD. One 2-second /health miss used to kill the
+            # 15 GB server and reload it - on 2026-10-29/30, with his other
+            # apps holding 8-10 GB and memory at 94-97%, that reload thrashed
+            # the machine and JARVIS was gone for 6 to 24 minutes, four times.
+            # A server that is still running gets a patient second look and
+            # five minutes before it is replaced; a server that has exited is
+            # replaced at once.
+            running = llama.running
+            answered = running and await llama.healthy(timeout=15.0)
+            action, self._llm_slow_since = self.llm_recovery_action(
+                running, answered, getattr(self, "_llm_slow_since", None), time.time(),
+                self.LLM_PATIENCE_S)
+            if action == "ok":
+                continue
+            if action == "wait":
+                log.warning("llama-server is running but slow to answer (%.0fs so far, memory "
+                            "at %s%%) - waiting rather than reloading it",
+                            time.time() - self._llm_slow_since, _mem_percent())
+                continue
+            if action == "replace":
+                log.warning("llama-server has not answered for %.0fs while running - replacing it",
+                            self.LLM_PATIENCE_S)
+            else:
+                log.warning("llama-server has exited - restarting it")
             if self.sm.state != State.ERROR:
                 await self.sm.to(State.ERROR, force=True)
                 await bus.emit("error", summary="language model connection lost — recovering")

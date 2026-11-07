@@ -6,6 +6,7 @@ import ctypes
 import logging
 import os
 import subprocess
+import time
 from ctypes import wintypes
 from pathlib import Path
 
@@ -215,6 +216,12 @@ class LlamaServer:
         ]
         if mcfg.get("mmproj") and Path(mcfg["mmproj"]).exists():
             args += ["--mmproj", mcfg["mmproj"]]
+        # NEVER START A LOAD THAT CANNOT FINISH. The weights live in shared
+        # system memory (the iGPU has none of its own); starting a 12 GB load
+        # with 3 GB free thrashed the whole machine on 2026-10-29 and froze
+        # JARVIS for up to 24 minutes. Wait for room instead, and say so.
+        if not await self._wait_for_memory(Path(model_path)):
+            return False
         log.info("starting llama-server: %s", model_name)
         # the API key goes in the child's ENVIRONMENT, never on its command line:
         # any local process can read another process's argv (WMI/Win32_Process).
@@ -241,9 +248,50 @@ class LlamaServer:
         await self.stop()
         return False
 
-    async def healthy(self) -> bool:
+    # Room needed beyond the weights file for the KV cache, compute buffers
+    # and everything else JARVIS loads beside it.
+    LOAD_HEADROOM_GB = 2.5
+    MEMORY_WAIT_S = 600.0
+
+    @staticmethod
+    def _available_gb() -> float | None:
         try:
-            async with httpx.AsyncClient(timeout=2.0) as c:
+            import psutil
+            return psutil.virtual_memory().available / 2 ** 30
+        except Exception:
+            return None
+
+    async def _wait_for_memory(self, model_path: Path, deadline_s: float | None = None) -> bool:
+        """True once there is room to load `model_path`; False after the deadline.
+
+        Unknown memory (no psutil) is taken as room: this guard must never be
+        the reason he has no model at all.
+        """
+        try:
+            need = model_path.stat().st_size / 2 ** 30 + self.LOAD_HEADROOM_GB
+        except OSError:
+            return True
+        deadline = time.time() + (self.MEMORY_WAIT_S if deadline_s is None else deadline_s)
+        told = False
+        while True:
+            have = self._available_gb()
+            if have is None or have >= need:
+                if told:
+                    log.info("memory is back (%.1f GB free) - loading the model", have or 0)
+                return True
+            if not told:
+                log.warning("not loading %s yet: it needs %.1f GB and %.1f GB is free - waiting "
+                            "for memory rather than thrashing the machine", model_path.name, need, have)
+                told = True
+            if time.time() >= deadline:
+                log.error("gave up waiting for memory to load %s (%.1f GB free, %.1f GB needed)",
+                          model_path.name, have, need)
+                return False
+            await asyncio.sleep(15)
+
+    async def healthy(self, timeout: float = 2.0) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as c:
                 r = await c.get(f"{self.base_url}/health")
                 return r.status_code == 200
         except Exception:
