@@ -138,26 +138,33 @@ async def lifespan(app: FastAPI):
     delivery.orchestrator = orchestrator
     spawn(delivery.presence_watch(), name="presence-watch")   # back after an absence: say what was held, once
 
-    async def _announce_alert(text: str, *, key: str = "") -> None:
-        await delivery.deliver(text, tier=ALERT, key=key)
+    async def _announce_alert(text: str, *, key: str = "", subject: str = "") -> None:
+        await delivery.deliver(text, tier=ALERT, key=key, subject=subject)
 
-    async def _announce_reminder(text: str, *, key: str = "") -> None:
-        """A due reminder, in JARVIS's own words rather than the user's.
+    async def _announce_reminder(text: str, *, key: str = "", occurrence: int | None = None) -> None:
+        """A due reminder, in HIS words, plainly ("Time for your retainers,
+        sir."). It went through the LLM from 09-01 to 11-06 and came out as
+        "lace up your retainers" and, once, "put on your." - never again: no
+        model rephrases a reminder (2026-11-07).
 
-        He set "wear my retainers" and heard `A reminder: wear my retainers`
-        back every night. Now it goes through the LLM and comes out as
-        something he would actually say, differently most nights.
+        The key "task:<id>" makes it a reminder (notify_policy): one of the two
+        things allowed to make his phone sound. On Telegram it carries a "Done"
+        button for this occurrence; no Done in half an hour means one quiet
+        nudge (scheduler.nudge). The key is the TASK, so delivery's flood guard
+        holds per task, and the ledger keeps it as "task:<id>" as before."""
+        from reminder_voice import plain
+        buttons = [("Done", f"done:{occurrence}")] if occurrence else None
+        await delivery.deliver(plain(text), tier=ALERT, key=key, buttons=buttons)
 
-        `key` is the TASK, deliberately - not the sentence. The whole point of
-        this feature is that the wording changes, and delivery's flood guard
-        de-duplicates on the key. Keying on text would mean every fresh phrasing
-        looked like a brand new message, which is exactly how a stuck reminder
-        became ~2,600 overnight messages on 2026-08-31.
-        """
-        from reminder_voice import phrase
-        await delivery.deliver(await phrase(text), tier=ALERT, key=key)
+    async def _nudge_reminder(text: str, *, key: str = "", occurrence: int | None = None) -> None:
+        """The one follow-up ("nudge:<occurrence>"): silent on the phone,
+        never an interruption."""
+        from reminder_voice import nudge
+        buttons = [("Done", f"done:{occurrence}")] if occurrence else None
+        await delivery.deliver(nudge(text), tier=ALERT, key=key, buttons=buttons)
 
     scheduler.announce = _announce_reminder
+    scheduler.nudge = _nudge_reminder
     scheduler.start()
     from mcp_client import mcp_manager
     spawn(mcp_manager.start())

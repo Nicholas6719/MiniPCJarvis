@@ -528,6 +528,10 @@ class MemoryStore:
         have = {r[1] for r in self.db.execute("PRAGMA table_info(deliveries)")}
         if "replayed" not in have:
             self.db.execute("ALTER TABLE deliveries ADD COLUMN replayed INTEGER NOT NULL DEFAULT 0")
+        # `sound`: whether it reached his phone WITH a sound (2026-11-07) - the
+        # daily budget of sounding pings is counted from these after a restart
+        if "sound" not in have:
+            self.db.execute("ALTER TABLE deliveries ADD COLUMN sound INTEGER NOT NULL DEFAULT 0")
         self.db.commit()
         self._deliveries_cols_ok = True
 
@@ -541,12 +545,12 @@ class MemoryStore:
         try:
             self._deliveries_columns()
             cur = self.db.execute(
-                "INSERT INTO deliveries (ts, tier, outcome, why, subject, text, replayed) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO deliveries (ts, tier, outcome, why, subject, text, replayed, sound) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (float(row.get("ts") or time.time()), str(row.get("tier") or ""),
                  str(row.get("outcome") or "nothing"), str(row.get("why") or ""),
                  str(row.get("subject") or "")[:120], str(row.get("text") or "")[:300],
-                 int(bool(row.get("replayed")))))
+                 int(bool(row.get("replayed"))), int(bool(row.get("sound")))))
             self.db.commit()
             return cur.lastrowid
         except Exception:
@@ -558,14 +562,15 @@ class MemoryStore:
         try:
             self._deliveries_columns()
             rows = self.db.execute(
-                "SELECT rowid, ts, tier, outcome, why, subject, text, replayed FROM deliveries "
+                "SELECT rowid, ts, tier, outcome, why, subject, text, replayed, sound FROM deliveries "
                 "WHERE ts >= ? ORDER BY ts DESC LIMIT ?", (float(since), int(limit))).fetchall()
         except Exception:
             log.exception("could not read the deliveries")
             self._unlock()
             return []
         return [{"id": r[0], "ts": r[1], "tier": r[2], "outcome": r[3], "why": r[4],
-                 "subject": r[5], "text": r[6], "replayed": bool(r[7])} for r in reversed(rows)]
+                 "subject": r[5], "text": r[6], "replayed": bool(r[7]), "sound": bool(r[8])}
+                for r in reversed(rows)]
 
     def mark_delivery(self, row_id: int, replayed: bool = True) -> bool:
         """He has now been told. Never raises."""

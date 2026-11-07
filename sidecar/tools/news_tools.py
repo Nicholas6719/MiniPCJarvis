@@ -254,8 +254,8 @@ async def get_breaking_news(count: int = 4) -> dict:
 def register_all() -> None:
     registry.register(Tool(
         name="local_emergencies",
-        description="Emergencies near the user RIGHT NOW, judged by his own rules (local "
-                    "emergencies, and national ones only if huge). Use for 'any emergencies "
+        description="Emergencies near the user RIGHT NOW, judged by his own rules (local, "
+                    "current and dangerous only - within his radius). Use for 'any emergencies "
                     "near me', 'is anything happening nearby'. Returns an empty list when quiet.",
         parameters={"type": "object", "properties": {}, "required": []},
         risk=Risk.SAFE, handler=local_emergencies, timeout=40))

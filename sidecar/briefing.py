@@ -18,22 +18,44 @@ is worth saying at all, using significance.py, and hands it over.
 Anything judged NOTABLE is not sent on its own; it is kept and folded into the
 next brief, which is what makes the briefs worth reading and the alerts worth
 noticing.
+
+**2026-11-07, after ten days he mostly ignored** (41+ briefs, Friday's close
+recited six times over a weekend, the 20:00 market section repeating 16:15, and
+"take my supplements at 7 PM; wear my retainers at 9 PM" every morning though
+those reminders fire anyway):
+  * News reaches him on its own only as an URGENT that passed
+    `significance.urgent_gate` AND the local model's confirmation
+    (`news_check.py`). What would have been an ALERT waits for the next brief.
+  * The market sections ride only on NYSE trading days (`market_calendar`) and
+    only when the numbers changed since the last brief that carried them; a
+    session's close is told once.
+  * A brief with nothing new since the previous one is not sent at all.
+  * The morning "Today" lists one-off things only - his recurring reminders
+    announce themselves.
+  * If the scanner desk exists (`scanner_desk.brief_line`), its line rides in
+    the morning brief; it is optional and can never break a brief.
+  * Everything here arrives on his phone silently (notify_policy).
 """
 from __future__ import annotations
 
 import asyncio
 import datetime as dt
 import logging
+import re
 import time
 
+import market_calendar
 from config import config
 from delivery import ALERT, BRIEF, URGENT, delivery
-from significance import NONE, classify_market, classify_news
+from significance import NONE, NOTABLE, classify_market, classify_news
 
 log = logging.getLogger("jarvis.briefing")
 
 TICK_S = 60                    # how often the clock is checked
 DEFAULT_TIMES = ["07:30", "12:30", "16:15", "20:00"]
+# The market group: carried together, dropped together.
+MARKET_TITLES = ("Markets", "Yours", "Worth a look", "The story", "Experts", "Ahead")
+HELD_IN_BRIEF = 3              # held news items one brief will carry
 
 
 def _now() -> dt.datetime:
@@ -61,9 +83,12 @@ def _in_quiet_hours(now: dt.datetime | None = None) -> bool:
 
 
 def _judged(story: dict, tier: str, why: str, stage: str = "headline") -> None:
-    """Log and keep every ALERT/URGENT decision with the text it was judged on."""
+    """Log and keep a news decision with the text it was judged on: every
+    URGENT, everything held for the brief instead, and the model's verdict
+    (stage "llm"). The caller decides what is worth keeping; nothing here is
+    allowed to fail a sweep."""
     try:
-        if tier not in (ALERT, URGENT):
+        if not tier:
             return
         head = str(story.get("headline") or story.get("title") or "")[:160]
         desc = str(story.get("summary") or story.get("description") or "")[:400]
@@ -104,6 +129,8 @@ class Briefing:
         # a death), not only by their headlines. The Maynard pedestrian death
         # went out twice an hour apart from two desks (2026-10-17).
         self._seen_text: dict[str, str] = self._load_state("seen_text", as_dict=True) or {}
+        # headlines refused as features/trials/settlements, logged once each
+        self._junk_logged: dict[str, float] = {}
         self._last_watch: float = 0.0
         # Two clocks: emergencies are checked more often than prices are.
         self._last_news: float = 0.0
@@ -167,6 +194,74 @@ class Briefing:
             }), encoding="utf-8")
         except Exception:
             log.debug("could not save briefing state", exc_info=True)
+
+    # ---------- what the last brief said (across days) ----------
+    #
+    # The daily state above forgets at midnight on purpose. What the last
+    # brief SAID must not: the 20:00 market section is what the next 07:30
+    # would otherwise repeat, and Friday's close what Saturday would.
+
+    @staticmethod
+    def _memory_path():
+        from config import DB_PATH
+        return DB_PATH.parent / "brief_memory.json"
+
+    def _memory(self) -> dict:
+        try:
+            import json
+            data = json.loads(self._memory_path().read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _remember_brief(self, **kv) -> None:
+        try:
+            import json
+            mem = self._memory()
+            mem.update(kv)
+            self._memory_path().write_text(json.dumps(mem), encoding="utf-8")
+        except Exception:
+            log.debug("could not save what the brief said", exc_info=True)
+
+    @staticmethod
+    def _brief_lines(written: str) -> list[str]:
+        """The bullet lines of a written brief - what 'nothing new' is judged
+        on. A brief with no bullets is judged as one line."""
+        lines = [ln.strip() for ln in str(written or "").splitlines() if ln.strip()]
+        bullets = [ln for ln in lines if ln.startswith("•")]
+        return bullets or (["\n".join(lines)] if lines else [])
+
+    def _market_due(self, now: dt.datetime) -> bool:
+        """May this brief carry the market at all? Only on an NYSE trading day,
+        and a session's close only once: a brief after the last one that
+        carried the close (the 20:00 after the 16:15, the next morning's
+        07:30, a whole weekend) has nothing new to say about it."""
+        if not market_calendar.is_trading_day(now):
+            return False
+        state, session = market_calendar.session_state(now)
+        if state == "closed" and self._memory().get("market_key") == f"closed:{session}":
+            return False
+        return True
+
+    @staticmethod
+    def _market_fingerprint(sections) -> list:
+        """The index and holding moves, rounded so a cent of drift is not news."""
+        fp = []
+        for title, lines in sections or []:
+            if title in ("Markets", "Yours"):
+                for _spoken, written in lines:
+                    fp.append(re.sub(r"(-?\d+\.\d+)%",
+                                     lambda m: f"{round(float(m.group(1)) * 4) / 4:.2f}%", written))
+        return fp
+
+    def _drop_unchanged_market(self, sections, now: dt.datetime):
+        """Mid-session, a second brief carries the market only if it moved."""
+        state, session = market_calendar.session_state(now)
+        mem = self._memory()
+        if (state == "open" and mem.get("market_key") == f"open:{session}"
+                and mem.get("market_fp") == self._market_fingerprint(sections)):
+            return [(t, ls) for t, ls in sections if t not in MARKET_TITLES]
+        return sections
 
     # ---------- lifecycle ----------
 
@@ -267,28 +362,49 @@ class Briefing:
         if _in_quiet_hours(now):
             log.info("brief due at %s but it is quiet hours - holding", stamp)
             return
+        # The market only on a trading day, and a session's close only once.
+        market = self._market_due(now)
         # Composed once, shaped twice: sentences for the ear, bullets for the eye.
         sections = await self._sections(final=self.is_final_slot(slot, times),
-                                        first=self.is_first_slot(slot, times))
+                                        first=self.is_first_slot(slot, times),
+                                        market=market)
+        if market and isinstance(sections, list):
+            sections = self._drop_unchanged_market(sections, now)
         text = await self.compose_brief(sections)
         written = await self.compose_brief_written(sections)
-        if text:
-            # ON SCREEN as well as in his ear. A brief read aloud at 07:30 is
-            # gone by 07:31; the written form went only to his phone until
-            # 2026-09-05. The HUD shows the same sections he would get there.
-            try:
-                from events import bus
-                hour = now.hour
-                title = ("Morning brief" if hour < 11 else "Midday brief" if hour < 15
-                         else "Afternoon brief" if hour < 18 else "Evening brief")
-                await bus.emit("brief", title=title, eyebrow="THE BRIEF",
-                               sections=[{"title": t, "lines": [w for _s, w in lines if w]}
-                                         for t, lines in sections if lines],
-                               gauges=self._gauges_of(sections))
-            except Exception:
-                log.debug("could not put the brief on screen", exc_info=True)
-            await delivery.deliver(text, tier=BRIEF, key=f"brief:{stamp}",
+        # NOTHING NEW, NOTHING SENT. Saturday 10-31 and Sunday 11-01 each got
+        # four briefs that said the same thing; "Nothing worth reporting" is
+        # not a message either.
+        lines = self._brief_lines(written)
+        before = set(self._memory().get("last_lines") or [])
+        if not sections or not text or not [ln for ln in lines if ln not in before]:
+            log.info("brief for %s not sent: nothing new since the last one", stamp)
+            return
+        # ON SCREEN as well as in his ear. A brief read aloud at 07:30 is
+        # gone by 07:31; the written form went only to his phone until
+        # 2026-09-05. The HUD shows the same sections he would get there.
+        try:
+            from events import bus
+            hour = now.hour
+            title = ("Morning brief" if hour < 11 else "Midday brief" if hour < 15
+                     else "Afternoon brief" if hour < 18 else "Evening brief")
+            await bus.emit("brief", title=title, eyebrow="THE BRIEF",
+                           sections=[{"title": t, "lines": [w for _s, w in lines_ if w]}
+                                     for t, lines_ in sections if lines_],
+                           gauges=self._gauges_of(sections))
+        except Exception:
+            log.debug("could not put the brief on screen", exc_info=True)
+        r = await delivery.deliver(text, tier=BRIEF, key=f"brief:{stamp}",
                                    written=written)
+        if str((r or {}).get("delivered") or "nothing") == "nothing":
+            return                       # not said (budget, a test mute): it is not "the last brief"
+        remember = {"last_lines": lines[-60:], "last_brief_ts": time.time()}
+        titles = {t for t, _l in sections} if isinstance(sections, list) else set()
+        if titles & {"Markets", "Yours"}:
+            state, session = market_calendar.session_state(now)
+            remember.update(market_key=f"{state}:{session}",
+                            market_fp=self._market_fingerprint(sections))
+        self._remember_brief(**remember)
 
     async def _maybe_watch(self) -> None:
         """Two lanes, two clocks. Emergencies are not the same job as prices.
@@ -346,6 +462,18 @@ class Briefing:
         for story in await self._fresh_stories():
             tier, why = classify_news(story)
             if tier == NONE:
+                # A story refused as a feature, trial, settlement, column... is
+                # exactly what reached his phone as URGENT from 10-27 to 11-06,
+                # so the refusal is kept in news_judged too - once per headline.
+                if why.startswith("not breaking news"):
+                    jk = str(story.get("headline") or "")[:80].lower()
+                    junk = self.__dict__.setdefault("_junk_logged", {})
+                    if jk and jk not in junk:
+                        junk[jk] = time.time()
+                        if len(junk) > 300:
+                            for k in sorted(junk, key=junk.get)[:100]:
+                                junk.pop(k, None)
+                        _judged(story, "none", why)
                 continue
             # A three-day-old story appearing in a feed is not breaking. Without
             # this, anything the feed happens to carry can wake him.
@@ -369,50 +497,55 @@ class Briefing:
             # weeks of urgents could not be tuned afterwards because only the
             # spoken sentence survived (2026-10-26). Logged and kept 14 days.
             _judged(story, tier, why)
-            if tier in (ALERT, URGENT):
-                # Read the piece and say what happened. He asked for exactly
-                # this: "is Jarvis reading through these like news articles and
-                # then summarizing them into 1-2 sentences". If it cannot be
-                # read, the headline still goes - an alert is never dropped for
-                # want of a summary.
-                from newsroom import spoken_line, summarize
-                said = await summarize(story)
-                # READ IT, THEN JUDGE IT AGAIN. The tier above was decided on
-                # a headline; the article is now open, and the summary often
-                # holds the one fact the headline left out - "in Laconia, New
-                # Hampshire", "a sweep that found no hazardous materials", "the
-                # outbreak has ended". Each of those went to his phone as
-                # URGENT off its headline (2026-09-10 to 13). If the read
-                # version is not an emergency, nothing is sent - and the story
-                # is already marked seen, so it is not asked again.
-                if said.get("summary"):
-                    judged = dict(story)
-                    judged["summary"] = str(said["summary"])
-                    tier2, why2 = classify_news(judged)
-                    _judged(judged, tier2, why2, stage="read")
-                    if tier2 not in (ALERT, URGENT):
-                        log.info("demoted after reading: %r - %s", head[:60], why2)
-                        continue
-                    tier = tier2
-                    # the summary is what the next outlet's version is compared to
-                    self._seen_text[key] = str(said["summary"])[:300]
-                    if self._summary_seen_before(str(said["summary"]), key):
-                        log.info("same event, another outlet: %r", head[:60])
-                        continue
-                self._remember(said)
-                out.append((spoken_line(said), tier, key))
-            else:
-                # NOTABLE means "waits for the brief", not "belongs in the brief".
-                # The first real brief rolled up a Manchester United tribute to an
-                # officer killed on the A66 and a UMass football staff hire. Both
-                # are correctly NOTABLE - neither is worth his morning. A held item
-                # has to be near him or carry national weight; a distant one-off
-                # death stays classified so a direct question still answers, but it
-                # does not get to crowd the roll-up.
-                from significance import NATIONAL_WEIGHT, is_local
-                near, _town = is_local(story)
-                if near or NATIONAL_WEIGHT.search(head):
-                    self._held.append({"kind": "news", "text": head, "why": why})
+            if tier != URGENT:
+                # WOULD HAVE BEEN AN ALERT: it waits for the next brief instead
+                # (2026-11-07). Only local, current and dangerous goes now.
+                self._hold_news(story, head, why)
+                continue
+            # Read the piece and say what happened. He asked for exactly this:
+            # "is Jarvis reading through these like news articles and then
+            # summarizing them into 1-2 sentences". If it cannot be read, the
+            # headline still goes - an emergency is never dropped for want of
+            # a summary.
+            from newsroom import spoken_line, summarize
+            said = await summarize(story)
+            judged = dict(story)
+            # READ IT, THEN JUDGE IT AGAIN. The tier above was decided on a
+            # headline; the article is now open, and the summary often holds the
+            # one fact the headline left out - "in Laconia, New Hampshire", "a
+            # sweep that found no hazardous materials", "the outbreak has
+            # ended". Each of those went to his phone as URGENT off its headline
+            # (2026-09-10 to 13). If the read version is not an emergency, it
+            # waits for the brief - and the story is already marked seen, so it
+            # is not asked again.
+            if said.get("summary"):
+                judged["summary"] = str(said["summary"])
+                tier2, why2 = classify_news(judged)
+                _judged(judged, tier2, why2, stage="read")
+                if tier2 != URGENT:
+                    log.info("demoted after reading: %r - %s", head[:60], why2)
+                    self._hold_news(judged, head, why2)
+                    continue
+                # the summary is what the next outlet's version is compared to
+                self._seen_text[key] = str(said["summary"])[:300]
+                if self._summary_seen_before(str(said["summary"]), key):
+                    log.info("same event, another outlet: %r", head[:60])
+                    continue
+            # THE SECOND OPINION. The local model, at temperature 0, answers a
+            # fixed set of questions about it; it can veto, never promote. If
+            # it cannot answer at all, the story still goes - silently.
+            import news_check
+            check = await news_check.confirm(judged)
+            verdict = check.get("verdict")
+            _judged(judged, URGENT if verdict == news_check.CONFIRMED else
+                    (ALERT if verdict == news_check.UNCONFIRMED else NOTABLE),
+                    f"{verdict}: {check.get('why')}", stage="llm")
+            if verdict == news_check.VETOED:
+                log.info("the model vetoed an urgent: %r - %s", head[:60], check.get("why"))
+                self._hold_news(judged, head, f"vetoed: {check.get('why')}")
+                continue
+            self._remember(said)
+            out.append((spoken_line(said), URGENT if verdict == news_check.CONFIRMED else ALERT, key))
         # THE WEATHER SERVICE, in the same lane as the news. A tornado warning
         # for Southeast Middlesex is the purest local emergency there is, and
         # the desks carry it late if at all. Tiered like the news (nws.py);
@@ -432,6 +565,21 @@ class Briefing:
         self._forget_old()
         self._save_state()
         return out
+
+    def _hold_news(self, story: dict, head: str, why: str) -> None:
+        """Keep a story for the next brief - only if it is worth his morning.
+
+        NOTABLE means "waits for the brief", not "belongs in the brief". The
+        first real brief rolled up a Manchester United tribute to an officer
+        killed on the A66 and a UMass football staff hire. A held item has to
+        be near him, in his state, or carry national weight."""
+        from significance import NATIONAL_WEIGHT, in_his_state, is_local
+        near, _own = is_local(story)
+        if near or in_his_state(story) or NATIONAL_WEIGHT.search(head) \
+                or why.startswith("for the brief"):
+            if not any(h.get("text") == head for h in self._held):
+                self._held.append({"kind": "news", "text": head, "why": why})
+                del self._held[:-20]
 
     @staticmethod
     def _same_story(a: str, b: str) -> bool:
@@ -459,12 +607,24 @@ class Briefing:
         # killing. So: the same town plus a death on the same day is treated as
         # one story. Two unrelated deaths in Natick on one day is rare enough
         # that conflating them occasionally beats printing one event four times.
-        from significance import FATALITY, HOME_TOWNS
-        towns_a = {t for t in HOME_TOWNS if t in a.lower()}
-        towns_b = {t for t in HOME_TOWNS if t in b.lower()}
+        from significance import FATALITY
+        towns_a, towns_b = Briefing._towns_named(a), Briefing._towns_named(b)
         if towns_a & towns_b and FATALITY.search(a) and FATALITY.search(b):
             return True
         return False
+
+    @staticmethod
+    def _towns_named(text: str) -> set[str]:
+        """Towns inside his radius that the text names (geo; the seen-keys are
+        stored lower-case, so those are title-cased to be read at all)."""
+        import geo
+        t = str(text or "")
+        if t and not any(c.isupper() for c in t):
+            t = t.title()
+        try:
+            return {f.town.name for f in geo.find_towns(t) if geo.within_radius(f.miles)}
+        except Exception:
+            return set()
 
     def _dedupe(self, stories: list[dict]) -> list[dict]:
         kept: list[dict] = []
@@ -543,11 +703,9 @@ class Briefing:
         Telegram alerts across a weekend, and ALERT is not suppressed by quiet
         hours. The key also carried the hour, so each one looked new.
         """
-        now = _now()
-        if now.weekday() >= 5:                 # Saturday, Sunday
-            return False
-        minutes = now.hour * 60 + now.minute   # his machine runs on ET
-        return 9 * 60 + 30 <= minutes <= 16 * 60
+        # ...and an exchange holiday is a Friday-close weekend in the middle of
+        # the week (market_calendar: the NYSE closures for 2026-2027).
+        return market_calendar.is_open(_now())     # his machine runs on ET
 
     async def _market_moves(self) -> list[tuple[str, str, str]]:
         if not self._market_open():
@@ -571,7 +729,9 @@ class Briefing:
                 way = "up" if (row.get("percent") or 0) > 0 else "down"
                 line = f"{name} is {way} {pct:.2f}% at {row.get('price')} dollars."
                 if tier in (ALERT, URGENT):
-                    out.append((line, tier, key))
+                    # HIS WATCHLIST, KEPT - BUT QUIETLY (2026-11-07): never
+                    # above ALERT, so a price never sounds or gets chased.
+                    out.append((line, ALERT, key))
                 # a smaller move is NOT held: every brief already lists his
                 # holdings, so holding it printed the same line twice
         except Exception:
@@ -587,7 +747,7 @@ class Briefing:
                     pct = m.get("percent") or 0
                     way = "up" if pct >= 0 else "down"
                     out.append((f"{m['name']} is {way} {abs(pct):.2f}% today.",
-                                tier, key))
+                                ALERT, key))
         except Exception:
             log.debug("index scan failed", exc_info=True)
         return out
@@ -725,7 +885,11 @@ class Briefing:
         return lines
 
     def _today_lines(self) -> list[tuple[str, str]]:
-        """Reminders due today, for the morning: 'dentist at 4 PM'."""
+        """One-off reminders due today, for the morning: 'dentist at 4 PM'.
+
+        Not his RECURRING ones. Every morning brief from 10-27 to 11-06 recited
+        "take my supplements at 7 PM; wear my retainers at 9 PM", which he set
+        himself and which announce themselves at seven and nine anyway."""
         try:
             from tasks.scheduler import scheduler
             today = _now().strftime("%Y-%m-%d")
@@ -733,6 +897,8 @@ class Briefing:
             for r in scheduler.list_pending():
                 due = str(r.get("due") or "")
                 if not due.startswith(today):
+                    continue
+                if str(r.get("recurrence") or "none").lower() not in ("", "none"):
                     continue
                 hhmm = due[11:16]
                 try:
@@ -753,13 +919,46 @@ class Briefing:
             log.debug("brief: reminders failed", exc_info=True)
             return []
 
-    async def _sections(self, final: bool = False,
-                        first: bool = False) -> list[tuple[str, list[tuple[str, str]]]]:
+    async def _scanner_lines(self, since_ts: float) -> list[tuple[str, str]]:
+        """The scanner desk's line for the morning, if the desk exists.
+
+        `scanner_desk` is another piece of work (sidecar/scanner_desk.py,
+        `brief_line(since_ts)`); until it ships, or if it raises, returns
+        nothing usable or takes too long, the brief goes out without it. A sync
+        brief_line runs off the loop so it cannot stall the briefing."""
+        try:
+            import importlib
+            desk = importlib.import_module("scanner_desk")
+        except Exception:
+            return []                           # not built yet, or broken on import
+        fn = getattr(desk, "brief_line", None)
+        if not callable(fn):
+            return []
+        try:
+            if asyncio.iscoroutinefunction(fn):
+                res = await asyncio.wait_for(fn(since_ts), timeout=8.0)
+            else:
+                res = await asyncio.wait_for(asyncio.to_thread(fn, since_ts), timeout=8.0)
+                if asyncio.iscoroutine(res):
+                    res = await asyncio.wait_for(res, timeout=8.0)
+        except Exception:
+            log.info("brief: the scanner desk had nothing usable", exc_info=True)
+            return []
+        if isinstance(res, (tuple, list)) and len(res) == 2 and all(isinstance(x, str) for x in res):
+            said, shown = res[0].strip(), res[1].strip()
+            return [(said, shown or said)] if said else []
+        line = res.strip() if isinstance(res, str) else ""
+        return [(line, line)] if line else []
+
+    async def _sections(self, final: bool = False, first: bool = False,
+                        market: bool = True) -> list[tuple[str, list[tuple[str, str]]]]:
         """The brief as titled groups, each line held as (spoken, written).
 
-        `final` is the last brief of the day, the only one that carries news;
-        `first` is the morning one, which opens with the weather and the day's
-        reminders and is the only one that carries the week's earnings.
+        `final` is the last brief of the day, the only one that carries general
+        news; `first` is the morning one, which opens with the weather and the
+        day's one-off reminders and is the only one that carries the week's
+        earnings and the scanner desk. `market` False leaves out the whole
+        market group (a weekend, a holiday, a close already told).
 
         The single source of truth for both renderings, so the phone and the
         voice can never disagree, and so the market and news calls happen once.
@@ -788,7 +987,23 @@ class Briefing:
                     out.append(("Yesterday", me))
             except Exception:
                 log.debug("brief: self report failed", exc_info=True)
+            # ...and what the scanner heard since the last brief, if that desk
+            # exists. Optional by construction: it can never break a brief.
+            last = float(self._memory().get("last_brief_ts") or 0.0)
+            since = max(last, time.time() - 24 * 3600) if last else time.time() - 12 * 3600
+            heard = await self._scanner_lines(since)
+            if heard:
+                out.append(("Scanner", heard))
 
+        if market:
+            out += await self._market_sections(first, display_name, get_market_movers, get_watchlist)
+        return await self._news_sections(out, final)
+
+    async def _market_sections(self, first, display_name, get_market_movers,
+                               get_watchlist) -> list[tuple[str, list[tuple[str, str]]]]:
+        """Markets, his holdings, the analysts' take and the market story -
+        carried together or not at all."""
+        out: list[tuple[str, list[tuple[str, str]]]] = []
         try:
             movers = await get_market_movers()
             rows = movers.get("markets") or []
@@ -853,42 +1068,47 @@ class Briefing:
                 out.append((title, lines))
         except Exception:
             log.debug("brief: market intelligence failed", exc_info=True)
+        return out
 
+    async def _news_sections(self, out: list, final: bool) -> list:
+        """General news for the night brief, and what was held back from his
+        phone for whichever brief comes next."""
         # NEWS BELONGS TO THE LAST BRIEF OF THE DAY. His instruction, 2026-09-05:
         # by day he wants only local and national emergencies, and "for his
         # nightly brief (last of the day) he can tell me general news so that
-        # I'm still informed that way". So the midday briefs carry markets and
-        # nothing else, and the night brief carries the news of the day -
-        # GENERAL news, ranked, not only what would have interrupted him.
+        # I'm still informed that way". So the midday briefs carry no general
+        # news, and the night brief carries the news of the day - GENERAL news,
+        # ranked, not only what would have interrupted him.
         mode = str(config.get("briefing", "news_in_briefs", default="last")).lower()
         want_news = mode == "all" or (mode == "last" and final)
-        if not want_news:
-            return out
-        count = int(config.get("briefing", "night_news_count", default=5)) if final else 3
-        picked = self.rank_for_brief(await self._fresh_stories(), count)
-        # The brief says what happened, not what was printed. Read in parallel:
-        # articles one after another would put ~15s into a brief nobody is
-        # waiting on, and they have nothing to do with each other.
-        news: list[tuple[str, str]] = []
-        if picked:
-            from newsroom import summarize_all
-            said_all = await summarize_all(picked, limit=count)
-            # ONE call with all of them. note_result REPLACES the link list, so
-            # calling it per story in a loop left only the last one - and "give
-            # me the article" opened story three whatever he asked for.
-            self._remember_all(said_all)
-            for said in said_all:
-                body = said.get("summary") or said.get("headline") or ""
-                src = said.get("source") or "the news"
-                line = f"{body.rstrip(' .')} ({src})"
-                news.append((line, line))
-        if news:
-            out.append(("News", news))
-
-        if self._held:
-            extra = [self._tidy(h["text"]) for h in self._held[-2:]]
-            self._held.clear()
-            out.append(("Also", [(e, e) for e in extra if e]))
+        if want_news:
+            count = int(config.get("briefing", "night_news_count", default=5)) if final else 3
+            picked = self.rank_for_brief(await self._fresh_stories(), count)
+            # The brief says what happened, not what was printed.
+            news: list[tuple[str, str]] = []
+            if picked:
+                from newsroom import summarize_all
+                said_all = await summarize_all(picked, limit=count)
+                # ONE call with all of them. note_result REPLACES the link list, so
+                # calling it per story in a loop left only the last one - and "give
+                # me the article" opened story three whatever he asked for.
+                self._remember_all(said_all)
+                for said in said_all:
+                    body = said.get("summary") or said.get("headline") or ""
+                    src = said.get("source") or "the news"
+                    line = f"{body.rstrip(' .')} ({src})"
+                    news.append((line, line))
+            if news:
+                out.append(("News", news))
+        # WHAT WAS HELD BACK FROM HIS PHONE rides in the NEXT brief, whichever
+        # one that is (2026-11-07): what would once have been an ALERT is no
+        # longer sent on its own, so it must not then wait until 20:00 either.
+        held = [h for h in self._held if h.get("kind") == "news"]
+        if held:
+            self._held = [h for h in self._held if h.get("kind") != "news"]
+            extra = [self._tidy(h["text"]) for h in held[-HELD_IN_BRIEF:]]
+            if any(extra):
+                out.append(("Also", [(e, e) for e in extra if e]))
         return out
 
     def _gauges_of(self, sections) -> list[dict]:

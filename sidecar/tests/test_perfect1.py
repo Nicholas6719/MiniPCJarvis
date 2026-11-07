@@ -61,23 +61,34 @@ def main() -> int:
         check(name, t == NONE, f"{t}: {why}")
 
     print("\n-- a crash in his town that is over is told once, not chased --")
+    # (2026-11-07: told in the next BRIEF - there is no ALERT for news any
+    # more, and a crash that is over is not a live hazard to the public)
     for h, s in (("Multi-vehicle crash in Natick MA kills woman, hospitalizes man", ""),
                  ("30-year-old woman killed in Framingham pedestrian crash",
                   "A 30-year-old woman was struck by a Honda CR-V on Worcester Road in Framingham at about 12:30 a.m. She was taken to MetroWest Medical Center and later died")):
         t, why = tier(h, s)
-        check(f"{h[:48]!r} is an ALERT", t == ALERT, f"{t}: {why}")
+        check(f"{h[:48]!r} waits for the brief", t == S.NOTABLE, f"{t}: {why}")
 
-    print("\n-- and what must still get through, unchanged --")
+    print("\n-- and what must still get through --")
+    # 2026-11-07: only LOCAL, CURRENT and DANGEROUS sounds. A fire that killed
+    # two overnight is over; an attack in Chicago is national; both wait for
+    # the brief. A hurricane warning for his county reaches him through the
+    # Weather Service (a WARNING for his own point, below), not the desks.
     for name, h, s, want in (
         ("an explosion is still an explosion", "Explosion rocks Framingham apartment building, residents evacuated", "", (URGENT,)),
         ("a blast that kills is still a blast", "Blast kills two at Natick chemical plant", "", (URGENT,)),
-        ("a hurricane that IS coming", "Hurricane warning issued for Massachusetts coast as storm approaches Middlesex County", "", (URGENT, ALERT)),
-        ("a fire that kills in his town", "Two dead in overnight Sudbury house fire", "", (URGENT,)),
+        ("a hurricane warning off a desk, with no town, waits for the brief",
+         "Hurricane warning issued for Massachusetts coast as storm approaches Middlesex County", "", (S.NOTABLE,)),
+        ("a fire that killed two overnight is over: the brief", "Two dead in overnight Sudbury house fire", "", (S.NOTABLE,)),
         ("a shooter at large in his town", "Police search for gunman after shooting in Framingham", "", (URGENT,)),
-        ("an attack that was NOT thwarted", "Terrorist attack kills dozens in Chicago, suspect at large", "", (URGENT,)),
+        ("an attack in Chicago is national: the brief", "Terrorist attack kills dozens in Chicago, suspect at large", "", (S.NOTABLE,)),
     ):
-        t, why = tier(h, s, local=name != "an attack that was NOT thwarted")
+        t, why = tier(h, s, local=not name.startswith("an attack"))
         check(name, t in want, f"{t}: {why}")
+    import nws
+    check("...and the hurricane WARNING for his point is still urgent, from the Weather Service",
+          nws.classify({"event": "Hurricane Warning", "status": "Actual", "severity": "Extreme",
+                        "urgency": "Immediate"})[0] == nws.URGENT)
 
     print("\n-- 'make your own' is an answer --")
     import clarify

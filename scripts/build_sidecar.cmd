@@ -141,6 +141,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_reminder_flood.py || (echo REMINDER FLOOD TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_reminder_voice.py || (echo REMINDER VOICE TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_delivery_budget.py || (echo DELIVERY BUDGET TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_notify_policy.py || (echo NOTIFY POLICY TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\sleep_coverage.py || (echo SLEEP TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\speech_symbols.py || (echo SPEECH TEST FAILED & exit /b 1)
 .venv\Scripts\pyinstaller jarvis-sidecar.spec --noconfirm --distpath dist --workpath build > "%TEMP%\pyi.log" 2>&1 || (echo PYINSTALLER FAILED & exit /b 1)

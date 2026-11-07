@@ -53,7 +53,7 @@ def main() -> int:
     D._in_quiet_hours = lambda: False
 
     class FakeTelegram:
-        async def send_proactive(self, text, tier=NOTABLE, subject=""):
+        async def send_proactive(self, text, tier=NOTABLE, subject="", silent=False, buttons=None):
             sent.append((tier, text))
             return True          # the bridge now reports whether Telegram took it
 

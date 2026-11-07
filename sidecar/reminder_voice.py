@@ -1,100 +1,46 @@
-"""A reminder, said the way JARVIS would say it.
+"""A reminder, in his own words, plainly.
 
-Nicholas set a standing 9 p.m. reminder to wear his retainers. What he got back,
-every night, was `A reminder: wear my retainers` - his own words read back at
-him. His note on 2026-09-01: *"he should say something different or similar
-almost every night at nine but like with JARVIS's personality... sir, it's about
-time to put in your retainers, or I believe you have to wear your retainers now,
-sir."*
+History, because it explains the rule. On 2026-09-01 he asked for his 9 p.m.
+retainer reminder to come back in JARVIS's voice, "something different or
+similar almost every night", so it went through the LLM at temperature 0.9. Ten
+days of his phone (10-27..11-06) show what that became: "ingest your daily
+supplements", "lace up your retainers", "don your retainers", "strap on your
+retainers", and once, cut off mid-sentence, "Sir, now is the appropriate time
+to put on your." Twenty-two reminders, a thesaurus, and one that said nothing.
 
-So the reminder goes through the LLM and comes back in his voice, and it should
-not be the same sentence twice in a row.
+The rule since 2026-11-07: a reminder is HIS words, said plainly - "Time for
+your retainers, sir." - and no model or wit ever rephrases it. The same
+sentence every night is the point: it is recognisable at a glance on a lock
+screen, which is the only place a reminder is read.
 
-Three rules this file will not break, all of them learned the hard way:
+Rules this file will not break:
 
-  * It NEVER raises. A reminder that fails to be phrased is still a reminder;
-    the caller gets plain, decent English back instead of an exception.
-  * It NEVER blocks for long. The model is on the same machine as everything
-    else, and a reminder that arrives four minutes late is a broken reminder.
-  * It NEVER invents an errand. The model rephrases what he asked for and adds
-    nothing - no new tasks, no advice, no "and don't forget to floss".
+  * It never raises and never waits on anything: no model, no network, no disk.
+  * It never invents an errand or drops one: every word of what he asked for
+    is in the sentence, with the pronouns turned round ("my" -> "your",
+    because JARVIS is the one saying it).
+  * It is never empty and never cut short.
 """
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
-import random
 import re
 
-from config import APP_DIR
-
-log = logging.getLogger("jarvis.reminder_voice")
-
-BUDGET_S = 8.0          # a late reminder is a broken reminder
-MAX_TOKENS = 60
-KEEP_RECENT = 8         # how many past phrasings to steer away from
-_STATE = APP_DIR / "reminder_phrasings.json"
-
-PROMPT = """You are JARVIS, the user's AI assistant: calm, precise, courteous, quietly witty. You are speaking aloud.
-
-He asked you, earlier, to remind him to do this: "{text}"
-
-It is now time. Say the reminder in your own words, in your own voice.
-
-Rules:
-- ONE short sentence. Spoken aloud, so no markdown, no lists, no emoji.
-- Address him as "sir", either at the start or at the end, never both.
-- Do NOT quote his phrasing back at him verbatim. Put it in your own words.
-- Remind him of exactly that one thing. Do not add advice, do not invent extra
-  tasks, do not ask a question.
-- Calm and courteous. A little dry is welcome. Never nagging, never cute.
-{avoid}
-Reply with the sentence and nothing else."""
-
-# Used when the model is unavailable, too slow, or says something unusable.
-# Still his voice, just not a fresh thought - which is much better than
-# reciting his own words back at him.
-FALLBACKS = (
-    "Sir, it's time to {t}.",
-    "A reminder, sir: time to {t}.",
-    "I believe you're meant to {t} now, sir.",
-    "Time to {t}, sir.",
-    "That's your reminder to {t}, sir.",
-)
-
-
-def _load() -> dict:
-    try:
-        return json.loads(_STATE.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _save(state: dict) -> None:
-    try:
-        _STATE.write_text(json.dumps(state)[:200_000], encoding="utf-8")
-    except Exception:
-        log.debug("could not persist reminder phrasings", exc_info=True)
+# Verbs that only say "do the usual thing with": "take my supplements" and
+# "wear my retainers" read as "Time for your supplements / retainers".
+_ROUTINE = re.compile(r"^(?:take|wear|put (?:in|on)|use|have|do)\s+(your\s+.+)$", re.I)
 
 
 def _as_errand(text: str) -> str:
-    """His reminder text as a verb phrase that reads correctly after "time to".
+    """His reminder text as a phrase JARVIS can say: trimmed, the "remind me
+    to" scaffolding off, and first person turned to second.
 
-    He says "wear my retainers", so "time to wear my retainers" is already
-    right. He also says "retainers" on its own, and "time to retainers" is not.
-    """
+    He sets a reminder as "wear my retainers" - first person, because he is
+    talking about himself - and a sentence that keeps "my" sounds like JARVIS
+    owns a set of retainers (reported 2026-09-02)."""
     t = re.sub(r"\s+", " ", str(text or "")).strip().rstrip(".!?")
     t = re.sub(r"^(?:to|please|remember to|remind me to|don'?t forget to)\s+", "", t, flags=re.I)
     if not t:
         return ""
-    # HIS words, spoken by SOMEONE ELSE. He sets a reminder as "wear my
-    # retainers" — first person, because he is talking about himself — and the
-    # fallback template turned that into "Time to wear MY retainers, sir",
-    # which sounds like JARVIS owns a set of retainers. Reported 2026-09-02.
-    # The pronouns have to turn round when the sentence changes speaker. This
-    # also cleans the text handed to the model, so the LLM path stops being
-    # tempted to echo the first person back.
     for pat, rep in (
         (r"\bmy\b", "your"), (r"\bmine\b", "yours"),
         (r"\bmyself\b", "yourself"), (r"\bme\b", "you"),
@@ -103,82 +49,31 @@ def _as_errand(text: str) -> str:
         (r"\bwe\b", "you"),
     ):
         t = re.sub(pat, rep, t, flags=re.I)
-    # A bare noun ("retainers") needs a verb in front of it, or the fallback
-    # sentences read as "time to retainers".
-    if len(t.split()) == 1:
-        return f"see to your {t}"
     return t
 
 
-def _tidy(said: str, errand: str) -> str:
-    """Trim the model's scaffolding. Empty string means 'unusable'."""
-    s = re.sub(r"\s+", " ", str(said or "")).strip()
-    s = s.strip('"').strip("'").strip()
-    s = re.sub(r"^(?:reminder|jarvis|answer|response)\s*:\s*", "", s, flags=re.I)
-    s = re.sub(r"[*_`#]+", "", s)                     # no markdown, it is spoken
-    if not s:
-        return ""
-    # One sentence. A model that runs on gets cut rather than rambling at him.
-    parts = re.split(r"(?<=[.!?])\s+", s)
-    s = parts[0].strip()
-    if len(s) > 160 or len(s) < 8:
-        return ""
-    # It must still be about the thing he asked for. If the model wandered off
-    # and produced a pleasantry, that is worse than the plain sentence.
-    words = [w for w in re.findall(r"[a-z]{4,}", errand.lower())]
-    if words and not any(w in s.lower() for w in words):
-        log.info("reminder phrasing lost the subject (%r); using the fallback", s[:60])
-        return ""
-    if not s.endswith((".", "!", "?")):
-        s += "."
-    return s
+def plain(text: str) -> str:
+    """`text` is the reminder as he set it. Returns the sentence to say or send.
 
-
-async def _think(errand: str, avoid: list[str]) -> str:
-    from llm.provider import local_llm
-    avoid_block = ""
-    if avoid:
-        lines = "\n".join(f'- "{a}"' for a in avoid[-KEEP_RECENT:])
-        avoid_block = ("- You have recently said these. Say something different "
-                       f"this time:\n{lines}\n")
-    out = ""
-    async for ch in local_llm.stream(
-            [{"role": "user", "content": PROMPT.format(text=errand, avoid=avoid_block)}],
-            max_tokens=MAX_TOKENS,
-            # Warm enough to be a different sentence most nights. The news
-            # summariser runs at 0.1 because it must not embellish; this one is
-            # allowed to have a bit of life in it.
-            sampling={"temperature": 0.9, "top_p": 0.95}):
-        out += ch.text
-        if ch.done:
-            break
-    return out.strip()
-
-
-async def phrase(text: str) -> str:
-    """`text` is the reminder as he set it. Returns a sentence to say aloud."""
+      "take my supplements" -> "Time for your supplements, sir."
+      "wear my retainers"   -> "Time for your retainers, sir."
+      "call the dentist"    -> "Time to call the dentist, sir."
+      "supplements"         -> "Supplements, sir."
+    """
     errand = _as_errand(text)
     if not errand:
         return "You asked me to remind you of something, sir."
+    if len(errand.split()) == 1:
+        return f"{errand[0].upper()}{errand[1:]}, sir."
+    m = _ROUTINE.match(errand)
+    if m:
+        return f"Time for {m.group(1)}, sir."
+    return f"Time to {errand}, sir."
 
-    state = _load()
-    recent = [str(x) for x in (state.get(errand.lower()) or []) if x]
-    said = ""
-    try:
-        said = _tidy(await asyncio.wait_for(_think(errand, recent), timeout=BUDGET_S),
-                     errand)
-    except asyncio.TimeoutError:
-        log.info("reminder phrasing timed out; using the plain form")
-    except Exception:
-        log.debug("reminder phrasing failed", exc_info=True)
 
-    if not said:
-        # Not the same fallback every time either.
-        pool = [f.format(t=errand) for f in FALLBACKS]
-        fresh = [p for p in pool if p not in recent] or pool
-        said = random.choice(fresh)
-
-    recent.append(said)
-    state[errand.lower()] = recent[-KEEP_RECENT:]
-    _save(state)
-    return said
+def nudge(text: str) -> str:
+    """The one quiet follow-up when no Done came: still his words."""
+    errand = _as_errand(text)
+    if not errand:
+        return "Still to do, sir: the reminder from earlier."
+    return f"Still to do, sir: {errand}."

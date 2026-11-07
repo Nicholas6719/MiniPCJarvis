@@ -22,6 +22,11 @@ Explicitly agreed with Nicholas 2026-08-30: interrupting a spreadsheet to say
 "there is breaking news" is welcome when it is urgent. That is what being
 present means. What is never acceptable is waking a dark screen, or talking to a
 room he left.
+
+Since 2026-11-07 a message that goes to his phone is SILENT unless
+`notify_policy` says it may sound (an URGENT, his own reminders, the watches he
+asked for), and the sounding ones that are not reminders have a hard daily
+budget: past it they still arrive, silently, and the log says so once.
 """
 from __future__ import annotations
 
@@ -147,6 +152,58 @@ class Delivery:
         # first word after hours away can be "two things reached your phone,
         # sir" rather than nothing. In memory, this session, capped.
         self.ledger: list[dict] = []
+        # Times today that his phone was made to SOUND by something other
+        # than his own reminders (urgent chases included), for the daily cap.
+        self._sounded: list[float] = []
+        self._sounded_loaded = False
+        self._sound_capped_day = ""
+
+    # ------------------------------------------------------- the sound budget
+    @staticmethod
+    def _today_start(now: float | None = None) -> float:
+        import datetime as _dt
+        d = _dt.datetime.fromtimestamp(now or time.time())
+        return _dt.datetime(d.year, d.month, d.day).timestamp()
+
+    def _load_sounded(self) -> None:
+        """Today's sounding pings from the ledger on disk, once: a restart
+        (every release is one) must not hand him a fresh day's budget."""
+        if self._sounded_loaded:
+            return
+        self._sounded_loaded = True
+        try:
+            import notify_policy
+            from memory.store import memory
+            for e in memory.recent_deliveries(self._today_start()):
+                subj = str(e.get("subject") or "")
+                if e.get("sound") and e.get("outcome") == "telegram" and \
+                        notify_policy.counts_against_budget(notify_policy.kind_of(subj, subj)):
+                    self._sounded.append(float(e.get("ts") or 0))
+        except Exception:
+            log.debug("could not read today's sounding pings", exc_info=True)
+
+    def sound_budget_left(self) -> int:
+        """How many more non-reminder sounding pings today. Never raises."""
+        try:
+            import notify_policy
+            self._load_sounded()
+            start = self._today_start()
+            self._sounded = [t for t in self._sounded if t >= start]
+            left = notify_policy.daily_sound_cap() - len(self._sounded)
+            if left <= 0:
+                day = time.strftime("%Y-%m-%d")
+                if self._sound_capped_day != day:
+                    self._sound_capped_day = day
+                    log.warning("sounding budget spent: %d sounding pings today (cap %d) - "
+                                "everything else today arrives silently",
+                                len(self._sounded), notify_policy.daily_sound_cap())
+            return max(0, left)
+        except Exception:
+            return 1            # unknown: this one may sound; the hourly ceiling still holds
+
+    def note_sounded(self) -> None:
+        """A message that made his phone sound (an urgent chase, say)."""
+        self._sounded.append(time.time())
 
     def _key_for(self, key: str, text: str) -> str:
         """A cooldown key for every message, whether the caller supplied one or not.
@@ -243,16 +300,20 @@ class Delivery:
 
     async def deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
                       subject: str = "", written: str = "",
-                      image: str = "") -> dict:
-        """Say it, send it, or hold it — and remember what was done (ledger)."""
+                      image: str = "", buttons: list | None = None) -> dict:
+        """Say it, send it, or hold it — and remember what was done (ledger).
+
+        `buttons` are Telegram inline buttons, [(label, callback_data), ...]
+        - the reminder's "Done". Ignored when the message is spoken."""
         r = await self._deliver(text, tier, key=key, subject=subject,
-                                written=written, image=image)
+                                written=written, image=image, buttons=buttons)
         outcome = str(r.get("delivered") or "nothing")
         if outcome != "nothing" or r.get("why") not in ("empty", "said recently"):
             row = {"ts": time.time(), "tier": r.get("tier", tier),
                    "outcome": outcome, "why": r.get("why", ""),
                    "subject": (subject or key or "").strip(),
-                   "text": (text or "").strip()[:300], "replayed": False}
+                   "text": (text or "").strip()[:300], "replayed": False,
+                   "sound": bool(r.get("sound"))}
             self._load_ledger()
             self.ledger.append(row)
             del self.ledger[:-200]
@@ -424,7 +485,7 @@ class Delivery:
 
     async def _deliver(self, text: str, tier: str = NOTABLE, *, key: str = "",
                        subject: str = "", written: str = "",
-                       image: str = "") -> dict:
+                       image: str = "", buttons: list | None = None) -> dict:
         """Say it, send it, or hold it. Returns what was actually done.
 
         `image` is a picture to send WITH the message when it goes to his phone —
@@ -469,8 +530,10 @@ class Delivery:
             await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
             return {"delivered": "held for the next brief", "tier": tier}
 
+        import notify_policy
+        kind = notify_policy.kind_of(subject, key)
         if present:
-            spoke = await self._speak(text, interrupt=tier in (ALERT, URGENT))
+            spoke = await self._speak(text, interrupt=notify_policy.interrupts(tier, kind))
             if spoke:
                 self._sent.append(time.time())
                 _remember_proactive(text)
@@ -481,17 +544,24 @@ class Delivery:
             # audio gone) — the phone is better than losing it
         if telegram_available():
             from remote_telegram import telegram
+            # SILENT UNLESS IT HAS EARNED A SOUND (2026-11-07). What sounds and
+            # is not one of his reminders spends the daily budget; past it, it
+            # still arrives - silently.
+            sound = notify_policy.audible(tier, kind)
+            if sound and notify_policy.counts_against_budget(kind) and self.sound_budget_left() <= 0:
+                sound = False
             sent_photo = False
             if image:
                 # The picture IS the message for a finished render. Sent first
                 # so the caption arrives with it rather than after it.
                 try:
                     sent_photo = await telegram._upload(
-                        image, kind="photo", caption=(written or text)[:900])
+                        image, kind="photo", caption=(written or text)[:900], silent=not sound)
                 except Exception:
                     log.warning("could not send the render photo", exc_info=True)
             sent = sent_photo or await telegram.send_proactive(
-                written or text, tier=tier, subject=subject)
+                written or text, tier=tier, subject=subject, silent=not sound,
+                buttons=buttons)
             if not sent:
                 # NOT delivered, and it must not be filed as if it were. This
                 # path used to append to _sent, remember the text as told and
@@ -509,10 +579,12 @@ class Delivery:
                 return {"delivered": "held", "why": "telegram did not accept it",
                         "tier": tier}
             self._sent.append(time.time())
+            if sound and notify_policy.counts_against_budget(kind):
+                self.note_sounded()
             _remember_proactive(text)
             await bus.emit("proactive", text=text, tier=tier, channel="telegram",
                            subject=subject)
-            return {"delivered": "telegram", "tier": tier,
+            return {"delivered": "telegram", "tier": tier, "sound": sound,
                     "photo": bool(image and sent_photo),
                     "why": "he is not at the machine" if not present else "could not speak"}
 

@@ -117,7 +117,11 @@ class Proactive:
         await bus.emit("proactive", alert=key, text=text)
         if self.announce is not None:
             try:
-                await self.announce(text)
+                # A rule he set ("tell me if the CPU goes above 90") is his own
+                # request, like a watch: it may sound on his phone. The rest of
+                # these (the disk, a break) arrive silently (notify_policy).
+                await self.announce(text, key=key,
+                                    subject="watch" if key.startswith("rule:") else "")
             except Exception:
                 log.exception("proactive announce failed")
         return True
@@ -282,6 +286,100 @@ class Proactive:
         except Exception:
             return ""
 
+    # ---------- memory: only when it is JARVIS's problem ----------
+    #
+    # Eight times between 10-29 and 11-05 his phone said "Memory is at 94
+    # percent - the model server 15 GB, claude 5 GB, python 4 GB". It was
+    # about his other apps (Claude sessions, a Gradle daemon), JARVIS was
+    # answering normally, and there was nothing he could or would do from his
+    # phone. Since 2026-11-07: at most once a day, silently, and only when
+    # memory has stayed at or above 95% for ten minutes AND JARVIS himself is
+    # affected - the model server failing its health check, slow to give it,
+    # or slow (or failing) to say one word in the liveness probe. Otherwise it
+    # is logged and nothing is sent.
+    PROBE_SLOW_MS = 20_000
+    HEALTH_SLOW_MS = 1500
+    RECHECK_S = 600               # while high and JARVIS is fine, look again this often
+    _ram_since: float | None = None
+    _ram_logged_day = ""
+    _ram_checked_at = 0.0
+
+    async def _jarvis_affected(self) -> tuple[bool, str]:
+        """(is JARVIS slowed, how). Never raises; unknown is 'not affected'."""
+        try:
+            from llm.llama_server import llama
+            t0 = time.monotonic()
+            ok = await llama.healthy()
+            ms = (time.monotonic() - t0) * 1000
+            if not ok:
+                return True, "the model server is not answering its health check"
+            if ms > self.HEALTH_SLOW_MS:
+                return True, f"the model server took {ms / 1000:.1f} seconds to answer a health check"
+        except Exception:
+            log.debug("health check for the memory alert failed", exc_info=True)
+        try:
+            from orchestrator import orchestrator as _o
+            if int(getattr(_o, "_probe_failures", 0) or 0):
+                return True, "my last liveness probe came back with nothing usable"
+            pm = int(getattr(_o, "_probe_ms", 0) or 0)
+            at = float(getattr(_o, "_probe_done_at", 0.0) or 0.0)
+            if pm > self.PROBE_SLOW_MS and time.time() - at < 1800:
+                return True, f"one word took me {pm / 1000:.0f} seconds"
+        except Exception:
+            log.debug("probe check for the memory alert failed", exc_info=True)
+        return False, ""
+
+    @staticmethod
+    def _said_memory_today() -> bool:
+        """Was a memory alert delivered today? From the ledger, so a restart
+        does not buy a second one."""
+        try:
+            from memory.store import memory
+            d = dt.datetime.now()
+            start = dt.datetime(d.year, d.month, d.day).timestamp()
+            return any(str(e.get("subject") or "").startswith("memory:")
+                       and e.get("outcome") not in ("nothing",)
+                       for e in memory.recent_deliveries(start))
+        except Exception:
+            return False
+
+    async def _memory_check(self, vm, now: float | None = None) -> str:
+        """One reading. Returns what was done: '', 'waiting', 'logged',
+        'sent', 'already today' - for the gate and the log."""
+        now = now or time.time()
+        warn = float(self._cfg("memory_alert_percent", 95))
+        if vm.percent < warn:
+            self._ram_since = None
+            return ""
+        if self._ram_since is None:
+            self._ram_since = now
+        if now - self._ram_since < float(self._cfg("ram_hold_minutes", 10)) * 60:
+            return "waiting"
+        if now - self._ram_checked_at < self.RECHECK_S:
+            return "logged"                  # looked recently: JARVIS was fine
+        if self._said_memory_today():
+            return "already today"
+        affected, how = await self._jarvis_affected()
+        # SAY WHAT IS USING IT. "Memory is running very tight" reached him every
+        # two hours for a day with nothing running but JARVIS (2026-10-13); the
+        # hog was llama-server's own host prompt cache.
+        text = (f"Memory is at {int(vm.percent)} percent{_memory_hogs()}"
+                f"{self._against_last_week(vm.percent)}.")
+        day = dt.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        if not affected:
+            self._ram_checked_at = now
+            if self._ram_logged_day != day:
+                self._ram_logged_day = day
+                log.info("memory held at %d%% for %d minutes, but JARVIS is answering normally - "
+                         "logged, not sent: %s", int(vm.percent), int((now - self._ram_since) / 60), text)
+            return "logged"
+        from delivery import ALERT, delivery
+        log.warning("memory held at %d%% and it is slowing JARVIS (%s) - telling him, once today",
+                    int(vm.percent), how)
+        await delivery.deliver(f"{text} It is slowing me down: {how}.", ALERT,
+                               key=f"memory:{day}")
+        return "sent"
+
     # ---------- checks ----------
 
     async def run_checks(self) -> None:
@@ -304,21 +402,11 @@ class Proactive:
             # with nothing wrong with it.
             log.debug("disk check failed", exc_info=True)
 
-        # sustained RAM pressure (what is holding it is in the sentence)
+        # sustained RAM pressure, said only when it is slowing JARVIS himself
         vm = None
         try:
             vm = psutil.virtual_memory()
-            if vm.percent >= float(self._cfg("ram_percent_warn", 94)):
-                # SAY WHAT IS USING IT. "Memory is running very tight" reached him
-                # every two hours for a day with nothing running but JARVIS
-                # (2026-10-13); the hog was llama-server's own host prompt cache.
-                # A warning that cannot name the culprit sends him looking at
-                # the wrong things.
-                await self._fire(
-                    "ram_high",
-                    f"Memory is at {int(vm.percent)} percent{_memory_hogs()}"
-                    f"{self._against_last_week(vm.percent)}. Things may slow down.",
-                    cooldown_h=2)
+            await self._memory_check(vm)
         except Exception:
             log.debug("memory check failed", exc_info=True)
 

@@ -31,10 +31,31 @@ Four tiers, and the same four everywhere:
 Rules rather than a model, deliberately: this must be fast, predictable and
 testable against real headlines. A model may sharpen the wording of a brief; it
 does not get to decide whether to wake him at 3 a.m.
+
+**2026-11-07: news never pings unless it is LOCAL, CURRENT and DANGEROUS.** His
+words: *"I am mainly ignoring his notifications, which is not what I built him
+for."* Ten days of his phone (10-27..11-06) carried ten URGENT news pings and
+not one was urgent or local - a 70%-contained wildfire eighty miles off, an RMV
+bribery case, a "Dear Annie" column, Taco Bell's recovery, a settlement fund,
+election punditry - and a school lockdown in Gloucester, ENGLAND as "a hazard
+loose in his state". So the tiers below still decide how a story ranks in a
+brief, and `urgent_gate()` alone decides whether it may make his phone sound:
+a town `geo` is certain of inside his radius, a hazard to the public that is
+happening now, and not a feature, trial, anniversary, recovery, settlement,
+opinion, prediction, advice piece or business story. ALERT no longer exists
+for news: what would have been one waits for the next brief. National and
+world news never pings. At runtime the local model must also confirm an
+URGENT (`news_check.py`); it can veto, never promote.
+
+Where things are comes from `geo.py` (every Massachusetts town, how far from
+his home, and which Gloucester); the hand-kept town lists that lived here are
+gone.
 """
 from __future__ import annotations
 
 import re
+
+import geo
 
 URGENT = "urgent"
 ALERT = "alert"
@@ -42,68 +63,26 @@ NOTABLE = "notable"
 NONE = ""
 
 # --- where he lives -----------------------------------------------------------
-# Middlesex County, Massachusetts. The five towns he named come first; the state
-# is still local, and Boston is close enough to matter to him.
-HOME_TOWNS = ("framingham", "sudbury", "marlborough", "marlboro", "maynard", "natick")
-# The STATE, said plainly. Since 2026-09-06 this is not "near" on its own (see
-# NEAR_TOWNS): it is the fallback for a story that names the state and no town,
-# which is by its nature statewide - an earthquake felt across Massachusetts,
-# a Mass. grant programme - and so may well include him.
-HOME_REGION = ("massachusetts", "middlesex", "mass.", "metrowest", "bay state")
-
 # HIS GROUND IS A RADIUS, NOT THE STATE. His words, 2026-09-06: "I live in
 # Framingham MA, I want news from say a 15-20 mile radius, use your best
-# judgement." Measured from Framingham (42.2793, -71.4162) with Open-Meteo's
-# geocoder that afternoon: everything here is within twenty miles as the crow
-# flies (Boston at 19.0 is kept - it is the hub; Worcester at 19.8 is not - a
-# city of its own with its own troubles). The state alone is no longer
-# "near": Taunton, Ludlow, Brockton and Lynn are all Massachusetts and all
-# reached his phone for things that were none of his business.
-# Names nobody else uses: these count on sight, whatever wire they rode in on.
-NEAR_SURE = (
-    "natick", "sherborn", "holliston", "southborough", "southboro", "wellesley",
-    "hopkinton", "millis", "medfield", "needham", "westborough", "westboro", "maynard",
-    "westwood", "northborough", "northboro", "hopedale", "watertown", "bellingham",
-    "mendon", "shrewsbury", "wrentham", "brookline", "boxborough", "boylston",
-    "foxborough", "foxboro", "carlisle", "uxbridge", "somerville", "millbury",
-    "blackstone", "stoughton", "woburn", "waltham", "northbridge", "metrowest",
-    "mass pike", "mass. pike")
-# Names that are ALSO somewhere else - Berlin, Lincoln, Canton, Burlington,
-# Lexington, Arlington, Concord, Dover, Milford, Medford, Hudson, Franklin -
-# and so count only when the story is corroborated: it came off one of his
-# desks, or says Massachusetts somewhere. ("Mass casualty incident in Berlin"
-# is Germany.) Boston, Cambridge and Newton get the older, gentler test
-# below: his unless the story reads as England.
-NEAR_ALSO = (
-    "sudbury", "marlborough", "wayland", "weston", "medway", "hudson", "milford",
-    "newton", "stow", "norfolk", "upton", "norwood", "walpole", "concord", "dedham",
-    "acton", "bolton", "belmont", "grafton", "sharon", "arlington", "cambridge",
-    "harvard", "milton", "medford", "boston", "ashland", "lincoln", "dover",
-    "lexington", "bedford", "burlington", "franklin", "berlin", "littleton",
-    "canton", "clinton", "lancaster", "route 9", "the pike")
-NEAR_TOWNS = NEAR_SURE + NEAR_ALSO
-_alt = lambda names: "|".join(r"\b" + re.escape(t) + r"\b" for t in names)  # noqa: E731
-NEAR_SURE_RE = re.compile(_alt(NEAR_SURE), re.I)
-NEAR_ALSO_RE = re.compile(_alt(NEAR_ALSO), re.I)
-BIG_CITY_RE = re.compile(
-    r"\b(?:boston|cambridge|newton|somerville|brookline|quincy|dorchester|roxbury|"
-    r"south end|back bay|fenway|seaport|north station|south station|"
-    r"logan (?:airport|international|cargo|terminal)|"
-    r"green line|red line|orange line|blue line)\b", re.I)
+# judgement." The radius and every town's distance now come from geo.py
+# (`home.radius_mi`, default 20, measured from the Census interior points).
+# Two distances matter inside it:
+#   NEIGHBOUR_MI  his own patch. The five towns he named (Framingham, Natick,
+#                 Sudbury, Marlborough, Maynard) all fall inside 8.5 miles, with
+#                 Wayland, Ashland, Sherborn, Southborough, Hopkinton, Holliston,
+#                 Wellesley, Weston and Hudson.
+#   EDGE_MI       the edge of his ground: Cambridge, Somerville, Brookline,
+#                 Woburn, Worcester. In the radius, but cities of their own: a
+#                 point incident there is theirs (Boston itself, 21.5 miles
+#                 from Framingham by the Census point, is outside).
+NEIGHBOUR_MI = 8.5
+EDGE_MI = 15.0
 
-# Massachusetts, but not his ground: beyond ~20 miles, or the big cities of
-# their own regions. A story off a local desk that names one of these, and
-# none of his, is that town's news, not his. (No "Reading", "Beverly",
-# "Douglas", "Sterling" - those are ordinary words and names before they are
-# towns, and a false far-place would silence a real one of his.)
-FAR_MA = re.compile(
-    r"\b(?:worcester|taunton|brockton|lynn|lowell|lawrence|springfield|ludlow|falmouth|"
-    r"plymouth|attleboro|quincy|braintree|weymouth|randolph|malden|everett|chelsea|revere|"
-    r"billerica|westford|chelmsford|wilmington|leominster|fitchburg|"
-    r"new bedford|fall river|haverhill|pittsfield|northampton|amherst|holyoke|chicopee|"
-    r"westfield|gloucester|salem|peabody|danvers|newburyport|hyannis|cape cod|"
-    r"nantucket|martha'?s vineyard|the berkshires|barnstable|yarmouth|"
-    r"greenfield|marlborough, ct)\b", re.I)
+# The STATE, said plainly. Not "near" on its own: the fallback for a story that
+# names the state and no town, which is by its nature statewide - an earthquake
+# felt across Massachusetts, a Mass. grant programme - and so may include him.
+HOME_REGION = ("massachusetts", "middlesex", "mass.", "metrowest", "bay state")
 
 # "mass." was written " mass." with a leading space, to keep "mass shooting" and
 # "mass casualty" from reading as Massachusetts. It also meant a headline that
@@ -112,19 +91,14 @@ FAR_MA = re.compile(
 # was foreign news to him. A word boundary does the same job without the hole.
 REGION_RE = re.compile(
     "|".join(r"\b" + re.escape(term) for term in HOME_REGION), re.I)
-TOWN_RE = re.compile(
-    "|".join(r"\b" + re.escape(town) + r"\b" for town in HOME_TOWNS), re.I)
 
 # Says Massachusetts and cannot mean anywhere else.
 ANCHOR_RE = re.compile(r"\bmassachusetts\b|\bmass\.|\bmetrowest\b|\bmiddlesex\b"
                        r"|\bbay state\b|\b(?:ma|mass)\b(?=[,.]|\s+state)", re.I)
 
-# Place names that are ALSO somewhere else, or something else entirely. The
-# always-scanned national wire is BBC and Sky, so "Cambridge United striker
-# killed in car crash" read as a death close to home, "Worcester man charged over
-# stabbing" as violence in his state, and "Marlboro maker Altria to cut 500 jobs"
-# as news from one of his five towns. A name like this needs corroboration.
-AMBIGUOUS_TOWN_RE = re.compile(r"\bmarlboro\b(?!ugh)", re.I)
+# Another state by its postal code, in capitals only ("2 Mass. residents killed
+# in NH crash", 2026-11-02): lower case, "me", "or" and "in" are words.
+STATE_CODE = re.compile(r"\b(?:NH|N\.H|VT|RI|R\.I|CT|NY|NJ|PA|CA|FL|TX|AZ|NV|GA|NC|SC|OH|MI|IL)\b")
 
 # A local desk is not only local. WCVB, MassLive and Boston.com all carry the
 # national wire, so provenance ALONE made "Woman randomly stabs 2 people in New
@@ -720,15 +694,16 @@ TRAFFIC = re.compile(
     r"suv|pickup truck|tractor.trailer)\b", re.I)
 
 
-def _city_only(text: str) -> bool:
-    """Near him ONLY because it is Boston (or the T, or the airport) - not one
-    of his towns, not MetroWest, not the county. A smoky Green Line train at
-    North Station reached him as URGENT (2026-09-11 05:20). Boston is his
-    when something there spreads or moves; a point incident there is
-    Boston's."""
-    return bool(BIG_CITY_RE.search(text)) and not (
-        TOWN_RE.search(text) or NEAR_SURE_RE.search(text) or NEAR_ALSO_RE.search(text)
-        or re.search(r"\bmetrowest\b|\bmiddlesex\b", text, re.I))
+def _edge_only(story: dict) -> bool:
+    """Near him ONLY because of a city at the edge of his ground - Cambridge,
+    Somerville, Woburn, Worcester - not one of his towns, not MetroWest, not
+    the county. A smoky Green Line train at North Station reached him as
+    URGENT (2026-09-11 05:20). The edge is his when something there spreads
+    or moves; a point incident there is the city's."""
+    inside = [f for f in places(story) if geo.within_radius(f.miles)]
+    if not inside or inside[0].miles <= EDGE_MI:
+        return False
+    return not re.search(r"\bmetrowest\b|\bmiddlesex\b", _text_of(story), re.I)
 
 
 # THE ASSASSINATION HE DID NOT HEAR ABOUT. A national figure shot dead is
@@ -810,67 +785,89 @@ def _text_of(story: dict) -> str:
                     ("headline", "title", "summary", "description"))
 
 
+def _far(text: str) -> bool:
+    """The text names another state or another country."""
+    return bool(FAR_PLACE.search(text) or FOREIGN.search(text) or geo.FOREIGN.search(text)
+                or STATE_CODE.search(text))
+
+
+def _elsewhere(text: str) -> bool:
+    """...or reads as Britain (a pub, a borough, a football club). Any of these
+    beats a Massachusetts desk when a SHARED town name needs vouching for."""
+    return _far(text) or bool(ELSEWHERE_RE.search(text))
+
+
+def places(story: dict) -> list:
+    """The Massachusetts towns this story CERTAINLY names, nearest first
+    (`geo.Found`, with `.town`, `.miles`).
+
+    geo decides certainty: a name only Massachusetts has counts on sight; a
+    shared one (Gloucester, Concord, Sudbury, Boston) needs the text or the
+    outlet to place it here, and never counts beside a foreign marker. One of
+    HIS desks (`_local_feed`: WCVB, MassLive, the Patch towns) also vouches
+    for a shared name - unless the text itself says it is elsewhere, which
+    beats provenance (the Herald covers Gloucester, England too)."""
+    t = _text_of(story)
+    try:
+        found = geo.find_towns(t, str(story.get("source") or ""))
+    except Exception:
+        return []
+    if story.get("_local_feed") and any(not f.certain for f in found):
+        # the town's own name is not evidence against it: Berlin, Peru and
+        # Wales are Massachusetts towns as well as foreign places
+        rest = t
+        for f in found:
+            rest = re.sub(r"\b" + re.escape(f.said) + r"\b", " ", rest)
+        if not _elsewhere(rest):
+            found = [f if f.certain else geo.Found(f.town, True, f.said) for f in found]
+    return [f for f in found if f.certain]
+
+
 def is_local(story: dict) -> tuple[bool, bool]:
-    """(near him at all, one of his five towns).
+    """(near him at all, in his own patch - within NEIGHBOUR_MI).
 
     Place names are not evidence on their own. Boston, Cambridge, Worcester and
-    Newton are all English towns too, and the always-scanned national wire is BBC
-    and Sky - so "Cambridge United striker killed in car crash" read as somebody
-    dying close to home, and "Marlboro maker Altria to cut 500 jobs" read as news
-    from one of his five towns.
+    Gloucester are all English towns too, and the always-scanned national wire
+    is BBC and Sky - so "Cambridge United striker killed in car crash" read as
+    somebody dying close to home, and a sword incident outside a Gloucestershire
+    school reached him four times as "a hazard loose in his state".
 
-    Two ways to be local, and an ambiguous name alone is neither:
-      * the story came from one of HIS desks (WCVB, MassLive, the Patch towns) -
-        provenance beats parsing, and it is free;
-      * or the text names Massachusetts unambiguously, or names one of his towns
-        in a form nobody else uses.
+    Three ways to be local:
+      * a town geo is certain of, inside his radius;
+      * the story came from one of HIS desks and names nothing far - provenance
+        beats parsing, and it is free;
+      * the text names Massachusetts unambiguously and no town at all.
     """
     t = _text_of(story)
-    from_his_desk = bool(story.get("_local_feed"))
-    anchored = bool(ANCHOR_RE.search(t))
-    elsewhere = bool(ELSEWHERE_RE.search(t))
+    found = places(story)
+    inside = [f for f in found if geo.within_radius(f.miles)]
+    if inside:
+        return True, inside[0].miles <= NEIGHBOUR_MI
     # somewhere clearly not his: another state, another country, or the far
-    # end of this one (Taunton, Ludlow, Worcester - 2026-09-06)
-    far = bool(FAR_PLACE.search(t) or FOREIGN.search(t))
-    far_ma = bool(FAR_MA.search(t))
-
-    town = bool(TOWN_RE.search(t))
-    if town and AMBIGUOUS_TOWN_RE.search(t) and not (anchored or from_his_desk):
-        town = False            # "Marlboro maker Altria" is a cigarette company
-
-    # 1. A town inside his twenty miles, named. A name nobody else uses counts
-    #    on sight; a shared one needs the desk or the state to vouch for it;
-    #    Boston/Cambridge/Newton are his unless the story reads as England.
-    near_named = (
-        town
-        or (bool(NEAR_SURE_RE.search(t)) and not elsewhere)
-        or (bool(NEAR_ALSO_RE.search(t)) and (from_his_desk or anchored) and not elsewhere)
-        or (bool(BIG_CITY_RE.search(t)) and not elsewhere and not far))
-    if near_named:
-        return True, town
-    # 2. Provenance, with nothing against it. His desks syndicate the wire
-    #    and cover the whole state: a far place, a foreign one, or the far
-    #    end of Massachusetts in the text means the desk stops counting.
-    #    ("A fire in Congo's capital" off Boston.com, 2026-09-05; a Taunton
-    #    house party off WCVB, 2026-09-06.)
-    if from_his_desk and not (far or far_ma):
+    # end of this one (Taunton, Ludlow, Holyoke - 2026-09-06)
+    far = _far(t)
+    far_ma = bool(found)                 # certain towns, every one outside the radius
+    # Provenance, with nothing against it. His desks syndicate the wire and
+    # cover the whole state. ("A fire in Congo's capital" off Boston.com,
+    # 2026-09-05; a Taunton house party off WCVB, 2026-09-06.)
+    if story.get("_local_feed") and not (far or far_ma):
         return True, False
-    # 3. The state, said plainly, and no town at all: statewide by nature
-    #    (an earthquake felt across Massachusetts), so it may include him.
-    if (anchored or REGION_RE.search(t)) and not (far or far_ma or elsewhere):
+    # The state, said plainly, and no town at all: statewide by nature.
+    if (ANCHOR_RE.search(t) or REGION_RE.search(t)) and not (far or far_ma
+                                                            or ELSEWHERE_RE.search(t)):
         return True, False
     return False, False
 
 
 def in_his_state(story: dict) -> bool:
-    """Massachusetts, near him or not. The one thing this decides: a hazard
-    that is loose and still moving at the far end of his state (a nuclear
-    plant leak in Plymouth with an evacuation on) is not silenced by the
-    twenty-mile rule - it is the only kind of far-end story that is."""
+    """Massachusetts, near him or not, for the brief's ranking. A town geo is
+    certain of anywhere in the state, the state said plainly, or one of his
+    desks - and never when the text says it is somewhere else (Gloucester,
+    England is not his state, whatever wire carried it)."""
     t = _text_of(story)
-    if FAR_PLACE.search(t) or FOREIGN.search(t) or ELSEWHERE_RE.search(t):
+    if _elsewhere(t):
         return False
-    return bool(FAR_MA.search(t) or ANCHOR_RE.search(t) or REGION_RE.search(t)
+    return bool(places(story) or ANCHOR_RE.search(t) or REGION_RE.search(t)
                 or story.get("_local_feed"))
 
 
@@ -913,13 +910,246 @@ def emergencies_only() -> bool:
                           default="emergencies")).lower().startswith("emerg")
 
 
+# --- NOT BREAKING NEWS, WHATEVER WORDS IT USES (2026-11-07) ----------------------
+# Every one of these reached his phone as URGENT or ALERT between 10-27 and
+# 11-06, each on a hazard word in a story that was not a hazard: a "Dear Annie"
+# column about the "office outbreak source", Taco Bell's recovery from a
+# cyclospora outbreak, a settlement fund from "the worst US gas leak", an RMV
+# bribery case (the pandemic "caused delays"), election punditry predicting a
+# "tsunami", an advice piece on emergency kits, a trial, a new veterans' home
+# opening "after deadly 2020 outbreak", and a year-in-review of singers who
+# died. A feature, column, trial, anniversary, recovery, settlement, opinion,
+# prediction, advice piece or business story is never an emergency. Phrases,
+# not bare words, wherever a real emergency could use the word too: the gas
+# COMPANY is on scene, a gunman OPENS fire, police seek TIPS on a missing girl.
+NOT_NEWS_NOW = re.compile(
+    # columns, advice, opinion, explainers
+    r"\b(?:dear (?:annie|abby|prudence|amy)|ask (?:amy|ellie|eric|carolyn)|advice column\w*|"
+    r"columnist|op-?ed|opinion|editorial|letters? to the editor|commentary|"
+    r"explainer|q ?& ?a|quiz|podcast|recipes?|how to\b|why you should|"
+    r"should(?:n'?t|'t|t)? panic|don'?t panic|no need to panic|emergency kits?|preparedness|"
+    # predictions, punditry, politics
+    r"predict\w*|analysts?|pundits?|polls?|survey|elections?|ballots?|voters?|campaign\w*|"
+    r"candidates?|blue wave|red wave|"
+    # the courts
+    r"trial|testif\w+|closing (?:arguments|statements)|jur(?:y|ors?)|verdict|"
+    r"(?:appears?|appeared|back) in court|in court|courtroom|courthouse|"
+    r"(?:superior|district|federal|appeals|supreme|probate|housing) court|"
+    r"lawsuit|sued|settlement|plea (?:deal|agreement|bargain)|pleads?|pleaded|sentenc\w+|indict\w+|"
+    r"arraign\w+|charged (?:with|in)|accused|"
+    # after the fact
+    r"anniversary|(?:years?|months?|decades?) (?:ago|later|after)|remembered|"
+    r"memorial (?:service|fund|ride|walk|plaque|bench|statue)|tributes?|vigil|"
+    r"recovers|recovery|recovering from|rebuild\w*|aftermath|"
+    r"cause of (?:the )?(?:fire|crash|death|explosion|blaze|collapse)|share cause|report finds|"
+    r"investigation (?:finds|found|concludes|concluded)|"
+    # money and business
+    r"earnings|revenue|profits?|quarterly|investors?|ipo|ceo|stock (?:price|market)|wall street|"
+    r"restaurant chain|fast[- ]food chain|"
+    r"(?:millions|billions) of dollars|available to help|grants?|"
+    r"funding|rebates?|incentives?|bribe\w*|salary|fraud|embezzl\w+|scam\w*|"
+    # occasions
+    r"grand opening|ribbon[- ]cutting|groundbreaking|celebrat\w+|new veterans'? home|"
+    r"most devastating year|year in review|(?:have|who) died in \d{4}|in memoriam)\b", re.I)
+
+
+def _not_news_now(text: str) -> str:
+    """The words that make this a feature, a trial, a settlement... or ''."""
+    m = NOT_NEWS_NOW.search(text or "")
+    return m.group(0).lower() if m else ""
+
+
+# --- WHAT IS HAPPENING NOW, AND IS DANGEROUS TO THE PUBLIC ------------------------
+# The categories a ping may be about. Each must describe the danger as present:
+# a fire burning, a suspect loose, a gas leak, a road shut now, a warning in
+# force, a person missing, a school locked down. A finished incident (a crash
+# that is over, a fire put out, a death) is news for the brief.
+FIRE_NOW = re.compile(
+    r"\b(?:brush|grass|forest|wild|woods|mulch|marsh|leaf)\s*fires?\b"
+    r"|\b(?:[2-9]|two|three|four|five|six|seven|eight|nine|multi|multiple)[- ]alarm\b"
+    r"|\b(?:crews|firefighters|fire crews|fire departments?)\s+(?:are\s+)?"
+    r"(?:battl\w+|fight\w*|working to (?:contain|knock down|put out)|on scene of (?:a |the )?(?:fire|blaze))"
+    r"|\b(?:fire|blaze|flames)\s+(?:is\s+|are\s+)?(?:spread\w*|still burning|burning out of control|"
+    r"threaten\w*|rag\w+)"
+    r"|\bfire\b[^.]{0,50}\bevacuat\w+|\bevacuat\w+[^.]{0,50}\b(?:fire|blaze|smoke)\b", re.I)
+# A fire his phone may sound for beyond his own patch: one that reaches people
+# who are not in the building.
+FIRE_PUBLIC = re.compile(
+    r"\b(?:brush|grass|forest|wild|woods|marsh)\s*fires?\b"
+    r"|\b(?:[3-9]|three|four|five|six|seven|eight|nine)[- ]alarm\b"
+    r"|\bevacuat\w+|\bspread\w*|\bavoid the area\b|\b(?:roads?|streets?|route \d+) (?:is |are )?(?:closed|shut)\b"
+    r"|\bsmoke (?:advisory|warning)|\bshelter[- ]in[- ]place\b|\bkeep (?:windows|doors) closed\b", re.I)
+POLICE_NOW = re.compile(
+    r"\b(?:manhunt|at large|on the loose|active shooter|shelter[- ]in[- ]place|barricaded|standoff|"
+    r"swat (?:team|teams|officers)|heavy police (?:presence|activity)|police activity|shots fired|"
+    r"armed and dangerous|no suspect in custody|suspects? (?:fled|remains? at large|still at large)|"
+    r"(?:police (?:are )?)?(?:search(?:ing|es)?|look(?:ing)?|hunt(?:ing|s)?) for (?:a |an |the |two |three )?"
+    r"(?:suspects?|gunm[ae]n|shooters?|armed (?:man|woman|person|suspect)|"
+    r"(?:man|woman|driver|person|people) (?:who|wanted|accused|suspected))|"
+    r"police (?:are )?(?:search(?:ing|es)?|look(?:ing)?|hunt(?:ing|s)?) for (?:a |an |the )?(?:man|woman|driver|person)|"
+    r"avoid the area)\b", re.I)
+HAZMAT_NOW = re.compile(
+    r"\b(?:gas leak|gas odor|odor of gas|smell of gas|chemical (?:leak|spill|fire|release|exposure)|"
+    r"hazmat|hazardous (?:materials?|chemicals?|substance)|toxic (?:gas|fumes?|smoke|spill|leak|cloud|chemical)|"
+    r"carbon monoxide|ammonia leak|chlorine (?:leak|gas)|fuel spill|oil spill|radiation (?:leak|release)|"
+    r"explosion|exploded|blasts? (?:kills?|injures?|rocks?|rips?|levels?|at|in|near)|"
+    r"suspicious (?:package|device|substance|powder)|bomb squad|"
+    r"boil[- ]water|do not drink the water|contaminated (?:water|drinking water)|water (?:is )?contaminated|"
+    r"(?:legionnaires'?|measles|norovirus|e\.? ?coli|salmonella|listeria|meningitis|hepatitis a) "
+    r"(?:outbreak|cases?|exposure)|possible (?:measles )?exposure)\b", re.I)
+ROAD_NOW = re.compile(
+    r"\b(?:roads?|streets?|st\.|avenue|ave\.?|highway|route|rte\.?|routes? \d+|interstate|i-?\d+|"
+    r"mass ?pike|turnpike|ramps?|exits?|bridge|overpass|lanes?|intersection|both directions)\b"
+    r"[^.]{0,40}\b(?:closed|shut down|shut|blocked|impassable)\b"
+    r"|\bclos(?:es|ed|ing)\s+(?:part of\s+)?(?:route|rte\.?|i-?\d+|the mass ?pike|the turnpike|"
+    r"[A-Z][a-z]+ (?:road|street|st|avenue|ave|drive|highway))\b"
+    r"|\b(?:route|rte\.?) \d+\b[^.]{0,30}\b(?:closed|shut|blocked)\b", re.I)
+ROAD_PLANNED = re.compile(
+    r"\bfor (?:construction|paving|repairs?|road ?work|utility work|the (?:weekend|season|parade|race|"
+    r"marathon|event|holiday|night)|a (?:parade|race|festival|marathon|road race))\b"
+    r"|\b(?:scheduled|planned|overnight work|this weekend|next week|starting (?:on )?(?:monday|tuesday|"
+    r"wednesday|thursday|friday|saturday|sunday)|will (?:be )?clos\w+|to close|closing for)\b", re.I)
+WEATHER_NOW = re.compile(
+    r"\b(?:tornado|severe thunderstorm|flash flood|flood|blizzard|winter storm|ice storm|hurricane|"
+    r"tropical storm|high wind|wind chill|extreme cold|excessive heat|extreme heat|storm surge|"
+    r"red flag|snow squall) warning\b"
+    r"|\btornado (?:touches down|touched down|on the ground|confirmed|spotted)\b"
+    r"|\b(?:flash flooding|flooding) (?:closes|closed|strands|stranded|traps|trapped|forces)\b", re.I)
+MISSING_NOW = re.compile(
+    r"\b(?:amber|silver) alert\b"
+    r"|\bmissing\s+(?:\d+[- ]year[- ]old|child|children|boy|girl|teen\w*|toddler|woman|man|person|hiker|"
+    r"kayaker|swimmer|boater|elderly|senior|resident|student|autistic)\b"
+    r"|\b(?:\d+[- ]year[- ]old|boy|girl|teen\w*|child|toddler|woman|man|hiker|kayaker|swimmer|resident)\s+"
+    r"(?:who is |is |has gone |reported |went |still )?missing\b"
+    r"|\bsearch(?:ing)? (?:for|continues for) (?:a |the )?missing\b|\bhave you seen\b", re.I)
+MISSING_OVER = re.compile(
+    r"\bfound (?:safe|alive|dead|unharmed|deceased|in good health)\b|\b(?:has been|was|were) (?:found|located)\b"
+    r"|\bsafely located\b|\bbody (?:found|recovered)\b|\bremains (?:found|identified)\b|\breunited\b", re.I)
+LOCKDOWN_NOW = re.compile(
+    r"\block(?:ed)?[- ]?down\b|\blockdown\b|\bshelter[- ]in[- ]place\b|\b(?:hold|secure) in place\b"
+    r"|\b(?:schools?|campus|mall|hospital)\b[^.]{0,40}\bevacuat\w+|\bevacuat\w+[^.]{0,40}\b(?:schools?|campus|mall)\b",
+    re.I)
+RESCUE_NOW = re.compile(
+    r"\b(?:trapped|pinned)\b[^.]{0,40}\b(?:collapse\w*|rubble|debris|trench|building)\b"
+    r"|\b(?:collapse\w*|trench)\b[^.]{0,40}\b(?:trapped|rescue under way|search(?:ing)? for)\b"
+    r"|\bsearch(?:ing|es)? for survivors\b|\bsearch[- ]and[- ]rescue (?:operation|under way|is under way)\b",
+    re.I)
+# Reach, not place: a story about the whole country is the country's.
+NATIONAL_SPREAD = re.compile(
+    r"\b(?:across (?:the )?(?:us|u\.s|country|nation)|nationwide|half a dozen cities|"
+    r"several (?:u\.s\. )?cities|multiple states|coast to coast)\b", re.I)
+# Who said it is not what happened: "police said" in a live story is not a
+# courtroom. Removed before the aftermath words are read by the gate.
+ATTRIBUTION = re.compile(
+    r"\b(?:police|officials|authorities|investigators|fire officials|firefighters|the fire department|"
+    r"state police|troopers|the chief|witnesses) (?:say|said|says|report(?:s|ed)?|told \w+)\b"
+    r"|\btold police\b|\baccording to (?:police|officials|authorities|the fire department)\b"
+    r"|\bpolice report(?:s|ed)?\b", re.I)
+
+HAZARD_KINDS = (
+    ("police", "police activity", POLICE_NOW),
+    ("lockdown", "a lockdown", LOCKDOWN_NOW),
+    ("hazmat", "a hazard in the air or water", HAZMAT_NOW),
+    ("fire", "an active fire", FIRE_NOW),
+    ("weather", "a severe weather warning", WEATHER_NOW),
+    ("missing", "a missing person", MISSING_NOW),
+    ("rescue", "people trapped", RESCUE_NOW),
+    ("road", "a road shut now", ROAD_NOW),
+)
+URGENT_MAX_AGE_MIN = 120
+
+
+def hazard_now(text: str, miles: float | None = None) -> tuple[str, str]:
+    """(category, how to say it) for a present, ongoing hazard to the public,
+    or ("", why not). Read on the text with threats-of-things, figures of
+    speech and absent weather already removed (`_hazard_text`)."""
+    t = _hazard_text(text or "")
+    for cat, label, rx in HAZARD_KINDS:
+        if not rx.search(t):
+            continue
+        if cat == "missing" and MISSING_OVER.search(t):
+            continue                       # found, one way or the other
+        if cat == "road" and ROAD_PLANNED.search(t):
+            continue                       # construction, a parade, next week
+        if cat == "fire" and not FIRE_PUBLIC.search(t) and (miles is None or miles > NEIGHBOUR_MI):
+            continue                       # one building, and not his patch
+        return cat, label
+    return "", "nothing dangerous is happening there now"
+
+
+def urgent_gate(story: dict) -> tuple[bool, str, dict]:
+    """May this story make his phone SOUND? (ok, why, facts).
+
+    ALL of: a town geo is certain of, inside his radius; a hazard to the
+    public that is happening now; and not a feature, column, trial,
+    anniversary, recovery, settlement, opinion, prediction, advice piece or
+    business story. Deterministic, so the gates can hold it to every decision
+    his phone ever got wrong; at runtime the local model must also confirm an
+    URGENT (news_check.py), and can only veto. `facts` carries the town,
+    its distance and the category for that check and for the log."""
+    text = _text_of(story).strip()
+    if not text:
+        return False, "nothing to read", {}
+    junk = _not_news_now(text)
+    if junk:
+        return False, f"not breaking news ({junk})", {}
+    if ENTERTAINMENT.search(text) and not _human_deaths(METAPHOR.sub(" ", text)):
+        return False, "a game, a film or a show", {}
+    if RESOLVED.search(text) and not ONGOING_DESPITE.search(text):
+        return False, "over - the all-clear, not the emergency", {}
+    if NOT_ACTIVE.search(text):
+        return False, "over - no threat to the public, or someone in custody", {}
+    if RECALL.search(text):
+        return False, "a recall is a notice", {}
+    if THWARTED.search(text):
+        return False, "stopped before it happened", {}
+    if OLD_EVENT.search(text) and not ONGOING_DESPITE.search(text):
+        return False, "an old event", {}
+    if ADJUDICATED.search(ATTRIBUTION.sub(" ", text)) and not STILL_ACTIVE.search(text):
+        return False, "a court case or the aftermath of one", {}
+    if _is_obituary(text):
+        return False, "an obituary", {}
+    if NATIONAL_SPREAD.search(text):
+        return False, "national, not local", {}
+    found = places(story)
+    rest = text
+    for f in found:                      # Berlin, Mass. is not Germany
+        rest = re.sub(r"\b" + re.escape(f.said) + r"\b", " ", rest)
+    if _far(rest):
+        return False, "somewhere else", {}
+    inside = [f for f in found if geo.within_radius(f.miles)]
+    if not inside:
+        if found:
+            return False, f"{found[0].town.name} is {found[0].miles:.0f} miles away", {}
+        return False, "no town he can be sure of", {}
+    where = inside[0]
+    cat, label = hazard_now(text, where.miles)
+    if not cat:
+        return False, f"{where.town.name}, but {label}", {}
+    age = story.get("age_minutes")
+    try:
+        if age is not None and float(age) > URGENT_MAX_AGE_MIN:
+            return False, f"{label} in {where.town.name}, but {int(float(age))} minutes old", {}
+    except (TypeError, ValueError):
+        pass
+    facts = {"town": where.town.name, "miles": round(where.miles, 1), "category": cat}
+    return True, f"{label} in {where.town.name}, {where.miles:.0f} miles from home", facts
+
+
 def _classify_news_full(story: dict) -> tuple[str, str]:
-    """(tier, why). `story` is any dict with a headline and ideally a summary."""
+    """(tier, why). `story` is any dict with a headline and ideally a summary.
+
+    How LOUD a story is, for ranking the brief and for deciding what waits
+    for it. Since 2026-11-07 it no longer decides what reaches his phone:
+    `classify_news` does, through `urgent_gate`."""
     text = _text_of(story).strip()
     if text and ENTERTAINMENT.search(text) and not _human_deaths(METAPHOR.sub(" ", text)):
         return NOTABLE, "a game, a film or a show - never an emergency"
     if not text:
         return NONE, "nothing to read"
+    junk = _not_news_now(text)
+    if junk:
+        return NOTABLE, f"not breaking news ({junk})"
 
     near, own_town = is_local(story)
 
@@ -964,16 +1194,16 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
     violence = bool(VIOLENCE.search(_violence_text(scrubbed)))
     danger = hazard or violence
 
-    # BOSTON IS NOT HIS TOWN. It counts as near - he is there often enough -
-    # but a point incident there is not his emergency: a smoky train at North
-    # Station, a bomb threat at Logan where nothing was found. What reaches him
-    # from the city is what spreads (gas, chemicals, an outbreak, fire), what
-    # moves (a shooter at large), or a catastrophe by size.
-    if (near and not own_town and _city_only(text)
+    # THE EDGE IS NOT HIS TOWN. Cambridge or Worcester counts as near, but a
+    # point incident there is not his emergency: a smoky train at a station, a
+    # bomb threat where nothing was found. What reaches him from the edge is
+    # what spreads (gas, chemicals, an outbreak, fire), what moves (a shooter
+    # at large), or a catastrophe by size.
+    if (near and not own_town and _edge_only(story)
             and not (TRAVELS.search(scrubbed) or CATASTROPHE.search(text)
                      or (violence and _ongoing(scrubbed))
                      or (MANY.search(text) and _human_deaths(text)))):
-        return NOTABLE, "Boston, and not an emergency that reaches him"
+        return NOTABLE, "the edge of his ground, and not an emergency that reaches him"
     # Nobody hurt, said plainly, and not his town: a point incident that is
     # over. A hazard that spreads is still a hazard with nobody hurt yet.
     if (NO_HARM.search(text) and not own_town
@@ -1101,11 +1331,28 @@ def _classify_news_full(story: dict) -> tuple[str, str]:
 
 
 def _news_tier(story: dict) -> tuple[str, str]:
-    """The tier, with his emergencies-only rule applied last."""
-    tier, why = _classify_news_full(story)
+    """What a story may do to him (2026-11-07):
+
+      URGENT   `urgent_gate` passed - local, current, dangerous. Sounds on his
+               phone; at runtime the local model must confirm it first.
+      NOTABLE  it would have been an ALERT or an URGENT: it waits for the
+               next brief instead. (Or ordinary news, if he ever turns
+               emergencies-only off.)
+      NONE     nothing he needs.
+
+    There is no ALERT for news any more, and national or world news never
+    pings: the gate needs a town inside his radius."""
+    ok, why, _facts = urgent_gate(story)
+    if ok:
+        return URGENT, why
+    tier, full_why = _classify_news_full(story)
+    if tier in (URGENT, ALERT):
+        return NOTABLE, f"for the brief: {why} (was {tier}: {full_why})"
     if tier == NOTABLE and emergencies_only():
+        if full_why.startswith("not breaking news"):
+            return NONE, full_why          # the shape of every false alarm of 10-27..11-06
         return NONE, "not an emergency, and he asked for emergencies only"
-    return tier, why
+    return tier, full_why
 
 
 def classify_market(*, symbol: str, percent: float, held: bool = False,

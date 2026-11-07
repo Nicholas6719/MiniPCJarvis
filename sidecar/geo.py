@@ -228,6 +228,19 @@ def match_town(label: str) -> Town | None:
 
 _NAMES_RE = None
 
+# A TOWN NAME FOLLOWED BY A ROAD WORD IS A ROAD. "211 Boylston Street" is in
+# Boston, "Concord Street" runs through Framingham, and Route 9 in Framingham
+# is "Worcester Road" - Massachusetts names its streets after the next town
+# over, so a name directly in front of one of these is not that town.
+# (2026-11-07: "Firefighters evacuate a building at 211 Boylston Street" read
+# as Boylston, the town, fifteen miles away.)
+_STREET_AFTER = re.compile(
+    r"\s+(?:st|street|rd|road|ave|avenue|dr|drive|ln|lane|way|blvd|boulevard|pkwy|parkway|"
+    r"tpke|turnpike|pike|hwy|highway|pl|place|ct|court|cir|circle|ter|terrace|sq|square|"
+    r"path|trail|extension)\b\.?", re.I)
+# (not "Common" or "Green": Framingham Common and Lexington Green are in the
+# town they are named for)
+
 
 def _names_re() -> re.Pattern:
     global _NAMES_RE
@@ -255,6 +268,8 @@ def find_towns(text: str, source: str = "") -> list[Found]:
         # a capitalised word, not "the reading" or "a hull"
         if not said[0].isupper():
             continue
+        if _STREET_AFTER.match(text, m.end()):
+            continue                # "Boylston Street", "Worcester Road"
         t = town(said)
         if t is None:
             continue

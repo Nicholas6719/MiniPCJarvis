@@ -127,6 +127,11 @@ def main() -> int:
     nxt = s.db.execute("SELECT due_ts FROM tasks WHERE id=?", (tid,)).fetchone()[0]
     check("...and its schedule actually moved", nxt > time.time(),
           "it did not advance — this is how the flood started")
+    # the gate database outlives the build: take back what this file left
+    # (the task, and the record its firing leaves since 2026-11-07)
+    s.db.execute("DELETE FROM reminder_log WHERE task_id=?", (tid,))
+    s.db.execute("DELETE FROM tasks WHERE id=?", (tid,))
+    s.db.commit()
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

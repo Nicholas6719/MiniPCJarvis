@@ -72,6 +72,17 @@ def main() -> int:
     check("a name only Massachusetts has is certain on its own",
           any(f.certain and f.town.name == "Framingham" for f in geo.find_towns("Framingham man arrested", "")))
     check("lower-case words are not towns", geo.find_towns("we went reading by the hull") == [])
+    print("\n-- a town name in front of a road word is a road --")
+    st = geo.find_towns("Firefighters evacuated a six-unit residential building at 211 Boylston "
+                        "Street after finding the rear walls were unstable.", "WCVB Boston")
+    check("211 Boylston Street is not Boylston", not any(f.town.name == "Boylston" for f in st), st)
+    fr = geo.find_towns("Crews battle house fire on Concord Street in Framingham", "WCVB Boston")
+    check("Concord Street in Framingham is Framingham, and only Framingham",
+          [f.town.name for f in fr] == ["Framingham"], fr)
+    check("Worcester Road is Route 9, not Worcester",
+          not any(f.town.name == "Worcester" for f in geo.find_towns("Crash on Worcester Rd. in Natick", "")))
+    check("...while Lexington Green is still Lexington",
+          any(f.town.name == "Lexington" for f in geo.find_towns("Crowds gather on Lexington Green", "WCVB")))
     n = geo.nearest("Western Mass. wildfire reaches 70% containment near Holyoke", "MassLive")
     check("Western Mass. resolves to a town far away", n is not None and n.miles > 60, n)
     check("...which is outside his radius", not geo.within_radius(n.miles if n else None))
