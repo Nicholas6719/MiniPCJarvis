@@ -5678,6 +5678,41 @@ adapter 16.25 GB committed, first word 0.2 s - but 2 confidently wrong of the
 deferred. NOT enabled (config.py note); trial server stopped by PID. The file
 stays in C:\AI\models (unused, deletable). No recovery test was needed.
 
+### 2026-11-07 evening - "this is real life/death information": research + confirmation
+His quiet hours are now 22:30-05:30 (his call; PATCH /config live + defaults);
+the morning summary covers exactly that night and arrives at 05:30.
+A nonsense message ("Why do we have a crash be on anyone A1? I need a crash",
+0.70) and a wrong one (a Wayland PD lookout for a 72-year-old woman sent as "a
+well-being check here in Framingham. A patient transported") led to research
+by two agents (scanner-alert products; radio ASR and corroboration). Findings:
+- Every product that alerted on ONE machine transcript sent false shootings
+  and fires (CrimeRadar: "show me out at" -> school shooting, "Shop with a
+  Cop" -> "shot with a cop"; Citizen's AI alerts). The respected ones (Watch
+  Duty; Citizen originally) wait for corroboration and label unverified.
+- Police-radio WER: Whisper large-v3 ~51%, fine-tuned NeMo 27%, humans ~26%
+  (arXiv 2409.10858). No official near-real-time source covers local
+  dispatches (Mass511/PulsePoint/Waze not usable): confirmation must come from
+  the radio (a second transmission, repeated address, tone-outs).
+- Tone-outs verified on RadioReference for Holliston (QC-II, 470.4750),
+  Sherborn (1285.8/1122.5), Weston (701/1036), Waltham (1003 Hz); NOT listed
+  for Framingham/Natick/Sudbury/Wayland... (icad_tone_detection is the model).
+- The BC125AT headphone out is ~line level (0.36 V RMS): a USB adapter with a
+  LINE input is the right fix, not the mic side of a splitter.
+Done (8561161): nothing sounds or interrupts on one transmission (his answer);
+a lone line is "Unconfirmed: ... (one transmission so far)" with the recording,
+the alert follows on a second; one transmission must be `rules.anchored`;
+questions are not reports; destination towns do not move calls; past-tense
+clauses are not facts; "police looking for someone" (lookout) with age,
+clothing, hair, on foot; police/medical calls merge only on the same kind;
+mutual-aid follow-ups join by street on the channel. Per-word confidence
+(onnx_asr .with_timestamps() logprobs) was MEASURED and does not separate real
+from nonsense on this audio (Natick junk "crash" 0.89, a real Sudbury dispatch
+0.40) - unused until the audio is fixed; re-transcribing a clip also changes
+its text. Scanner: priority mode ON (Framnghm FD ch 51 already flagged;
+backup 20261107-162534-manual) - his OK.
+Next: tone-out detection (log first, learn which channels page, then use a
+tone as corroboration); re-measure per-word confidence after the line-in fix.
+
 ### Not done / next
 - When he fits the splitter: set the console's input, re-check
   `/api/health` audio (expect peaks -12..-3 dBFS) and the transcripts.
