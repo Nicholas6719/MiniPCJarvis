@@ -5581,6 +5581,16 @@ Framingham PD, Natick PD, Waltham PD, Newton PD, Newton FD 1. Clear analog:
 Framingham FD. Scanner VOL is now 12-13 (the doctor tunes it).
 NOT verified live: an URGENT incident end to end (none yet), the Telegram
 voice note, the doctor's trial writes over days.
+Found by driving the live install the same morning (all fixed, gated,
+hot-swapped): "what's happening in Wayland" asked "did you mean" (a real MA
+town now nudges `scanner_town` in `router._lexical_delta`); "what did the scan
+doctor change" read nothing (the 1.3.0 report is counts + {kind, before,
+after, why}: `scanner_desk._describe_doctor_v1`); "residential fire
+activation" (conf 0.41) became a structure fire (alarm wording now wins; a
+dangerous reading below 0.6 needs a second transmission from the same town:
+`ScannerDesk._corroborated`); Natick FD's normal traffic with no baseline
+nearly went out as "unusually busy" (bursts are stored until 3 days of
+listening, `scanner.burst_min_days`).
 
 ### Not done / next
 - When he fits the splitter: set the console's input, re-check
