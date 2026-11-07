@@ -5540,7 +5540,54 @@ Ledger keys are unchanged on purpose ("brief:<stamp>", "task:<id>"; new
 NOT verified live: the model's JSON check on a real local emergency; the Done
 button round trip on his phone.
 
+### 2026-11-07 - the police scanner, heard (release 90)
+His brief: "make him into what he needs to be" + his police scanner. The audit
+of 10-27..11-06 (his real DB): 5 turns in 11 days (3 "go to sleep" after
+false activations), 94-98 unprompted Telegram messages, none of the 10 urgent
+pings local or urgent. Wake is NOT the problem: all six kept rejected-wake
+clips are TV or family speech (none contain the name).
+- **geo.py** (shared, Census 351 towns, distances from Framingham 01701,
+  shared-name certainty, `match_town` for his typed channel labels). Boston is
+  measured from City Hall (19.7 mi), not the harbour point (21.5); the BC125AT
+  Console carries the same correction.
+- **Slow is not dead** (`Orchestrator.llm_recovery_action`,
+  `LlamaServer._wait_for_memory`, `tests/test_llm_patience.py`): four 6-24 min
+  outages on 10-29/30 were the watchdog killing a slow 15 GB server at 94-97%
+  memory and reloading into memory that was not there.
+- **Scanner desk** (`scanner_desk.py`, `scanner/`): follows his BC125AT
+  Console service (127.0.0.1:8125, header `X-Scanner-Client: 1`), transcribes
+  each hit with Parakeet only while he is not speaking, writes transcripts
+  back (`/api/hits/annotate`), builds incidents (town/agency from the channel
+  label, ~30 types, addresses, a burst detector that needs no words), URGENT
+  only within 5 mi, ALERT within 20 / his roads, caps 4+8 a day, an URGENT
+  while away also sends the clip as a Telegram voice note. Skills:
+  scanner_now / _town / _last / _summary / _health / _doctor. Autostarts the
+  console with `--serve` (never a second copy).
+- **News**: inside the radius but beyond 8.5 mi (Boston) only a severe-weather
+  warning may sound; the rest goes to the brief (`significance.urgent_gate`).
+- **Volume tools** initialise COM where they run (`tests/test_volume_com.py`):
+  release 90's suites caught "CoInitialize has not been called".
+- **BC125AT Console 1.3.0** (his repo, pushed): service mode, the JARVIS API,
+  per-hit quality classifier, the cable diagnostic, the **Scan Doctor**
+  (apply mode running since 11-07 08:43; backup `before-doctor`; removed the
+  10 channels beyond 20 mi; 40 FCC candidates in trial bank 10; report at
+  `%LOCALAPPDATA%\BC125AT Console\doctor-report.md`). The FCC directory was
+  copied into his real data folder (FCC date 2026-11-01).
+Measured on his hardware: the audio reaches the PC ~35 dB too quiet (TRS
+cable in the TRRS combo jack; peaks -35 dBFS at scanner VOL 13, nothing at
+VOL 5), so transcripts are mostly garbled until he fits a TRRS splitter (MIC
+side) or a USB audio adapter. Digital (no BC125AT setting can decode):
+Framingham PD, Natick PD, Waltham PD, Newton PD, Newton FD 1. Clear analog:
+Framingham FD. Scanner VOL is now 12-13 (the doctor tunes it).
+NOT verified live: an URGENT incident end to end (none yet), the Telegram
+voice note, the doctor's trial writes over days.
+
 ### Not done / next
+- When he fits the splitter: set the console's input, re-check
+  `/api/health` audio (expect peaks -12..-3 dBFS) and the transcripts.
+- Scanner burst thresholds and the transcript confidence cut-off (0.35) want
+  tuning on a week of his real traffic (`scanner_incidents`, the console's
+  hits table).
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the
   reasoning-chars numbers above first; the switch is `POST /config

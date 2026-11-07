@@ -388,7 +388,11 @@ class Speaker:
                 # stream, so once it is closed it is no orphan at all - and
                 # leaving it on the list kept PortAudio from ever being
                 # re-initialised again after the first dark-screen wake.
-                got = self._wlock.acquire(timeout=3.0)
+                # No lock (a Speaker built without __init__, as gates do)
+                # means the stream cannot be proven writer-free: it closes
+                # but stays on the orphan list, the safe side.
+                lock = getattr(self, "_wlock", None)
+                got = lock.acquire(timeout=3.0) if lock is not None else False
                 try:
                     try:
                         s.abort()
@@ -402,7 +406,7 @@ class Speaker:
                             pass
                 finally:
                     if got:
-                        self._wlock.release()
+                        lock.release()
             threading.Thread(target=_shut, name="jarvis-audio-stale", daemon=True).start()
         loop = asyncio.get_running_loop()
         while True:
