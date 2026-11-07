@@ -455,6 +455,7 @@ class ScannerDesk:
         self.clip_sender = None       # async (wav path, caption) -> bool
         self.editor = None            # async (message id, text) -> bool
         self._refreshing: set[int] = set()
+        self._dirty: set[int] = set()                         # more arrived while a refresh ran
         self._edited: dict[int, str] = {}                     # id -> the text his message shows
 
     # ------------------------------------------------------------ plumbing
@@ -984,7 +985,12 @@ class ScannerDesk:
             fields["escalations"] = inc["escalations"] + [esc]
             log.info("scanner: incident #%d escalated - %s", inc["id"], esc)
         store.update_incident(inc["id"], fields)
-        if esc or (reading.types and not set(reading.types) <= set(inc["types"])):
+        # Judged again when it got worse, when it gained a kind - and while he
+        # has not been told at all: a shaky first report that a second one now
+        # confirms is worth a line ("heard twice"), and nothing else would
+        # have asked (review of 2026-11-07).
+        if esc or (reading.types and not set(reading.types) <= set(inc["types"])) or \
+                (reading.types and not inc["tier"]):
             self._spawn_task(self._consider(inc["id"], row, esc), name=f"scanner-consider-{inc['id']}")
         self._schedule_refresh(inc["id"])       # his message for it, if he has one, grows
         return inc["id"]
@@ -992,20 +998,26 @@ class ScannerDesk:
     # Crashes and police calls are short: one heard this long after the last
     # word about another in the same town is a new call.
     SHORT_CALL_S = 1800.0
-    _ANOTHER = re.compile(r"\banother (?:motor vehicle|mva|mvc|crash|accident|call|fire|alarm|report)\b", re.I)
+    _ANOTHER = re.compile(r"\banother (?:motor vehicle|mva|mvc|crash|accident|collision|car crash)\b", re.I)
 
     def _separate_call(self, inc: dict, reading: rules.Reading, text: str, now: float) -> bool:
         """Two calls, not one? On 2026-11-07 four Wellesley PD crash reports
         across two hours ("...for ANOTHER motor vehicle accident") became one
-        incident, and its message read "2 vehicles; hit and run; 1 vehicle"."""
+        incident, and its message read "2 vehicles; hit and run; 1 vehicle".
+        Only crashes and police calls: a fire is long, and "another report of
+        heavy smoke" is the same fire getting worse, not a second one."""
+        if inc.get("family") not in ("traffic", "police"):
+            return False
         if reading.types and self._ANOTHER.search(text or ""):
             return True
-        return inc.get("family") in ("traffic", "police") and now - float(inc["last_ts"]) > self.SHORT_CALL_S
+        return now - float(inc["last_ts"]) > self.SHORT_CALL_S
 
     # A transmission with no call in it joins the open call on its channel
     # only while that call is this fresh (Wellesley PD's follow-ups on a
     # crash came 12 minutes after it).
     CONTEXT_WINDOW_S = 900.0
+    # facts that describe a unit, not a call
+    _STATUS_ONLY = frozenset({"units on scene", "mutual aid", "police requested"})
 
     def _attach(self, row: dict, text: str, conf: float, reading: rules.Reading) -> int | None:
         """THE DETAILS ARE IN THE FOLLOW-UPS (2026-11-07, his words: "I need
@@ -1027,7 +1039,13 @@ class ScannerDesk:
         inc = open_now[0]
         facts = rules.details(text)
         same_street = bool(reading.street and reading.street == inc.get("street"))
-        if (row.get("agency") or "").upper() not in ("FD", "EMS") and not facts and not same_street:
+        fire_or_ems = (row.get("agency") or "").upper() in ("FD", "EMS")
+        # On a police channel a unit's status ("Car 12 on location with the
+        # lockout") is not a fact about THIS call: only the call's substance
+        # (injuries, vehicles, transport, damage...) or its street ties a line
+        # to it (review of 2026-11-07).
+        substance = [f for f in facts if f not in self._STATUS_ONLY]
+        if not fire_or_ems and not substance and not same_street:
             return None
         said_row = {"ts": row["ts"], "text": text[:300], "hit": row["id"], "channel": name,
                     "conf": round(float(conf), 2), "context": True}
@@ -1035,7 +1053,8 @@ class ScannerDesk:
                         "said": (inc["said"] + [said_row])[-SAID_KEEP:],
                         "details": _union(inc.get("details") or [], facts, 8),
                         "units": _union(inc.get("units") or [], reading.units, 10)}
-        if not inc.get("address") and reading.address:
+        if not inc.get("address") and reading.address and fire_or_ems:
+            # a police channel's next line is as likely another call's place
             fields.update(address=reading.address, street=reading.street)
         if not store.update_incident(inc["id"], fields):
             return None
@@ -1048,7 +1067,8 @@ class ScannerDesk:
 
     def _schedule_refresh(self, iid: int) -> None:
         if iid in self._refreshing:
-            return                     # one waiting refresh takes everything that arrives meanwhile
+            self._dirty.add(iid)       # the refresh in flight goes round once more
+            return
         inc = store.incident(iid)
         if not inc or not inc.get("msg_id"):
             return
@@ -1057,19 +1077,27 @@ class ScannerDesk:
 
     async def _refresh(self, iid: int) -> None:
         """Bring his message for a call up to date - an edit, which never makes
-        a sound - with what has been heard since, at most once per REFRESH_GAP_S."""
+        a sound - with what has been heard since, at most once per
+        REFRESH_GAP_S. One refresh per call at a time: what arrives while it
+        waits or edits marks it dirty and it goes round again, so two edits
+        never race and none is lost (review of 2026-11-07)."""
         try:
-            inc = store.incident(iid)
-            if not inc or not inc.get("msg_id"):
-                return
-            wait = float(inc.get("edited_ts") or 0) + self.REFRESH_GAP_S - self.now()
-            if wait > 0:
-                await asyncio.sleep(min(wait, self.REFRESH_GAP_S))
+            while True:
+                self._dirty.discard(iid)
+                inc = store.incident(iid)
+                if not inc or not inc.get("msg_id"):
+                    return
+                wait = float(inc.get("edited_ts") or 0) + self.REFRESH_GAP_S - self.now()
+                if wait > 0:
+                    await asyncio.sleep(min(wait, self.REFRESH_GAP_S))
+                inc = store.incident(iid)
+                if inc:
+                    await self._edit(inc)
+                if iid not in self._dirty:
+                    return
         finally:
             self._refreshing.discard(iid)
-        inc = store.incident(iid)
-        if inc:
-            await self._edit(inc)
+            self._dirty.discard(iid)
 
     async def _edit(self, inc: dict) -> bool:
         text = self.written(inc, inc.get("tier") or FYI)
@@ -1165,7 +1193,9 @@ class ScannerDesk:
         sev = max((rules.KINDS[t].severity for t in types if t in rules.KINDS), default=0)
         if sev < int(_cfg("fyi_min_severity", 3)) and not (home and sev >= 2):
             return False, f"{label} {place}: stored, too routine to mention"
-        said = inc.get("said") or []
+        # only the transmissions that named the call count: a follow-up line
+        # ("on scene") says nothing about whether the call was heard right
+        said = [s for s in (inc.get("said") or []) if not s.get("context")]
         sure = [s for s in said if s.get("agreed") or float(s.get("conf") or 0) >= self.SURE]
         if not sure and len(said) < 2:
             return False, f"{label} {place}: stored, heard once and not clearly"
@@ -1182,13 +1212,18 @@ class ScannerDesk:
             said = inc.get("said") or []
             if not inc.get("types") or not said:
                 continue                 # a burst: nothing to read again
-            if len(said) >= SAID_KEEP or any(len(s.get("text") or "") >= 300 for s in said):
-                # more was heard than was kept, so only the address is checked,
-                # and only when the words it came from are still here to read
-                # ("Master 3, Fox drive, Charlie, Romeo" became 3 Fox Dr)
+            # More was heard than was kept: lines cut at 300 characters, the
+            # ten-line cap, or an older build that kept six (hits counts every
+            # transmission; a fire whose last six lines were stand-downs must
+            # not be "closed" for want of its first eight - review 2026-11-07).
+            if len(said) >= SAID_KEEP or int(inc.get("hits") or 0) > len(said) or \
+                    any(len(s.get("text") or "") >= 300 for s in said):
+                # ...so only the address is checked, and only when the words it
+                # came from are still here to read ("Master 3, Fox drive,
+                # Charlie, Romeo" became 3 Fox Dr)
                 key = (inc.get("street") or "").split()[:-1]
-                texts = " ".join((s.get("text") or "").lower() for s in said)
-                if key and all(w in texts for w in key) and not any(
+                words = set(re.findall(r"[a-z0-9']+", " ".join((s.get("text") or "").lower() for s in said)))
+                if key and all(w in words for w in key) and not any(
                         rules.read(s.get("text") or "", inc.get("town") or "").street == inc.get("street")
                         for s in said):
                     if store.update_incident(inc["id"], {"address": "", "street": ""}):
@@ -1304,8 +1339,10 @@ class ScannerDesk:
                  f"; {rwhy}" if rwhy else "", text)
         if outcome not in SENT:
             revert = {"tier": inc["tier"] or "", "delivered_ts": inc["delivered_ts"] or 0}
-            if rwhy == "said recently":
-                revert["pending"] = tier            # delivery's repeat window; retried when it opens
+            if rwhy == "said recently" or (rwhy == "hourly message budget spent" and tier != FYI):
+                # delivery's repeat window - or its hourly ceiling, which must
+                # never simply lose an emergency: retried when it opens
+                revert["pending"] = tier
             store.update_incident(iid, revert)
             return
         msg_id = r.get("message_id") if outcome == "telegram" else None
@@ -1313,15 +1350,20 @@ class ScannerDesk:
             # the newest message for this call is the one the follow-ups edit
             store.update_incident(iid, {"msg_id": int(msg_id), "edited_ts": now})
             self._edited[iid] = written
+            # anything heard while the send was in flight found no message to
+            # edit; the identical-text check makes this free when nothing came
+            self._schedule_refresh(iid)
         if outcome == "spoken":
             await self._card(inc, tier)
         if tier == URGENT and outcome == "telegram" and _cfg("send_audio", True) and trigger:
-            await self._send_clip(inc, trigger)
+            # the recording sounds only if the alert itself did (the daily
+            # sound budget may have sent it silently)
+            await self._send_clip(inc, trigger, silent=not r.get("sound", True), reply_to=msg_id)
         elif tier == FYI and outcome == "telegram" and _cfg("fyi_audio", True) and trigger \
                 and trigger.get("audio_path"):
             # the dispatch itself, silent, threaded under its line: the words
             # are a machine's guess at weak audio, the recording is not
-            await self._send_clip(inc, trigger, silent=True, reply_to=msg_id)
+            await self._send_clip(inc, trigger, silent=True, reply_to=msg_id, kind="scanner_fyi")
 
     async def _retry_pending(self) -> None:
         """An update delivery held as 'said recently' goes out once its repeat
@@ -1489,7 +1531,16 @@ class ScannerDesk:
             elif float(inc.get("last_ts") or first) - float(first) >= 60:
                 foot += f" - latest {_hm(float(inc['last_ts']))}"
             lines.append(foot)
-        return "\n".join(lines)
+        # ONE Telegram message (4096 characters): the id kept for edits must be
+        # the whole message, never the last of several chunks - the oldest
+        # heard lines give way first
+        heard = [i for i, x in enumerate(lines) if re.match(r"\d{1,2}:\d\d [AP]M  \"", x)]
+        while len("\n".join(lines)) > self.MAX_WRITTEN and len(heard) > 1:
+            del lines[heard.pop(0)]
+            heard = [i - 1 for i in heard]
+        return "\n".join(lines)[:self.MAX_WRITTEN]
+
+    MAX_WRITTEN = 3900
 
     async def _card(self, inc: dict, tier: str) -> None:
         """The incident on the HUD while it is said (the brief card; no new UI)."""
@@ -1509,9 +1560,19 @@ class ScannerDesk:
         except Exception:
             log.debug("scanner: card failed", exc_info=True)
 
-    async def _send_clip(self, inc: dict, row: dict, silent: bool = False, reply_to: int | None = None) -> None:
-        """The transmission itself, to his phone: an URGENT's with a sound, a
-        quiet call's silently, threaded under its message."""
+    async def _send_clip(self, inc: dict, row: dict, silent: bool = False, reply_to: int | None = None,
+                         kind: str = "") -> None:
+        """The transmission itself, to his phone: an URGENT's with a sound
+        (unless the alert went silently), a quiet call's silently, threaded
+        under its message. It is a message like any other: it answers to the
+        hourly ceiling of its kind, and a clip that sounds spends the day's
+        sound budget (review of 2026-11-07)."""
+        if self.clip_sender is None:
+            from delivery import delivery
+            if not delivery.has_budget(ALERT if kind else URGENT, kind):
+                log.info("scanner: clip of hit %s for #%s held - the hourly ceiling is reached",
+                         row.get("id"), inc.get("id"))
+                return
         audio = await self._load_audio(row)
         audio, _ = normalise_audio(audio) if audio is not None else (None, 0.0)
         if audio is None:
@@ -1529,7 +1590,9 @@ class ScannerDesk:
                 ok = await telegram.send_voice_clip(str(path), caption, silent=silent, reply_to=reply_to)
                 if ok:
                     from delivery import delivery
-                    delivery.note_sent()            # a second message on his phone counts
+                    delivery.note_sent(kind)        # a second message on his phone counts
+                    if not silent:
+                        delivery.note_sounded()
             log.info("scanner: clip of hit %s for #%s %s", row["id"], inc.get("id"), "sent" if ok else "NOT sent")
         except Exception:
             log.warning("scanner: could not send the clip", exc_info=True)

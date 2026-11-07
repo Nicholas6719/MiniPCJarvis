@@ -410,20 +410,46 @@ def _capitals(text: str) -> tuple[set[str], set[str]]:
     return anywhere, inner
 
 
-def _believable(span: dict, tokens: list[str], cased: bool, caps: tuple[set[str], set[str]]) -> bool:
-    """Is this 'street' a street? Not when it sits inside a spelled-out plate,
-    and - when the transcript has capitals at all - not unless it was written
-    as a name ("It About One Pl" came from "cut it about one place")."""
-    near = tokens[max(0, span["start"] - 5):span["start"]] + tokens[span["end"] + 1:span["end"] + 5]
-    if sum(1 for w in near if w.strip(".,'") in _PHONETIC) >= 2:
+_PLATE_WORD = re.compile(r"^(?:plate|plates|registration|reg|tag|tags|mass|ma)$")
+
+
+def _plate_side(words: list[str], house: str = "") -> bool:
+    """Two spelling-alphabet words on one side of a 'street', with a plate
+    in play - a number on that side other than the house number, or the word
+    plate/registration/tag nearby. "Caller is John Young at 45 Union Avenue"
+    is two names and an address; "Fox drive, Charlie, Romeo 213" is a plate."""
+    w = [x.strip(".,'") for x in words]
+    if sum(1 for x in w if x in _PHONETIC) < 2:
         return False
+    return any(_PLATE_WORD.match(x) for x in w) or any(re.search(r"\d", x) and x != house for x in w)
+
+
+def _believable(span: dict, tokens: list[str], cased: bool, caps: tuple[set[str], set[str]]) -> dict | None:
+    """This 'street' as a street, or None. None when it sits inside a
+    spelled-out plate. When the transcript has capitals, the words in front
+    that were not written as a name are trimmed off ("the caller states
+    Union Avenue" -> Union Avenue; "cut it about one place" -> nothing)."""
+    start, end = span["start"], span["end"]
+    house = tokens[start - 1] if start >= 1 and re.fullmatch(r"\d{1,5}[a-z]?", tokens[start - 1]) else ""
+    window = tokens[max(0, start - 6):start] + tokens[end + 1:end + 6]
+    if _plate_side(tokens[max(0, start - 6):start], house) or _plate_side(tokens[end + 1:end + 6]) or \
+            (any(_PLATE_WORD.match(x.strip(".,'")) for x in window) and
+             sum(1 for x in window if x.strip(".,'") in _PHONETIC) >= 2):
+        return None
     if span["name"].startswith("Route") or not cased:
-        return True
+        return span
     anywhere, inner = caps
     name = span["key"].split()[:-1]
-    suffix = tokens[span["end"]].rstrip(".")
-    return bool(name) and all(w in anywhere for w in name) and \
-        (any(w in inner for w in name) or suffix in inner)
+    while name and name[0] not in anywhere:
+        name.pop(0)                    # junk in front of the name: drop it, keep the street
+    suffix = tokens[end].rstrip(".")
+    if not name or not all(w in anywhere for w in name) or not (any(w in inner for w in name) or suffix in inner):
+        return None
+    if len(name) == len(span["key"].split()) - 1:
+        return span
+    suf = span["name"].split()[-1]
+    return {"start": end - len(name), "end": end, "name": f"{_title(name)} {suf}",
+            "key": f"{' '.join(name)} {suf.lower()}", "dir": span.get("dir", "")}
 
 
 def extract_address(text: str) -> tuple[str, str]:
@@ -434,7 +460,7 @@ def extract_address(text: str) -> tuple[str, str]:
     tokens = re.findall(r"[a-z0-9][a-z0-9'.]*|&", t)
     cased = any(c.isupper() for c in text or "") and any(c.islower() for c in text or "")
     caps = _capitals(text)
-    spans = [s for s in _street_spans(tokens) if _believable(s, tokens, cased, caps)]
+    spans = [b for b in (_believable(s, tokens, cased, caps) for s in _street_spans(tokens)) if b]
     # a house number: digits right before the street, not a unit's number
     for s in spans:
         k = s["start"] - 1
@@ -495,27 +521,32 @@ _HOSPITALS = (("metrowest", "MetroWest"), ("metro west", "MetroWest"), ("framing
               ("saint elizabeth", "St. Elizabeth's"), ("brigham", "the Brigham"), ("children's", "Children's"))
 _N = r"(one|two|three|four|five|1|2|3|4|5)"
 _NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+_NOT_A_CAR = r"(?! (?:garage|fire|seat|lot|port|wash|one|two|three|four|five|\d))"
 _DETAILS: tuple[tuple[re.Pattern, str], ...] = tuple((re.compile(p, re.I), d) for p, d in (
     (r"\bhit[- ]and[- ]run\b", "hit and run"),
-    (r"\b(?:single|one|1)[- ]?(?:car|vehicle)\b(?! (?:one|two|three|four|five|\d))", "1 vehicle"),
-    (rf"\b{_N}[- ]?(?:car|vehicle)s?\b(?! (?:one|two|three|four|five|\d))", "{n} vehicles"),
-    (r"\bno (?:apparent |reported )?injur(?:y|ies)\b|\bnegative (?:for )?injur|\buninjured\b|\bno one (?:is )?hurt\b",
-     "no injuries"),
+    (rf"\b(?:single|one|1)[- ]?(?:car|vehicle)\b{_NOT_A_CAR}", "1 vehicle"),
+    (rf"\b{_N}[- ]?(?:car|vehicle)s?\b{_NOT_A_CAR}", "{n} vehicles"),
+    (r"\bno (?:apparent |reported |visible )?injur(?:y|ies)\b|\bnegative (?:for )?injur|\buninjured\b"
+     r"|\bno one (?:is |was )?(?:hurt|injured)\b", "no injuries"),
+    (r"\bnon[- ]?life[- ]threatening\b", "non-life-threatening injuries"),
     (r"\bminor injur", "minor injuries"),
     (r"\b(?:serious|severe|life[- ]threatening|critical) injur|\bseriously (?:injured|hurt)\b", "serious injuries"),
     (rf"\b{_N} patients?\b", "{n} patient(s)"),
     (r"\b(?:unconscious|unresponsive)\b", "someone unconscious"),
     (r"\bconscious and breathing\b", "conscious and breathing"),
     (r"\bcpr\b", "CPR in progress"),
-    (r"\brefus(?:ed|ing|al)\b", "a patient refused transport"),
-    (r"\bairbags?\b", "airbags deployed"),
+    (r"\brefus(?:ed|es|ing|al)\s+(?:of\s+)?(?:transport|treatment|care|medical|ems|to be (?:seen|transported))"
+     r"|\b(?:patient|pt|party|male|female)\s+(?:is\s+)?refus\w*|\bsigned (?:a |the )?refusal", "a patient refused transport"),
+    (r"\bairbags? (?:were |was |have |had |all )?(?:deployed|went off|are out)\b|\bairbag deployment\b",
+     "airbags deployed"),
     (r"\bfront[- ]end damage\b", "front-end damage"),
     (r"\b(?:heavy|major|significant|extensive) damage\b", "heavy damage"),
     (r"\bminor damage\b", "minor damage"),
     (r"\bdisabled (?:vehicle|car)\b", "a disabled vehicle"),
     (r"\b(?:doesn'?t|does not|don'?t|do not) (?:wish|want) to (?:file|make|pursue) (?:a |the )?report\b",
      "no report wanted"),
-    (r"\bfluids?\b", "fluids on the road"),
+    (r"\bfluids? (?:on|across|in|all over) (?:the )?(?:road|roadway|street|pavement|lanes?|ground)\b"
+     r"|\bleaking fluids?\b|\bfluids? leak", "fluids on the road"),
     (r"\btow (?:truck|requested)\b|\brequest(?:ing)? a tow\b|\bneed a tow\b", "tow requested"),
     (r"\b(?:lanes?|road|roadway|street) (?:is |are )?(?:blocked|closed|shut down)\b|\bblocking (?:the |a )?lane",
      "road blocked"),
@@ -527,24 +558,52 @@ _DETAILS: tuple[tuple[re.Pattern, str], ...] = tuple((re.compile(p, re.I), d) fo
     (r"\bmutual aid\b", "mutual aid"),
     (r"\bpolice (?:requested|needed|to respond)\b|\brequest(?:ing)? (?:pd|police)\b", "police requested"),
 ))
+_TRANSPORT = re.compile(r"\btransport(?:ing|ed)?\b", re.I)
+# facts that are themselves a denial: never "negated" by their own "no"
+_DENIALS = frozenset({"no injuries", "non-life-threatening injuries", "nothing showing", "no report wanted"})
+# a negation just after the words undoes these ("CPR not in progress")
+_DENIED_AFTER = frozenset({"CPR in progress", "transport"})
+_NEGATOR = re.compile(r"^(?:no|not|negative|without|non|never|nobody|none|denies|deny|denied|didn't|doesn't|"
+                      r"isn't|aren't|wasn't|weren't|can't|cannot|won't)$")
+
+
+def _sentence(t: str, start: int, end: int) -> tuple[str, str, bool]:
+    """(words before the match in its clause, words after it in its clause,
+    is its sentence a question). "No injuries, two vehicles": the "no"
+    belongs to the clause before the comma."""
+    a = max(t.rfind(ch, 0, start) for ch in ".!?,;") + 1
+    clause_ends = [i for i in (t.find(ch, end) for ch in ".!?,;") if i != -1]
+    b = min(clause_ends) if clause_ends else len(t)
+    sentence_ends = [i for i in (t.find(ch, end) for ch in ".!?") if i != -1]
+    s = min(sentence_ends) if sentence_ends else len(t)
+    return t[a:start], t[end:b], s < len(t) and t[s] == "?"
+
+
+def _denied(t: str, m: re.Match, fact: str) -> bool:
+    """Is this match denied, asked about, or a unit's name rather than a fact?"""
+    before, after, question = _sentence(t, m.start(), m.end())
+    if question:
+        return True                                  # "is everyone out?" is not a fact
+    words = re.findall(r"[a-z']+", before)
+    if fact not in _DENIALS and any(_NEGATOR.match(w) for w in words[-3:]):
+        return True                                  # "no serious injuries", "not on scene yet"
+    if fact in _DENIED_AFTER and any(_NEGATOR.match(w) for w in re.findall(r"[a-z']+", after)[:2]):
+        return True                                  # "CPR not in progress", "transport not needed"
+    if ("{n}" in fact or fact.endswith("vehicle")) and words and words[-1] in _UNIT_WORDS:
+        return True                                  # "Ladder 2 car fire", "Medic 2 patient"
+    return False
 
 
 def details(text: str) -> list[str]:
-    """Short facts in one transmission, in the order of _DETAILS."""
+    """Short facts in one transmission, in the order of _DETAILS. Each is
+    said only when the words are there, not denied, and not asked about
+    (review of 2026-11-07: "non-life-threatening injuries" had come out as
+    serious injuries, "no transport needed" as transported)."""
     t = normalise(text)
-    scrubbed = _NEG.sub(" ~neg~ ", t)
     out: list[str] = []
-    denied_injury = False
     for rx, d in _DETAILS:
-        # "no injuries" is read from the text itself; everything after it from
-        # the text with denials scrubbed, so "no fire showing" is not fire
-        src = t if d == "no injuries" else scrubbed
-        m = rx.search(src)
-        if not m:
-            continue
-        if d == "no injuries":
-            denied_injury = True
-        if denied_injury and d in ("minor injuries", "serious injuries"):
+        m = next((m for m in rx.finditer(t) if not _denied(t, m, d)), None)
+        if m is None:
             continue
         if "{n}" in d:
             n = m.group(1).lower()
@@ -556,9 +615,14 @@ def details(text: str) -> list[str]:
                 d = "1 vehicle"
         if d not in out:
             out.append(d)
-    if "a patient refused transport" not in out and re.search(r"\btransport(?:ing|ed)?\b", t):
-        place = next((name for key, name in _HOSPITALS if key in t), "")
-        out.append(f"transported to {place}" if place else "a patient transported")
+    if "no injuries" in out or "non-life-threatening injuries" in out:
+        out = [d for d in out if d != "serious injuries" and (d != "minor injuries" or "no injuries" not in out)]
+    if "a patient refused transport" not in out:
+        place = next((name for key, name in _HOSPITALS
+                      if re.search(rf"\b(?:to|for)\s+(?:the\s+)?{re.escape(key)}", t)), "")
+        moving = any(not _denied(t, m, "transport") for m in _TRANSPORT.finditer(t))
+        if moving or (place and re.search(r"\b(?:en route|headed|going|taking (?:him|her|them|the patient))\s+to\b", t)):
+            out.append(f"transported to {place}" if place else "a patient transported")
     return out[:8]
 
 

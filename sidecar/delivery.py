@@ -143,6 +143,10 @@ class Delivery:
         self._last: dict[str, tuple[float, str]] = {}
         # timestamps of everything actually sent, for the hourly ceiling
         self._sent: list[float] = []
+        # ...and of the scanner's quiet feed, which has a ceiling of its own
+        # so it can never spend the room his reminders need
+        self._quiet_sent: list[float] = []
+        self._quiet_capped_at = 0.0
         # a test mute (/debug/silence): until then, nothing short of URGENT
         # is spoken OR sent - see _deliver
         self.mute_until: float = 0.0
@@ -253,24 +257,45 @@ class Delivery:
         self._last[key] = (now, tier)
         return False
 
-    def note_sent(self) -> None:
+    def note_sent(self, kind: str = "") -> None:
         """Record a message that reached him by a route outside `deliver()`.
 
         The urgent chase in remote_telegram sends straight through the Telegram
         API, so until now its follow-ups were invisible to the ceiling below: a
         cap of 12 an hour really meant up to 48, because every alert could carry
-        three chases behind it. They reach his phone, so they count.
+        three chases behind it. They reach his phone, so they count. `kind`
+        files it under its own ceiling when it has one (the scanner's clips).
         """
-        self._sent.append(time.time())
+        self._bucket(kind).append(time.time())
 
-    def has_budget(self, tier: str = ALERT) -> bool:
+    def _bucket(self, kind: str) -> list[float]:
+        import notify_policy
+        return self._quiet_sent if kind in notify_policy.OWN_CEILING else self._sent
+
+    def has_budget(self, tier: str = ALERT, kind: str = "") -> bool:
         """Whether another message may reach him right now. Never raises."""
         try:
-            return not self._over_budget(tier)
+            return not self._over_budget(tier, kind)
         except Exception:
             return True         # unknown is treated as allowed: never mute him by accident
 
-    def _over_budget(self, tier: str) -> bool:
+    def _over_budget(self, tier: str, kind: str = "") -> bool:
+        import notify_policy
+        if kind in notify_policy.OWN_CEILING:
+            now = time.time()
+            self._quiet_sent = [t for t in self._quiet_sent if now - t < 3600.0]
+            cap = int(config.get("proactive", "max_quiet_per_hour",
+                                 default=notify_policy.DEFAULT_QUIET_PER_HOUR))
+            if len(self._quiet_sent) < cap:
+                return False
+            if now - self._quiet_capped_at > 3600.0:
+                self._quiet_capped_at = now
+                log.warning("quiet feed budget spent: %d in the last hour (cap %d) - holding the rest",
+                            len(self._quiet_sent), cap)
+            return True
+        return self._over_shared(tier)
+
+    def _over_shared(self, tier: str) -> bool:
         """The backstop: a hard ceiling on unprompted messages per hour.
 
         Every specific fix here addresses a specific bug. This one exists
@@ -507,10 +532,12 @@ class Delivery:
             tier = NOTABLE
         if self._too_soon(self._key_for(key, text), tier):
             return {"delivered": "nothing", "why": "said recently", "tier": tier}
+        import notify_policy
+        kind = notify_policy.kind_of(subject, key)
         # NOTABLE is only ever held for the brief, so it costs him nothing and
         # is not charged against the budget; anything that actually reaches him
         # is. Checked before we decide speech vs phone, so neither route leaks.
-        if tier != NOTABLE and self._over_budget(tier):
+        if tier != NOTABLE and self._over_budget(tier, kind):
             await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
             return {"delivered": "nothing", "why": "hourly message budget spent",
                     "tier": tier}
@@ -530,12 +557,10 @@ class Delivery:
             await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
             return {"delivered": "held for the next brief", "tier": tier}
 
-        import notify_policy
-        kind = notify_policy.kind_of(subject, key)
         if present:
             spoke = await self._speak(text, interrupt=notify_policy.interrupts(tier, kind))
             if spoke:
-                self._sent.append(time.time())
+                self._bucket(kind).append(time.time())
                 _remember_proactive(text)
                 await bus.emit("proactive", text=text, tier=tier, channel="voice",
                                subject=subject)
@@ -582,7 +607,7 @@ class Delivery:
             # taken before anything below can await: the scanner edits this
             # message as the call develops
             message_id = None if sent_photo else getattr(telegram, "last_sent_id", None)
-            self._sent.append(time.time())
+            self._bucket(kind).append(time.time())
             if sound and notify_policy.counts_against_budget(kind):
                 self.note_sounded()
             _remember_proactive(text)

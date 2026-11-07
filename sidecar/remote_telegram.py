@@ -42,6 +42,15 @@ TOKEN_PATH = APP_DIR / "telegram.token.bin"
 API = "https://api.telegram.org"
 
 
+def _reply_parameters(message_id: int) -> str:
+    """Thread an upload under a message, as a multipart form field (JSON).
+    `reply_parameters` replaced `reply_to_message_id` in Bot API 7.0, and
+    allow_sending_without_reply means a deleted parent costs the threading,
+    never the upload."""
+    import json
+    return json.dumps({"message_id": int(message_id), "allow_sending_without_reply": True})
+
+
 # ---------------------------------------------------------------- token at rest
 def save_token(token: str) -> None:
     import win32crypt
@@ -348,8 +357,15 @@ class TelegramBridge:
         chat = config.get("remote", "telegram_chat_id", default=None)
         if not (chat and message_id and text):
             return False
-        return await self._api("editMessageText", chat_id=chat, message_id=int(message_id),
-                               text=text[:4000]) is not None
+        params: dict = {"chat_id": chat, "message_id": int(message_id), "text": text[:4000]}
+        # An edit REPLACES the buttons, and one that carries none removes them:
+        # an unanswered URGENT keeps its "Got it" through every update.
+        for token, item in self._urgent.items():
+            if item.get("mid") == int(message_id):
+                params["reply_markup"] = {"inline_keyboard": [[
+                    {"text": "Got it", "callback_data": f"ack:{token}"}]]}
+                break
+        return await self._api("editMessageText", **params) is not None
 
     def _answers_pending(self, text: str) -> bool:
         """A TYPED (or spoken) YES IS A YES. The inline buttons carried the
@@ -379,7 +395,7 @@ class TelegramBridge:
                                caption=caption[:1000]) is not None
 
     async def _upload(self, path: str, kind: str = "photo", caption: str = "",
-                      silent: bool = False) -> bool:
+                      silent: bool = False, reply_to: int | None = None) -> bool:
         """sendPhoto/sendDocument from a local file (multipart)."""
         chat = config.get("remote", "telegram_chat_id", default=None)
         p = Path(path)
@@ -393,6 +409,8 @@ class TelegramBridge:
             data = {"chat_id": str(chat), "caption": caption[:1000]}
             if silent:
                 data["disable_notification"] = "true"
+            if reply_to:
+                data["reply_parameters"] = _reply_parameters(reply_to)
             r = await self._client.post(
                 f"{API}/bot{self.token}/{method}",
                 data=data, files={field: (p.name, blob)}, timeout=120)
@@ -441,7 +459,7 @@ class TelegramBridge:
                         if silent:
                             data["disable_notification"] = "true"
                         if reply_to:
-                            data["reply_to_message_id"] = str(int(reply_to))
+                            data["reply_parameters"] = _reply_parameters(reply_to)
                         r = await self._client.post(
                             f"{API}/bot{self.token}/sendVoice",
                             data=data, files={"voice": (ogg.name, blob, "audio/ogg")}, timeout=60)
@@ -449,7 +467,8 @@ class TelegramBridge:
                             return True
                     except Exception:
                         log.warning("telegram sendVoice failed", exc_info=True)
-            return await self._upload(str(src), kind="document", caption=caption, silent=silent)
+            return await self._upload(str(src), kind="document", caption=caption, silent=silent,
+                                      reply_to=reply_to)
         finally:
             try:
                 ogg.unlink()
@@ -899,7 +918,7 @@ class TelegramBridge:
         if silent:
             log.info("telegram urgent sent silently (sound budget spent), not chased: %r", text[:70])
             return True
-        self._urgent[token] = {"text": text, "at": time.time(), "sent": 1}
+        self._urgent[token] = {"text": text, "at": time.time(), "sent": 1, "mid": self.last_sent_id}
         log.info("telegram urgent %s sent, chasing until acknowledged: %r",
                  token, text[:70])
         spawn(self._chase(token), name="tg-urgent-chase")

@@ -59,7 +59,8 @@ def check(name, cond, detail=""):
 BASE = 9_000_000_000            # every hit id this gate plants is >= BASE
 TEST_CHANNELS = ("Framnghm FD", "Newton PD", "Natick PD", "Sudbury FD", "Waltham PD", "Ashland FD",
                  "Wayland FD", "Hudson FD", "Waltham FD", "Marlboro PD", "Wellesley PD", "Natick FD",
-                 "Southboro FD", "Sherborn FD", "Framingham EMS")
+                 "Southboro FD", "Sherborn FD", "Framingham EMS",
+                 "Hopkinton FD", "Holliston PD", "Weston FD", "Dover FD", "Maynard FD")
 TMP = Path(tempfile.mkdtemp(prefix="scanner-gate-"))
 
 
@@ -980,9 +981,194 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         config.data["remote"] = real_remote
     src = Path(RT.__file__).read_text(encoding="utf-8")
     seg = src[src.index("async def send_voice_clip"):src.index("async def _poll_loop")]
-    check("the recording can go silently, threaded under its message",
-          'data["disable_notification"] = "true"' in seg and 'data["reply_to_message_id"]' in seg
-          and "silent=silent" in seg, "")
+    check("the recording can go silently, threaded under its message - even as the fallback document",
+          'data["disable_notification"] = "true"' in seg and 'data["reply_parameters"] = _reply_parameters(reply_to)' in seg
+          and "silent=silent" in seg and "reply_to=reply_to)" in seg, "")
+    rp = json.loads(RT._reply_parameters(4242))
+    check("...and a deleted parent costs only the threading, never the recording",
+          rp == {"message_id": 4242, "allow_sending_without_reply": True}, rp)
+
+    print("\n-- what the code review found (2026-11-07) --")
+    for text, want in (
+            ("Two patients, non-life-threatening injuries, transporting one to MetroWest.",
+             ["non-life-threatening injuries", "2 patients", "transported to MetroWest"]),
+            ("Two vehicles, no serious injuries, Route 9 eastbound.", ["2 vehicles"]),
+            ("Driver is not seriously injured.", []),
+            ("Command to dispatch, not everyone is out, possible occupant on the second floor.", []),
+            ("Command, is everyone out of the building?", []),
+            ("Car 4, subject is refusing to leave the store.", []),
+            ("Negative transport, patient signed off.", []),
+            ("No transport needed, units can clear.", []),
+            ("Engine 1 respond for a fire in a detached two car garage at 12 Elm Street.", []),
+            ("Ladder 2 car fire Route 9 westbound.", []),
+            ("No airbag deployment, minor damage.", ["minor damage"]),
+            ("Airbags did not deploy.", []),
+            ("Patient is alert, giving fluids en route to MetroWest.", ["transported to MetroWest"]),
+            ("CPR not in progress, obvious death.", []),
+            ("Car 3, not on scene yet, still en route.", []),
+            ("Medic 2 patient is conscious and breathing.", ["conscious and breathing"]),
+            ("No injuries, two vehicles, tow requested.", ["2 vehicles", "no injuries", "tow requested"]),
+            ("Milford ambulance transporting to Leonard Morse.", ["transported to Leonard Morse"])):
+        got = R.details(text)
+        check(f"review: details of {text[:48]!r}", got == want, got)
+    for text, want in (
+            ("Car 3 the caller states Union Avenue, two cars blocking.", "Union Ave"),
+            ("Caller is John Young at 45 Union Avenue, motor vehicle accident.", "45 Union Ave"),
+            ("Car 2 for a lift assist Pleasant Street.", "Pleasant St"),
+            ("Engine 2, medical, Main St. and Concord St.", "Main St and Concord St"),
+            ("Master 3, Fox drive, Charlie, Romeo 213.", "")):
+        got = R.extract_address(text)[0]
+        check(f"review: address in {text[:48]!r} -> {want or 'none'}", got == want, got)
+
+    rsent, redits, conc = [], [], {"now": 0, "max": 0}
+    rdesk = SD.ScannerDesk()
+    rdesk.quiet_hours = lambda: False
+    rdesk.REFRESH_GAP_S = 0.0
+    rdesk.summariser = fake_summary
+    rdesk.clip_sender = fake_clip
+
+    async def slow_deliver(text, tier, key="", subject="", written=""):
+        await asyncio.sleep(0.3)                  # a real Telegram round trip
+        rsent.append((tier, key, written))
+        return {"delivered": "telegram", "tier": tier, "message_id": 8000 + len(rsent), "sound": tier == URGENT}
+
+    async def slow_edit(mid, text):
+        conc["now"] += 1
+        conc["max"] = max(conc["max"], conc["now"])
+        await asyncio.sleep(0.2)
+        conc["now"] -= 1
+        redits.append((mid, text))
+        return True
+    rdesk.deliverer, rdesk.editor = slow_deliver, slow_edit
+
+    def rrow(n, name, town, agency, ago):
+        r = {"id": BASE + 7000 + n, "ts": now - ago, "end_ts": now - ago + 2, "duration": 2, "name": name,
+             "town": town, "agency": agency, "quality": None, "audio_path": ""}
+        S.log_hit(r)
+        return r
+    a1 = await rdesk.on_text(rrow(1, "Hopkinton FD", "Hopkinton", "FD", 300),
+                             "Hopkinton, motor vehicle accident, Main Street.", 0.45, annotate=False)
+    await rdesk.settle()
+    a2 = await rdesk.on_text(rrow(2, "Hopkinton FD", "Hopkinton", "FD", 280),
+                             "Car 3, motor vehicle accident on Main Street, two cars.", 0.5, annotate=False)
+    await rdesk.settle()
+    check("review: a shaky crash that a second transmission confirms is sent (it was never asked again)",
+          a1 == a2 and S.incident(a1)["tier"] == SD.FYI and len(rsent) == 1, (S.incident(a1), rsent))
+    rsent.clear()
+    b1 = await rdesk.on_text(rrow(3, "Weston FD", "Weston", "FD", 200),
+                             "Engine 1 respond to 12 Elm Street for a gas leak, odor of gas in the basement.", 0.9,
+                             annotate=False)
+    await asyncio.sleep(0.1)                      # the line is being sent
+    await rdesk.on_text(rrow(4, "Weston FD", "Weston", "FD", 190),
+                        "Engine 1 on scene, two patients, transporting one to MetroWest.", 0.9, annotate=False)
+    await rdesk.settle()
+    check("review: a follow-up heard while the line was being sent still reaches his message",
+          len(rsent) == 1 and redits and "MetroWest" in redits[-1][1] and redits[-1][0] == S.incident(b1)["msg_id"],
+          (rsent, redits[-1:]))
+    check("review: one call's message is never edited twice at once", conc["max"] == 1, conc)
+    rsent.clear()
+    c1 = await rdesk.on_text(rrow(5, "Dover FD", "Dover", "FD", 150),
+                             "Engine 1, Ladder 1 respond to 45 Main Street for a reported structure fire, smoke showing.",
+                             0.9, annotate=False)
+    await rdesk.settle()
+    c2 = await rdesk.on_text(rrow(6, "Dover FD", "Dover", "FD", 140),
+                             "Command, dispatch, we're getting another report of heavy smoke from the roof.", 0.9,
+                             annotate=False)
+    await rdesk.settle()
+    check("review: 'another report of heavy smoke' is the same fire - one incident, one alert",
+          c1 == c2 and len([s for s in rsent if s[1].startswith("scanner:")]) == 1, (c1, c2, rsent))
+    d1 = await rdesk.on_text(rrow(7, "Holliston PD", "Holliston", "PD", 120),
+                             "Two car crash by the mall, no injuries.", 0.9, annotate=False)
+    await rdesk.settle()
+    d2 = await rdesk.on_text(rrow(8, "Holliston PD", "Holliston", "PD", 110),
+                             "Car 12 on location with the lockout at 30 Central Street.", 0.9, annotate=False)
+    await rdesk.settle()
+    check("review: a police unit's status about another call joins nothing and takes no address",
+          d2 is None and S.incident(d1)["address"] == "", (d2, S.incident(d1)["address"]))
+    old_fire = S.create_incident({
+        "first_ts": now - 3000, "last_ts": now - 2000, "town": "Maynard", "miles": 9.0, "agency": "FD",
+        "channel": "Maynard FD", "family": "fire", "kind": "working_fire", "label": "a working fire", "severity": 9,
+        "types": ["working_fire"], "address": "9 Maple St", "street": "maple st", "roads": [], "units": [],
+        "said": [{"ts": now - 2100 + k, "text": "Units can clear, fire is out, returning.", "hit": BASE + 7100 + k,
+                  "channel": "Maynard FD"} for k in range(6)], "hits": 14, "status": "over"})
+    rdesk._rejudge(now - 3600)
+    of = S.incident(old_fire)
+    check("review: a call kept by an older build (six of fourteen lines) is not 'closed' by the re-read",
+          of["types"] == ["working_fire"] and of["address"] == "9 Maple St", of)
+    seen_clip = {}
+
+    async def capture_clip(inc_, row_, silent=False, reply_to=None, kind=""):
+        seen_clip.update(silent=silent, reply_to=reply_to, kind=kind)
+    rdesk._send_clip = capture_clip
+
+    async def quiet_urgent(text, tier, key="", subject="", written=""):
+        return {"delivered": "telegram", "tier": tier, "message_id": 8800, "sound": False}
+    rdesk.deliverer = quiet_urgent
+    caps_before = config.data["scanner"].get("max_per_day")
+    config.data["scanner"]["max_per_day"] = {"urgent": 99, "alert": 99, "fyi": 99}
+    try:
+        trig = rrow(9, "Framingham EMS", "Framingham", "EMS", 60)
+        hot = S.create_incident({
+            "first_ts": now - 60, "last_ts": now - 58, "town": "Framingham", "miles": 0.4, "agency": "EMS",
+            "channel": "Framingham EMS", "family": "fire", "kind": "working_fire", "label": "a working fire",
+            "severity": 9, "types": ["working_fire"], "address": "7 Ash St", "street": "ash st", "roads": [],
+            "units": [], "said": [{"ts": now - 60, "text": "Working fire, 7 Ash Street.", "conf": 0.9}],
+            "hits": 1, "status": "active"})
+        await rdesk._consider(hot, trig, "")
+    finally:
+        if caps_before is None:
+            config.data["scanner"].pop("max_per_day", None)
+        else:
+            config.data["scanner"]["max_per_day"] = caps_before
+    check("review: an URGENT that went silently (sound budget spent) sends its recording silently too",
+          S.incident(hot)["tier"] == URGENT and seen_clip.get("silent") is True
+          and seen_clip.get("reply_to") == 8800, (S.incident(hot)["tier"], seen_clip))
+    long_inc = {"town": "Weston", "miles": 9.0, "types": ["mva"], "label": "a crash", "channel": "Weston FD",
+                "first_ts": now - 600, "last_ts": now, "hits": 10, "units": [], "details": [], "address": "",
+                "said": [{"ts": now - 600 + k, "text": ("word " * 80).strip()} for k in range(10)]}
+    check("review: ten full lines fit one Telegram message as it is",
+          len(rdesk.written(long_inc, SD.FYI)) <= 3900)
+    rdesk.MAX_WRITTEN = 1200                    # the safety net itself, exercised
+    lw = rdesk.written(long_inc, SD.FYI)
+    rdesk.MAX_WRITTEN = SD.ScannerDesk.MAX_WRITTEN
+    check("...and past the limit the oldest lines give way, the header and the footer stay",
+          len(lw) <= 1200 and lw.startswith("SCANNER - Weston") and lw.count('  "') < 10
+          and lw.splitlines()[-1].startswith("First heard"), (len(lw), lw.count('  "')))
+    import delivery as DV2
+    saved = (list(DV2.delivery._sent), list(DV2.delivery._quiet_sent))
+    try:
+        DV2.delivery._sent.clear()
+        DV2.delivery._quiet_sent[:] = [time.time()] * 8
+        check("review: the quiet feed has its own hourly ceiling...",
+              DV2.delivery.has_budget(ALERT, "scanner_fyi") is False)
+        check("...which never spends the room his reminders need", DV2.delivery.has_budget(ALERT) is True
+              and DV2.delivery.has_budget(ALERT, "reminder") is True)
+        DV2.delivery.note_sent("scanner_fyi")
+        check("...and a quiet call's recording is counted there, not in the shared ceiling",
+              len(DV2.delivery._sent) == 0 and len(DV2.delivery._quiet_sent) == 9)
+    finally:
+        DV2.delivery._sent[:], DV2.delivery._quiet_sent[:] = saved
+    import remote_telegram as RT2
+    api_calls: list = []
+
+    async def api2(method, http_timeout=30, _token=None, **params):
+        api_calls.append((method, params))
+        return True
+    real_api2, real_remote2 = RT2.telegram._api, dict(config.data.get("remote") or {})
+    RT2.telegram._api = api2
+    config.data.setdefault("remote", {})["telegram_chat_id"] = 123
+    RT2.telegram._urgent["gate1234"] = {"text": "x", "at": time.time(), "sent": 1, "mid": 5555}
+    try:
+        await RT2.telegram.edit_text(5555, "SCANNER - URGENT - Framingham (home)\nUnits: Engine 2")
+        kb = (api_calls[-1][1].get("reply_markup") or {}).get("inline_keyboard") or [[{}]]
+        check("review: editing an unanswered URGENT keeps its 'Got it' button",
+              kb[0][0].get("callback_data") == "ack:gate1234", api_calls[-1:])
+        await RT2.telegram.edit_text(6666, "SCANNER - Weston (9 mi)")
+        check("...and a quiet call's edit carries no buttons", "reply_markup" not in api_calls[-1][1], api_calls[-1:])
+    finally:
+        RT2.telegram._urgent.pop("gate1234", None)
+        RT2.telegram._api = real_api2
+        config.data["remote"] = real_remote2
 
     print("\n-- the daily cap --")
     cap = int(config.get("scanner", "max_per_day", default={}).get("urgent", 4))

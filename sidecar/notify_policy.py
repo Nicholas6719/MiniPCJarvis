@@ -35,6 +35,11 @@ QUIET_KINDS = frozenset({"brief", "market", "memory", "nudge", "held", "render",
 NO_INTERRUPT = frozenset({"brief", "market", "memory", "nudge", "scanner_fyi"})
 # kinds that sound at any tier: he asked for them, at a time he chose
 HIS_OWN = frozenset({"reminder", "watch"})
+# kinds counted against their OWN hourly ceiling, never the shared one: six
+# scanner calls in an hour must not spend the room his reminders need
+# (delivery._over_budget; review of 2026-11-07)
+OWN_CEILING = frozenset({"scanner_fyi"})
+DEFAULT_QUIET_PER_HOUR = 8
 DEFAULT_DAILY_SOUNDS = 5
 
 
