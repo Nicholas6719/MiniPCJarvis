@@ -1518,6 +1518,39 @@ def say_emergencies(_s: dict, res: dict) -> str:
     return f"{len(items)} things, sir. " + " ".join(i["text"] for i in items[:3])
 
 
+# THE SCANNER DESK (scanner_desk.py, 2026-11-07): his police scanner. The
+# desk composes every answer itself; these only pick the question and the town.
+_SCANNER_TOWN = re.compile(
+    r"\b(?:in|around|near|over in|out in|about|from|for)\s+(?:the\s+)?(?:town of\s+|city of\s+)?"
+    r"([a-z][a-z .'-]{2,40}?)"
+    r"(?:\s+(?:right now|today|tonight|this morning|this afternoon|this evening|now|lately|"
+    r"on the scanner|on the radio))*\s*[?.!]*$")
+
+
+def slots_scanner_town(t: str) -> dict | None:
+    """"what's happening in Natick" -> {'town': 'Natick'}. Only a Massachusetts
+    town (geo) counts: "what's happening in the world" is the news, and steps
+    aside for it."""
+    m = _SCANNER_TOWN.search((t or "").lower())
+    if not m:
+        return None
+    words = m.group(1).strip(" .'-").split()
+    if not words:
+        return None
+    import geo
+    for cand in (" ".join(words), " ".join(words[:2]), words[0]):
+        town = geo.town(cand)
+        if town:
+            return {"town": town.name}
+    return None
+
+
+def say_scanner(_s: dict, res: dict) -> str:
+    if res.get("error"):
+        return str(res["error"])
+    return res.get("spoken") or "I couldn't read the scanner just now, sir."
+
+
 _NOTE = re.compile(
     r"^\s*(?:please\s+)?(?:take|make|jot|write)\s+(?:a\s+|this\s+|that\s+)?(?:quick\s+)?(?:note|down)"
     r"(?:\s+to self)?(?:\s+(?:called|named|titled)\s+(?P<name>[^:,]{2,60}?)(?=\s*[:,-]))?\s*(?:[:,-]|\bthat\b|\bsaying\b)?\s*(?P<body>.*)$"
@@ -3264,6 +3297,44 @@ SKILLS: list[Skill] = [
         "anything dangerous going on around here", "is there an emergency nearby",
         "any alerts for my area"],
         speak=say_emergencies),
+    # HIS POLICE SCANNER (scanner_desk.py, 2026-11-07). One internal tool,
+    # `_scanner`, answers all six; every seed names the scanner, a town or a
+    # radio call, so none of them can fold onto another skill's canon.
+    Skill("scanner_now", "_scanner", [
+        "what's on the scanner", "anything on the scanner", "what's the scanner saying",
+        "anything going on on the scanner", "what's happening on the scanner", "any calls on the scanner",
+        "check the scanner", "what's the scanner picking up", "anything on the police scanner",
+        "is anything happening on the scanner", "what's the latest on the scanner"],
+        fixed_args={"ask": "now"}, speak=say_scanner),
+    Skill("scanner_town", "_scanner", [
+        "what's happening in natick", "what's going on in sudbury", "anything happening in framingham",
+        "any calls in wellesley", "what's going on over in marlborough", "anything going on in hudson right now",
+        "what's happening in waltham tonight", "any police activity in acton", "is anything going on in maynard",
+        "what's the scanner saying about newton", "anything happening in ashland",
+        "what's going on in boston on the scanner"],
+        slots=slots_scanner_town, fixed_args={"ask": "town"}, speak=say_scanner),
+    Skill("scanner_last", "_scanner", [
+        "what was that call", "what did they just say", "what was that on the scanner",
+        "what did the scanner just say", "what was that radio call", "who was that on the radio",
+        "what did dispatch just say", "what was that last call", "what did that call say",
+        "who was that on the scanner"],
+        fixed_args={"ask": "last"}, speak=say_scanner),
+    Skill("scanner_summary", "_scanner", [
+        "scanner summary", "what happened overnight on the scanner", "give me the scanner summary",
+        "what did the scanner pick up overnight", "anything on the scanner last night",
+        "summarize the scanner for me", "what happened on the scanner today", "what did i miss on the scanner"],
+        fixed_args={"ask": "summary"}, speak=say_scanner),
+    Skill("scanner_health", "_scanner", [
+        "is the scanner working", "is the scanner on", "is the scanner connected",
+        "check if the scanner is working", "is the police scanner running", "why isn't the scanner working",
+        "how's the scanner doing", "is the scanner console running", "can you hear the scanner",
+        "is the scanner audio okay"],
+        fixed_args={"ask": "health"}, speak=say_scanner),
+    Skill("scanner_doctor", "_scanner", [
+        "what did the scan doctor change", "what did the scan doctor do", "scan doctor report",
+        "what changes did the scan doctor make", "did the scan doctor change anything",
+        "what did the scanner doctor recommend", "what did the scan optimizer change"],
+        fixed_args={"ask": "doctor"}, speak=say_scanner),
     Skill("note_take", "write_note", [
         "take a note", "take a note called groceries: milk and eggs", "take a note for me: the lab is due friday",
         "jot this down: call the registrar", "write this down: locker combination is on the card",
@@ -4472,6 +4543,12 @@ CONFIRM_AS = {
     "watch_battery": "tell you when the battery is charged",
     "watch_list": "say what I'm watching for",
     "been_doing": "say what you've been doing",
+    "scanner_now": "check the scanner",
+    "scanner_town": "check the scanner for that town",
+    "scanner_last": "say what that last call was",
+    "scanner_summary": "sum up the scanner",
+    "scanner_health": "check the scanner is working",
+    "scanner_doctor": "read the scan doctor's report",
 }
 
 
@@ -4555,6 +4632,7 @@ QUERY_SKILLS = frozenset({
     "news", "breaking", "general", "recall", "protocols", "briefing", "tasks", "reminders",
     "battery", "volume_get", "where_am_i", "screen", "read_screen", "camera", "face",
     "health", "agenda", "phone_reminders", "watch_list", "been_doing",
+    "scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor",
 })
 
 

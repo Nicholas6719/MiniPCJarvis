@@ -192,6 +192,29 @@ DEFAULTS: dict[str, Any] = {
     # The watcher (awareness.py): every 90 s, notices change, holds it as
     # context, speaks only in the interrupt tiers (2026-09-18).
     "awareness": {"enabled": True, "every_s": 90},
+    # THE SCANNER DESK (scanner_desk.py, 2026-11-07). His police scanner, read
+    # through his own BC125AT Console running headless (`--serve` on :8125):
+    # JARVIS starts it when it does not answer, transcribes analog traffic on
+    # the same Parakeet he talks to (his voice always first), builds incidents
+    # and interrupts only for active danger near him. Caps are per rolling day.
+    "scanner": {
+        "enabled": True,
+        "url": "http://127.0.0.1:8125",
+        "console_exe": os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs",
+                                    "BC125AT Console", "BC125AT Console.exe"),
+        "recordings_dir": "",          # "" = %LOCALAPPDATA%\BC125AT Console\recordings
+        "autostart": True,
+        "autostart_every_s": 300,      # at most one start attempt per five minutes
+        "poll_s": 1.0,
+        "transcribe": True,
+        "backlog_max_age_s": 600,      # older transmissions are counted, never transcribed
+        "near_miles": 5.0,             # URGENT only in Framingham or this close
+        "merge_minutes": 90,
+        "burst_min": 8, "burst_ratio": 3.0, "burst_window_s": 600,
+        "max_per_day": {"urgent": 4, "alert": 8},
+        "llm_summary": True,
+        "send_audio": True,            # an URGENT clip to his phone when he is away
+    },
     "confirm": {"by_voice": True},   # answer shutdown/restart confirmations by saying yes/no
     "ui": {"panel_hold_s": 5},      # seconds the stage holds after an answer (§6.3: 5 s + drain bar)
     # token lives DPAPI-encrypted on disk, never here

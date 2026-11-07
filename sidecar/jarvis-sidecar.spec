@@ -51,6 +51,10 @@ datas += [("profiles/generic_fdm_0.4.ini", "profiles")]
 # times in one evening, and JARVIS quietly spoke with the Kokoro fallback
 # while the log said "pocket tts worker said ''".
 datas += [("audio/pocket_worker.py", "audio")]
+# Every Massachusetts town (geo.py reads it beside itself: Path(__file__).parent
+# is _MEIPASS in the bundle). Without it the frozen build has no towns, so the
+# scanner desk can place nothing and the news judge has no distances.
+datas += [("data/ma_towns.csv", "data")]
 datas += [("models/face_detection_yunet_2023mar.onnx", "models"),
           ("models/object_detection_yolox_2022nov.onnx", "models"),
           ("models/face_recognition_sface_2021dec.onnx", "models"),

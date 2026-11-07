@@ -27,6 +27,7 @@ REM last thing that runs before a deploy, so it is where this gets caught.
 .venv\Scripts\python.exe tests\test_tool_schemas.py || (echo TOOL SCHEMA TEST FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_volatile.py || (echo VOLATILE FACTS FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_geo.py || (echo GEO TEST FAILED & exit /b 1)
+.venv\Scripts\python.exe tests\test_scanner_desk.py || (echo SCANNER DESK FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_projects.py || (echo PROJECTS FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_location_health.py || (echo LOCATION/HEALTH FAILED & exit /b 1)
 .venv\Scripts\python.exe tests\test_vision_analyze.py || (echo VISION ANALYZE FAILED & exit /b 1)

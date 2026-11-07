@@ -57,6 +57,9 @@ EXPECTED = [
     ("watch_for_battery",   "low",  6),
     ("list_watches",        "low",  6),
     ("cancel_watch",        "low",  6),
+    # The scanner desk (2026-11-07): read-only answers about his scanner,
+    # underscore-named so the model never sees it - the reflexes call it.
+    ("_scanner",            "safe", 7),
 ]
 
 
@@ -69,13 +72,14 @@ def main() -> int:
                        workspace_tools, site_tools, text_tools, watch_tools,
                        web_tools, windows_tools)
     import market_intel   # the market as a story (2026-09-05), sidecar-level module
+    import scanner_desk   # his police scanner (2026-11-07), sidecar-level module
     mods = (builtin, memory_tools, windows_tools, web_tools, task_tools,
             vision_tools, browser_tools, handoff, file_tools, weather,
             camera_tools, market_tools, news_tools, input_tools, uia,
             projects, location, health, vision_analyze, biometric, fabrication,
             holo_tools, render_tools, model_tools,
             documents, office, image_tools, phone,
-            workspace_tools, site_tools, text_tools, watch_tools, market_intel)
+            workspace_tools, site_tools, text_tools, watch_tools, market_intel, scanner_desk)
     for m in mods:
         m.register_all()
 

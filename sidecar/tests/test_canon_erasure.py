@@ -106,6 +106,16 @@ SUBSYSTEMS: dict[str, list[str]] = {
     "reaches": ["let me know when the battery reaches 90"],
     "doing": ["what have i been doing today", "what have i been doing"],
     "climbing": ["has memory been climbing"],
+    # HIS POLICE SCANNER (scanner_desk.py, 2026-11-07). "scanner" is the
+    # word that chooses all six scanner skills; "check the scanner" must not
+    # fold onto anything that reads a website or opens an app.
+    "scanner": [
+        "what's on the scanner", "anything on the scanner", "check the scanner",
+        "is the scanner working", "scanner summary", "what did the scanner just say",
+        "anything on the police scanner", "what happened overnight on the scanner",
+    ],
+    "doctor": ["what did the scan doctor change", "scan doctor report"],
+    "call": ["what was that call", "what was that last call"],
 }
 
 
