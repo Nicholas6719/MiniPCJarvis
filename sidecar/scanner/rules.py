@@ -127,7 +127,11 @@ PATTERNS: dict[str, re.Pattern] = {
     "water_rescue": _P(r"\b(?:water rescue|ice rescue|dive team|(?:person|someone|party|victim) in the water"
                        r"|(?:fell|fallen|went) (?:in|into|through) the (?:water|ice|lake|pond|river)"
                        r"|through the ice|drowning|capsized)\b"),
+    # "residential fire alarm" / "fire activation" is an ALARM call: on
+    # 2026-11-07 "...for the residential fire activation" became a structure
+    # fire. The lookahead keeps those for the alarm pattern below.
     "structure_fire": _P(r"\b(?:structure|house|building|apartment|dwelling|residential|commercial|garage|barn) fire\b"
+                         r"(?!\s+(?:alarm|activation|detector|system|panel|box|drill|inspection))"
                          r"|\bfire in (?:the |a )?(?:building|house|home|apartment|basement|attic|unit|garage)\b"
                          r"|\breported (?:structure )?fire\b"),
     "gas_leak": _P(r"\b(?:gas (?:leak|odor|smell|main|line)|(?:odor|smell) of (?:natural )?gas|natural gas"
@@ -141,7 +145,7 @@ PATTERNS: dict[str, re.Pattern] = {
     "wires_down": _P(r"\b(?:wires? (?:down|arcing|burning)|(?:power|electrical|utility) lines? down"
                      r"|tree (?:down )?on (?:the )?wires|tree (?:on|into) (?:a )?(?:house|car|wires)"
                      r"|pole (?:down|snapped|sheared))\b"),
-    "alarm": _P(r"\b(?:fire alarm|alarm (?:activation|sounding|going off|system)|box alarm|master box"
+    "alarm": _P(r"\b(?:fire alarm|fire activation|alarm (?:activation|sounding|going off|system)|box alarm|master box"
                 r"|municipal box|pull station|smoke detector|sprinkler (?:alarm|activation|head)"
                 r"|water ?flow(?: alarm)?)\b"),
     "shots_fired": _P(r"\b(?:shots? fired|shots? (?:heard|being fired)|gun ?shots?|gun ?fire|shooting"

@@ -709,6 +709,16 @@ class ScannerDesk:
             "types": [], "hits": n, "burst": 1, "summary": self._burst_summary(n, base, days, window)})
         log.info("scanner: burst on %s - %d transmissions in %d min (normal %.1f, from %d days)%s",
                  name, n, int(window / 60), base, days, f" -> incident #{iid}" if iid else "")
+        # "BUSY" MEANS BUSIER THAN USUAL, AND USUAL TAKES DAYS TO LEARN. On
+        # its first morning (2026-11-07) Natick FD's ordinary traffic - 8 in
+        # ten minutes against a baseline of nothing - came within a test
+        # mute of reaching his phone as "unusually busy". Until a channel
+        # has a few days of history its bursts are stored, not sent.
+        min_days = int(_cfg("burst_min_days", 3))
+        if iid and days < min_days:
+            log.info("scanner: #%d stored, not sent - only %d day(s) of history for %s (need %d)",
+                     iid, days, name, min_days)
+            return
         if iid:
             self._spawn_task(self._consider(iid, row, ""), name=f"scanner-consider-{iid}")
 
@@ -828,13 +838,47 @@ class ScannerDesk:
         if conf >= rules.TRUST:
             reading = rules.read(text, row.get("town") or "")
             tags = list(reading.types) + (["resolved"] if reading.resolved else [])
-            if reading.types or reading.resolved:
+            if (reading.types and not self._corroborated(row, reading, conf)):
+                # ONE SHAKY TRANSMISSION IS NOT A FIRE. On 2026-11-07 a noisy
+                # "...for the residential fire activation" (confidence 0.41,
+                # really a fire-alarm call) became "a reported structure fire
+                # in Wayland". A dangerous reading from a transcript below
+                # SURE waits for a second transmission from the same town
+                # saying the same kind of thing.
+                log.info("scanner: holding %s in %s from one shaky transmission (confidence %.2f) "
+                         "until a second one agrees", reading.top, row.get("town") or "?", conf)
+                tags.append("unconfirmed")
+            elif reading.types or reading.resolved:
                 iid = self._merge(row, reading, text)
                 if iid:
                     store.set_transcript(row["id"], text, conf, iid)
         if annotate:
             await self._annotate(row["id"], text, conf, tags, iid)
         return iid
+
+    # A transcript at or above this is believed on its own; below it (and
+    # above TRUST) a dangerous reading needs a second transmission to agree.
+    SURE = 0.6
+    SHAKY_WINDOW_S = 1800.0
+
+    def _corroborated(self, row: dict, reading: rules.Reading, conf: float) -> bool:
+        """May this reading start or escalate an incident on its own?"""
+        danger = int(reading.severity or 0) >= rules.KINDS["structure_fire"].severity
+        if not danger or conf >= self.SURE:
+            return True
+        now = float(row.get("end_ts") or row.get("ts") or self.now())
+        town = row.get("town") or ""
+        seen = getattr(self, "_shaky", None)
+        if seen is None:
+            seen = self._shaky = {}
+        for k in [k for k, t in seen.items() if now - t > self.SHAKY_WINDOW_S]:
+            del seen[k]
+        key = (town, reading.family or reading.top)
+        if key in seen and seen[key] != now:
+            del seen[key]
+            return True                        # a second transmission agrees
+        seen[key] = now
+        return False
 
     def _merge(self, row: dict, reading: rules.Reading, text: str) -> int | None:
         now = float(row.get("end_ts") or row["ts"])

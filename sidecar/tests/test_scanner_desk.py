@@ -58,7 +58,7 @@ def check(name, cond, detail=""):
 BASE = 9_000_000_000            # every hit id this gate plants is >= BASE
 TEST_CHANNELS = ("Framnghm FD", "Newton PD", "Natick PD", "Sudbury FD", "Waltham PD", "Ashland FD",
                  "Wayland FD", "Hudson FD", "Waltham FD", "Marlboro PD", "Wellesley PD", "Natick FD",
-                 "Southboro FD")
+                 "Southboro FD", "Sherborn FD", "Framingham EMS")
 TMP = Path(tempfile.mkdtemp(prefix="scanner-gate-"))
 
 
@@ -657,6 +657,46 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     await desk.settle()
     check("a finished fire does not absorb a new call elsewhere in town",
           brush and brush != fire["id"] and S.incident(fire["id"])["status"] == "over", (brush, fire["id"]))
+
+    print("\n-- what the first live morning taught it (2026-11-07) --")
+    # Natick FD's ordinary traffic against a baseline of nothing came within a
+    # test mute of his phone as "unusually busy".
+    # "Days of history" are days the desk was LISTENING at this hour (this
+    # gate planted five above), so a desk on its first day is simulated.
+    sent_before = len(calls["deliver"])
+    ids_before = {i["id"] for i in S.incidents_since(now - 3600)}
+    real_baseline = desk._baseline
+    desk._baseline = lambda name, hour, now_, window: (0.0, 0)
+    try:
+        await burst_on("Sherborn FD", BASE + 6200)
+    finally:
+        desk._baseline = real_baseline
+    fresh = [i for i in S.incidents_since(now - 3600)
+             if i["id"] not in ids_before and i["burst"] and i["channel"] == "Sherborn FD"]
+    check("a burst on a desk's first day is stored", len(fresh) == 1, fresh)
+    check("...and never sent: busy means busier than usual, and usual takes days",
+          len(calls["deliver"]) == sent_before, calls["deliver"][sent_before:])
+    # "...for the residential fire activation" (0.41) became a structure fire.
+    rd = R.read("Number 22 Always for the residential fire activation.", "Wayland")
+    check("'residential fire activation' is an alarm call, not a structure fire",
+          "structure_fire" not in rd.types and "alarm" in rd.types, rd.types)
+    rd = R.read("Engine 3 respond to a residential fire alarm on Main Street", "Wayland")
+    check("...and so is 'residential fire alarm'", "structure_fire" not in rd.types, rd.types)
+    shaky = {"id": BASE + 42, "ts": now - 15, "end_ts": now - 13, "duration": 3, "name": "Wayland FD",
+             "town": "Wayland", "agency": "FD", "quality": None, "audio_path": ""}
+    S.log_hit(shaky)
+    first = await desk.on_text(shaky, "Engine 1 respond to 9 Pond Road for a structure fire.", 0.45, annotate=False)
+    check("one shaky transmission saying 'structure fire' starts nothing", first is None, first)
+    again = dict(shaky, id=BASE + 43, ts=now - 5, end_ts=now - 3)
+    S.log_hit(again)
+    second = await desk.on_text(again, "Ladder 1 on the way to Pond Road, structure fire.", 0.5, annotate=False)
+    await desk.settle()
+    check("...a second transmission from the same town agreeing does", bool(second), second)
+    sure = dict(shaky, id=BASE + 44, ts=now - 2, end_ts=now - 1, town="Hudson", name="Hudson FD")
+    S.log_hit(sure)
+    clear = await desk.on_text(sure, "Engine 2 respond to 40 Main Street for a structure fire.", 0.9, annotate=False)
+    await desk.settle()
+    check("a clear transcript is believed on its own", bool(clear), clear)
 
     print("\n-- the daily cap --")
     cap = int(config.get("scanner", "max_per_day", default={}).get("urgent", 4))
