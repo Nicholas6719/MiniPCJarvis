@@ -31,6 +31,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -429,9 +430,26 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     spoken, written = desk.compose(i, URGENT)
     check("URGENT speaks the kind, the street in full and the town",
           spoken == "Scanner, sir: a structure fire with smoke showing at 45 Union Avenue here in Framingham.", spoken)
+    wl_ = written.splitlines()
     check("...and the phone gets a header, the place and the words he can judge",
           written.startswith("SCANNER - URGENT - Framingham (home)") and "45 Union Ave" in written
-          and "smoke showing" in written.splitlines()[-1], written)
+          and "Heard on Framnghm FD:" in wl_
+          and any(re.match(r"\d{1,2}:\d\d [AP]M  \"", x) and "smoke showing" in x for x in wl_)
+          and wl_[-1].startswith("First heard "), written)
+    i3 = inc("Sudbury", ["mva"])
+    i3.update(channel="Sudbury FD", address="", summary="", units=["Car 3", "Ambulance 1"],
+              details=["2 vehicles", "minor injuries", "units on scene"], first_ts=time.time() - 300,
+              last_ts=time.time(), hits=4,
+              said=[{"ts": time.time() - 300, "text": "Two car MVA, car three ambulance one respond.", "conf": 0.8},
+                    {"ts": time.time() - 60, "text": "Car 3 on scene, minor injuries.", "conf": 0.8, "context": True}])
+    spoken, written = desk.compose(i3, SD.FYI)
+    check("a quiet call is said with what was heard: the facts and who was sent",
+          spoken == "From the scanner: a crash in Sudbury, 5 miles away. 2 vehicles, minor injuries. "
+                    "Sudbury Fire sent Car 3 and Ambulance 1.", spoken)
+    check("...and written with where, the units, what is known and every line heard",
+          written.startswith("SCANNER - Sudbury (5 mi)\nA crash\n") and "Units: Car 3, Ambulance 1" in written
+          and "Known: 2 vehicles; minor injuries; units on scene" in written and "Heard on Sudbury FD:" in written
+          and written.count('  "') == 2 and "4 transmissions - latest" in written, written)
     i2 = inc("Natick", ["entrapment"], ["Route 9"])
     i2.update(address="Route 9 eastbound at Speen St", channel="Natick FD", said=[], summary="")
     spoken, _ = desk.compose(i2, ALERT)
@@ -484,7 +502,14 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
 
     async def fake_deliver(text, tier, key="", subject="", written=""):
         calls["deliver"].append({"text": text, "tier": tier, "key": key, "written": written})
-        return {"delivered": "telegram", "tier": tier, "why": "he is not at the machine"}
+        return {"delivered": "telegram", "tier": tier, "why": "he is not at the machine",
+                "message_id": 7000 + len(calls["deliver"])}
+
+    calls["edit"] = []
+
+    async def fake_edit(message_id, text):
+        calls["edit"].append((message_id, text))
+        return True
 
     async def fake_summary(inc_, urgent):
         calls["summ"].append(urgent)
@@ -497,6 +522,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     desk = SD.ScannerDesk()
     desk.client = ConsoleClient(console.url)
     desk.transcriber, desk.deliverer, desk.summariser, desk.clip_sender = fake_stt, fake_deliver, fake_summary, fake_clip
+    desk.editor = fake_edit
+    desk.REFRESH_GAP_S = 0.0                     # the gate does not wait twenty seconds between edits
     desk.voice_busy = lambda: False
     desk.quiet_hours = lambda: False
     desk.after_id = BASE
@@ -553,11 +580,17 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("one URGENT went out, keyed to the incident",
           len(loud()) == 1 and loud()[0]["tier"] == URGENT
           and loud()[0]["key"] == f"scanner:{fire['id']}", calls["deliver"])
-    check("the model was asked without waiting for a quiet moment (URGENT)", calls["summ"] == [True], calls["summ"])
+    check("the model was asked without waiting for a quiet moment (URGENT), and never for the quiet line "
+          "(it invents details from weak audio)", calls["summ"] == [True], calls["summ"])
     check("he was away, so the transmission itself went to his phone",
-          len(calls["clip"]) == 1 and calls["clip"][0][1], calls["clip"])
-    check("...and the clip file was cleaned up", not Path(calls["clip"][0][0]).exists() if calls["clip"] else False)
-    check("the send was recorded", S.sent_count(URGENT, now - 60) >= 1)
+          len(calls["clip"]) == 2 and calls["clip"][0][1] and "smoke showing" in calls["clip"][0][2], calls["clip"])
+    check("...and the quiet call's recording went too", len(calls["clip"]) == 2 and "gas leak" in calls["clip"][1][2],
+          calls["clip"])
+    check("...and the clip files were cleaned up", calls["clip"] and not any(Path(c[0]).exists() for c in calls["clip"]))
+    want_mid = 7000 + calls["deliver"].index(g[0]) + 1 if g else -1
+    check("the message ids came back and were kept, so the call's message can grow",
+          gas and S.incident(gas["id"])["msg_id"] == want_mid and S.incident(fire["id"])["msg_id"] > 7000,
+          (S.incident(gas["id"])["msg_id"], want_mid, S.incident(fire["id"])["msg_id"]))
 
     print("\n-- the same fire, escalating, then standing down --")
     h6 = plant(6, "Framnghm FD", "Framingham Command, strike a second alarm for 45 Union Avenue.", 4.06, ago=2)
@@ -583,6 +616,47 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("...and nothing more was sent", len(loud()) == 2 and len(quiet_feed()) == 1, calls["deliver"])
     check("a different street in the same town is a different incident",
           S.incident(S.hit(h4)["incident_id"])["id"] != fire["id"])
+
+    print("\n-- the follow-ups are where the details are --")
+    edits_before = len(calls["edit"])
+    h8 = plant(8, "Sudbury FD", "Tower 1 on scene, everyone is out, two patients, transporting one to Emerson.", 3.08,
+               ago=1)
+    await desk.tick()
+    while desk._queue:
+        await desk._transcribe_one(desk._queue.popleft())
+    await desk.settle()
+    gas2 = S.incident(gas["id"])
+    check("a follow-up with no call in it joins the open call on its channel",
+          S.hit(h8)["incident_id"] == gas["id"] and len(gas2["said"]) == 2 and gas2["said"][-1].get("context"), gas2)
+    check("...and its facts are kept", {"everyone out", "2 patients", "transported to Emerson"} <= set(gas2["details"]),
+          gas2["details"])
+    new_edits = calls["edit"][edits_before:]
+    check("...and his message for that call is edited (silently) - not a second message",
+          new_edits and new_edits[-1][0] == gas2["msg_id"] and "transported to Emerson" in new_edits[-1][1]
+          and "Tower 1 on scene" in new_edits[-1][1] and len(quiet_feed()) == 1, new_edits[-1:])
+    ann8 = next((a for a in console.annotations if a["id"] == h8), {})
+    check("...and the console shows which call it belongs to", "context" in (ann8.get("tags") or [])
+          and str(ann8.get("incident") or "").startswith(f"JARVIS #{gas['id']}"), ann8)
+    await desk._edit(S.incident(gas["id"]))
+    check("an edit that would change nothing is not sent", len(calls["edit"]) == len(new_edits) + edits_before,
+          len(calls["edit"]))
+
+    S.update_incident(gas["id"], {"summary": "Responders are on scene with no injuries."})
+    check("a model summary never reaches the phone text: only what was heard does",
+          "no injuries" not in desk.written(S.incident(gas["id"]), SD.FYI), "")
+    S.update_incident(gas["id"], {"summary": ""})
+    wpd =S.incident(S.hit(h5)["incident_id"] or 0) if S.hit(h5)["incident_id"] else None
+    row = {"id": BASE + 30, "ts": now - 2, "end_ts": now - 1, "duration": 2, "name": "Waltham PD",
+           "town": "Waltham", "agency": "PD", "quality": None, "audio_path": ""}
+    S.log_hit(row)
+    got = await desk.on_text(row, "What's your location? Copy that.", 0.9, annotate=False)
+    check("on a police channel, chatter with no fact in it joins nothing", got is None, got)
+    row = dict(row, id=BASE + 31)
+    S.log_hit(row)
+    got = await desk.on_text(row, "Two patients, both refusing, units can stay.", 0.9, annotate=False)
+    check("...a stated fact joins the one open call there" if wpd else "...(no open Waltham PD call to join)",
+          (got == wpd["id"]) if wpd else got is None, (got, wpd and wpd["id"]))
+    check("the send was recorded", S.sent_count(URGENT, now - 60) >= 1)
 
     print("\n-- mutual aid, the model's veto, delivery's repeat window --")
     row = {"id": BASE + 20, "ts": now - 3, "end_ts": now - 1, "duration": 5, "name": "Framnghm FD",
@@ -795,6 +869,97 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           g2 and g2["types"] == [] and g2["status"] == "over", g2)
     check("...and incidents the rules still agree with are left alone",
           n >= 2 and S.incident(fire["id"])["types"] == fire2["types"], (n, S.incident(fire["id"])["types"]))
+
+    print("\n-- the details a call carries (his words: 'I need more details') --")
+    for text, want in (
+            ("For a two-car MPA, a trunk, and a Toyota wrap war.", ["2 vehicles"]),
+            ("This is gonna be a hit and run with just one vehicle.", ["hit and run", "1 vehicle"]),
+            ("Car 3 on scene, two patients, one being transported to MetroWest, airbags deployed.",
+             ["2 patients", "airbags deployed", "units on scene", "transported to MetroWest"]),
+            ("No injuries, two vehicles, fluids on the roadway.", ["2 vehicles", "no injuries", "fluids on the road"]),
+            ("Minor injuries, no entrapment, units can clear.", ["minor injuries"]),
+            ("Engine 2 on location, smoke showing from the second floor, everyone is out.",
+             ["smoke showing", "everyone out", "units on scene"]),
+            ("No smoke or fire showing, alarm was burnt food.", []),
+            ("Patient refused transport, units clearing.", ["a patient refused transport"]),
+            ("Two car crash on the Mass Pike westbound near exit 117, all lanes blocked.", ["2 vehicles", "road blocked"]),
+            ("Everybody dispatch it in two car three ambulance one.", [])):
+        got = R.details(text)
+        check(f"details of {text[:50]!r}", got == want, got)
+    # four Wellesley PD crash reports in two hours were one incident (2026-11-07)
+    wp = {"id": BASE + 50, "ts": now - 3000, "end_ts": now - 2998, "duration": 2, "name": "Wellesley PD",
+          "town": "Wellesley", "agency": "PD", "quality": None, "audio_path": ""}
+    S.log_hit(wp)
+    c1 = await desk.on_text(wp, "Two car MVA at the light, units respond.", 0.9, annotate=False)
+    wp2 = dict(wp, id=BASE + 51, ts=now - 2950, end_ts=now - 2948)
+    S.log_hit(wp2)
+    c2 = await desk.on_text(wp2, "Car 2 respond for another motor vehicle accident, Washington Street.", 0.9,
+                            annotate=False)
+    wp3 = dict(wp, id=BASE + 52, ts=now - 120, end_ts=now - 118)
+    S.log_hit(wp3)
+    c3 = await desk.on_text(wp3, "Report of a crash, one vehicle into a pole.", 0.9, annotate=False)
+    await desk.settle()
+    check("'another motor vehicle accident' is a second crash, not the first one again",
+          c1 and c2 and c1 != c2, (c1, c2))
+    check("...and a crash reported 48 minutes after the last word about one is a new call",
+          c3 and c3 not in (c1, c2), (c1, c2, c3))
+    got = R.extract_units("Everybody dispatch it in two car three ambulance one. Engine 2 respond.")
+    check("units said as words are read ('car three, ambulance one')", got == ["Car 3", "Ambulance 1", "Engine 2"], got)
+    import sqlite3
+    old_db = sqlite3.connect(":memory:")
+    old_db.execute("CREATE TABLE scanner_incidents (id INTEGER PRIMARY KEY, first_ts REAL, last_ts REAL)")
+    added = S._migrate(old_db)
+    cols = {r[1] for r in old_db.execute("PRAGMA table_info(scanner_incidents)")}
+    check("an install from before today gets the new columns, once",
+          added == ["msg_id", "details", "edited_ts"] and {"msg_id", "details", "edited_ts"} <= cols
+          and S._migrate(old_db) == [], (added, cols))
+    import remote_telegram as RT
+    sent_api: list = []
+    tg_obj = RT.telegram
+
+    async def fake_api(method, http_timeout=30, _token=None, **params):
+        sent_api.append((method, params))
+        return {"message_id": 4242} if method == "sendMessage" else True
+    real_api, real_remote = tg_obj._api, dict(config.data.get("remote") or {})
+    tg_obj._api = fake_api
+    config.data.setdefault("remote", {})["telegram_chat_id"] = 123
+    try:
+        ok = await tg_obj._send("SCANNER - Sudbury (5 mi)", silent=True)
+        check("a sent message's id is kept for whoever sent it", ok and tg_obj.last_sent_id == 4242,
+              tg_obj.last_sent_id)
+        ok = await tg_obj.edit_text(4242, "SCANNER - Sudbury (5 mi)\nUnits: Car 3")
+        check("...and the message can be edited in place",
+              ok and sent_api[-1][0] == "editMessageText" and sent_api[-1][1]["message_id"] == 4242
+              and "Car 3" in sent_api[-1][1]["text"], sent_api[-1:])
+        import delivery as DV
+        real_present, real_tg_mod = DV.is_present, RT.telegram
+
+        class TG:
+            last_sent_id = None
+
+            async def send_proactive(self, text, tier="notable", subject="", silent=False, buttons=None):
+                self.last_sent_id = 9191
+                self.silent = silent
+                return True
+        fake_tg = TG()
+        DV.is_present = lambda: False
+        RT.telegram = fake_tg
+        try:
+            r = await DV.delivery._deliver("From the scanner: a crash in Sudbury.", ALERT,
+                                           key=f"scanner-fyi:gate-{time.time()}", subject="scanner-fyi: a crash - Sudbury",
+                                           written="SCANNER - Sudbury (5 mi)")
+        finally:
+            DV.is_present, RT.telegram = real_present, real_tg_mod
+        check("delivery hands back the message id, and the quiet line went silently",
+              r.get("delivered") == "telegram" and r.get("message_id") == 9191 and fake_tg.silent is True, r)
+    finally:
+        tg_obj._api = real_api
+        config.data["remote"] = real_remote
+    src = Path(RT.__file__).read_text(encoding="utf-8")
+    seg = src[src.index("async def send_voice_clip"):src.index("async def _poll_loop")]
+    check("the recording can go silently, threaded under its message",
+          'data["disable_notification"] = "true"' in seg and 'data["reply_to_message_id"]' in seg
+          and "silent=silent" in seg, "")
 
     print("\n-- the daily cap --")
     cap = int(config.get("scanner", "max_per_day", default={}).get("urgent", 4))

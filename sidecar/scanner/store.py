@@ -62,7 +62,10 @@ CREATE TABLE IF NOT EXISTS scanner_incidents (
     tier TEXT DEFAULT '',            -- the highest tier he was actually sent
     delivered_ts REAL DEFAULT 0,
     decided TEXT DEFAULT '',         -- why it was or was not sent, last decision
-    pending TEXT DEFAULT ''          -- a tier waiting on delivery's repeat window
+    pending TEXT DEFAULT '',         -- a tier waiting on delivery's repeat window
+    msg_id INTEGER DEFAULT 0,        -- his Telegram message for it, edited as details arrive
+    details TEXT DEFAULT '[]',       -- facts heard: vehicles, injuries, transport...
+    edited_ts REAL DEFAULT 0         -- when that message was last brought up to date
 );
 CREATE INDEX IF NOT EXISTS scanner_incidents_last ON scanner_incidents(last_ts);
 CREATE TABLE IF NOT EXISTS scanner_sent (
@@ -74,10 +77,13 @@ CREATE TABLE IF NOT EXISTS scanner_sent (
 );
 CREATE INDEX IF NOT EXISTS scanner_sent_ts ON scanner_sent(ts);
 """
-_JSON = ("types", "roads", "units", "said", "escalations")
+_JSON = ("types", "roads", "units", "said", "escalations", "details")
 _INC_COLS = ("first_ts", "last_ts", "town", "miles", "agency", "channel", "family", "kind", "label",
              "severity", "types", "address", "street", "roads", "units", "said", "summary", "hits",
-             "burst", "status", "escalations", "tier", "delivered_ts", "decided", "pending")
+             "burst", "status", "escalations", "tier", "delivered_ts", "decided", "pending",
+             "msg_id", "details", "edited_ts")
+# columns added after the first install: (name, definition) - see _migrate
+_ADDED = (("msg_id", "INTEGER DEFAULT 0"), ("details", "TEXT DEFAULT '[]'"), ("edited_ts", "REAL DEFAULT 0"))
 _HIT_COLS = ("id", "ts", "end_ts", "duration", "channel", "name", "freq", "town", "agency", "quality",
              "audio_path", "transcript", "asr_conf", "incident_id")
 
@@ -91,11 +97,28 @@ def conn():
         try:
             db.executescript(_SCHEMA)
             db.commit()
+            _migrate(db)
         except Exception:
             _rollback(db)
             raise
         _db = db
     return _db
+
+
+def _migrate(db) -> list[str]:
+    """Columns this build needs that an older install's table lacks.
+    CREATE TABLE IF NOT EXISTS leaves an existing table as it was, so a new
+    column has to be added by hand - once, committed. Returns what was added."""
+    have = {r[1] for r in db.execute("PRAGMA table_info(scanner_incidents)").fetchall()}
+    added = []
+    for name, decl in _ADDED:
+        if name not in have:
+            db.execute(f"ALTER TABLE scanner_incidents ADD COLUMN {name} {decl}")
+            added.append(name)
+    if added:
+        db.commit()
+        log.info("scanner store: added %s to scanner_incidents", ", ".join(added))
+    return added
 
 
 def _rollback(db) -> None:
@@ -260,6 +283,13 @@ def incidents_since(ts: float, town: str = "") -> list[dict]:
         sql += " AND town = ?"
         args.append(town)
     return [_inc(r) for r in _rows(sql + " ORDER BY last_ts DESC", tuple(args))]
+
+
+def open_on_channel(channel: str, since: float) -> list[dict]:
+    """Active incidents on one channel heard from since `since`, newest first."""
+    return [_inc(r) for r in _rows(
+        f"SELECT id, {', '.join(_INC_COLS)} FROM scanner_incidents WHERE channel = ? AND status = 'active' "
+        "AND last_ts >= ? ORDER BY last_ts DESC", (channel or "", float(since)))]
 
 
 def pending_incidents(since: float) -> list[dict]:

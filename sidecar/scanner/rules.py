@@ -461,12 +461,104 @@ def spoken_address(address: str) -> str:
     return " ".join(_SPOKEN_SUFFIX.get(w, w) for w in words)
 
 
+_UNIT_WORD_RE = re.compile(r"\b(engine|ladder|rescue|medic|ambulance|truck|tower|squad|tanker|brush|forestry"
+                           r"|marine|battalion|deputy|car|cruiser)\s+(one|two|three|four|five|six|seven|eight"
+                           r"|nine|ten|eleven|twelve)\b", re.I)
+
+
 def extract_units(text: str) -> list[str]:
-    out: list[str] = []
+    """'Engine 3, Ladder 1' - and the way Parakeet often writes them, 'car
+    three, ambulance one' (2026-11-07, Sudbury FD)."""
+    found: list[tuple[int, str]] = []
     for m in _UNIT_RE.finditer(text or ""):
-        u = f"{m.group(1).title()} {m.group(2)}"
+        found.append((m.start(), f"{m.group(1).title()} {m.group(2)}"))
+    words = {**_ONES, **_TEENS}
+    for m in _UNIT_WORD_RE.finditer(text or ""):
+        found.append((m.start(), f"{m.group(1).title()} {words[m.group(2).lower()]}"))
+    out: list[str] = []
+    for _pos, u in sorted(found):
         if u not in out:
             out.append(u)
+    return out[:8]
+
+
+# ---------------------------------------------------------------- the details
+# What a call is like, beyond what kind it is: the facts he would want on his
+# phone ("2 vehicles, one patient, transported to MetroWest"). Each is a short
+# phrase, said only when the words are there - never inferred.
+_HOSPITALS = (("metrowest", "MetroWest"), ("metro west", "MetroWest"), ("framingham union", "MetroWest"),
+              ("leonard morse", "Leonard Morse"), ("newton wellesley", "Newton-Wellesley"),
+              ("newton-wellesley", "Newton-Wellesley"), ("emerson", "Emerson"), ("marlborough hospital",
+              "Marlborough Hospital"), ("marlboro hospital", "Marlborough Hospital"), ("milford", "Milford"),
+              ("umass", "UMass Memorial"), ("u mass", "UMass Memorial"), ("mass general", "Mass General"),
+              ("mgh", "Mass General"), ("beth israel", "Beth Israel"), ("st. elizabeth", "St. Elizabeth's"),
+              ("saint elizabeth", "St. Elizabeth's"), ("brigham", "the Brigham"), ("children's", "Children's"))
+_N = r"(one|two|three|four|five|1|2|3|4|5)"
+_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+_DETAILS: tuple[tuple[re.Pattern, str], ...] = tuple((re.compile(p, re.I), d) for p, d in (
+    (r"\bhit[- ]and[- ]run\b", "hit and run"),
+    (r"\b(?:single|one|1)[- ]?(?:car|vehicle)\b(?! (?:one|two|three|four|five|\d))", "1 vehicle"),
+    (rf"\b{_N}[- ]?(?:car|vehicle)s?\b(?! (?:one|two|three|four|five|\d))", "{n} vehicles"),
+    (r"\bno (?:apparent |reported )?injur(?:y|ies)\b|\bnegative (?:for )?injur|\buninjured\b|\bno one (?:is )?hurt\b",
+     "no injuries"),
+    (r"\bminor injur", "minor injuries"),
+    (r"\b(?:serious|severe|life[- ]threatening|critical) injur|\bseriously (?:injured|hurt)\b", "serious injuries"),
+    (rf"\b{_N} patients?\b", "{n} patient(s)"),
+    (r"\b(?:unconscious|unresponsive)\b", "someone unconscious"),
+    (r"\bconscious and breathing\b", "conscious and breathing"),
+    (r"\bcpr\b", "CPR in progress"),
+    (r"\brefus(?:ed|ing|al)\b", "a patient refused transport"),
+    (r"\bairbags?\b", "airbags deployed"),
+    (r"\bfront[- ]end damage\b", "front-end damage"),
+    (r"\b(?:heavy|major|significant|extensive) damage\b", "heavy damage"),
+    (r"\bminor damage\b", "minor damage"),
+    (r"\bdisabled (?:vehicle|car)\b", "a disabled vehicle"),
+    (r"\b(?:doesn'?t|does not|don'?t|do not) (?:wish|want) to (?:file|make|pursue) (?:a |the )?report\b",
+     "no report wanted"),
+    (r"\bfluids?\b", "fluids on the road"),
+    (r"\btow (?:truck|requested)\b|\brequest(?:ing)? a tow\b|\bneed a tow\b", "tow requested"),
+    (r"\b(?:lanes?|road|roadway|street) (?:is |are )?(?:blocked|closed|shut down)\b|\bblocking (?:the |a )?lane",
+     "road blocked"),
+    (r"\b(?:fire|flames) (?:showing|visible|through the roof)\b|\bfully involved\b", "fire showing"),
+    (r"\bsmoke (?:showing|visible|in the (?:building|house|basement))\b", "smoke showing"),
+    (r"\bnothing (?:showing|found|evident)\b", "nothing showing"),
+    (r"\b(?:everyone|everybody|all occupants|occupants) (?:is |are )?out\b", "everyone out"),
+    (r"\bon (?:scene|location)\b", "units on scene"),
+    (r"\bmutual aid\b", "mutual aid"),
+    (r"\bpolice (?:requested|needed|to respond)\b|\brequest(?:ing)? (?:pd|police)\b", "police requested"),
+))
+
+
+def details(text: str) -> list[str]:
+    """Short facts in one transmission, in the order of _DETAILS."""
+    t = normalise(text)
+    scrubbed = _NEG.sub(" ~neg~ ", t)
+    out: list[str] = []
+    denied_injury = False
+    for rx, d in _DETAILS:
+        # "no injuries" is read from the text itself; everything after it from
+        # the text with denials scrubbed, so "no fire showing" is not fire
+        src = t if d == "no injuries" else scrubbed
+        m = rx.search(src)
+        if not m:
+            continue
+        if d == "no injuries":
+            denied_injury = True
+        if denied_injury and d in ("minor injuries", "serious injuries"):
+            continue
+        if "{n}" in d:
+            n = m.group(1).lower()
+            n = _NUM.get(n, n)
+            d = d.replace("{n}", str(n))
+            if d.endswith("(s)"):
+                d = d[:-3] + ("" if str(n) == "1" else "s")
+            if d == "1 vehicles":
+                d = "1 vehicle"
+        if d not in out:
+            out.append(d)
+    if "a patient refused transport" not in out and re.search(r"\btransport(?:ing|ed)?\b", t):
+        place = next((name for key, name in _HOSPITALS if key in t), "")
+        out.append(f"transported to {place}" if place else "a patient transported")
     return out[:8]
 
 

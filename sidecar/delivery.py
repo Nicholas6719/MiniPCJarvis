@@ -551,6 +551,7 @@ class Delivery:
             if sound and notify_policy.counts_against_budget(kind) and self.sound_budget_left() <= 0:
                 sound = False
             sent_photo = False
+            telegram.last_sent_id = None        # read back below: the id of THIS message
             if image:
                 # The picture IS the message for a finished render. Sent first
                 # so the caption arrives with it rather than after it.
@@ -578,6 +579,9 @@ class Delivery:
                 await bus.emit("proactive_held", text=text, tier=tier, subject=subject)
                 return {"delivered": "held", "why": "telegram did not accept it",
                         "tier": tier}
+            # taken before anything below can await: the scanner edits this
+            # message as the call develops
+            message_id = None if sent_photo else getattr(telegram, "last_sent_id", None)
             self._sent.append(time.time())
             if sound and notify_policy.counts_against_budget(kind):
                 self.note_sounded()
@@ -585,7 +589,7 @@ class Delivery:
             await bus.emit("proactive", text=text, tier=tier, channel="telegram",
                            subject=subject)
             return {"delivered": "telegram", "tier": tier, "sound": sound,
-                    "photo": bool(image and sent_photo),
+                    "photo": bool(image and sent_photo), "message_id": message_id,
                     "why": "he is not at the machine" if not present else "could not speak"}
 
         # nowhere to send it: keep it for the next time he is here

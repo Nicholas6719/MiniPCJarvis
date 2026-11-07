@@ -330,9 +330,26 @@ class TelegramBridge:
                 params["disable_notification"] = True
             if reply_markup and n == len(chunks) - 1:
                 params["reply_markup"] = reply_markup
-            if await self._api("sendMessage", **params) is None:
+            res = await self._api("sendMessage", **params)
+            if res is None:
                 ok = False
+            elif isinstance(res, dict):
+                # the scanner desk edits its message as a call develops; it
+                # reads this straight after the send returns (no await between)
+                self.last_sent_id = res.get("message_id")
         return ok
+
+    last_sent_id: int | None = None
+
+    async def edit_text(self, message_id: int, text: str) -> bool:
+        """Replace the text of a message already sent - silently: an edit never
+        makes a sound. The scanner's message for a call grows as the call does
+        (units on scene, injuries, transport) instead of becoming five."""
+        chat = config.get("remote", "telegram_chat_id", default=None)
+        if not (chat and message_id and text):
+            return False
+        return await self._api("editMessageText", chat_id=chat, message_id=int(message_id),
+                               text=text[:4000]) is not None
 
     def _answers_pending(self, text: str) -> bool:
         """A TYPED (or spoken) YES IS A YES. The inline buttons carried the
@@ -384,11 +401,14 @@ class TelegramBridge:
             log.warning("telegram upload failed", exc_info=True)
             return False
 
-    async def send_voice_clip(self, wav_path: str, caption: str = "") -> bool:
-        """A short recording (the scanner desk's URGENT transmission) as a voice
+    async def send_voice_clip(self, wav_path: str, caption: str = "", silent: bool = False,
+                              reply_to: int | None = None) -> bool:
+        """A short recording (the scanner desk's transmission) as a voice
         message he can play from the lock screen: WAV -> OGG/Opus with ffmpeg,
         then sendVoice. Without ffmpeg, or if it fails, the WAV goes as a
-        document instead. True only if Telegram accepted one of them."""
+        document instead. True only if Telegram accepted one of them.
+        `silent` sends it without a sound; `reply_to` threads it under the
+        message it belongs to (the scanner's line for that call)."""
         chat = config.get("remote", "telegram_chat_id", default=None)
         src = Path(wav_path)
         if not chat or not self.token or not src.exists():
@@ -417,15 +437,19 @@ class TelegramBridge:
                         if self._client is None:
                             self._client = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10))
                         blob = await asyncio.to_thread(ogg.read_bytes)
+                        data = {"chat_id": str(chat), "caption": caption[:1000]}
+                        if silent:
+                            data["disable_notification"] = "true"
+                        if reply_to:
+                            data["reply_to_message_id"] = str(int(reply_to))
                         r = await self._client.post(
                             f"{API}/bot{self.token}/sendVoice",
-                            data={"chat_id": str(chat), "caption": caption[:1000]},
-                            files={"voice": (ogg.name, blob, "audio/ogg")}, timeout=60)
+                            data=data, files={"voice": (ogg.name, blob, "audio/ogg")}, timeout=60)
                         if bool(r.json().get("ok")):
                             return True
                     except Exception:
                         log.warning("telegram sendVoice failed", exc_info=True)
-            return await self._upload(str(src), kind="document", caption=caption)
+            return await self._upload(str(src), kind="document", caption=caption, silent=silent)
         finally:
             try:
                 ogg.unlink()
@@ -870,6 +894,8 @@ class TelegramBridge:
         sent = await self._api("sendMessage", **params)
         if sent is None:
             return False                 # nothing to chase: he never got it
+        if isinstance(sent, dict):
+            self.last_sent_id = sent.get("message_id")
         if silent:
             log.info("telegram urgent sent silently (sound budget spent), not chased: %r", text[:70])
             return True

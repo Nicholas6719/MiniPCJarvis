@@ -76,6 +76,12 @@ SENT = ("spoken", "telegram")
 FYI = "fyi"
 _RANK = {"": 0, "notable": 1, FYI: 1, ALERT: 2, URGENT: 3}
 _DAILY_CAP = {URGENT: 4, ALERT: 8, FYI: 30}
+SAID_KEEP = 10            # transmissions kept per incident: the dispatch and its follow-ups
+
+
+def _union(old: list, new: list, cap: int) -> list:
+    """old + whatever in new is not already there, order kept, at most cap."""
+    return list(dict.fromkeys(list(old) + list(new)))[:cap]
 CONSOLE_EXE_NAME = "bc125at console.exe"
 
 
@@ -447,6 +453,9 @@ class ScannerDesk:
         self.deliverer = None         # async (text, tier, key=, subject=, written=) -> dict
         self.summariser = None        # async (incident, urgent) -> dict | None
         self.clip_sender = None       # async (wav path, caption) -> bool
+        self.editor = None            # async (message id, text) -> bool
+        self._refreshing: set[int] = set()
+        self._edited: dict[int, str] = {}                     # id -> the text his message shows
 
     # ------------------------------------------------------------ plumbing
     def _log_every(self, key: str, every: float, level: int, msg: str, *args, exc: bool = False) -> None:
@@ -871,6 +880,11 @@ class ScannerDesk:
                 iid = self._merge(row, reading, text, conf, agreed=bool(reading.types) and shaky_danger)
                 if iid:
                     store.set_transcript(row["id"], text, conf, iid)
+            else:
+                iid = self._attach(row, text, conf, reading)
+                if iid:
+                    store.set_transcript(row["id"], text, conf, iid)
+                    tags.append("context")
         if annotate:
             await self._annotate(row["id"], text, conf, tags, iid)
         return iid
@@ -919,6 +933,8 @@ class ScannerDesk:
                 continue                        # a finished incident takes only its own street back
             if reading.family and (inc["family"] == reading.family
                                    or (inc["burst"] and not inc["types"] and reading.family in ("fire", "ems"))):
+                if self._separate_call(inc, reading, text, now):
+                    continue
                 match = inc
                 break
             if not reading.types and reading.resolved and inc["channel"] == row.get("name") and inc["status"] == "active":
@@ -933,7 +949,7 @@ class ScannerDesk:
                 "agency": row.get("agency") or "", "channel": row.get("name") or "", "family": reading.family,
                 "kind": reading.top, "label": reading.label, "severity": reading.severity, "types": reading.types,
                 "address": reading.address, "street": reading.street, "roads": reading.roads,
-                "units": reading.units, "said": [said_row], "hits": 1,
+                "units": reading.units, "said": [said_row], "hits": 1, "details": rules.details(text),
                 "status": "over" if reading.resolved else "active"})
             if iid:
                 log.info("scanner: incident #%d - %s%s in %s (%s)", iid, reading.label,
@@ -943,7 +959,8 @@ class ScannerDesk:
             return iid
         inc = match
         fields: dict = {"last_ts": max(float(inc["last_ts"]), now), "hits": int(inc["hits"] or 0) + 1,
-                        "said": (inc["said"] + [said_row])[-6:]}
+                        "said": (inc["said"] + [said_row])[-SAID_KEEP:],
+                        "details": _union(inc.get("details") or [], rules.details(text), 8)}
         esc = rules.escalation(inc["types"], reading) if reading.types else ""
         if reading.types:
             types = sorted(set(inc["types"]) | set(reading.types),
@@ -969,7 +986,110 @@ class ScannerDesk:
         store.update_incident(inc["id"], fields)
         if esc or (reading.types and not set(reading.types) <= set(inc["types"])):
             self._spawn_task(self._consider(inc["id"], row, esc), name=f"scanner-consider-{inc['id']}")
+        self._schedule_refresh(inc["id"])       # his message for it, if he has one, grows
         return inc["id"]
+
+    # Crashes and police calls are short: one heard this long after the last
+    # word about another in the same town is a new call.
+    SHORT_CALL_S = 1800.0
+    _ANOTHER = re.compile(r"\banother (?:motor vehicle|mva|mvc|crash|accident|call|fire|alarm|report)\b", re.I)
+
+    def _separate_call(self, inc: dict, reading: rules.Reading, text: str, now: float) -> bool:
+        """Two calls, not one? On 2026-11-07 four Wellesley PD crash reports
+        across two hours ("...for ANOTHER motor vehicle accident") became one
+        incident, and its message read "2 vehicles; hit and run; 1 vehicle"."""
+        if reading.types and self._ANOTHER.search(text or ""):
+            return True
+        return inc.get("family") in ("traffic", "police") and now - float(inc["last_ts"]) > self.SHORT_CALL_S
+
+    # A transmission with no call in it joins the open call on its channel
+    # only while that call is this fresh (Wellesley PD's follow-ups on a
+    # crash came 12 minutes after it).
+    CONTEXT_WINDOW_S = 900.0
+
+    def _attach(self, row: dict, text: str, conf: float, reading: rules.Reading) -> int | None:
+        """THE DETAILS ARE IN THE FOLLOW-UPS (2026-11-07, his words: "I need
+        more details than just a crash in Sudbury"). "Car 3 on scene, two
+        patients, transporting one to Emerson" names no kind of call, so the
+        rules used to drop it - and with it everything he wanted to know. It
+        joins the one open call on its own channel: on a fire or EMS channel
+        always (one call at a time is the norm); on a police channel, which
+        carries several calls at once, only when it states a fact or names
+        the call's street. Two open calls on the channel: whose words these
+        are would be a guess, so they join neither."""
+        if not _cfg("context", True):
+            return None
+        name = row.get("name") or ""
+        now = float(row.get("end_ts") or row.get("ts") or self.now())
+        open_now = store.open_on_channel(name, now - self.CONTEXT_WINDOW_S)
+        if len(open_now) != 1:
+            return None
+        inc = open_now[0]
+        facts = rules.details(text)
+        same_street = bool(reading.street and reading.street == inc.get("street"))
+        if (row.get("agency") or "").upper() not in ("FD", "EMS") and not facts and not same_street:
+            return None
+        said_row = {"ts": row["ts"], "text": text[:300], "hit": row["id"], "channel": name,
+                    "conf": round(float(conf), 2), "context": True}
+        fields: dict = {"last_ts": max(float(inc["last_ts"]), now), "hits": int(inc["hits"] or 0) + 1,
+                        "said": (inc["said"] + [said_row])[-SAID_KEEP:],
+                        "details": _union(inc.get("details") or [], facts, 8),
+                        "units": _union(inc.get("units") or [], reading.units, 10)}
+        if not inc.get("address") and reading.address:
+            fields.update(address=reading.address, street=reading.street)
+        if not store.update_incident(inc["id"], fields):
+            return None
+        log.info("scanner: #%d heard more: %r%s", inc["id"], text[:100], f" ({', '.join(facts)})" if facts else "")
+        self._schedule_refresh(inc["id"])
+        return inc["id"]
+
+    # ------------------------------------------------------------ his message, kept up to date
+    REFRESH_GAP_S = 20.0          # at most one edit of a message per this long
+
+    def _schedule_refresh(self, iid: int) -> None:
+        if iid in self._refreshing:
+            return                     # one waiting refresh takes everything that arrives meanwhile
+        inc = store.incident(iid)
+        if not inc or not inc.get("msg_id"):
+            return
+        self._refreshing.add(iid)
+        self._spawn_task(self._refresh(iid), name=f"scanner-refresh-{iid}")
+
+    async def _refresh(self, iid: int) -> None:
+        """Bring his message for a call up to date - an edit, which never makes
+        a sound - with what has been heard since, at most once per REFRESH_GAP_S."""
+        try:
+            inc = store.incident(iid)
+            if not inc or not inc.get("msg_id"):
+                return
+            wait = float(inc.get("edited_ts") or 0) + self.REFRESH_GAP_S - self.now()
+            if wait > 0:
+                await asyncio.sleep(min(wait, self.REFRESH_GAP_S))
+        finally:
+            self._refreshing.discard(iid)
+        inc = store.incident(iid)
+        if inc:
+            await self._edit(inc)
+
+    async def _edit(self, inc: dict) -> bool:
+        text = self.written(inc, inc.get("tier") or FYI)
+        if self._edited.get(inc["id"]) == text:
+            return True                # nothing new to show; Telegram refuses an identical edit
+        try:
+            if self.editor is not None:
+                ok = await self.editor(int(inc["msg_id"]), text)
+            else:
+                from remote_telegram import telegram
+                ok = await telegram.edit_text(int(inc["msg_id"]), text)
+        except Exception:
+            log.warning("scanner: could not update the message for #%s", inc.get("id"), exc_info=True)
+            ok = False
+        if ok:
+            self._edited[inc["id"]] = text
+            store.update_incident(inc["id"], {"edited_ts": self.now()})
+            if len(self._edited) > 256:
+                self._edited = dict(list(self._edited.items())[-128:])
+        return bool(ok)
 
     async def _annotate(self, hit_id: int, text: str, conf: float, tags: list[str], iid: int | None) -> None:
         label = None
@@ -1060,7 +1180,7 @@ class ScannerDesk:
         changed = 0
         for inc in store.incidents_since(since):
             said = inc.get("said") or []
-            if not inc.get("types") or not said or len(said) >= 6 or \
+            if not inc.get("types") or not said or len(said) >= SAID_KEEP or \
                     any(len(s.get("text") or "") >= 300 for s in said):
                 continue                 # a burst, or more than was kept
             types: set[str] = set()
@@ -1105,6 +1225,10 @@ class ScannerDesk:
         update = bool(escalated) and want == have and bool(inc["delivered_ts"])
         if want < have or (want == have and not update):
             return                                  # already told at this level
+        if update and tier == FYI:
+            # a quiet call that grew is the same message, edited - never a second one
+            self._schedule_refresh(iid)
+            return
         # The quiet feed is said in the rules' own words: one line is not worth
         # a model call, and it must never wait behind one.
         if tier != FYI and _cfg("llm_summary", True) and not (inc["burst"] and not inc["types"]):
@@ -1153,10 +1277,20 @@ class ScannerDesk:
                 revert["pending"] = tier            # delivery's repeat window; retried when it opens
             store.update_incident(iid, revert)
             return
+        msg_id = r.get("message_id") if outcome == "telegram" else None
+        if msg_id:
+            # the newest message for this call is the one the follow-ups edit
+            store.update_incident(iid, {"msg_id": int(msg_id), "edited_ts": now})
+            self._edited[iid] = written
         if outcome == "spoken":
             await self._card(inc, tier)
         if tier == URGENT and outcome == "telegram" and _cfg("send_audio", True) and trigger:
             await self._send_clip(inc, trigger)
+        elif tier == FYI and outcome == "telegram" and _cfg("fyi_audio", True) and trigger \
+                and trigger.get("audio_path"):
+            # the dispatch itself, silent, threaded under its line: the words
+            # are a machine's guess at weak audio, the recording is not
+            await self._send_clip(inc, trigger, silent=True, reply_to=msg_id)
 
     async def _retry_pending(self) -> None:
         """An update delivery held as 'said recently' goes out once its repeat
@@ -1257,25 +1391,84 @@ class ScannerDesk:
             spoken = lead + s + "."
         else:
             spoken = lead + f"{label}{spoken_at}" + (f" {where}" if where else "") + "."
-        last = (inc.get("said") or [])[-1:] or [None]
-        quote = f'"{last[0]["text"]}" ({_hm(last[0]["ts"])}, {last[0].get("channel") or inc.get("channel")})' if last[0] else ""
-        dist = "home" if inc.get("town") == home_town().name else f"{float(inc.get('miles') or 0):.0f} mi"
-        grade = "" if tier == FYI else f" - {tier.upper()}"
-        head = f"SCANNER{grade} - {inc.get('town') or '?'} ({dist})"
-        body = _cap(label) + (f" - {address}" if address else "")
+        extra = self._spoken_details(inc) if not update else ""
+        return spoken + (f" {extra}" if extra else ""), self.written(inc, tier, update)
+
+    def _spoken_details(self, inc: dict) -> str:
+        """One more sentence for the voice, from what was actually heard:
+        "Two vehicles, minor injuries. Sudbury Fire sent Car 3 and Ambulance 1."
+        Empty when nothing more was heard."""
         if inc.get("burst") and not inc.get("types"):
-            body = f"Unusual activity on {inc.get('channel')}: {inc.get('summary')}"
-            quote = "No words yet (digital or unclear audio)."
+            return ""
+        facts = [d for d in (inc.get("details") or []) if d != "units on scene"][:2]
+        out = _cap(", ".join(facts)) + "." if facts else ""
+        units = (inc.get("units") or [])[:3]
+        if units:
+            who = rules.parse_label(inc.get("channel") or "").spoken
+            names = units[0] if len(units) == 1 else ", ".join(units[:-1]) + f" and {units[-1]}"
+            out += (" " if out else "") + f"{who} sent {names}."
+        return out
+
+    def written(self, inc: dict, tier: str, update: str = "") -> str:
+        """The phone's version: short lines he can scan, and everything the
+        radio gave - the summary, where, who was sent, what is known, every
+        line heard with its time. Edited in place as the call develops."""
+        home = home_town().name
+        town = inc.get("town") or "?"
+        dist = "home" if town == home else f"{float(inc.get('miles') or 0):.0f} mi"
+        grade = "" if tier == FYI else f" - {tier.upper()}"
+        lines = [f"SCANNER{grade} - {town} ({dist})"]
         if update:
-            body = f"UPDATE: {update}. " + body
-        written = "\n".join(x for x in (head, body, quote) if x)
-        return spoken, written
+            lines.append(f"UPDATE: {update}.")
+        address = inc.get("address") or ""
+        if inc.get("burst") and not inc.get("types"):
+            lines.append(f"Unusual activity on {inc.get('channel')}: {inc.get('summary') or 'far more traffic than usual'}")
+        else:
+            # No model summary here, on purpose. Tried on two real calls
+            # (2026-11-07), gpt-oss turned weak-audio transcripts into "no
+            # injuries reported" and "responders are on scene", neither of
+            # which anyone said. What he reads is only what was heard: the
+            # facts the rules found word for word, and the words themselves.
+            lines.append(_cap(inc.get("label") or "activity") + (f" - {address}" if address else ""))
+        roads = [r for r in (inc.get("roads") or []) if r not in address]
+        if address or roads:
+            lines.append("Where: " + ", ".join(x for x in [address] + roads if x))
+        if inc.get("units"):
+            lines.append("Units: " + ", ".join(inc["units"]))
+        if inc.get("details"):
+            lines.append("Known: " + "; ".join(inc["details"]))
+        said = inc.get("said") or []
+        if said:
+            chans = list(dict.fromkeys(s.get("channel") or inc.get("channel") or "" for s in said))
+            lines.append(f"Heard on {', '.join(c for c in chans if c) or 'the scanner'}:")
+            for s in said[-SAID_KEEP:]:
+                words = re.sub(r"\s+", " ", str(s.get("text") or "")).strip()
+                if len(words) > 220:
+                    words = words[:217].rstrip() + "..."
+                lines.append(f'{_hm(float(s.get("ts") or 0))}  "{words}"')
+        elif inc.get("burst"):
+            lines.append("No words yet (digital or unclear audio).")
+        starts = [float(x) for x in [inc.get("first_ts")] + [s.get("ts") for s in said[:1]] if x]
+        first = min(starts) if starts else None        # the first word heard, not when it ended
+        if first:
+            n = int(inc.get("hits") or len(said) or 1)
+            foot = f"First heard {_hm(float(first))} - {n} transmission{'s' if n != 1 else ''}"
+            if inc.get("status") == "over":
+                foot += f" - over by {_hm(float(inc.get('last_ts') or first))}"
+            elif float(inc.get("last_ts") or first) - float(first) >= 60:
+                foot += f" - latest {_hm(float(inc['last_ts']))}"
+            lines.append(foot)
+        return "\n".join(lines)
 
     async def _card(self, inc: dict, tier: str) -> None:
         """The incident on the HUD while it is said (the brief card; no new UI)."""
         try:
             lines = [_cap(inc.get("label") or "activity") + (f" - {inc['address']}" if inc.get("address") else ""),
                      f"{inc.get('town') or '?'} - {miles_words(inc.get('miles'))} - {inc.get('channel') or ''}"]
+            if inc.get("units"):
+                lines.append("Units: " + ", ".join(inc["units"][:6]))
+            if inc.get("details"):
+                lines.append("Known: " + "; ".join(inc["details"][:4]))
             for s in (inc.get("said") or [])[-2:]:
                 lines.append(f'"{s.get("text", "")}" ({_hm(s.get("ts", 0))})')
             if inc.get("burst") and inc.get("summary") and not inc.get("types"):
@@ -1285,8 +1478,9 @@ class ScannerDesk:
         except Exception:
             log.debug("scanner: card failed", exc_info=True)
 
-    async def _send_clip(self, inc: dict, row: dict) -> None:
-        """The transmission itself, to his phone, for an URGENT while he is away."""
+    async def _send_clip(self, inc: dict, row: dict, silent: bool = False, reply_to: int | None = None) -> None:
+        """The transmission itself, to his phone: an URGENT's with a sound, a
+        quiet call's silently, threaded under its message."""
         audio = await self._load_audio(row)
         audio, _ = normalise_audio(audio) if audio is not None else (None, 0.0)
         if audio is None:
@@ -1301,7 +1495,7 @@ class ScannerDesk:
                 ok = await self.clip_sender(str(path), caption)
             else:
                 from remote_telegram import telegram
-                ok = await telegram.send_voice_clip(str(path), caption)
+                ok = await telegram.send_voice_clip(str(path), caption, silent=silent, reply_to=reply_to)
                 if ok:
                     from delivery import delivery
                     delivery.note_sent()            # a second message on his phone counts
@@ -1465,9 +1659,17 @@ class ScannerDesk:
                     s += ", now over"
                 items.append(s)
             line = f"In {t.name}, {dist}: " + "; and ".join(items) + "."
+            more = self._spoken_details(incs[0]).strip()       # only what was heard, word for word
+            if more:
+                line += " " + (more if more.endswith(".") else more + ".")
             if hits:
                 line += f" {len(hits)} call{'s' if len(hits) != 1 else ''} from there in the last hour."
-            await self._query_card(t.name, [_cap(x) for x in items])
+            card = [_cap(x) for x in items]
+            if incs[0].get("units"):
+                card.insert(1, "Units: " + ", ".join(incs[0]["units"][:6]))
+            if incs[0].get("details"):
+                card.insert(1, "Known: " + "; ".join(incs[0]["details"][:4]))
+            await self._query_card(t.name, card)
             return line
         if hits:
             words = [h for h in hits if h.get("transcript") and (h.get("asr_conf") or 0) >= rules.TRUST]
