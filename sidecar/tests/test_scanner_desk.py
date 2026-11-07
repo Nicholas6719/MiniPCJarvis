@@ -283,6 +283,9 @@ async def run() -> None:
         config.data["scanner"] = cfg_before
         left = S._rows("SELECT COUNT(*) FROM scanner_hits WHERE id >= ?", (BASE,))[0][0]
         check("the gate took back every row it planted", left == 0, left)
+        import shutil
+        shutil.rmtree(TMP, ignore_errors=True)       # its WAVs and the dummy exe
+        check("...and its temporary files", not TMP.exists())
 
 
 async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, volatile) -> None:
