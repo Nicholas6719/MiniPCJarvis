@@ -5476,6 +5476,70 @@ report). Zero ERROR lines since release 89.
 NOT verified live: needs his display dark; watch for the "chime reached the
 speakers" line on his next dark-screen wake.
 
+### 2026-11-07 - "I am mainly ignoring his notifications" (notify overhaul)
+His phone, 10-27..11-06 (`deliveries`, 98 rows; 96 to Telegram, every one
+with a sound): 10 URGENT news pings, none urgent or local; 44 briefs (Friday's
+close six times over the weekend, 20:00 repeating 16:15, the supplements and
+retainers recited every morning); 8 memory warnings about his other apps; 22
+reminders rephrased by the LLM ("lace up your retainers", "put on your.").
+What changed, one rule each:
+1. **News pings only when LOCAL, CURRENT and DANGEROUS** (`significance.urgent_gate`):
+   a town `geo` is CERTAIN of inside `home.radius_mi` (20), a present hazard
+   to the public (fire, police activity/manhunt, hazmat/boil-water, road shut
+   now, NWS-style warning, missing person, lockdown, people trapped), and not
+   a feature/column/trial/anniversary/recovery/settlement/opinion/prediction/
+   advice/business story (`NOT_NEWS_NOW`). Then `news_check.py` asks the local
+   model at temp 0 for {happening_now, town, state, country, hazard_to_public,
+   category, one_line}: it can VETO (-> brief), never promote; if it cannot
+   answer, the story goes out silently (ALERT). No ALERT for news: what would
+   have been one is held for the NEXT brief ("Also"), whatever the slot.
+   National/world news never pings. The hand-kept town lists are gone
+   (geo); "own town" is now <= 8.5 mi (`NEIGHBOUR_MI`), the edge > 15 mi.
+   Every decision still lands in `news_judged`, plus stage "llm" and the
+   refused-as-junk ones (tier "none", once per headline).
+2. **Telegram is silent by default** (`notify_policy.py`, `disable_notification`):
+   only URGENT and his own reminders (and the watches he set) sound;
+   `proactive.max_sounding_per_day` (5) caps the sounding ones, reminders
+   excluded, chases included; past it they arrive silently and the log says
+   "sounding budget spent". `deliveries.sound` records it (restart-proof).
+   Price/index moves are capped at ALERT: kept, silent, never chased.
+3. **Briefs**: the market group (Markets, Yours, Worth a look, The story,
+   Experts, Ahead) only on NYSE trading days (`market_calendar.py`, 2026-27
+   closures committed; the gate fails 60 days before the table runs out) and
+   a session's close only once (`brief_memory.json` beside the DB:
+   market_key/market_fp/last_lines); a brief with nothing new is not sent;
+   the morning "Today" lists one-off items only; `scanner_desk.brief_line(since_ts)`
+   rides in the morning brief if that module exists (guarded, 8 s, sync or async).
+4. **Memory alert**: `memory_alert_percent` 95 for `ram_hold_minutes` 10 AND
+   JARVIS slowed (llama /health failing or > 1.5 s, the liveness probe failing
+   or > 20 s - `orchestrator._probe_ms`), at most once a day (from the ledger),
+   silent. Otherwise one log line a day. New key on purpose: his saved 94 under
+   `ram_percent_warn` no longer applies.
+5. **Reminders are his words, plainly** (`reminder_voice.plain`): "Time for your
+   retainers, sir." No model, ever. `reminder_log` records each firing; Telegram
+   carries a "Done" button (`done:<occurrence>`; the button is removed after);
+   a typed "done" or saying "I took my supplements" counts; no Done in 30 min ->
+   ONE silent nudge (claimed first). Skills `reminder_record` ("have I taken my
+   supplements this week") and `reminder_done` answer from the record.
+6. `geo.find_towns` bug fixed: a town name before a road word is a road
+   ("211 Boylston Street" was Boylston, 15 mi; "Worcester Rd." was Worcester).
+   NWS lines name the first Massachusetts zone (UGC), not "Hartford".
+Gate: `tests/test_notify_policy.py` replays all 28 `news_judged` rows and all
+98 deliveries (fixtures in the file): after = 22 sounding (his reminders only),
+49 silent (40 briefs, 9 price/index), 3 news held for the brief, 23 dropped
+(4 weekend briefs, 11 news, 8 memory). Old tests re-pinned where the policy
+deliberately changed (national ones -> brief; Boston is 21.5 mi by geo's
+Census point, so it is outside the radius - say so if he wants it in).
+His log for those days backs the memory call: at every 95%+ warning the
+ten-minute probe answered in ~1 s at ~24 t/s, so all eight would now be one
+log line a day. (It also shows "llama-server unhealthy - attempting
+recovery" five times on the 10-29/10-30 afternoons, between the 94% warnings:
+not investigated. Under the new rule those would count as "JARVIS slowed".)
+Ledger keys are unchanged on purpose ("brief:<stamp>", "task:<id>"; new
+"nudge:<occ>", "memory:<day>"): self_report and "what did I miss" read them.
+NOT verified live: the model's JSON check on a real local emergency; the Done
+button round trip on his phone.
+
 ### Not done / next
 - Bench Gemma 4 26B-A4B (thinking off) against gpt-oss-20b on the perfect
   battery: the config's own note says "smarter and quicker for text". Needs the

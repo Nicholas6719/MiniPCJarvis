@@ -55,8 +55,9 @@ class FakeTelegram:
     def __init__(self):
         self.sent = []
 
-    async def send_proactive(self, text, tier="notable", subject=""):
+    async def send_proactive(self, text, tier="notable", subject="", silent=False, buttons=None):
         self.sent.append((text, tier))
+        self.silent = silent      # 2026-11-07: whether it arrived without a sound
         return True          # the bridge reports whether Telegram accepted it
 
 
@@ -148,7 +149,7 @@ def main() -> int:
         # was later answered as though he had heard it.
         orch, tg = setup(present=False)
         _original_send = FakeTelegram.send_proactive      # BEFORE overriding it
-        async def refused(self, text, tier="notable", subject=""):
+        async def refused(self, text, tier="notable", subject="", silent=False, buttons=None):
             tg.sent.append((text, tier))
             return False
         type(tg).send_proactive = refused
@@ -241,7 +242,7 @@ def main() -> int:
             raise SpeakerStalled("the audio output device is not accepting data")
 
     class _FakeTG:
-        async def send_proactive(self, text, tier=None, subject=None):
+        async def send_proactive(self, text, tier=None, subject=None, silent=False, buttons=None):
             sent.append(text)
             return True
 

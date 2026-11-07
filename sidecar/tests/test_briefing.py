@@ -20,6 +20,20 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "gate.db"))
 import briefing as br  # noqa: E402
+import news_check  # noqa: E402
+
+
+async def _confirm_stub(story):
+    """The model's second opinion on an URGENT, stubbed: no gate ever asks a
+    live model (the release builds while his own JARVIS is running)."""
+    return {"verdict": news_check.CONFIRMED, "why": "confirmed: stub", "answer": {}}
+
+
+news_check.confirm = _confirm_stub
+# what the last brief said is kept beside the gate database and outlives a
+# build: this file uses a scratch copy of its own
+_BRIEF_MEMORY = __import__("pathlib").Path(tempfile.mkdtemp()) / "brief_memory.json"
+br.Briefing._memory_path = staticmethod(lambda: _BRIEF_MEMORY)
 
 fails = []
 
@@ -153,8 +167,11 @@ def main() -> int:
     found = asyncio.run(b7.scan())
     heads = " ".join(t for t, _, _ in found)
     check("a California wildfire does not reach him", "Ross Fire" not in heads, heads)
-    check("a nuclear meltdown does", "meltdown" in heads, heads)
-    check("...and it is urgent", any(tr == "urgent" for _t, tr, _k in found), found)
+    # 2026-11-07: national news never pings. The meltdown is still read off
+    # the wire - and waits for his next brief instead of his phone.
+    check("a nuclear meltdown in Pennsylvania does not ping him", "meltdown" not in heads, heads)
+    check("...it waits for the next brief",
+          any("meltdown" in h["text"] for h in b7._held), b7._held)
     check("the national wire is still read on local-only", sig.local_only())
 
     # --- two clocks: emergencies more often than prices -----------------------
@@ -338,8 +355,14 @@ def main() -> int:
     day = asyncio.run(_day_sections(bA))
     _analyst_mod.analyst.take = _real_take
     titles = [t for t, _l in day]
-    check("a midday brief carries no news", "News" not in titles and "Also" not in titles, titles)
-    check("...and the held items wait for the night", len(bA._held) == 1, bA._held)
+    check("a midday brief carries no general news", "News" not in titles, titles)
+    # 2026-11-07: what was held back from his phone rides in the NEXT brief,
+    # whichever it is - it is no longer sent on its own, so it must not then
+    # wait until 20:00 as well.
+    check("...but the held items ride in the next brief, midday included",
+          "Also" in titles and any("Framingham road closed" in w for t, ls in day if t == "Also"
+                                   for _s, w in ls), day)
+    check("...once", bA._held == [], bA._held)
     check("20:00 is the final slot", br.Briefing.is_final_slot("20:00", br.DEFAULT_TIMES))
     check("...and 12:30 is not", not br.Briefing.is_final_slot("12:30", br.DEFAULT_TIMES))
     check("the last slot is the latest time, wherever it sits in the list",
@@ -461,10 +484,12 @@ def main() -> int:
     async def _slot(at, fresh=True, made=None):
         bD = made or br.Briefing()
         async def compose(sections=None):
-            return "brief"
+            # different every time: a brief with nothing new is not sent
+            # (2026-11-07), and this block is about the clock, not the content
+            return f"brief at {at}"
         bD.compose_brief = compose
         bD.compose_brief_written = compose
-        bD._sections = lambda final=False, first=False: compose()
+        bD._sections = lambda final=False, first=False, market=True: compose()
         br._now = lambda: at
         rec.sent.clear()
         await bD._maybe_brief()

@@ -29,7 +29,9 @@ def _subject(e: dict) -> str:
     (2026-09-15)."""
     s = str(e.get("subject") or "").strip()
     kind, _, rest = s.partition(":")
-    if kind == "task" or not s:
+    # a reminder, its nudge, a memory note, a watch: the TEXT says what it was
+    # ("nudge:<occurrence>" and "memory:<day>" since 2026-11-07)
+    if kind in ("task", "nudge", "memory", "watch") or not s:
         s = ""
     elif kind == "brief":
         hhmm = rest.strip()[-5:]

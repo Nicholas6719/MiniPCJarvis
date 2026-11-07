@@ -43,8 +43,10 @@ def main() -> int:
     def fresh(announce_sink):
         s = Scheduler()
         s.announce = announce_sink
-        # start from a clean slate whatever else the gate DB holds
+        # start from a clean slate whatever else the gate DB holds - the tasks
+        # and the record each firing leaves (reminder_log, 2026-11-07)
         s.db.execute("DELETE FROM tasks")
+        s.db.execute("DELETE FROM reminder_log")
         s.db.commit()
         return s
 
@@ -182,6 +184,10 @@ def main() -> int:
     s7.add("wear my retainers", time.time() - 60, "daily")
     asyncio.run(tick(s7, n=4))
     check("a reminder a minute late is still announced", len(late) == 1, late)
+    # the gate database outlives the build: take back what this file left
+    s7.db.execute("DELETE FROM reminder_log")
+    s7.db.execute("DELETE FROM tasks")
+    s7.db.commit()
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

@@ -1108,6 +1108,8 @@ class Orchestrator:
             return "wait", since
         return "replace", None
     _probe_failures = 0
+    _probe_ms = 0
+    _probe_done_at = 0.0
 
     @staticmethod
     def _probe_verdict(text: str, finish: str | None) -> bool:
@@ -1123,6 +1125,7 @@ class Orchestrator:
         was alive and /health was fine while every answer was 4,000 tokens of
         gibberish; the watchdog only ever checked the process."""
         text, finish = "", None
+        t0 = time.monotonic()
         try:
             async for ch in local_llm.stream(
                     [{"role": "user", "content": "Reply with the single word OK."}],
@@ -1133,6 +1136,10 @@ class Orchestrator:
         except Exception as e:
             log.info("model probe skipped: %s", e)
             return
+        # how long one word took: the memory alert asks whether JARVIS itself
+        # is slowed before it says anything (proactive, 2026-11-07)
+        self._probe_ms = int((time.monotonic() - t0) * 1000)
+        self._probe_done_at = time.time()
         if self._probe_verdict(text, finish):
             self._probe_failures = 0
             return

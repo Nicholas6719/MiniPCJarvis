@@ -37,6 +37,14 @@ DATA = Path(__file__).resolve().parent / "data" / "ma_towns.csv"
 HOME_LAT, HOME_LON = 42.30791, -71.43620
 DEFAULT_RADIUS_MI = 20.0
 
+# Where a town's Census interior point is the wrong place to measure from.
+# Boston's lies in the harbour off South Boston, which put the city he named
+# among his must-have towns at 21.5 miles, outside his radius; City Hall is
+# about 19.
+CENTRES = {
+    "Boston": (42.36030, -71.05800),
+}
+
 # Spellings people and dispatchers actually use.
 ALIASES = {
     "marlboro": "Marlborough", "southboro": "Southborough", "westboro": "Westborough",
@@ -156,7 +164,8 @@ def towns() -> dict[str, Town]:
     out: dict[str, Town] = {}
     with open(DATA, encoding="utf-8", newline="") as f:
         for row in csv.DictReader(f):
-            t = Town(row["name"], float(row["lat"]), float(row["lon"]))
+            lat, lon = CENTRES.get(row["name"], (float(row["lat"]), float(row["lon"])))
+            t = Town(row["name"], lat, lon)
             out[t.name.lower()] = t
     return out
 
@@ -228,6 +237,19 @@ def match_town(label: str) -> Town | None:
 
 _NAMES_RE = None
 
+# A TOWN NAME FOLLOWED BY A ROAD WORD IS A ROAD. "211 Boylston Street" is in
+# Boston, "Concord Street" runs through Framingham, and Route 9 in Framingham
+# is "Worcester Road" - Massachusetts names its streets after the next town
+# over, so a name directly in front of one of these is not that town.
+# (2026-11-07: "Firefighters evacuate a building at 211 Boylston Street" read
+# as Boylston, the town, fifteen miles away.)
+_STREET_AFTER = re.compile(
+    r"\s+(?:st|street|rd|road|ave|avenue|dr|drive|ln|lane|way|blvd|boulevard|pkwy|parkway|"
+    r"tpke|turnpike|pike|hwy|highway|pl|place|ct|court|cir|circle|ter|terrace|sq|square|"
+    r"path|trail|extension)\b\.?", re.I)
+# (not "Common" or "Green": Framingham Common and Lexington Green are in the
+# town they are named for)
+
 
 def _names_re() -> re.Pattern:
     global _NAMES_RE
@@ -255,6 +277,8 @@ def find_towns(text: str, source: str = "") -> list[Found]:
         # a capitalised word, not "the reading" or "a hull"
         if not said[0].isupper():
             continue
+        if _STREET_AFTER.match(text, m.end()):
+            continue                # "Boylston Street", "Worcester Road"
         t = town(said)
         if t is None:
             continue

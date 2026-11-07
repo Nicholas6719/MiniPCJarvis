@@ -96,7 +96,18 @@ def spoken(alert: dict) -> str:
     4:15 PM. Take shelter now in a basement or an interior room.'"""
     p = alert.get("properties") if "properties" in alert else alert
     event = str(p.get("event") or "weather alert")
-    area = str(p.get("areaDesc") or "").split(";")[0].strip()
+    areas = [a.strip() for a in str(p.get("areaDesc") or "").split(";") if a.strip()]
+    area = areas[0] if areas else ""
+    # A statement covering two states lists them in its own order: his
+    # 10-29 brief carried "a Special Weather Statement for Hartford". The
+    # zone codes (UGC) run in the same order as the names, so the first
+    # Massachusetts zone is the one to name.
+    ugc = list(((p.get("geocode") or {}).get("UGC")) or [])
+    if len(ugc) == len(areas):
+        for name, code in zip(areas, ugc):
+            if str(code).upper().startswith(("MAZ", "MAC")):
+                area = name
+                break
     where = f" for {area}" if area else " for your area"
     line = f"The Weather Service has a {event}{where}{_until(p)}."
     inst = _instruction(p)

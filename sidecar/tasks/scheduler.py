@@ -29,7 +29,25 @@ CREATE TABLE IF NOT EXISTS tasks (
     recurrence TEXT NOT NULL DEFAULT 'none',  -- none|daily|weekdays|weekly
     status TEXT NOT NULL DEFAULT 'pending'    -- pending|done|cancelled
 );
+-- One row per time a reminder actually went off (2026-11-07): whether he said
+-- he did it (the Telegram "Done", or telling JARVIS), and the one nudge.
+CREATE TABLE IF NOT EXISTS reminder_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    due_ts REAL NOT NULL,
+    fired_ts REAL NOT NULL,
+    done_ts REAL,
+    done_via TEXT,
+    nudged_ts REAL
+);
 """
+
+# The nudge: once, quietly, if the Done never came.
+NUDGE_AFTER_S = 30 * 60
+# ...and never for a reminder that went off long ago (a restart after a day
+# away must not nudge him about last night's retainers).
+NUDGE_WINDOW_S = 3 * 3600
 
 
 class Scheduler:
@@ -44,6 +62,7 @@ class Scheduler:
         self.db.commit()
         self._task: asyncio.Task | None = None
         self.announce = None  # set by orchestrator wiring
+        self.nudge = None     # set by main: says the one quiet nudge
         # tid -> the due_ts already announced, so one due time is one message
         self._fired: dict[int, float] = {}
         # tid -> time before which it must stay silent (its schedule would not write)
@@ -81,6 +100,91 @@ class Scheduler:
         self.db.commit()
         return cur.rowcount > 0
 
+    # ---------- what he did about them ----------
+
+    def _write(self, sql: str, args: tuple) -> int | None:
+        """One write, committed, or rolled back: the shared connection must
+        never be left holding the write lock (the 2,600-message night)."""
+        try:
+            cur = self.db.execute(sql, args)
+            self.db.commit()
+            return cur.lastrowid if sql.lstrip().upper().startswith("INSERT") else cur.rowcount
+        except Exception:
+            log.exception("reminder log write failed")
+            try:
+                self.db.rollback()
+            except Exception:
+                log.warning("rollback failed after a reminder log write", exc_info=True)
+            return None
+
+    def log_occurrence(self, tid: int, text: str, due_ts: float) -> int | None:
+        """This reminder just went off. Returns the occurrence id."""
+        return self._write("INSERT INTO reminder_log (task_id, text, due_ts, fired_ts) VALUES (?,?,?,?)",
+                           (int(tid), str(text), float(due_ts), time.time()))
+
+    def mark_done(self, occ_id: int, via: str = "") -> bool:
+        """He did it. True only the first time - a second press changes nothing."""
+        n = self._write("UPDATE reminder_log SET done_ts=?, done_via=? WHERE id=? AND done_ts IS NULL",
+                        (time.time(), str(via or ""), int(occ_id)))
+        return bool(n)
+
+    def open_occurrences(self, within_s: float = NUDGE_WINDOW_S, words: str = "") -> list[dict]:
+        """Reminders that went off in the last `within_s` and are not done,
+        newest first; `words` narrows them to the ones about that."""
+        rows = self.db.execute(
+            "SELECT id, task_id, text, fired_ts FROM reminder_log "
+            "WHERE done_ts IS NULL AND fired_ts >= ? ORDER BY fired_ts DESC",
+            (time.time() - within_s,)).fetchall()
+        out = [{"id": r[0], "task_id": r[1], "text": r[2], "fired_ts": r[3]} for r in rows]
+        if words:
+            want = _content_words(words)
+            out = [o for o in out if want & _content_words(o["text"])]
+        return out
+
+    def mark_latest_done(self, within_s: float = 2 * 3600, via: str = "",
+                         words: str = "") -> int | None:
+        """The newest open reminder (about `words`, if given) is done.
+        Returns its occurrence id, or None when nothing was open."""
+        for o in self.open_occurrences(within_s, words):
+            if self.mark_done(o["id"], via):
+                return o["id"]
+        return None
+
+    def due_nudges(self, now: float | None = None) -> list[dict]:
+        """Occurrences past NUDGE_AFTER_S with no Done and no nudge yet, inside
+        NUDGE_WINDOW_S."""
+        now = now or time.time()
+        rows = self.db.execute(
+            "SELECT id, task_id, text, fired_ts FROM reminder_log "
+            "WHERE done_ts IS NULL AND nudged_ts IS NULL AND fired_ts <= ? AND fired_ts >= ?",
+            (now - NUDGE_AFTER_S, now - NUDGE_WINDOW_S)).fetchall()
+        return [{"id": r[0], "task_id": r[1], "text": r[2], "fired_ts": r[3]} for r in rows]
+
+    def claim_nudge(self, occ_id: int) -> bool:
+        """Claim the one nudge BEFORE saying it. False if it could not be
+        recorded (then it is not said: a missed nudge is fine, a repeated one
+        is the thing this exists to prevent) or was already claimed."""
+        return bool(self._write("UPDATE reminder_log SET nudged_ts=? WHERE id=? AND nudged_ts IS NULL",
+                                (time.time(), int(occ_id))))
+
+    def history(self, words: str, since_ts: float | None = None) -> dict:
+        """What the record says about one reminder since `since_ts` (default a
+        week ago): {text, fired, done, missed_days, done_days} for occurrences
+        whose text shares a content word with `words`. Empty when none match."""
+        since = since_ts if since_ts is not None else time.time() - 7 * 86400
+        want = _content_words(words)
+        rows = self.db.execute(
+            "SELECT text, fired_ts, done_ts FROM reminder_log WHERE fired_ts >= ? ORDER BY fired_ts",
+            (since,)).fetchall()
+        hits = [r for r in rows if want and want & _content_words(r[0])]
+        if not hits:
+            return {}
+        day = lambda ts: dt.datetime.fromtimestamp(ts).strftime("%A")  # noqa: E731
+        return {"text": hits[-1][0], "fired": len(hits),
+                "done": sum(1 for r in hits if r[2]),
+                "done_days": [day(r[1]) for r in hits if r[2]],
+                "missed_days": [day(r[1]) for r in hits if not r[2]]}
+
     # ---------- loop ----------
 
     async def _loop(self) -> None:
@@ -97,10 +201,24 @@ class Scheduler:
                     if self._too_late(tid, due_ts, now, recurrence):
                         continue
                     await self._fire(tid, due_ts, text, recurrence)
+                await self._nudge_tick(now)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("scheduler tick failed")
+
+    async def _nudge_tick(self, now: float) -> None:
+        """One quiet nudge for a reminder with no Done after half an hour -
+        claimed first, so it can never be said twice."""
+        if self.nudge is None:
+            return
+        for o in self.due_nudges(now):
+            if not self.claim_nudge(o["id"]):
+                continue
+            try:
+                await self.nudge(o["text"], key=f"nudge:{o['id']}", occurrence=o["id"])
+            except Exception:
+                log.exception("nudge failed")
 
     def _suppressed(self, tid: int, due_ts: float, now: float) -> bool:
         """Whether this task must NOT be announced right now.
@@ -185,16 +303,35 @@ class Scheduler:
             self._blocked[tid] = time.time() + _BLOCKED_RETRY_S
             return
         log.info("task due: %s", text)
+        # The occurrence, so a Done (or its absence) has somewhere to land.
+        occ = self.log_occurrence(tid, text, due_ts)
         await bus.emit("task_due", task_id=tid, text=text)
         if self.announce is not None:
             try:
-                # The RAW text, and a key tied to this task. The announcer puts
-                # it into JARVIS's own words, so the sentence differs night to
-                # night - which means the sentence cannot be what delivery
-                # de-duplicates on. The task can.
-                await self.announce(text, key=f"task:{tid}")
+                # The RAW text, and a key tied to this task: delivery
+                # de-duplicates on the task, never on the sentence.
+                await self.announce(text, key=f"task:{tid}", occurrence=occ)
             except Exception:
                 log.exception("announce failed")
+
+
+_STOP = {"have", "has", "had", "take", "taken", "took", "taking", "wear", "wore", "worn", "wearing",
+         "put", "puts", "your", "mine", "this", "that", "week", "today", "yesterday", "night",
+         "last", "days", "much", "many", "times", "with", "been", "into", "done", "remind",
+         "reminder", "reminders", "please", "always", "every", "daily", "morning", "evening"}
+
+
+def _content_words(text: str) -> set[str]:
+    """The words that say what a reminder is ABOUT: 'take my supplements' and
+    'have I taken my supplements this week' share 'supplements'. Plurals are
+    folded so 'retainer' finds 'retainers'."""
+    import re as _re
+    out = set()
+    for w in _re.findall(r"[a-z]{4,}", (text or "").lower()):
+        if w in _STOP:
+            continue
+        out.add(w[:-1] if w.endswith("s") and not w.endswith("ss") else w)
+    return out
 
 
 def _next_occurrence(due_ts: float, recurrence: str) -> float:

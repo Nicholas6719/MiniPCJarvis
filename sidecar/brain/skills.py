@@ -2992,6 +2992,109 @@ def say_reminders(_s: dict, res: dict) -> str:
     return f"You have {len(rem)} reminders: {head}."
 
 
+# --- WHAT HE DID ABOUT HIS REMINDERS (2026-11-07) ---------------------------
+# Every reminder that goes off is recorded (tasks.scheduler reminder_log), and
+# marked done by the Telegram "Done", a typed "done", or saying so here. These
+# two answer from that record, never from the model.
+_DID_I = re.compile(r"\b(?:have|did|had)\s+i\b|\bhow (?:many times|often)\b|\bam i\b")
+_DID_VERB = re.compile(r"\b(?:take|taken|took|taking|wear|wore|worn|wearing|put|done|do|did|"
+                       r"skip(?:ped)?|miss(?:ed)?|forg[eo]t(?:ten)?|remember(?:ed)?)\b")
+
+
+def _record_since(t: str) -> tuple[float, str]:
+    now = dt.datetime.now()
+    midnight = dt.datetime(now.year, now.month, now.day)
+    if re.search(r"\b(?:last night|yesterday)\b", t):
+        return (midnight - dt.timedelta(days=1)).timestamp(), "since yesterday"
+    if re.search(r"\b(?:today|tonight|this morning|this evening)\b", t):
+        return midnight.timestamp(), "today"
+    if re.search(r"\b(?:this month|past month|last month|last 30 days)\b", t):
+        return (now - dt.timedelta(days=30)).timestamp(), "over the last thirty days"
+    return (now - dt.timedelta(days=7)).timestamp(), "over the last seven days"
+
+
+def slots_reminder_record(t: str) -> dict | None:
+    """'Have I taken my supplements this week', 'did I wear my retainers last
+    night' - only when the words name a reminder he actually has."""
+    t = t or ""
+    if not (_DID_I.search(t) and _DID_VERB.search(t)) or _SET_REQUEST.search(t):
+        return None
+    try:
+        from tasks.scheduler import _content_words, scheduler
+        want = _content_words(t)
+        if not want:
+            return None
+        known = any(want & _content_words(r["text"]) for r in scheduler.list_pending())
+        since, period = _record_since(t)
+        if not known and not scheduler.history(t, since):
+            return None                       # not one of his reminders: the model's
+    except Exception:
+        return None
+    return {"q": t, "since": since, "period": period}
+
+
+def say_reminder_record(slots: dict, _r: dict) -> str:
+    try:
+        from reminder_voice import _as_errand
+        from tasks.scheduler import scheduler
+        h = scheduler.history(slots.get("q", ""), float(slots.get("since") or 0))
+    except Exception:
+        return "I couldn't read the reminder record just now, sir."
+    period = slots.get("period") or "over the last seven days"
+    if not h:
+        return (f"Nothing on record {period}, sir - I go by the Done on the reminder, "
+                "or you telling me.")
+    what = _as_errand(h["text"]) or "that reminder"
+    what = what[0].upper() + what[1:]
+    done, fired = int(h["done"]), int(h["fired"])
+    if done == fired:
+        return f"{what}: yes, sir - {done} of {fired} {period}, every one marked done."
+    if done == 0:
+        return f"{what}: none of the {fired} {period} were marked done, sir."
+    missed = list(dict.fromkeys(h.get("missed_days") or []))
+    if len(missed) > 1:
+        tail = " - not on " + ", ".join(missed[:-1]) + " or " + missed[-1]
+    elif missed:
+        tail = " - not on " + missed[0]
+    else:
+        tail = ""
+    return f"{what}: {done} of {fired} {period}, sir{tail}."
+
+
+_SAID_DONE = re.compile(
+    r"\b(?:i(?:'ve| have)?\s+(?:just\s+|already\s+|now\s+)?(?:took|taken|put|wore|worn|done|did|had)|"
+    r"(?:are|is|they'?re|it'?s)\s+(?:in|on|done|taken)|done with|finished (?:with )?my|took (?:them|it|my))\b")
+
+
+def slots_reminder_done(t: str) -> dict | None:
+    """'I took my supplements', 'my retainers are in', 'done with my
+    supplements' - while one of his reminders is open. A question, an order
+    to set or cancel one, or nothing open: not this skill."""
+    t = t or ""
+    if "?" in t or _DID_I.search(t) or _SET_REQUEST.search(t) or not _SAID_DONE.search(t):
+        return None
+    if re.search(r"\b(?:remind|reminder|cancel|stop|remember that|note that)\b", t):
+        return None
+    try:
+        from tasks.scheduler import _content_words, scheduler
+        words = " ".join(sorted(_content_words(t)))
+        if not scheduler.open_occurrences(words=words):
+            return None
+    except Exception:
+        return None
+    return {"words": words}
+
+
+def say_reminder_done(slots: dict, _r: dict) -> str:
+    try:
+        from tasks.scheduler import scheduler
+        occ = scheduler.mark_latest_done(within_s=3 * 3600, via="voice",
+                                         words=str(slots.get("words") or ""))
+    except Exception:
+        occ = None
+    return "Noted, sir." if occ else "Nothing was waiting on that, sir."
+
+
 _VOL_UP = re.compile(r"\b(?:turn|crank|bump|pump)\s*(?:it|the volume|the sound)?\s*up\b|"
                      r"\b(?:louder|loud er|more volume|volume up|speak up)\b")
 _VOL_DOWN = re.compile(r"\b(?:turn|bring|knock)\s*(?:it|the volume|the sound)?\s*down\b|"
@@ -4137,6 +4240,21 @@ SKILLS: list[Skill] = [
         "do i have any reminders", "show me my reminders", "what's on my reminder list",
         "what reminders are set"],
         slots=slots_reminders, speak=say_reminders),
+    # WHAT HE DID ABOUT THEM (2026-11-07), from the record each reminder
+    # leaves: the Telegram "Done", a typed "done", or saying so to him.
+    Skill("reminder_record", None, [
+        "have i taken my supplements this week", "did i take my supplements today",
+        "did i wear my retainers last night", "have i been taking my supplements",
+        "how many times did i take my supplements this week", "did i skip my supplements this week",
+        "have i worn my retainers every night this week", "did i miss my supplements",
+        "have i been wearing my retainers", "how often have i taken my supplements"],
+        slots=slots_reminder_record, speak=say_reminder_record),
+    Skill("reminder_done", None, [
+        "i took my supplements", "i've taken my supplements", "i put my retainers in",
+        "my retainers are in", "i just took my supplements", "done with my supplements",
+        "i already took them", "retainers are in", "i've put my retainers in",
+        "took my supplements"],
+        slots=slots_reminder_done, speak=say_reminder_done),
     # HIS PHONE. The watch, the calendar and the Reminders app, answered
     # from what the phone last sent (tools/health.py, tools/phone.py) -
     # reflexes, so "how's my heart rate" is a third of a second and not a
@@ -4631,7 +4749,7 @@ QUERY_SKILLS = frozenset({
     "quote", "analyst", "markets", "market_take", "watchlist", "earnings", "stock_context",
     "news", "breaking", "general", "recall", "protocols", "briefing", "tasks", "reminders",
     "battery", "volume_get", "where_am_i", "screen", "read_screen", "camera", "face",
-    "health", "agenda", "phone_reminders", "watch_list", "been_doing",
+    "health", "agenda", "phone_reminders", "watch_list", "been_doing", "reminder_record",
     "scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor",
 })
 

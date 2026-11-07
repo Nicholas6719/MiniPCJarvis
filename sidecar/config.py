@@ -424,7 +424,13 @@ DEFAULTS: dict[str, Any] = {
         "quiet_end": "05:30",
         "max_per_hour": 2,
         "disk_free_gb_warn": 50,
-        "ram_percent_warn": 94,
+        # 2026-11-07: memory is said only at or above this for ram_hold_minutes
+        # AND when JARVIS himself is slowed; a new key, so a saved 94 from the
+        # old "ram_percent_warn" cannot bring the eight-a-week warnings back
+        "memory_alert_percent": 95,
+        "ram_hold_minutes": 10,
+        # sounding Telegram pings a day, his own reminders excluded
+        "max_sounding_per_day": 5,
         "break_after_min": 180,
     },
 }

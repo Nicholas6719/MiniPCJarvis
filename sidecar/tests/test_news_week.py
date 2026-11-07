@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("JARVIS_DB", os.path.join(tempfile.mkdtemp(), "week.db"))
 
 import significance  # noqa: E402
-from significance import ALERT, NONE, URGENT, classify_news  # noqa: E402
+from significance import ALERT, NONE, NOTABLE, URGENT, classify_news  # noqa: E402
 
 fails = []
 
@@ -104,36 +104,50 @@ def main() -> int:
         ("a dog in a hot car in his town is not a fatality either",
          "Framingham police: dog dies after being left in hot car outside Natick Mall", ""),
     ]
+    # (2026-11-07) Two of these are Boston's - Logan and North Station. Boston
+    # is outside his radius by geo now, and the landmark list that used to say
+    # "this is Boston" went with the hand-kept town lists; off a local desk
+    # they may ride in the brief. What matters is unchanged: they never sound.
+    brief_ok = {"...and even before the summary says so, Logan is Boston's",
+                "a smoky train at North Station is Boston's"}
     for name, head, summ in quiet:
         t, why = tier(head, summ)
-        check(name, t == NONE, f"{t}: {why}")
+        if name in brief_ok:
+            check(name + " (never sounds)", t in (NONE, NOTABLE), f"{t}: {why}")
+        else:
+            check(name, t == NONE, f"{t}: {why}")
 
     print("\n-- what must still reach him --")
+    # SINCE 2026-11-07 news sounds only when it is LOCAL, CURRENT and
+    # DANGEROUS. The national ones below no longer ping: they wait for the
+    # next brief (NOTABLE). A fire that killed two overnight is over - the
+    # brief. Boston is outside his radius by geo (21.5 miles to the city's
+    # Census point), so a gunman or a gas leak there never sounds either.
     loud = [
-        ("the assassination itself, on the day",
-         "Conservative activist Charlie Kirk shot dead at Utah university event", "", False, (URGENT,)),
+        ("the assassination itself, on the day - in the brief",
+         "Conservative activist Charlie Kirk shot dead at Utah university event", "", False, (NOTABLE,)),
         ("...however it is worded",
-         "Charlie Kirk, conservative activist, assassinated during campus event in Utah", "", False, (URGENT,)),
-        ("a senator killed in an attack",
-         "US senator killed in shooting at town hall event", "", False, (URGENT,)),
+         "Charlie Kirk, conservative activist, assassinated during campus event in Utah", "", False, (NOTABLE,)),
+        ("a senator killed in an attack - in the brief",
+         "US senator killed in shooting at town hall event", "", False, (NOTABLE,)),
         ("an active shooter in his town",
          "Active shooter reported at Framingham High School, police responding", "", True, (URGENT,)),
         ("a gas leak with evacuations in his town",
          "Gas leak forces evacuation of homes on Main Street in Natick", "", True, (URGENT,)),
-        ("people dead in his town",
-         "Two dead in overnight Sudbury house fire", "", True, (URGENT,)),
+        ("people dead in his town, the fire over - in the brief",
+         "Two dead in overnight Sudbury house fire", "", True, (NOTABLE,)),
         ("his own school emptied for a bomb threat, whatever is found later",
-         "Framingham High School evacuated after bomb threat", "", True, (URGENT, ALERT)),
-        ("a gunman at large in Boston reaches him",
-         "Mass shooting at Boston nightclub, gunman at large", "", True, (URGENT, ALERT)),
-        ("...and so does a gas leak in the Back Bay",
-         "Gas leak forces evacuations in Boston's Back Bay, crews on scene", "", True, (URGENT, ALERT)),
+         "Framingham High School evacuated after bomb threat", "", True, (URGENT,)),
+        ("a gunman at large in Boston never sounds (inside his radius, beyond his neighbours)",
+         "Mass shooting at Boston nightclub, gunman at large", "", True, (NONE, NOTABLE)),
+        ("...nor a gas leak in the Back Bay - in the brief",
+         "Gas leak forces evacuations in Boston's Back Bay, crews on scene", "", True, (NOTABLE,)),
         ("a tornado through Middlesex County",
-         "Tornado touches down in Middlesex County, homes destroyed in Sudbury", "", True, (URGENT, ALERT)),
-        ("a nationwide grid failure",
-         "Nationwide grid failure leaves millions without power", "", False, (URGENT,)),
-        ("hundreds dead somewhere in the country",
-         "Hundreds dead as dam fails above Texas town", "", False, (URGENT,)),
+         "Tornado touches down in Middlesex County, homes destroyed in Sudbury", "", True, (URGENT,)),
+        ("a nationwide grid failure - in the brief",
+         "Nationwide grid failure leaves millions without power", "", False, (NOTABLE,)),
+        ("hundreds dead somewhere in the country - in the brief",
+         "Hundreds dead as dam fails above Texas town", "", False, (NOTABLE,)),
     ]
     for name, head, summ, local, want in loud:
         t, why = tier(head, summ, local=local)
@@ -169,6 +183,14 @@ def main() -> int:
                 "url": "", "read": h in summaries}
 
     newsroom.summarize = fake_summarize
+    # The model's second opinion, stubbed: never a live model in a gate.
+    import news_check
+    asked = []
+
+    async def fake_confirm(story):
+        asked.append(story.get("headline"))
+        return {"verdict": news_check.CONFIRMED, "why": "confirmed: stub", "answer": {}}
+    news_check.confirm = fake_confirm
     b = br.Briefing()
     # The gates share one database, and a seen story is remembered for three
     # days now: another gate's "Gas leak ... in Natick" must not dedupe this one.
@@ -197,6 +219,11 @@ def main() -> int:
           "shooter" in heads.lower(), heads)
     check("...and the demoted ones are remembered, so they are not asked again",
           any("multiple people dead" in k for k in b._seen), list(b._seen)[:4])
+    check("the model was asked only about what passed the gate",
+          set(asked) <= {"Gas leak forces evacuation in Natick", "Active shooter reported in Framingham"}
+          and asked, asked)
+    check("what it confirmed goes out urgent",
+          all(t == URGENT for _x, t, _k in found), found)
 
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0

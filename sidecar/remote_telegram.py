@@ -107,6 +107,12 @@ ACK_ONLY = re.compile(
     r"👍|👌|🙏|✅)[.!\s]*")
 
 
+# "Done" under a reminder: the same as pressing its button.
+DONE_ONLY = re.compile(
+    r"(?:done|all done|did it|did that|done it|taken|took (?:them|it|my \w+)|"
+    r"(?:they'?re|theyre|retainers are|retainers'?re) in|✅|✔️?)[.!\s]*")
+
+
 # A REMARK ABOUT WHAT HE WAS SENT. "That's awful, thank you for telling me"
 # ran as a full turn - thirty seconds - and came back "I'm sorry to hear
 # that." (2026-09-14 10:42). It is an acknowledgement with feeling in it.
@@ -302,17 +308,29 @@ class TelegramBridge:
                              "I'll refresh every fifteen minutes, and I'll warn you ten minutes before anything on it.")
         return True
 
-    async def _send(self, text: str) -> bool:
+    async def _send(self, text: str, silent: bool = False,
+                    reply_markup: dict | None = None) -> bool:
         """True only if every chunk was accepted. A send that failed used to be
         indistinguishable from one that landed, and delivery.py then remembered
-        the message as told and charged the hourly budget for it."""
+        the message as told and charged the hourly budget for it.
+
+        `silent` is Telegram's `disable_notification`: the message arrives
+        without a sound (2026-11-07 - briefs, price moves and everything else
+        that is not an emergency or his own reminder). `reply_markup` rides on
+        the LAST chunk, so a button sits under the end of the message."""
         chat = config.get("remote", "telegram_chat_id", default=None)
         if not (chat and text):
             return False
         ok = True
         # Telegram caps messages at 4096 chars
-        for i in range(0, len(text), 4000):
-            if await self._api("sendMessage", chat_id=chat, text=text[i:i + 4000]) is None:
+        chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
+        for n, chunk in enumerate(chunks):
+            params: dict = {"chat_id": chat, "text": chunk}
+            if silent:
+                params["disable_notification"] = True
+            if reply_markup and n == len(chunks) - 1:
+                params["reply_markup"] = reply_markup
+            if await self._api("sendMessage", **params) is None:
                 ok = False
         return ok
 
@@ -343,7 +361,8 @@ class TelegramBridge:
         return await self._api("sendPhoto", chat_id=chat, photo=url,
                                caption=caption[:1000]) is not None
 
-    async def _upload(self, path: str, kind: str = "photo", caption: str = "") -> bool:
+    async def _upload(self, path: str, kind: str = "photo", caption: str = "",
+                      silent: bool = False) -> bool:
         """sendPhoto/sendDocument from a local file (multipart)."""
         chat = config.get("remote", "telegram_chat_id", default=None)
         p = Path(path)
@@ -354,10 +373,12 @@ class TelegramBridge:
             if self._client is None:
                 self._client = httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10))
             blob = await asyncio.to_thread(p.read_bytes)    # up to 49 MB: not on the loop
+            data = {"chat_id": str(chat), "caption": caption[:1000]}
+            if silent:
+                data["disable_notification"] = "true"
             r = await self._client.post(
                 f"{API}/bot{self.token}/{method}",
-                data={"chat_id": str(chat), "caption": caption[:1000]},
-                files={field: (p.name, blob)}, timeout=120)
+                data=data, files={field: (p.name, blob)}, timeout=120)
             return bool(r.json().get("ok"))
         except Exception:
             log.warning("telegram upload failed", exc_info=True)
@@ -492,6 +513,27 @@ class TelegramBridge:
                              "chase stopped" if had else "nothing was pending")
                     await self._api("answerCallbackQuery", callback_query_id=cq["id"],
                                     text="Noted, sir.")
+                elif data.startswith("done:"):
+                    # THE REMINDER'S "DONE" (2026-11-07): this occurrence is
+                    # recorded as done, so no nudge follows and "have I taken
+                    # my supplements this week" has an answer. The button is
+                    # taken off the message so it cannot be pressed twice.
+                    occ = data.split(":", 1)[1]
+                    ok = False
+                    try:
+                        from tasks.scheduler import scheduler
+                        ok = occ.isdigit() and scheduler.mark_done(int(occ), via="telegram")
+                    except Exception:
+                        log.exception("could not record a reminder as done")
+                    log.info("telegram: reminder occurrence %s marked done (%s)", occ, ok)
+                    await self._api("answerCallbackQuery", callback_query_id=cq["id"],
+                                    text="Marked done, sir." if ok else "Already noted, sir.")
+                    m = cq.get("message") or {}
+                    if m.get("message_id") is not None:
+                        await self._api("editMessageReplyMarkup",
+                                        chat_id=(m.get("chat") or {}).get("id"),
+                                        message_id=m["message_id"],
+                                        reply_markup={"inline_keyboard": []})
                 elif data.startswith("clarify:"):
                     # tapping "The stock" is exactly saying it — it goes back in
                     # as the next thing he said, and the answer for it is already
@@ -608,6 +650,19 @@ class TelegramBridge:
         self.acknowledge_all()        # he is looking at his phone; stop chasing
         if self._answers_pending(text):
             return
+        # "Done" TYPED UNDER A REMINDER is the button pressed: the newest open
+        # reminder in the last two hours is recorded as done (2026-11-07).
+        if DONE_ONLY.fullmatch(text.strip().lower()):
+            try:
+                from tasks.scheduler import scheduler
+                occ = scheduler.mark_latest_done(within_s=2 * 3600, via="telegram")
+            except Exception:
+                log.exception("could not record a typed done")
+                occ = None
+            if occ:
+                log.info("telegram: %r recorded reminder occurrence %s as done", text[:20], occ)
+                await self._send("Noted, sir.", silent=True)
+                return
         # "OK" TO A MESSAGE IS NOT A REQUEST. He was sent the news, typed "ok",
         # and was told the time (2026-09-06): a bare acknowledgement with no
         # question open ran as a turn. It is an acknowledgement, and it is
@@ -781,12 +836,18 @@ class TelegramBridge:
         return heard
 
     async def send_proactive(self, text: str, tier: str = "notable",
-                             subject: str = "") -> bool:
+                             subject: str = "", silent: bool = False,
+                             buttons: list | None = None) -> bool:
         """Something he did not ask for, reaching him where he is.
 
         Urgent carries an acknowledge button and keeps asking until he taps it:
         the whole point of the tier is that it must not be missed. Everything
         else is said once.
+
+        `silent` (decided by delivery/notify_policy) sends it without a sound;
+        a silent urgent is not chased - a repeat nobody hears is just clutter.
+        `buttons` are [(label, callback_data)] under the message (a reminder's
+        "Done").
 
         Returns whether Telegram ACCEPTED it. delivery.py used to treat this as
         fire-and-forget: a network blip or a revoked token while he was away
@@ -796,14 +857,22 @@ class TelegramBridge:
         chat = config.get("remote", "telegram_chat_id", default=None)
         if not chat or not text:
             return False
+        markup = ({"inline_keyboard": [[{"text": str(lbl)[:40], "callback_data": str(data)[:64]}
+                                        for lbl, data in buttons]]} if buttons else None)
         if tier != "urgent":
-            return await self._send(text)
+            return await self._send(text, silent=silent, reply_markup=markup)
         token = pysecrets.token_hex(4)
-        sent = await self._api("sendMessage", chat_id=chat, text=text,
-                               reply_markup={"inline_keyboard": [[
-                                   {"text": "Got it", "callback_data": f"ack:{token}"}]]})
+        params: dict = {"chat_id": chat, "text": text,
+                        "reply_markup": {"inline_keyboard": [[
+                            {"text": "Got it", "callback_data": f"ack:{token}"}]]}}
+        if silent:
+            params["disable_notification"] = True
+        sent = await self._api("sendMessage", **params)
         if sent is None:
             return False                 # nothing to chase: he never got it
+        if silent:
+            log.info("telegram urgent sent silently (sound budget spent), not chased: %r", text[:70])
+            return True
         self._urgent[token] = {"text": text, "at": time.time(), "sent": 1}
         log.info("telegram urgent %s sent, chasing until acknowledged: %r",
                  token, text[:70])
@@ -838,6 +907,12 @@ class TelegramBridge:
                 log.warning("telegram chase %s stopping - the hourly message "
                             "budget is spent", token)
                 break
+            # ...and every chase SOUNDS, so it spends the daily sound budget
+            # too (2026-11-07); a silent chase would be clutter, so it stops.
+            if delivery.sound_budget_left() <= 0:
+                log.warning("telegram chase %s stopping - today's sounding budget "
+                            "is spent", token)
+                break
             item["sent"] += 1
             await self._api(
                 "sendMessage", chat_id=chat,
@@ -845,6 +920,7 @@ class TelegramBridge:
                 reply_markup={"inline_keyboard": [[
                     {"text": "Got it", "callback_data": f"ack:{token}"}]]})
             delivery.note_sent()
+            delivery.note_sounded()
         if self._urgent.pop(token, None):
             log.info("telegram chase %s giving up - never acknowledged", token)
 

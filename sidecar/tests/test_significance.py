@@ -57,13 +57,126 @@ def check(name, cond, detail=""):
         fails.append(name)
 
 
+def loud_story(story):
+    """How LOUD a story is: the full classifier with his emergencies-only rule,
+    which is what `classify_news` was until 2026-11-07. It still decides what
+    is held for the brief and how the night brief is ranked; what may make his
+    phone SOUND is `classify_news` now, judged in phone_policy() below."""
+    t, why = significance._classify_news_full(story)
+    if t == NOTABLE and significance.emergencies_only():
+        return NONE, "not an emergency, and he asked for emergencies only"
+    return t, why
+
+
 def tier(headline, summary=""):
-    return classify_news({"headline": headline, "summary": summary})[0]
+    return loud_story({"headline": headline, "summary": summary})[0]
+
+
+def phone(headline, summary="", source="WCVB Boston", local=True, age=None):
+    """What his phone does with it since 2026-11-07."""
+    st = {"headline": headline, "summary": summary, "source": source}
+    if local:
+        st["_local_feed"] = True
+    if age is not None:
+        st["age_minutes"] = age
+    return classify_news(st)
+
+
+def phone_policy() -> None:
+    """2026-11-07: NEWS NEVER PINGS UNLESS IT IS LOCAL, CURRENT AND DANGEROUS.
+
+    *"I am mainly ignoring his notifications, which is not what I built him
+    for."* URGENT needs a town geo is certain of inside his radius, a hazard
+    to the public happening now, and not a feature, trial, anniversary,
+    recovery, settlement, opinion, prediction, advice piece or business story.
+    There is no ALERT for news: what would have been one is NOTABLE - held for
+    the next brief. National and world news never pings."""
+    scope("local")
+    news_mode("emergencies")
+    print("\n-- what may make his phone sound (2026-11-07) --")
+
+    # The national door is closed for the phone; these wait for the brief.
+    for huge in ("Terrorist attack at Chicago airport leaves dozens dead",
+                 "President assassinated in Dallas",
+                 "Nuclear plant meltdown prompts evacuation in Pennsylvania",
+                 "Nationwide grid failure leaves millions without power",
+                 "CDC declares pandemic as new virus spreads",
+                 "US declares war after missile strike on naval base",
+                 "Hundreds dead as tornado levels Joplin"):
+        got, why = phone(huge, source="CBS", local=False)
+        check(f"national never pings, it waits for the brief: {huge[:34]!r}",
+              got == NOTABLE, f"{got}: {why}")
+
+    # Local, current, dangerous: these sound.
+    for live, src in (
+            ("Police respond to active shooter report in Framingham", "WCVB Boston"),
+            ("Gas leak forces evacuation of homes on Main Street in Natick", "MetroWest Daily News"),
+            ("Route 9 closed in Framingham after water main break", "WCVB Boston"),
+            ("Amber Alert issued for missing 8-year-old girl from Natick", "WHDH"),
+            ("Ashland schools in lockdown as police search for armed man", "WCVB Boston"),
+            ("Tornado warning in effect for Framingham and Sudbury until 5 PM", "WHDH"),
+            ("Boil water order issued for Natick", "MetroWest Daily News"),
+            ("Small plane crashes in Framingham; crews searching for survivors", "WCVB Boston"),
+            ("Crews battle three-alarm fire in Hopkinton, evacuations under way", "WCVB Boston"),
+            ("Brush fire in Sudbury forces evacuations near Route 20", "WCVB Boston")):
+        got, why = phone(live, source=src)
+        check(f"local, current, dangerous - it sounds: {live[:36]!r}", got == URGENT, f"{got}: {why}")
+
+    # Local, but over, routine, or no danger to the public: the brief, at most.
+    for calm in ("Two dead in overnight Sudbury house fire",
+                 "Man dies in Framingham house fire",
+                 "Sudbury police to host e-bike safety presentation",
+                 "Road closure on Speen Street in Natick for construction",
+                 "Natick police: suspect in custody after armed robbery, no threat to the public",
+                 "Missing Framingham teen found safe",
+                 "Boil water order lifted in Framingham after tests come back clean",
+                 "Framingham man arraigned in fatal stabbing",
+                 "Natick crash victim remembered at vigil",
+                 "Framingham fire chief shares cause of fatal fire",
+                 "Wayland restaurant chain recovers after outbreak",
+                 "Sudbury schools closed after water main break",
+                 "Power outage affects 4,000 in Framingham",
+                 "Crews battle house fire on Concord Street in Worcester"):
+        got, why = phone(calm)
+        check(f"local but not a live public hazard - never sounds: {calm[:34]!r}",
+              got != URGENT, f"{got}: {why}")
+
+    # Beyond his radius, or beyond his neighbouring towns (Boston, measured
+    # from City Hall, is inside twenty miles), it never sounds, however dangerous.
+    for far in ("Chemical fire forces evacuation of Lowell neighborhood, crews on scene",
+                "Nuclear plant leak prompts evacuation in Plymouth",
+                "Multiple people shot in Taunton; suspect at large",
+                "Gas leak forces evacuations in Boston's Back Bay, crews on scene"):
+        got, why = phone(far)
+        check(f"beyond {significance.geo.radius_mi():.0f} miles it never sounds: {far[:34]!r}",
+              got != URGENT, f"{got}: {why}")
+    # (Boston is measured from City Hall, 19.7 miles: inside the radius, and
+    # kept quiet by the neighbouring-towns rule in urgent_gate instead.)
+
+    # Old news is not current news.
+    got, why = phone("Gas leak forces evacuation of homes on Main Street in Natick", age=300)
+    check("five hours old is not current", got != URGENT, f"{got}: {why}")
+    # And ALERT no longer exists for news.
+    for any_story in ("Fatal crash closes Route 9", "Earthquake felt across Massachusetts, damage reported",
+                      "Western Mass. wildfire reaches 70% containment Tuesday"):
+        got, _why = phone(any_story)
+        check(f"no ALERT for news: {any_story[:34]!r}", got != ALERT, got)
+
+    # The gate gives its reason, and the reason is the one that matters.
+    ok, why, facts = significance.urgent_gate({"headline": "Police respond to active shooter report in Framingham"})
+    check("the gate names the town and the danger",
+          ok and facts.get("town") == "Framingham" and facts.get("category") == "police", (ok, why, facts))
+    ok, why, _f = significance.urgent_gate({"headline": "Dear Annie: Is there a polite way to tell a co-worker "
+                                                        "she's become the office outbreak source?",
+                                            "source": "MassLive", "_local_feed": True})
+    check("a column is refused as a column", not ok and "dear annie" in why, why)
 
 
 def main() -> int:
+    phone_policy()
     # ==========================================================================
-    # HIS SETTING: local only. Everything in this block is what his phone does.
+    # HIS SETTING: local only. Since 2026-11-07 this block is LOUDNESS - what is
+    # held for the brief and how it ranks; phone_policy() above is the phone.
     # ==========================================================================
     scope("local")
     news_mode("emergencies")
@@ -152,11 +265,11 @@ def main() -> int:
           "source": "Boston.com", "_local_feed": True}
     check("a Washington story off a Boston desk is not near him",
           not significance.is_local(kc)[0], significance.is_local(kc))
-    check("...and it does not reach him", classify_news(kc)[0] == NONE, classify_news(kc))
+    check("...and it does not reach him", loud_story(kc)[0] == NONE, loud_story(kc))
     weighty_local = {"headline": "Massachusetts election officials brace for federal shutdown; state of emergency talk",
                      "summary": "", "source": "MassLive", "_local_feed": True}
     check("weighty national news near him waits for the brief under emergencies-only",
-          classify_news(weighty_local)[0] == NONE, classify_news(weighty_local))
+          loud_story(weighty_local)[0] == NONE, loud_story(weighty_local))
 
     # THE LEDGER OF 2026-09-05/06: four alerts that reached his phone and should
     # not have, each off a LOCAL desk that syndicates the wire.
@@ -179,7 +292,7 @@ def main() -> int:
          "a shooting forty minutes away, over, no threat"),
     ]
     for story, why in ledger:
-        check(f"silent: {why}", classify_news(story)[0] == NONE, classify_news(story))
+        check(f"silent: {why}", loud_story(story)[0] == NONE, loud_story(story))
     # THE NAMED-PLACE SEARCH FEEDS, 2026-09-06 afternoon: three URGENTs that
     # were the aftermath of deaths, and one that was the state's abbreviation.
     aftermath = [
@@ -193,19 +306,19 @@ def main() -> int:
           "summary": "", "source": "People.com"}, "'Mass.' is the state, not a massacre"),
     ]
     for story, why in aftermath:
-        check(f"silent: {why}", classify_news(story)[0] == NONE, classify_news(story))
+        check(f"silent: {why}", loud_story(story)[0] == NONE, loud_story(story))
     check("...but a death in his town that is NOT over still wakes him",
-          classify_news({"headline": "Framingham man killed in Route 9 crash; road closed, driver fled",
+          loud_story({"headline": "Framingham man killed in Route 9 crash; road closed, driver fled",
                          "summary": "Police are searching for the driver.", "source": "WCVB"})[0] == URGENT,
-          classify_news({"headline": "Framingham man killed in Route 9 crash; road closed, driver fled",
+          loud_story({"headline": "Framingham man killed in Route 9 crash; road closed, driver fled",
                          "summary": "Police are searching for the driver.", "source": "WCVB"}))
 
     # ...and the same shapes when they ARE his emergency
     check("a plane crash in Framingham with a search on wakes him",
-          classify_news({"headline": "Small plane crashes in Framingham; crews searching for survivors",
+          loud_story({"headline": "Small plane crashes in Framingham; crews searching for survivors",
                          "summary": "", "source": "WCVB Boston", "_local_feed": True})[0] == URGENT)
     check("a shooting with the suspect at large near him is an alert",
-          classify_news({"headline": "Multiple people shot in Wellesley; suspect at large",
+          loud_story({"headline": "Multiple people shot in Wellesley; suspect at large",
                          "summary": "Police are searching for the gunman.",
                          "source": "WCVB Boston", "_local_feed": True})[0] in (ALERT, URGENT))
 
@@ -218,7 +331,7 @@ def main() -> int:
                    "Two people shot in Brockton overnight, police searching for gunman",
                    "Police respond to active shooter report in Lowell",
                    "House fire displaces family in Springfield, crews still on scene"):
-        got, why = classify_news({"headline": far_ma, "source": "WCVB Boston",
+        got, why = loud_story({"headline": far_ma, "source": "WCVB Boston",
                                   "_local_feed": True})
         check(f"beyond his twenty miles: {far_ma[:34]!r}", got == NONE, f"{got} ({why})")
     for near in ("Police respond to active shooter report in Wellesley",
@@ -226,7 +339,7 @@ def main() -> int:
                  "Crews battle three-alarm fire in Hopkinton, evacuations under way",
                  "Chemical spill closes Route 9 in Southborough",
                  "Active shooter reported at Natick Mall"):
-        got, why = classify_news({"headline": near, "source": "WCVB Boston",
+        got, why = loud_story({"headline": near, "source": "WCVB Boston",
                                   "_local_feed": True})
         check(f"inside his twenty miles: {near[:34]!r}", got in (URGENT, ALERT),
               f"{got} ({why})")
@@ -241,22 +354,30 @@ def main() -> int:
     # ...an unshared one does not
     check("Natick counts on sight",
           significance.is_local({"headline": "Water main break floods Natick center"}) == (True, True))
-    check("Wellesley counts on sight",
-          significance.is_local({"headline": "Gas leak at Wellesley College"}) == (True, False))
+    # (2026-11-07) "own town" is his patch by distance now, not five names:
+    # Wellesley is 7.8 miles from home by geo, inside NEIGHBOUR_MI with
+    # Maynard (8.2), the farthest of the five towns he named.
+    # (2026-11-07) geo knows Wellesley is also a town in Ontario, so the name
+    # alone is not certain - a Massachusetts desk places it.
+    check("Wellesley off a Massachusetts desk is near, and in his own patch",
+          significance.is_local({"headline": "Gas leak at Wellesley College", "source": "WCVB Boston"}) == (True, True),
+          significance.is_local({"headline": "Gas leak at Wellesley College", "source": "WCVB Boston"}))
+    check("...but the bare name, off no desk, is not certain",
+          not significance.is_local({"headline": "Gas leak at Wellesley College"})[0])
     # ...and the far end of the state is silent even off his desk, with one
     # exception: a hazard that is loose and still moving.
     check("a Ludlow crash off WHDH is not near him",
           not significance.is_local({"headline": "2 killed when small plane crashes in Ludlow",
                                      "_local_feed": True})[0])
     check("a nuclear leak in Plymouth still reaches him",
-          classify_news({"headline": "Nuclear plant leak prompts evacuation in Plymouth",
+          loud_story({"headline": "Nuclear plant leak prompts evacuation in Plymouth",
                          "_local_feed": True})[0] in (URGENT, ALERT),
-          classify_news({"headline": "Nuclear plant leak prompts evacuation in Plymouth",
+          loud_story({"headline": "Nuclear plant leak prompts evacuation in Plymouth",
                          "_local_feed": True}))
     check("a chemical fire in Lowell with an evacuation on still reaches him",
-          classify_news({"headline": "Chemical fire forces evacuation of Lowell neighborhood, crews on scene",
+          loud_story({"headline": "Chemical fire forces evacuation of Lowell neighborhood, crews on scene",
                          "_local_feed": True})[0] in (URGENT, ALERT),
-          classify_news({"headline": "Chemical fire forces evacuation of Lowell neighborhood, crews on scene",
+          loud_story({"headline": "Chemical fire forces evacuation of Lowell neighborhood, crews on scene",
                          "_local_feed": True}))
 
     # --- somebody else's country is not "the country" -------------------------
@@ -272,7 +393,7 @@ def main() -> int:
             ("Hundreds dead in Pakistan earthquake", ""),
             ("Mass casualty incident at German railway station", ""),
             ("Thousands killed as cyclone hits Bangladesh", "")):
-        got = classify_news({"headline": abroad, "summary": summ})[0]
+        got = loud_story({"headline": abroad, "summary": summ})[0]
         check(f"not his emergency: {abroad[:40]!r}", got == NONE, got)
 
     # ...but a foreign dateline that IS his country's news still counts
@@ -294,8 +415,8 @@ def main() -> int:
 
     # ...while a story off one of HIS desks is local whatever it says
     from_desk = {"headline": "Fatal crash closes Route 9", "_local_feed": True}
-    check("an emergency from his own desk is local", classify_news(from_desk)[0] != NONE,
-          classify_news(from_desk))
+    check("an emergency from his own desk is local", loud_story(from_desk)[0] != NONE,
+          loud_story(from_desk))
     # (2026-09-06: locality is asserted here; the story itself is a court
     # story - "held without bail" - and no longer reaches him as an alert)
     check("an explicit Massachusetts is local too",
@@ -311,7 +432,7 @@ def main() -> int:
     nepal = {"headline": "Nepal quake: hundreds dead",
              "summary": "A survivor told us the ground shook for a minute."}
     check("a pronoun does not make a foreign disaster national",
-          classify_news(nepal)[0] == NONE, classify_news(nepal))
+          loud_story(nepal)[0] == NONE, loud_story(nepal))
     check("...but the actual country still does",
           tier("US declares war after missile strike on naval base") == URGENT)
 
@@ -330,9 +451,14 @@ def main() -> int:
     # point of the change: quieter, not deafer.
     check("an active shooter in Framingham still wakes him",
           tier("Police respond to active shooter report in Framingham") == URGENT)
-    check("a Boston hazmat call still reaches him",
-          tier("Boston hazmat team responds to chemical exposure at Mass General")
-          in (URGENT, ALERT))
+    # (2026-11-07) Boston is outside his radius by geo (the city's Census
+    # point is 21.5 miles off): off a Boston desk, a hazard there is "loose in
+    # his state" - held for the brief, never a sound.
+    boston = {"headline": "Boston hazmat team responds to chemical exposure at Mass General",
+              "source": "WCVB Boston", "_local_feed": True}
+    check("a Boston hazmat call is still worth the brief",
+          loud_story(boston)[0] in (URGENT, ALERT), loud_story(boston))
+    check("...and never sounds", classify_news(boston)[0] != URGENT, classify_news(boston))
     # 2026-09-06: "held without bail" is the aftermath of a death, a court
     # story; it waits for the brief. The fresh death itself still reaches him.
     check("the aftermath of a death in a Mass. home does not reach him",
@@ -366,10 +492,13 @@ def main() -> int:
               tier(townish) == NONE, tier(townish))
 
     # ...but anything that changes what he can actually do today does ping.
+    # (a shared name - Sudbury is in Suffolk and Ontario too - comes off a
+    # Massachusetts desk, as it does in life)
     for real in ("Sudbury schools closed after water main break",
                  "Power outage affects 4,000 in Framingham",
                  "Boil water order issued for Natick"):
-        check(f"pings him: {real[:38]!r}", tier(real) in (URGENT, ALERT), tier(real))
+        got = loud_story({"headline": real, "source": "MetroWest Daily News"})[0]
+        check(f"loud enough for the brief: {real[:38]!r}", got in (URGENT, ALERT), got)
 
     # ==========================================================================
     # THE WIDER SETTING (briefing.news_scope = "national"), which he is not on.
@@ -410,7 +539,8 @@ def main() -> int:
 
     # --- his towns get a lower bar, but not NO bar -----------------------------
     check("something real in Sudbury reaches him",
-          tier("Sudbury schools closed after water main break") == ALERT)
+          loud_story({"headline": "Sudbury schools closed after water main break",
+                      "source": "MetroWest Daily News"})[0] == ALERT)
     check("a ribbon cutting in Maynard does not",
           tier("Ribbon cutting for new Maynard library wing") not in (URGENT, ALERT),
           tier("Ribbon cutting for new Maynard library wing"))
@@ -487,7 +617,7 @@ def main() -> int:
           in (URGENT, ALERT), tier("Death toll rises to 12 in Massachusetts flooding"))
 
     # --- an empty story is not a story ----------------------------------------
-    check("nothing is not something", classify_news({})[0] == NONE)
+    check("nothing is not something", loud_story({})[0] == NONE)
 
     # --- the market, and whose money it is -------------------------------------
     check("a 12% move in something he OWNS wakes him",
@@ -530,14 +660,14 @@ def main() -> int:
                  "Levi Herman, an outlaw country musician, died on Monday",
                  "Beloved actor dies at 88 after long illness",
                  "Grammy-winning singer passed away at her home"):
-        got, why = classify_news({"headline": obit, "_local_feed": True})
+        got, why = loud_story({"headline": obit, "_local_feed": True})
         check(f"obituary is silent: {obit[:36]!r}", got == NONE, f"{got} ({why})")
 
     # ...and a death that IS an incident still reaches him
     for real in ("Crews battle house fire on Concord Street in Framingham",
                  "One dead after crash on Route 9 in Natick",
                  "Fatal MBTA rail incident halts the Framingham line"):
-        got, why = classify_news({"headline": real, "_local_feed": True})
+        got, why = loud_story({"headline": real, "_local_feed": True})
         check(f"an incident death still reaches him: {real[:32]!r}",
               got in (URGENT, ALERT), f"{got} ({why})")
 
@@ -550,7 +680,7 @@ def main() -> int:
                  "where he was pronounced dead",
                  "Bicyclist dies after colliding with pickup truck in Lynn, Massachusetts",
                  "Two people shot in Brockton overnight"):
-        got, why = classify_news({"headline": over, "_local_feed": True})
+        got, why = loud_story({"headline": over, "_local_feed": True})
         check(f"already over, not his town: {over[:32]!r}", got == NONE,
               f"{got} ({why})")
 
@@ -564,7 +694,7 @@ def main() -> int:
              "more than one person, and the water is still moving"),
             ("Fatal crash closes Route 9",
              "it has shut a road he drives")):
-        got, _ = classify_news({"headline": live, "_local_feed": True})
+        got, _ = loud_story({"headline": live, "_local_feed": True})
         check(f"still reaches him ({why_it_matters})", got in (URGENT, ALERT), got)
 
     # --- a hazard word must name an EVENT, not a subject (2026-09-01) ---------
@@ -578,7 +708,7 @@ def main() -> int:
                   "Report finds toxic workplace culture at Boston firm",
                   "Market collapse wipes billions off Massachusetts pensions",
                   "Collapse of contract talks leaves Boston teachers without a deal"):
-        got, why = classify_news({"headline": topic, "_local_feed": True})
+        got, why = loud_story({"headline": topic, "_local_feed": True})
         check(f"a subject is not a hazard: {topic[:34]!r}", got == NONE,
               f"{got} ({why})")
 
@@ -588,7 +718,7 @@ def main() -> int:
                         "Building collapse traps workers in Marlborough",
                         "Bomb threat forces evacuation of Marlborough school",
                         "Boston hazmat team responds to chemical exposure at Mass General"):
-        got, _ = classify_news({"headline": real_hazard, "_local_feed": True})
+        got, _ = loud_story({"headline": real_hazard, "_local_feed": True})
         check(f"a real hazard still reaches him: {real_hazard[:32]!r}",
               got in (URGENT, ALERT), got)
 
