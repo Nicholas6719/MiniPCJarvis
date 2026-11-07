@@ -1180,25 +1180,56 @@ class ScannerDesk:
         changed = 0
         for inc in store.incidents_since(since):
             said = inc.get("said") or []
-            if not inc.get("types") or not said or len(said) >= SAID_KEEP or \
-                    any(len(s.get("text") or "") >= 300 for s in said):
-                continue                 # a burst, or more than was kept
-            types: set[str] = set()
-            for s in said:
-                types |= {t for t in rules.read(s.get("text") or "", inc.get("town") or "").types
-                          if t in rules.KINDS}
-            if types == set(inc["types"]):
+            if not inc.get("types") or not said:
+                continue                 # a burst: nothing to read again
+            if len(said) >= SAID_KEEP or any(len(s.get("text") or "") >= 300 for s in said):
+                # more was heard than was kept, so only the address is checked,
+                # and only when the words it came from are still here to read
+                # ("Master 3, Fox drive, Charlie, Romeo" became 3 Fox Dr)
+                key = (inc.get("street") or "").split()[:-1]
+                texts = " ".join((s.get("text") or "").lower() for s in said)
+                if key and all(w in texts for w in key) and not any(
+                        rules.read(s.get("text") or "", inc.get("town") or "").street == inc.get("street")
+                        for s in said):
+                    if store.update_incident(inc["id"], {"address": "", "street": ""}):
+                        log.info("scanner: #%d address %r is not an address by today's rules - dropped",
+                                 inc["id"], inc.get("address"))
+                        changed += 1
                 continue
-            if not types:
-                fields = {"types": [], "status": "over", "decided": "today's rules no longer read this as a call"}
-                log.info("scanner: #%d (%s) is not a call by today's rules - closed", inc["id"], inc["label"])
-            else:
-                ordered = sorted(types, key=lambda k: -rules.KINDS[k].severity)
-                top = rules.KINDS[ordered[0]]
-                fields = {"types": ordered, "kind": top.key, "label": rules.describe(ordered),
-                          "severity": top.severity, "family": top.family}
-                log.info("scanner: #%d re-read by today's rules: %s -> %s", inc["id"], inc["label"], fields["label"])
-            if store.update_incident(inc["id"], fields):
+            types: set[str] = set()
+            units: list[str] = []
+            facts: list[str] = []
+            address = street = ""
+            for s in said:
+                text = s.get("text") or ""
+                rd = rules.read(text, inc.get("town") or "")
+                types |= {t for t in rd.types if t in rules.KINDS}
+                units = _union(units, rd.units, 10)
+                facts = _union(facts, rules.details(text), 8)
+                if not address and rd.address:
+                    address, street = rd.address, rd.street
+            fields: dict = {}
+            if types != set(inc["types"]):
+                if not types:
+                    fields = {"types": [], "status": "over", "decided": "today's rules no longer read this as a call"}
+                    log.info("scanner: #%d (%s) is not a call by today's rules - closed", inc["id"], inc["label"])
+                else:
+                    ordered = sorted(types, key=lambda k: -rules.KINDS[k].severity)
+                    top = rules.KINDS[ordered[0]]
+                    fields = {"types": ordered, "kind": top.key, "label": rules.describe(ordered),
+                              "severity": top.severity, "family": top.family}
+                    log.info("scanner: #%d re-read by today's rules: %s -> %s", inc["id"], inc["label"], fields["label"])
+            # "a crash on It About One Place" was still in his answers after the
+            # address reader learned better: the place, the units and the facts
+            # are read again too
+            if address != (inc.get("address") or ""):
+                fields.update(address=address, street=street)
+                log.info("scanner: #%d address re-read: %r -> %r", inc["id"], inc.get("address"), address)
+            if _union(inc.get("units") or [], units, 10) != (inc.get("units") or []):
+                fields["units"] = _union(inc.get("units") or [], units, 10)
+            if _union(inc.get("details") or [], facts, 8) != (inc.get("details") or []):
+                fields["details"] = _union(inc.get("details") or [], facts, 8)
+            if fields and store.update_incident(inc["id"], fields):
                 changed += 1
         return changed
 

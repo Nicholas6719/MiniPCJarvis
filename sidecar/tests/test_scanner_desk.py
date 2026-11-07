@@ -861,7 +861,30 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         "severity": 3, "types": ["mva"], "address": "", "street": "", "roads": [], "units": [],
         "said": [{"ts": now - 800, "text": "Okay, copy that, thank you.", "hit": BASE + 46,
                   "channel": "Wayland FD"}], "hits": 1, "status": "active"})
+    junk = S.create_incident({
+        "first_ts": now - 700, "last_ts": now - 698, "town": "Sudbury", "miles": 5.3, "agency": "FD",
+        "channel": "Sudbury FD", "family": "traffic", "kind": "mva", "label": "a crash", "severity": 3,
+        "types": ["mva"], "address": "It About One Pl", "street": "it about one pl", "roads": [], "units": [],
+        "said": [{"ts": now - 700, "text": "Everybody dispatch it in two car three ambulance one. Two car crash. "
+                                           "Why do you cut it about one place?", "hit": BASE + 47,
+                  "channel": "Sudbury FD"}], "hits": 1, "status": "over"})
+    long_line = ("Where'd you think? We'll do that. This is gonna be a hit and run with just one vehicle. I can give "
+                 "you the plating operator when you're ready. Master 3, Fox drive, Charlie, Romeo 213, SCR21. But if "
+                 "you just attach the female RO and ATR we have just been out there for a while, sir, all set. "
+                 "Copy that, we will stand by on the side of the road until the tow arrives.")[:300]
+    plate = S.create_incident({            # closed, so it takes no later test's crash
+        "first_ts": now - 650, "last_ts": now - 648, "town": "Wellesley", "miles": 7.8, "agency": "PD",
+        "channel": "Wellesley PD", "family": "traffic", "kind": "mva", "label": "a crash", "severity": 3,
+        "types": ["mva"], "address": "3 Fox Dr", "street": "fox dr", "roads": [], "units": [],
+        "said": [{"ts": now - 650, "text": long_line, "hit": BASE + 48, "channel": "Wellesley PD"}],
+        "hits": 1, "status": "over"})
     n = desk._rejudge(now - 3600)
+    p_ = S.incident(plate)
+    check("a call whose lines were cut short still loses an address read from a spelled-out plate",
+          len(long_line) == 300 and p_ and p_["address"] == "" and p_["types"] == ["mva"], p_)
+    j = S.incident(junk)
+    check("this morning's 'It About One Place' is dropped, and the units it missed are read",
+          j and j["address"] == "" and j["units"] == ["Car 3", "Ambulance 1"] and "2 vehicles" in j["details"], j)
     o, g2 = S.incident(old), S.incident(gone)
     check("this morning's misread 'structure fire' is re-read as the fire alarm it was",
           o and o["types"] == ["alarm"] and o["label"] == "a fire alarm" and o["kind"] == "alarm", o)
