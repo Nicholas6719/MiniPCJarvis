@@ -220,6 +220,16 @@ def close_window(title: str) -> dict:
 
 def _endpoint_volume():
     from pycaw.pycaw import AudioUtilities
+    import comtypes
+    # COM IS PER THREAD. Tools run on pool threads, and this one never
+    # initialised COM on its own: it worked only while some other tool had
+    # happened to run on the same thread first. On 2026-11-07 (release 90)
+    # it landed on a fresh thread - "CoInitialize has not been called" - and
+    # "set the volume" failed. Initialising is cheap and idempotent per thread.
+    try:
+        comtypes.CoInitialize()
+    except OSError:
+        pass                      # already initialised in another apartment: usable
     # modern pycaw: AudioDevice wrapper exposes the endpoint volume directly
     return AudioUtilities.GetSpeakers().EndpointVolume
 
