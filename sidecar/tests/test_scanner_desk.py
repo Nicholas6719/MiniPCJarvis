@@ -952,7 +952,24 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         "types": ["mva"], "address": "3 Fox Dr", "street": "fox dr", "roads": [], "units": [],
         "said": [{"ts": now - 650, "text": long_line, "hit": BASE + 48, "channel": "Wellesley PD"}],
         "hits": 1, "status": "over"})
+    moved = S.create_incident({            # the Wayland lookout as it was stored at 4:08 PM
+        "first_ts": now - 640, "last_ts": now - 638, "town": "Framingham", "miles": 0.4, "agency": "PD",
+        "channel": "Wayland PD", "family": "police", "kind": "welfare_check", "label": "a well-being check",
+        "severity": 3, "types": ["welfare_check"], "address": "", "street": "", "roads": [], "units": [],
+        "said": [{"ts": now - 640, "hit": BASE + 49, "channel": "Wayland PD",
+                  "text": "Okay, do a well being check. 72 year old female left about four hours ago, on foot. "
+                          "They would like her transport it back to Framingham."}], "hits": 1, "status": "over"})
+    aid_kept = S.create_incident({         # a mutual-aid call keeps its town
+        "first_ts": now - 630, "last_ts": now - 628, "town": "Natick", "miles": 4.7, "agency": "FD",
+        "channel": "Wayland FD", "family": "fire", "kind": "working_fire", "label": "a working fire",
+        "severity": 9, "types": ["working_fire"], "address": "", "street": "", "roads": [], "units": [],
+        "said": [{"ts": now - 630, "hit": BASE + 50, "channel": "Wayland FD",
+                  "text": "Mutual aid to Natick, Engine 1 respond for a working fire."}], "hits": 1, "status": "over"})
     n = desk._rejudge(now - 3600)
+    check("the re-read puts a call back in its channel's town when it was moved by a passing mention",
+          S.incident(moved)["town"] == "Wayland", S.incident(moved)["town"])
+    check("...and a mutual-aid call keeps the town it was sent to", S.incident(aid_kept)["town"] == "Natick",
+          S.incident(aid_kept)["town"])
     p_ = S.incident(plate)
     check("a call whose lines were cut short still loses an address read from a spelled-out plate",
           len(long_line) == 300 and p_ and p_["address"] == "" and p_["types"] == ["mva"], p_)

@@ -77,6 +77,15 @@ FYI = "fyi"
 _RANK = {"": 0, "notable": 1, FYI: 1, ALERT: 2, URGENT: 3}
 _DAILY_CAP = {URGENT: 4, ALERT: 8, FYI: 80}       # FYI raised with medical and police calls
 SAID_KEEP = 10            # transmissions kept per incident: the dispatch and its follow-ups
+# Characters kept of each transmission. Was 300: the Wayland lookout's "back to
+# Framingham" fell past it and the start-up re-read could not correct the town.
+SAID_TEXT_MAX = 1000
+
+
+def _cut_at(said_row: dict) -> int:
+    """How long a kept line can be before it was cut: rows say so since
+    SAID_TEXT_MAX; older rows were cut at 300."""
+    return int(said_row.get("max") or 300)
 
 
 def _union(old: list, new: list, cap: int) -> list:
@@ -935,7 +944,8 @@ class ScannerDesk:
                agreed: bool = False) -> int | None:
         now = float(row.get("end_ts") or row["ts"])
         town = reading.towns[0] if reading.towns else (row.get("town") or "")
-        said_row = {"ts": row["ts"], "text": text[:300], "hit": row["id"], "channel": row.get("name") or ""}
+        said_row = {"ts": row["ts"], "text": text[:SAID_TEXT_MAX], "hit": row["id"], "channel": row.get("name") or "",
+                    "max": SAID_TEXT_MAX}
         if conf is not None:
             said_row["conf"] = round(float(conf), 2)     # the quiet feed believes clear words only
         if agreed:
@@ -1080,7 +1090,7 @@ class ScannerDesk:
         substance = [f for f in facts if f not in self._STATUS_ONLY]
         if not fire_or_ems and not substance and not same_street:
             return None
-        said_row = {"ts": row["ts"], "text": text[:300], "hit": row["id"], "channel": name,
+        said_row = {"ts": row["ts"], "text": text[:SAID_TEXT_MAX], "hit": row["id"], "channel": name, "max": SAID_TEXT_MAX,
                     "conf": round(float(conf), 2), "context": True}
         fields: dict = {"last_ts": max(float(inc["last_ts"]), now), "hits": int(inc["hits"] or 0) + 1,
                         "said": (inc["said"] + [said_row])[-SAID_KEEP:],
@@ -1313,12 +1323,28 @@ class ScannerDesk:
             said = inc.get("said") or []
             if not inc.get("types") or not said:
                 continue                 # a burst: nothing to read again
+            # THE TOWN, read again: a town named as a destination used to move
+            # a call ("transport her back to Framingham" put a Wayland PD
+            # lookout "here in Framingham"). Where the call's channel has a
+            # town, and no kept line names the call's town as where it is by
+            # today's rules, the call goes back to its channel's town.
+            lab = rules.parse_label(inc.get("channel") or "")
+            home_of_channel = lab.town.name if lab.town else ""
+            if home_of_channel and (inc.get("town") or "") != home_of_channel:
+                named = {t for s in said for t in rules.read(s.get("text") or "", home_of_channel).towns}
+                if (inc.get("town") or "") not in named:
+                    t = geo.town(home_of_channel)
+                    if t and store.update_incident(inc["id"], {"town": t.name, "miles": round(t.miles, 1)}):
+                        log.info("scanner: #%d is in %s (its channel's town), not %s - a passing mention",
+                                 inc["id"], t.name, inc.get("town"))
+                        inc = store.incident(inc["id"]) or inc
+                        changed += 1
             # More was heard than was kept: lines cut at 300 characters, the
             # ten-line cap, or an older build that kept six (hits counts every
             # transmission; a fire whose last six lines were stand-downs must
             # not be "closed" for want of its first eight - review 2026-11-07).
             if len(said) >= SAID_KEEP or int(inc.get("hits") or 0) > len(said) or \
-                    any(len(s.get("text") or "") >= 300 for s in said):
+                    any(len(s.get("text") or "") >= _cut_at(s) for s in said):
                 # ...so only the address is checked, and only when the words it
                 # came from are still here to read ("Master 3, Fox drive,
                 # Charlie, Romeo" became 3 Fox Dr)
