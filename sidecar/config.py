@@ -56,6 +56,12 @@ DEFAULTS: dict[str, Any] = {
         # what llm.draft.eligible() lets through (it invented a weather
         # forecast when asked). Set to "gemma-3-4b" to try it again, with a
         # smaller context on the big model or a ~1B draft.
+        # THE ~1B DRAFT WAS TRIED (2026-11-07, with his OK): gemma-3-1b-it
+        # Q4_K_M (C:\AI\models, 1.14 GB of the 780M heap, ~1.1 GB headroom
+        # left) answers in 0.2 s - and confidently WRONG: "who directed Jaws"
+        # -> Robert Zemeckis, "first person on the moon" -> the Soviet Luna 9;
+        # 2 wrong of the 13 it did not defer, 16 of 30 deferred. Not enabled.
+        # A wrong answer in 0.2 s is worse than a right one in 3.5 s.
         "draft_model": "",
         # Re-read the conversation into both prompt shapes after every turn
         # (orchestrator._rewarm_history). OFF: on release 74 (2026-09-18) it

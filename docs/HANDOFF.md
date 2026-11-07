@@ -5670,8 +5670,13 @@ Performance (measured, record:false bench): reflexes 0.2-1 s to first audio;
 knowledge turns ~3.3 s to first word = ~230-340 new prompt tokens at ~150
 tok/s prefill + ~20 tok/s decode; the cache works (3 pinned slots). The 780M
 uses 12.3 GB shared + 1.6 GB dedicated for gpt-oss (adapter committed 15.1 GB
-of ~17.4). He approved trying a ~1B draft model carefully: candidate
-ggml-org/gemma-3-1b-it-GGUF Q4_K_M (806 MB, sha256 8ccc5cd1...).
+of ~17.4). He approved trying a ~1B draft model carefully: downloaded
+ggml-org/gemma-3-1b-it-GGUF Q4_K_M (806 MB, sha256 verified 8ccc5cd1...) to
+C:\AI\models and ran it standalone on :8791 beside gpt-oss: 1.14 GB shared,
+adapter 16.25 GB committed, first word 0.2 s - but 2 confidently wrong of the
+13 answers it did not defer (Jaws -> Zemeckis; moon -> Luna 9) and 16/30
+deferred. NOT enabled (config.py note); trial server stopped by PID. The file
+stays in C:\AI\models (unused, deletable). No recovery test was needed.
 
 ### Not done / next
 - When he fits the splitter: set the console's input, re-check
