@@ -382,13 +382,59 @@ def _street_spans(tokens: list[str]) -> list[dict]:
     return spans
 
 
+# Police and fire spelling alphabets (APCO and NATO). Two of these beside a
+# "street" mean a plate or a name is being spelled out: "Master 3, Fox drive,
+# Charlie, Romeo 213" was a licence plate, not 3 Fox Drive (2026-11-07).
+_PHONETIC = {"adam", "boy", "charlie", "david", "edward", "frank", "george", "henry", "ida", "john",
+             "king", "lincoln", "mary", "nora", "ocean", "paul", "queen", "robert", "sam", "tom",
+             "victor", "william", "xray", "young", "zebra", "alpha", "bravo", "delta", "echo",
+             "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike", "november", "oscar",
+             "papa", "quebec", "romeo", "sierra", "tango", "uniform", "whiskey", "yankee", "zulu"}
+
+
+def _capitals(text: str) -> tuple[set[str], set[str]]:
+    """(words written with a capital anywhere, words with a capital that is
+    not just the start of a sentence), lowercased. Parakeet writes names with
+    capitals, so a street it heard as a name is in here and "why do you cut
+    it about one place" is not."""
+    anywhere: set[str] = set()
+    inner: set[str] = set()
+    for m in re.finditer(r"[A-Za-z][A-Za-z']*", text or ""):
+        w = m.group(0)
+        if not w[0].isupper():
+            continue
+        anywhere.add(w.lower())
+        before = text[:m.start()].rstrip()
+        if before and before[-1] not in ".!?":
+            inner.add(w.lower())
+    return anywhere, inner
+
+
+def _believable(span: dict, tokens: list[str], cased: bool, caps: tuple[set[str], set[str]]) -> bool:
+    """Is this 'street' a street? Not when it sits inside a spelled-out plate,
+    and - when the transcript has capitals at all - not unless it was written
+    as a name ("It About One Pl" came from "cut it about one place")."""
+    near = tokens[max(0, span["start"] - 5):span["start"]] + tokens[span["end"] + 1:span["end"] + 5]
+    if sum(1 for w in near if w.strip(".,'") in _PHONETIC) >= 2:
+        return False
+    if span["name"].startswith("Route") or not cased:
+        return True
+    anywhere, inner = caps
+    name = span["key"].split()[:-1]
+    suffix = tokens[span["end"]].rstrip(".")
+    return bool(name) and all(w in anywhere for w in name) and \
+        (any(w in inner for w in name) or suffix in inner)
+
+
 def extract_address(text: str) -> tuple[str, str]:
     """(address as written, street key for merging). A house number and a
     street first, then an intersection, then a route with its direction, then
     a street on its own. ('', '') when the transmission names no place."""
     t = normalise(text)
     tokens = re.findall(r"[a-z0-9][a-z0-9'.]*|&", t)
-    spans = _street_spans(tokens)
+    cased = any(c.isupper() for c in text or "") and any(c.islower() for c in text or "")
+    caps = _capitals(text)
+    spans = [s for s in _street_spans(tokens) if _believable(s, tokens, cased, caps)]
     # a house number: digits right before the street, not a unit's number
     for s in spans:
         k = s["start"] - 1

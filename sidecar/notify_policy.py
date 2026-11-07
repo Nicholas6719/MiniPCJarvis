@@ -28,10 +28,11 @@ from config import config
 
 URGENT = "urgent"
 
-# kinds that never sound, whatever their tier
-QUIET_KINDS = frozenset({"brief", "market", "memory", "nudge", "held", "render"})
+# kinds that never sound, whatever their tier. "scanner_fyi" is the scanner's
+# quiet feed: a crash or a reported fire in his radius, there when he looks.
+QUIET_KINDS = frozenset({"brief", "market", "memory", "nudge", "held", "render", "scanner_fyi"})
 # ...and that never cut into what he is doing at the PC either
-NO_INTERRUPT = frozenset({"brief", "market", "memory", "nudge"})
+NO_INTERRUPT = frozenset({"brief", "market", "memory", "nudge", "scanner_fyi"})
 # kinds that sound at any tier: he asked for them, at a time he chose
 HIS_OWN = frozenset({"reminder", "watch"})
 DEFAULT_DAILY_SOUNDS = 5
@@ -61,6 +62,10 @@ def kind_of(subject: str = "", key: str = "") -> str:
         return "held"
     if k.startswith("render-done:"):
         return "render"
+    if s.startswith("scanner-fyi") or k.startswith("scanner-fyi:"):
+        return "scanner_fyi"
+    if s.startswith("scanner:") or k.startswith("scanner:"):
+        return "scanner"
     return s or "other"
 
 

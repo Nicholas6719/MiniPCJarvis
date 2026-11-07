@@ -347,12 +347,17 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     natick, waltham = geo.town("Natick").miles, geo.town("Waltham").miles
     near_natick = URGENT if natick <= 5.0 else ALERT
 
-    def inc(town, types, roads=(), burst=0, status="active", channel="X"):
+    CLEAR = [{"ts": time.time(), "text": "(clear words)", "conf": 0.9}]
+
+    def inc(town, types, roads=(), burst=0, status="active", channel="X", said=None):
         t = geo.town(town) if town else None
         top = max(types, key=lambda k: R.KINDS[k].severity) if types else ""
         return {"town": town, "miles": round(t.miles, 1) if t else None, "types": list(types),
                 "label": R.describe(list(types)) or "unusual activity", "roads": list(roads), "burst": burst,
-                "status": status, "channel": channel, "family": R.KINDS[top].family if top else "fire"}
+                "status": status, "channel": channel, "family": R.KINDS[top].family if top else "fire",
+                "said": CLEAR if said is None else said}
+    shaky1 = [{"ts": time.time(), "text": "(noisy)", "conf": 0.4}]
+    shaky2 = shaky1 + [{"ts": time.time(), "text": "(noisy again)", "conf": 0.45}]
     table = [
         ("a working fire in Framingham", inc("Framingham", ["working_fire"]), URGENT),
         ("a working fire in Natick", inc("Natick", ["working_fire"]), near_natick),
@@ -363,19 +368,33 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         ("an entrapment crash in Hudson", inc("Hudson", ["entrapment"]), ALERT),
         ("a crash closing the road in Natick", inc("Natick", ["mva", "road_closure"]), near_natick),
         ("a plain crash on Route 9 in Wellesley", inc("Wellesley", ["mva"], ["Route 9"]), ALERT),
-        ("a plain crash on Elm Street in Natick", inc("Natick", ["mva"]), None),
-        ("a gas leak in Framingham", inc("Framingham", ["gas_leak"]), None),
-        ("a stabbing in Waltham", inc("Waltham", ["stabbing"]), None),
-        ("a fire alarm in Framingham", inc("Framingham", ["alarm"]), None),
+        # THE QUIET FEED: real calls in his radius that do not interrupt
+        ("a plain crash on Elm Street in Natick", inc("Natick", ["mva"]), SD.FYI),
+        ("a crash in Sudbury, ambulance sent", inc("Sudbury", ["mva"]), SD.FYI),
+        ("a gas leak in Framingham", inc("Framingham", ["gas_leak"]), SD.FYI),
+        ("a stabbing in Waltham", inc("Waltham", ["stabbing"]), SD.FYI),
+        ("a reported structure fire in Wayland", inc("Wayland", ["structure_fire"]), SD.FYI),
+        ("a fire alarm in Framingham, his own town", inc("Framingham", ["alarm"]), SD.FYI),
+        ("a fire alarm in Natick: routine elsewhere", inc("Natick", ["alarm"]), None),
+        ("a disturbance in Natick: routine elsewhere", inc("Natick", ["disturbance"]), None),
+        ("a crash heard once, unclearly", inc("Sudbury", ["mva"], said=shaky1), None),
+        ("...heard twice, it is believed", inc("Sudbury", ["mva"], said=shaky2), SD.FYI),
+        ("...or once, unclearly, with a second transmission agreeing",
+         inc("Wayland", ["structure_fire"], said=[dict(shaky1[0], agreed=True)]), SD.FYI),
         ("a burst on Ashland FD", inc("Ashland", [], burst=1, channel="Ashland FD"),
-         ALERT if geo.town("Ashland").miles <= 5 else None),
-        ("a burst on Hudson FD", inc("Hudson", [], burst=1, channel="Hudson FD"), None),
+         ALERT if geo.town("Ashland").miles <= 5 else SD.FYI),
+        ("a burst on Hudson FD, beyond five miles", inc("Hudson", [], burst=1, channel="Hudson FD"), SD.FYI),
         ("a working fire that is over", inc("Framingham", ["working_fire"], status="over"), None),
+        ("a crash that is over", inc("Natick", ["mva"], status="over"), None),
         ("a channel with no town", inc("", ["working_fire"]), None),
     ]
     for name, i, want in table:
         got, why = desk.decide(i)
         check(f"{name} -> {want or 'stored'}", got == want, f"got {got}: {why}")
+    got, why = desk.decide(inc("Natick", ["mva"]))
+    check("...and says why it is told", "a crash" in why and "Natick" in why, why)
+    got, why = desk.decide(inc("Natick", ["alarm"]))
+    check("...and why it is not", "routine" in why, why)
     quiet[0] = True
     got, _ = desk.decide(inc("Framingham", ["working_fire"]))
     check("quiet hours: an URGENT in his own town still reaches him", got == URGENT)
@@ -383,7 +402,25 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("quiet hours: an URGENT one town over waits", got is None and "quiet" in why, why)
     got, why = desk.decide(inc("Wellesley", ["mva"], ["Route 9"]))
     check("quiet hours: an ALERT waits", got is None and "quiet" in why, why)
+    got, why = desk.decide(inc("Natick", ["mva"]))
+    check("quiet hours: the quiet feed waits too (no pile of crashes at dawn)", got is None and "quiet" in why, why)
     quiet[0] = False
+    config.data.setdefault("scanner", {})["fyi"] = False
+    got, why = desk.decide(inc("Natick", ["mva"]))
+    check("the quiet feed can be switched off (scanner.fyi)", got is None and "stored" in why, why)
+    got, why = desk.decide(inc("Hudson", [], burst=1, channel="Hudson FD"))
+    check("...bursts beyond five miles included", got is None, why)
+    config.data["scanner"].pop("fyi", None)
+
+    print("\n-- the quiet feed is silent and never cuts in --")
+    import notify_policy as NP
+    k = NP.kind_of("scanner-fyi: a crash - Sudbury", "scanner-fyi:7")
+    check("its kind is scanner_fyi", k == "scanner_fyi", k)
+    check("...which never sounds, even sent as an ALERT", NP.audible(ALERT, k) is False)
+    check("...and never interrupts him at the PC", NP.interrupts(ALERT, k) is False)
+    k2 = NP.kind_of("scanner: a working fire - Natick", "scanner:8")
+    check("a real scanner ALERT still interrupts, silently on the phone; an URGENT sounds",
+          k2 == "scanner" and NP.interrupts(ALERT, k2) and not NP.audible(ALERT, k2) and NP.audible(URGENT, k2), k2)
 
     print("\n-- what he hears and reads --")
     i = inc("Framingham", ["smoke_showing", "structure_fire"])
@@ -500,10 +537,22 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           fire and fire["town"] == "Framingham" and fire["address"] == "45 Union Ave"
           and fire["units"] == ["Engine 3", "Ladder 1"] and fire["miles"] is not None, fire)
     gas = S.incident(S.hit(h4)["incident_id"] or 0)
-    check("the gas leak was stored, not sent", gas and gas["tier"] == "" and "stored" in gas["decided"], gas)
+    loud = lambda: [c for c in calls["deliver"] if c["key"].startswith("scanner:")]
+    quiet_feed = lambda: [c for c in calls["deliver"] if c["key"].startswith("scanner-fyi:")]
+    check("the gas leak went to the quiet feed, not as an alert",
+          gas and gas["tier"] == SD.FYI and "gas leak" in gas["decided"], gas)
+    g = [c for c in quiet_feed() if c["key"] == f"scanner-fyi:{gas['id'] if gas else 0}"]
+    check("...once, through delivery's ALERT route under its own key",
+          len(g) == 1 and g[0]["tier"] == ALERT, quiet_feed())
+    check("...said in plain words with the street and the distance",
+          g and g[0]["text"].startswith("From the scanner: a gas leak at 300 Boston Post Road in Sudbury")
+          and "mile" in g[0]["text"], g[:1])
+    check("...and written for the phone: town and distance, no tier shouting, the words he can judge",
+          g and g[0]["written"].startswith("SCANNER - Sudbury (") and "URGENT" not in g[0]["written"]
+          and "odor of gas" in g[0]["written"], g[:1])
     check("one URGENT went out, keyed to the incident",
-          len(calls["deliver"]) == 1 and calls["deliver"][0]["tier"] == URGENT
-          and calls["deliver"][0]["key"] == f"scanner:{fire['id']}", calls["deliver"])
+          len(loud()) == 1 and loud()[0]["tier"] == URGENT
+          and loud()[0]["key"] == f"scanner:{fire['id']}", calls["deliver"])
     check("the model was asked without waiting for a quiet moment (URGENT)", calls["summ"] == [True], calls["summ"])
     check("he was away, so the transmission itself went to his phone",
           len(calls["clip"]) == 1 and calls["clip"][0][1], calls["clip"])
@@ -522,8 +571,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("...recorded as an escalation", fire2["escalations"] == ["it has gone to a second alarm"],
           fire2["escalations"])
     check("...and said to him as an update, same key",
-          len(calls["deliver"]) == 2 and "second alarm" in calls["deliver"][1]["text"]
-          and calls["deliver"][1]["key"] == f"scanner:{fire['id']}", calls["deliver"][-1:])
+          len(loud()) == 2 and "second alarm" in loud()[1]["text"]
+          and loud()[1]["key"] == f"scanner:{fire['id']}", loud()[-1:])
     h7 = plant(7, "Framnghm FD", "Fire is knocked down, units can clear.", 3.07, ago=1)
     await desk.tick()
     while desk._queue:
@@ -531,7 +580,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     await desk.settle()
     check("the stand-down closed it", S.incident(fire["id"])["status"] == "over"
           and S.hit(h7)["incident_id"] == fire["id"])
-    check("...and nothing more was sent", len(calls["deliver"]) == 2, len(calls["deliver"]))
+    check("...and nothing more was sent", len(loud()) == 2 and len(quiet_feed()) == 1, calls["deliver"])
     check("a different street in the same town is a different incident",
           S.incident(S.hit(h4)["incident_id"])["id"] != fire["id"])
 
@@ -614,13 +663,17 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           and "normal for this hour" in (bursts.get("Ashland FD") or {}).get("summary", ""),
           (bursts.get("Ashland FD") or {}).get("summary"))
     check("Wayland FD at its usual busy rate is not", "Wayland FD" not in bursts, sorted(bursts))
-    check("Hudson FD's burst is stored, not sent (not near him)",
-          "Hudson FD" in bursts and bursts["Hudson FD"]["tier"] == "", bursts.get("Hudson FD"))
+    check("Hudson FD's burst (beyond five miles) goes to the quiet feed, not as an alert",
+          "Hudson FD" in bursts and bursts["Hudson FD"]["tier"] == SD.FYI, bursts.get("Hudson FD"))
     ashland_near = geo.town("Ashland").miles <= 5.0
-    new = calls["deliver"][sent_before:]
-    check("a burst near him reaches him as an ALERT" if ashland_near else "a burst beyond five miles is stored",
+    new = [c for c in calls["deliver"][sent_before:] if c["key"].startswith("scanner:")]
+    newq = [c for c in calls["deliver"][sent_before:] if c["key"].startswith("scanner-fyi:")]
+    check("a burst near him reaches him as an ALERT" if ashland_near else "no burst beyond five miles is an alert",
           (len(new) == 1 and new[0]["tier"] == ALERT and "unusually busy" in new[0]["text"]) if ashland_near
           else not new, new)
+    check("...and Hudson's is one quiet line that says it can't make out the words",
+          len(newq) == (1 if ashland_near else 2) and "Hudson Fire is unusually busy" in " ".join(c["text"] for c in newq)
+          and "can't make out the words" in newq[-1]["text"], newq)
 
     print("\n-- small calls never swallow big signals --")
 
@@ -697,6 +750,51 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     clear = await desk.on_text(sure, "Engine 2 respond to 40 Main Street for a structure fire.", 0.9, annotate=False)
     await desk.settle()
     check("a clear transcript is believed on its own", bool(clear), clear)
+
+    print("\n-- what the first live afternoon taught it (2026-11-07) --")
+    # Four hours, ~400 transmissions, two crashes and a reported fire built -
+    # and not one line reached him. Every real call now gets a quiet one.
+    check("the agreed shaky 'structure fire' in Wayland went to the quiet feed",
+          second and S.incident(second)["tier"] == SD.FYI, second and S.incident(second))
+    check("...and so did the clear one in Hudson", clear and S.incident(clear)["tier"] == SD.FYI,
+          clear and S.incident(clear))
+    said_rows = (S.incident(clear) or {}).get("said") or [{}]
+    check("an incident keeps how clearly each transmission was heard", said_rows[-1].get("conf") == 0.9, said_rows)
+    # "Master 3, Fox drive, Charlie, Romeo 213" was a licence plate in the
+    # phonetic alphabet; "cut it about one place" was not a street.
+    for text, want in (
+            ("Where'd you think? This is gonna be a hit and run. Master 3, Fox drive, Charlie, Romeo 213, SCR21.", ""),
+            ("Everybody dispatch it in two car three ambulance one. Why do you cut it about one place?", ""),
+            ("Engine 2 respond to 14 Elm Street, Natick, for a fire alarm activation.", "14 Elm St"),
+            ("engine 2 respond to 14 elm street for a fire alarm", "14 Elm St"),
+            ("Hemenway Road, Engine 5 and Forestry 2 respond for a brush fire.", "Hemenway Rd"),
+            ("Missing elderly male walked away from 40 Lincoln Street.", "40 Lincoln St"),
+            ("Plate is Lincoln David 4 Main Street Adam Boy.", "")):
+        got = R.extract_address(text)[0]
+        check(f"address in {text[:52]!r} -> {want or 'none'}", got == want, got)
+    # an incident named by an older reading is re-read by today's rules
+    wl = {"id": BASE + 45, "ts": now - 900, "end_ts": now - 898, "duration": 3, "name": "Wayland FD",
+          "town": "Wayland", "agency": "FD", "quality": None, "audio_path": ""}
+    old = S.create_incident({
+        "first_ts": now - 900, "last_ts": now - 898, "town": "Wayland", "miles": 5.3, "agency": "FD",
+        "channel": "Wayland FD", "family": "fire", "kind": "structure_fire", "label": "a reported structure fire",
+        "severity": 6, "types": ["structure_fire"], "address": "", "street": "", "roads": [], "units": [],
+        "said": [{"ts": wl["ts"], "text": "Number 22 Always for the residential fire activation. No.", "hit": wl["id"],
+                  "channel": "Wayland FD"}], "hits": 1, "status": "active"})
+    gone = S.create_incident({
+        "first_ts": now - 800, "last_ts": now - 798, "town": "Wayland", "miles": 5.3, "agency": "FD",
+        "channel": "Wayland FD", "family": "traffic", "kind": "mva", "label": "a crash",
+        "severity": 3, "types": ["mva"], "address": "", "street": "", "roads": [], "units": [],
+        "said": [{"ts": now - 800, "text": "Okay, copy that, thank you.", "hit": BASE + 46,
+                  "channel": "Wayland FD"}], "hits": 1, "status": "active"})
+    n = desk._rejudge(now - 3600)
+    o, g2 = S.incident(old), S.incident(gone)
+    check("this morning's misread 'structure fire' is re-read as the fire alarm it was",
+          o and o["types"] == ["alarm"] and o["label"] == "a fire alarm" and o["kind"] == "alarm", o)
+    check("...an incident today's rules see no call in is closed and drops out of his answers",
+          g2 and g2["types"] == [] and g2["status"] == "over", g2)
+    check("...and incidents the rules still agree with are left alone",
+          n >= 2 and S.incident(fire["id"])["types"] == fire2["types"], (n, S.incident(fire["id"])["types"]))
 
     print("\n-- the daily cap --")
     cap = int(config.get("scanner", "max_per_day", default={}).get("urgent", 4))

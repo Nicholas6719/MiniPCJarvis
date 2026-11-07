@@ -25,7 +25,9 @@ WAV. It runs headless with `--serve` on 127.0.0.1:8125. This desk:
     history for that hour;
   * interrupts him only for active danger close to him, through
     delivery.deliver with a stable key per incident, inside quiet hours and
-    a daily cap per tier, and logs every decision that reaches him with why.
+    a daily cap per tier, and logs every decision that reaches him with why;
+  * tells him every other real call in his radius quietly (FYI, below): one
+    silent line on his phone, or one sentence at the PC when he is idle.
 
 Measured on 2026-11-07: the audio reaching the PC is weak (~-35 dBFS) and
 some channels (Newton PD, Newton FD 1) are digital, which no transcriber
@@ -64,7 +66,16 @@ log = logging.getLogger("jarvis.scanner")
 RATE = 16000
 CURSOR_KEY = "scanner:cursor"
 SENT = ("spoken", "telegram")
-_RANK = {"": 0, "notable": 1, ALERT: 2, URGENT: 3}
+# THE QUIET FEED (2026-11-07, his words after four hours of nothing: "I haven't
+# gotten anything from Jarvis yet?! ... No way there hasn't been anything in
+# over an hour"). The desk heard 400 transmissions and built two crashes, two
+# fire alarms and a busy spell, and told him none of it, because only active
+# danger interrupted. A real call in his radius - a crash, a reported fire, a
+# gas leak, a break-in - now reaches him as one line: silent on his phone,
+# said at the PC only when he is idle, never cutting into what he is doing.
+FYI = "fyi"
+_RANK = {"": 0, "notable": 1, FYI: 1, ALERT: 2, URGENT: 3}
+_DAILY_CAP = {URGENT: 4, ALERT: 8, FYI: 30}
 CONSOLE_EXE_NAME = "bc125at console.exe"
 
 
@@ -470,6 +481,10 @@ class ScannerDesk:
             log.info("scanner desk: switched off in config (scanner.enabled)")
             return
         client = self._ensure_client()
+        try:
+            self._rejudge(self.now() - 86400)
+        except Exception:
+            log.warning("scanner: re-reading the day's incidents failed", exc_info=True)
         if self._worker is None:
             self._worker = spawn(self._transcribe_loop(), name="scanner-transcribe")
         log.info("scanner desk: following the console at %s", client.base_url)
@@ -838,6 +853,8 @@ class ScannerDesk:
         if conf >= rules.TRUST:
             reading = rules.read(text, row.get("town") or "")
             tags = list(reading.types) + (["resolved"] if reading.resolved else [])
+            shaky_danger = int(reading.severity or 0) >= rules.KINDS["structure_fire"].severity \
+                and conf < self.SURE
             if (reading.types and not self._corroborated(row, reading, conf)):
                 # ONE SHAKY TRANSMISSION IS NOT A FIRE. On 2026-11-07 a noisy
                 # "...for the residential fire activation" (confidence 0.41,
@@ -849,7 +866,9 @@ class ScannerDesk:
                          "until a second one agrees", reading.top, row.get("town") or "?", conf)
                 tags.append("unconfirmed")
             elif reading.types or reading.resolved:
-                iid = self._merge(row, reading, text)
+                # a shaky dangerous reading that got here had a second
+                # transmission agree with it: that is as good as a clear one
+                iid = self._merge(row, reading, text, conf, agreed=bool(reading.types) and shaky_danger)
                 if iid:
                     store.set_transcript(row["id"], text, conf, iid)
         if annotate:
@@ -880,10 +899,15 @@ class ScannerDesk:
         seen[key] = now
         return False
 
-    def _merge(self, row: dict, reading: rules.Reading, text: str) -> int | None:
+    def _merge(self, row: dict, reading: rules.Reading, text: str, conf: float | None = None,
+               agreed: bool = False) -> int | None:
         now = float(row.get("end_ts") or row["ts"])
         town = reading.towns[0] if reading.towns else (row.get("town") or "")
         said_row = {"ts": row["ts"], "text": text[:300], "hit": row["id"], "channel": row.get("name") or ""}
+        if conf is not None:
+            said_row["conf"] = round(float(conf), 2)     # the quiet feed believes clear words only
+        if agreed:
+            said_row["agreed"] = True
         match = None
         for inc in store.incidents_since(now - float(_cfg("merge_minutes", 90)) * 60, town):
             if reading.street and inc["street"]:
@@ -989,19 +1013,74 @@ class ScannerDesk:
         elif roads and types & (rules.TRAFFIC | {"road_closure"}):
             tier, why = ALERT, f"{inc.get('label')} on {', '.join(roads)}, {place}"
         elif inc.get("burst") and not types:
-            if not near:
+            if near:
+                tier, why = ALERT, f"unusual activity on {inc.get('channel')} {place}"
+            elif not _cfg("fyi", True):
                 return None, f"a burst {place} is not worth an interruption"
-            tier, why = ALERT, f"unusual activity on {inc.get('channel')} {place}"
+            else:
+                tier, why = FYI, f"a busy spell on {inc.get('channel')} {place}"
         else:
-            return None, f"{inc.get('label') or 'activity'} {place}: stored, not a kind that interrupts"
+            ok, why = self._fyi(inc, types, town == home, place)
+            if not ok:
+                return None, why
+            tier = FYI
         if self.quiet_hours() and not (tier == URGENT and town == home):
             return None, f"quiet hours ({why})"
         caps = _cfg("max_per_day", {}) or {}
-        cap = int(caps.get(tier, 4 if tier == URGENT else 8)) if isinstance(caps, dict) else 4
+        cap = int(caps.get(tier, _DAILY_CAP[tier])) if isinstance(caps, dict) else _DAILY_CAP[tier]
         used = store.sent_count(tier, now - 86400)
         if used >= cap:
             return None, f"daily {tier} cap reached ({used} of {cap}) - {why}"
         return tier, why
+
+    def _fyi(self, inc: dict, types: set, home: bool, place: str) -> tuple[bool, str]:
+        """Worth one quiet line? A real call in his radius - a crash, a
+        reported fire, a gas leak, a break-in, an overdose - heard clearly
+        enough to believe. A fire alarm or a disturbance only in his own town:
+        elsewhere they are the commonest calls on the air and almost always
+        nothing (two Natick fire alarms in a morning)."""
+        label = inc.get("label") or "activity"
+        if not _cfg("fyi", True):
+            return False, f"{label} {place}: stored, not a kind that interrupts"
+        sev = max((rules.KINDS[t].severity for t in types if t in rules.KINDS), default=0)
+        if sev < int(_cfg("fyi_min_severity", 3)) and not (home and sev >= 2):
+            return False, f"{label} {place}: stored, too routine to mention"
+        said = inc.get("said") or []
+        sure = [s for s in said if s.get("agreed") or float(s.get("conf") or 0) >= self.SURE]
+        if not sure and len(said) < 2:
+            return False, f"{label} {place}: stored, heard once and not clearly"
+        return True, f"{label} {place}"
+
+    def _rejudge(self, since: float) -> int:
+        """Read the day's incidents again with today's rules. The rules learn
+        (a "residential fire activation" is an alarm, not a structure fire) and
+        an incident named by an older reading would otherwise keep its wrong
+        name for the twelve hours he can ask about it. Only incidents whose
+        every transmission was kept whole are rebuilt. Returns how many changed."""
+        changed = 0
+        for inc in store.incidents_since(since):
+            said = inc.get("said") or []
+            if not inc.get("types") or not said or len(said) >= 6 or \
+                    any(len(s.get("text") or "") >= 300 for s in said):
+                continue                 # a burst, or more than was kept
+            types: set[str] = set()
+            for s in said:
+                types |= {t for t in rules.read(s.get("text") or "", inc.get("town") or "").types
+                          if t in rules.KINDS}
+            if types == set(inc["types"]):
+                continue
+            if not types:
+                fields = {"types": [], "status": "over", "decided": "today's rules no longer read this as a call"}
+                log.info("scanner: #%d (%s) is not a call by today's rules - closed", inc["id"], inc["label"])
+            else:
+                ordered = sorted(types, key=lambda k: -rules.KINDS[k].severity)
+                top = rules.KINDS[ordered[0]]
+                fields = {"types": ordered, "kind": top.key, "label": rules.describe(ordered),
+                          "severity": top.severity, "family": top.family}
+                log.info("scanner: #%d re-read by today's rules: %s -> %s", inc["id"], inc["label"], fields["label"])
+            if store.update_incident(inc["id"], fields):
+                changed += 1
+        return changed
 
     def _lock(self, iid: int) -> asyncio.Lock:
         if len(self._locks) > 256:
@@ -1026,7 +1105,9 @@ class ScannerDesk:
         update = bool(escalated) and want == have and bool(inc["delivered_ts"])
         if want < have or (want == have and not update):
             return                                  # already told at this level
-        if _cfg("llm_summary", True) and not (inc["burst"] and not inc["types"]):
+        # The quiet feed is said in the rules' own words: one line is not worth
+        # a model call, and it must never wait behind one.
+        if tier != FYI and _cfg("llm_summary", True) and not (inc["burst"] and not inc["types"]):
             got = await self._summarise(inc, urgent=tier == URGENT)
             if got:
                 store.update_incident(iid, {"summary": got["summary"]})
@@ -1050,8 +1131,15 @@ class ScannerDesk:
             log.error("scanner: could not record #%d before sending it - not sending", iid)
             return
         try:
-            r = await self._deliver(text, tier, key=f"scanner:{iid}",
-                                    subject=f"scanner: {inc['label']} - {inc['town']}", written=written)
+            if tier == FYI:
+                # delivery's ALERT route (now, at the PC or on his phone) with
+                # a kind notify_policy keeps silent and never interrupting,
+                # under its own key so a later real ALERT is not "a repeat"
+                r = await self._deliver(text, ALERT, key=f"scanner-fyi:{iid}",
+                                        subject=f"scanner-fyi: {inc['label']} - {inc['town']}", written=written)
+            else:
+                r = await self._deliver(text, tier, key=f"scanner:{iid}",
+                                        subject=f"scanner: {inc['label']} - {inc['town']}", written=written)
         except Exception:
             log.exception("scanner: delivery raised for #%d", iid)
             r = {"delivered": "nothing", "why": "delivery raised"}
@@ -1172,7 +1260,8 @@ class ScannerDesk:
         last = (inc.get("said") or [])[-1:] or [None]
         quote = f'"{last[0]["text"]}" ({_hm(last[0]["ts"])}, {last[0].get("channel") or inc.get("channel")})' if last[0] else ""
         dist = "home" if inc.get("town") == home_town().name else f"{float(inc.get('miles') or 0):.0f} mi"
-        head = f"SCANNER - {tier.upper()} - {inc.get('town') or '?'} ({dist})"
+        grade = "" if tier == FYI else f" - {tier.upper()}"
+        head = f"SCANNER{grade} - {inc.get('town') or '?'} ({dist})"
         body = _cap(label) + (f" - {address}" if address else "")
         if inc.get("burst") and not inc.get("types"):
             body = f"Unusual activity on {inc.get('channel')}: {inc.get('summary')}"
