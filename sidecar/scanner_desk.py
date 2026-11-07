@@ -953,11 +953,24 @@ class ScannerDesk:
                                    or (inc["burst"] and not inc["types"] and reading.family in ("fire", "ems"))):
                 if self._separate_call(inc, reading, text, now):
                     continue
+                # A police or medical channel runs several calls at once: a
+                # theft and a missing person ten minutes apart are two calls
+                # (Wellesley PD, 2026-11-07). They join only on the same kind.
+                if reading.family in ("police", "ems") and inc["types"] and \
+                        not set(reading.types) & set(inc["types"]):
+                    continue
                 match = inc
                 break
             if not reading.types and reading.resolved and inc["channel"] == row.get("name") and inc["status"] == "active":
                 match = inc
                 break
+        if match is None and reading.street:
+            # Mutual aid: "Engine 2 on scene at 88 Eliot Street" does not say
+            # Natick again - the same street on the same channel is the same call
+            for inc in store.open_on_channel(row.get("name") or "", now - float(_cfg("merge_minutes", 90)) * 60):
+                if inc.get("street") == reading.street:
+                    match = inc
+                    break
         if match is None:
             if not reading.types:
                 return None                     # a stand-down with nothing to stand down
@@ -1006,8 +1019,11 @@ class ScannerDesk:
         # has not been told at all: a shaky first report that a second one now
         # confirms is worth a line ("heard twice"), and nothing else would
         # have asked (review of 2026-11-07).
-        if esc or (reading.types and not set(reading.types) <= set(inc["types"])) or \
-                (reading.types and not inc["tier"]):
+        # Every transmission that names the call has it judged again: it may
+        # have become worse, gained a kind, or - the commonest - been CONFIRMED
+        # by this second voice, which is what lets an alert sound (judging is
+        # idempotent: nothing is sent twice at a tier).
+        if esc or reading.types:
             self._spawn_task(self._consider(inc["id"], row, esc), name=f"scanner-consider-{inc['id']}")
         self._schedule_refresh(inc["id"])       # his message for it, if he has one, grows
         return inc["id"]
@@ -1116,6 +1132,30 @@ class ScannerDesk:
             self._refreshing.discard(iid)
             self._dirty.discard(iid)
 
+    def _unconfirmed(self, inc: dict) -> bool:
+        """Only one transmission named it and nothing has backed it up (a busy
+        spell, which has no words, is never labelled so)."""
+        if inc.get("burst") and not inc.get("types"):
+            return False
+        named, confirmed, _ = self.evidence(inc)
+        return named <= 1 and not confirmed
+
+    async def _close_old(self, old_mid: int, iid: int) -> None:
+        """A newer message took over this call (it was confirmed and sent as an
+        alert): the old line says what it has become, once, silently."""
+        inc = store.incident(iid)
+        if not inc:
+            return
+        text = self.written(inc, FYI) + "\nConfirmed - the alert follows."
+        try:
+            if self.editor is not None:
+                await self.editor(old_mid, text)
+            else:
+                from remote_telegram import telegram
+                await telegram.edit_text(old_mid, text)
+        except Exception:
+            log.debug("scanner: could not close the old message for #%s", iid, exc_info=True)
+
     async def _edit(self, inc: dict) -> bool:
         text = self.written(inc, inc.get("tier") or FYI)
         if self._edited.get(inc["id"]) == text:
@@ -1189,6 +1229,18 @@ class ScannerDesk:
             if not ok:
                 return None, why
             tier = FYI
+        # NO ALERT FROM ONE TRANSMISSION (his answer, 2026-11-07: "wait for
+        # confirmation"). Every app that turned one misheard line into a loud
+        # alert sent false shootings and fires (CrimeRadar's "show me out at"
+        # -> school shooting). One transmission goes out as a silent,
+        # "Unconfirmed" line with the recording; the sound - or the spoken
+        # interruption at the PC - comes when a second transmission agrees.
+        # Busy spells are counts against days of history, not words: exempt.
+        if tier in (URGENT, ALERT) and not (inc.get("burst") and not types) and not self.evidence(inc)[2]:
+            ok, held = self._believed(inc, inc.get("label") or "activity", place)
+            if not ok:
+                return None, held
+            tier, why = FYI, f"{why} - unconfirmed, one transmission: silent until a second agrees"
         if self.quiet_hours() and not (tier == URGENT and town == home):
             # HIS NIGHT (his answer, 2026-11-07: "send silently plus in morning
             # summary"): everything still goes, silently - the quiet feed is
@@ -1206,6 +1258,19 @@ class ScannerDesk:
             return None, f"daily {tier} cap reached ({used} of {cap}) - {why}"
         return tier, why
 
+    @staticmethod
+    def evidence(inc: dict) -> tuple[int, bool, bool]:
+        """(transmissions that named the call, confirmed, confirmed enough to
+        sound). Confirmed enough to sound: two transmissions named it, or a
+        shaky one had a second agree. Confirmed (the "Unconfirmed" label goes):
+        that, or a follow-up on its channel stated something concrete
+        ("Engine 1 on scene", "two patients, transporting")."""
+        said = inc.get("said") or []
+        named = [s for s in said if not s.get("context")]
+        loud = len(named) >= 2 or any(s.get("agreed") for s in named)
+        backed = any(s.get("context") and rules.anchored(s.get("text") or "") for s in said)
+        return len(named), loud or backed, loud
+
     def _fyi(self, inc: dict, types: set, home: bool, place: str) -> tuple[bool, str]:
         """Worth one quiet line? A real call in his radius - a crash, a
         reported fire, a gas leak, a break-in, an overdose - heard clearly
@@ -1218,6 +1283,11 @@ class ScannerDesk:
         sev = max((rules.KINDS[t].severity for t in types if t in rules.KINDS), default=0)
         if sev < int(_cfg("fyi_min_severity", 3)) and not (home and sev >= 2):
             return False, f"{label} {place}: stored, too routine to mention"
+        return self._believed(inc, label, place)
+
+    def _believed(self, inc: dict, label: str, place: str) -> tuple[bool, str]:
+        """Was the call heard well enough to tell him even quietly? Used for the
+        quiet feed and for an unconfirmed danger line alike."""
         # only the transmissions that named the call count: a follow-up line
         # ("on scene") says nothing about whether the call was heard right
         said = [s for s in (inc.get("said") or []) if not s.get("context")]
@@ -1379,8 +1449,12 @@ class ScannerDesk:
         msg_id = r.get("message_id") if outcome == "telegram" else None
         if msg_id:
             # the newest message for this call is the one the follow-ups edit
+            old_mid = int(inc.get("msg_id") or 0)
             store.update_incident(iid, {"msg_id": int(msg_id), "edited_ts": now})
             self._edited[iid] = written
+            if old_mid and old_mid != int(msg_id):
+                # the quiet "Unconfirmed" line before it must not go on saying so
+                self._spawn_task(self._close_old(old_mid, iid), name=f"scanner-close-{iid}")
             # anything heard while the send was in flight found no message to
             # edit; the identical-text check makes this free when nothing came
             self._schedule_refresh(iid)
@@ -1477,7 +1551,9 @@ class ScannerDesk:
         where = self._where(inc)
         label = inc.get("label") or "activity"
         lab = rules.parse_label(inc.get("channel") or "")
-        lead = "Scanner, sir: " if tier == URGENT else "From the scanner: "
+        unconfirmed = self._unconfirmed(inc)
+        lead = "Scanner, sir: " if tier == URGENT else \
+            ("From the scanner, unconfirmed: " if unconfirmed else "From the scanner: ")
         town = inc.get("town") or ""
         if inc.get("burst") and not inc.get("types"):
             spoken = f"{lab.spoken} is unusually busy, sir: {inc.get('summary') or 'far more traffic than usual'}. " \
@@ -1533,7 +1609,9 @@ class ScannerDesk:
             # injuries reported" and "responders are on scene", neither of
             # which anyone said. What he reads is only what was heard: the
             # facts the rules found word for word, and the words themselves.
-            lines.append(_cap(inc.get("label") or "activity") + (f" - {address}" if address else ""))
+            what = (inc.get("label") or "activity") + (f" - {address}" if address else "")
+            # one transmission is evidence, not a conclusion: said so, plainly
+            lines.append(f"Unconfirmed: {what} (one transmission so far)" if self._unconfirmed(inc) else _cap(what))
         roads = [r for r in (inc.get("roads") or []) if r not in address]
         if address or roads:
             lines.append("Where: " + ", ".join(x for x in [address] + roads if x))

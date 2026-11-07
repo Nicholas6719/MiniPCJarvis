@@ -93,6 +93,10 @@ KINDS: dict[str, Kind] = {k.key: k for k in (
     Kind("stabbing", "a stabbing", "police", 7, False),
     Kind("robbery", "a robbery", "police", 6, False),
     Kind("missing_person", "a missing person", "police", 5, False),
+    # A description being read out (clothing, "on foot", "last seen"): someone
+    # is being looked for - a missing person or a suspect. Wayland PD,
+    # 2026-11-07: a 72-year-old woman who left MetroWest on foot, black hoodie.
+    Kind("lookout", "police looking for someone", "police", 4, False),
     Kind("break_in", "a break-in", "police", 4, False),
     # His police calls (2026-11-07, his answer: "Medical calls, Police calls"):
     # each reaches him quietly from anywhere in his radius (severity 3).
@@ -182,7 +186,15 @@ PATTERNS: dict[str, re.Pattern] = {
     "robbery": _P(r"\b(?:robbery|robbed|hold ?up|carjack(?:ed|ing)?|bank alarm)\b"),
     "missing_person": _P(r"\bmissing (?:person|party|elderly|adult|man|woman|male|female|resident|patient|hiker)\b"
                          r"|\b(?:wandered off|walked away from)\b|\bsilver alert\b"
-                         r"|\bendangered (?:adult|elderly|person)\b"),
+                         r"|\bendangered (?:adult|elderly|person)\b"
+                         r"|\b(?:eloped|elopement)\b"
+                         r"|\bleft (?:the )?(?:hospital|facility|nursing home|group home|rehab) (?:on foot|against)"
+                         r"|\bsection 12\b|\bat[- ]risk (?:adult|elder|person|female|male|woman|man)\b"),
+    "lookout": _P(r"\b(?:be on the lookout|bolo|last seen (?:wearing|in|heading|walking|on|at)"
+                  r"|last known (?:location|direction)|(?:fled|left|walking|last seen|took off) on foot)\b"
+                  r"|\bwearing (?:a |an )?(?:black|white|gray|grey|red|blue|green|dark|light|yellow|orange|brown"
+                  r"|pink|purple|tan|navy)(?: and \w+)? (?:hoodie|hooded sweatshirt|sweatshirt|jacket|coat|shirt"
+                  r"|t-shirt|hat|beanie|pants|jeans|shorts|dress|vest)\b"),
     "break_in": _P(r"\b(?:b ?(?:and|&|n) ?e|breaking and entering|break[- ]?in|burglary|burglar alarm"
                    r"|house break|forced entry|broke into|breaking into)\b"),
     "disturbance": _P(r"\b(?:disturbance|fight|fighting|domestic|assault(?:ed)?|altercation|disorderly"
@@ -594,7 +606,19 @@ _DETAILS: tuple[tuple[re.Pattern, str], ...] = tuple((re.compile(p, re.I), d) fo
     (r"\bmutual aid\b", "mutual aid"),
     (r"\bpolice (?:requested|needed|to respond)\b|\brequest(?:ing)? (?:pd|police)\b", "police requested"),
 ))
-_TRANSPORT = re.compile(r"\btransport(?:ing|ed)?\b", re.I)
+# "they would like her transport it back" is a wish, not a transport: only
+# the words for one happening count
+_TRANSPORT = re.compile(r"\b(?:transporting|transported|being transported|transport to)\b", re.I)
+# A clause about the past is history, not this call ("this party was
+# transported there last night", Wayland PD 2026-11-07)
+_PAST = re.compile(r"\b(?:last night|yesterday|last week|the other day|earlier today|previously|prior to)\b")
+# Who is being described - for a lookout, a missing person, a patient
+_AGE = re.compile(r"\b(\d{1,3})[- ](?:year|yr)s?[- ]old (male|female|man|woman|boy|girl)\b")
+_CLOTHES = re.compile(r"\bwearing (?:a |an )?((?:black|white|gray|grey|red|blue|green|dark|light|yellow|orange|brown"
+                      r"|pink|purple|tan|navy)(?: and [a-z]+)? (?:hoodie|hooded sweatshirt|sweatshirt|jacket|coat"
+                      r"|shirt|t-shirt|hat|beanie|pants|jeans|shorts|dress|vest))\b")
+_HAIR = re.compile(r"\b((?:short |long )?(?:blonde?|brown|black|red|gray|grey|white|dark|light)(?: short| long)? hair)\b")
+_ON_FOOT = re.compile(r"\bon foot\b")
 # facts that are themselves a denial: never "negated" by their own "no"
 _DENIALS = frozenset({"no injuries", "non-life-threatening injuries", "nothing showing", "no report wanted"})
 # a negation just after the words undoes these ("CPR not in progress")
@@ -623,6 +647,8 @@ def _denied(t: str, m: re.Match, fact: str) -> bool:
     words = re.findall(r"[a-z']+", before)
     if fact not in _DENIALS and any(_NEGATOR.match(w) for w in words[-3:]):
         return True                                  # "no serious injuries", "not on scene yet"
+    if _PAST.search(before) or _PAST.search(after):
+        return True                                  # "transported there last night"
     if fact in _DENIED_AFTER and any(_NEGATOR.match(w) for w in re.findall(r"[a-z']+", after)[:2]):
         return True                                  # "CPR not in progress", "transport not needed"
     if ("{n}" in fact or fact.endswith("vehicle")) and words and words[-1] in _UNIT_WORDS:
@@ -659,7 +685,20 @@ def details(text: str) -> list[str]:
         moving = any(not _denied(t, m, "transport") for m in _TRANSPORT.finditer(t))
         if moving or (place and re.search(r"\b(?:en route|headed|going|taking (?:him|her|them|the patient))\s+to\b", t)):
             out.append(f"transported to {place}" if place else "a patient transported")
-    return out[:8]
+    # who is being described (a lookout, a missing person, a patient): the
+    # first age, clothing and hair said, as said
+    m = _AGE.search(t)
+    if m:
+        out.append(f"{m.group(1)}-year-old {m.group(2)}")
+    m = _CLOTHES.search(t)
+    if m:
+        out.append(f"wearing a {m.group(1)}")
+    m = _HAIR.search(t)
+    if m:
+        out.append(m.group(1))
+    if _ON_FOOT.search(t) and not any(_denied(t, x, "on foot") for x in _ON_FOOT.finditer(t)):
+        out.append("on foot")
+    return out[:10]
 
 
 # ---------------------------------------------------------------- reading one transmission
@@ -708,7 +747,8 @@ TRUST = 0.35      # below this a transcript is kept but never starts or changes 
 # Words that frame a transmission as a call being run: someone is sent, a
 # caller reported, a unit is on its way or there.
 _DISPATCH = re.compile(r"\b(?:respond(?:s|ed|ing)?|response|dispatch(?:ed|ing)?|reports? of|reported|reporting|"
-                       r"caller|rp|wants? to report|en ?route|on (?:scene|location)|requesting|request(?:ed)?|"
+                       r"caller|rp|who'?s calling|calling (?:in|from|about)|called in|complaining of|"
+                       r"wants? to report|en ?route|on (?:scene|location)|requesting|request(?:ed)?|"
                        r"box alarm|still alarm|mutual aid|units? (?:respond|to)|call for|calling for)\b", re.I)
 
 
@@ -821,7 +861,14 @@ def _other_towns(text: str, t: str, channel_town: str) -> list[str]:
         spots = list(place.finditer(t))
         if not spots:
             continue
-        if aid or any(re.search(r"\b(?:in|into|to|of)\s+$", t[:m.start()]) for m in spots):
+        # WHERE it is, not where someone goes: "in Natick", "into Natick",
+        # "the town of Natick", or sent "to Natick" by a dispatch verb. A town
+        # named as a destination ("transport her back to Framingham", Wayland
+        # PD 2026-11-07) or a source ("from Framingham") does not move a call.
+        if aid or any(re.search(r"\b(?:in|into|(?:town|city) of)\s+$", t[:m.start()]) or
+                      re.search(r"\b(?:respond(?:ing)?|send(?:ing)?|sent|dispatch(?:ed|ing)?|request(?:ed|ing)?|"
+                                r"assist(?:ing)?)\b(?:\s+[a-z0-9']+){0,4}\s+to\s+$", t[:m.start()])
+                      for m in spots):
             out.append(name)
     return out
 

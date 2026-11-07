@@ -349,7 +349,11 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     natick, waltham = geo.town("Natick").miles, geo.town("Waltham").miles
     near_natick = URGENT if natick <= 5.0 else ALERT
 
-    CLEAR = [{"ts": time.time(), "text": "Engine 1 respond for the call.", "conf": 0.9}]
+    # two transmissions that name the call: confirmed (his answer, 2026-11-07:
+    # nothing sounds or interrupts on one transmission)
+    CLEAR = [{"ts": time.time(), "text": "Engine 1 respond for the call.", "conf": 0.9},
+             {"ts": time.time(), "text": "Engine 1 on scene, confirming.", "conf": 0.85}]
+    ONCE = CLEAR[:1]
 
     def inc(town, types, roads=(), burst=0, status="active", channel="X", said=None):
         t = geo.town(town) if town else None
@@ -406,6 +410,18 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         ("a burst on Ashland FD", inc("Ashland", [], burst=1, channel="Ashland FD"),
          ALERT if geo.town("Ashland").miles <= 5 else SD.FYI),
         ("a burst on Hudson FD, beyond five miles", inc("Hudson", [], burst=1, channel="Hudson FD"), SD.FYI),
+        # ONE TRANSMISSION NEVER SOUNDS OR INTERRUPTS (his answer, 2026-11-07)
+        ("a working fire in Framingham heard ONCE -> a silent unconfirmed line",
+         inc("Framingham", ["working_fire"], said=ONCE), SD.FYI),
+        ("shots fired in Framingham heard ONCE -> a silent unconfirmed line",
+         inc("Framingham", ["shots_fired"], said=ONCE), SD.FYI),
+        ("an entrapment crash in Hudson heard ONCE -> a silent unconfirmed line",
+         inc("Hudson", ["entrapment"], said=ONCE), SD.FYI),
+        ("a crash on Route 9 heard ONCE -> a silent unconfirmed line",
+         inc("Wellesley", ["mva"], ["Route 9"], said=ONCE), SD.FYI),
+        ("...and a one-line 'working fire' with nothing concrete in it is not sent at all",
+         inc("Natick", ["working_fire"], said=[{"ts": time.time(), "conf": 0.8,
+                                                "text": "I need a working fire. Why a working fire?"}]), None),
         ("a working fire that is over", inc("Framingham", ["working_fire"], status="over"), None),
         ("a crash that is over", inc("Natick", ["mva"], status="over"), None),
         ("a channel with no town", inc("", ["working_fire"]), None),
@@ -480,7 +496,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           and "Known: 2 vehicles; minor injuries; units on scene" in written and "Heard on Sudbury FD:" in written
           and written.count('  "') == 2 and "4 transmissions - latest" in written, written)
     i2 = inc("Natick", ["entrapment"], ["Route 9"])
-    i2.update(address="Route 9 eastbound at Speen St", channel="Natick FD", said=[], summary="")
+    i2.update(address="Route 9 eastbound at Speen St", channel="Natick FD", said=list(CLEAR), summary="")
     spoken, _ = desk.compose(i2, ALERT)
     check("ALERT says how far, and a road is 'on'",
           spoken.startswith("From the scanner: a crash with entrapment on Route 9 eastbound at "
@@ -600,17 +616,19 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     g = [c for c in quiet_feed() if c["key"] == f"scanner-fyi:{gas['id'] if gas else 0}"]
     check("...once, through delivery's ALERT route under its own key",
           len(g) == 1 and g[0]["tier"] == ALERT, quiet_feed())
-    check("...said in plain words with the street and the distance",
-          g and g[0]["text"].startswith("From the scanner: a gas leak at 300 Boston Post Road in Sudbury")
-          and "mile" in g[0]["text"], g[:1])
+    check("...said in plain words with the street and the distance - and as unconfirmed, being one transmission",
+          g and g[0]["text"].startswith("From the scanner, unconfirmed: a gas leak at 300 Boston Post Road in Sudbury")
+          and "mile" in g[0]["text"] and "Unconfirmed: a gas leak" in g[0]["written"], g[:1])
     check("...and written for the phone: town and distance, no tier shouting, the words he can judge",
           g and g[0]["written"].startswith("SCANNER - Sudbury (") and "URGENT" not in g[0]["written"]
           and "odor of gas" in g[0]["written"], g[:1])
-    check("one URGENT went out, keyed to the incident",
-          len(loud()) == 1 and loud()[0]["tier"] == URGENT
-          and loud()[0]["key"] == f"scanner:{fire['id']}", calls["deliver"])
-    check("the model was asked without waiting for a quiet moment (URGENT), and never for the quiet line "
-          "(it invents details from weak audio)", calls["summ"] == [True], calls["summ"])
+    fire_line = [c for c in quiet_feed() if c["key"] == f"scanner-fyi:{fire['id']}"]
+    check("the fire, heard ONCE, went out as a silent 'Unconfirmed' line - nothing sounded",
+          not loud() and len(fire_line) == 1 and fire_line[0]["text"].startswith("From the scanner, unconfirmed:")
+          and "Unconfirmed: a structure fire with smoke showing - 45 Union Ave" in fire_line[0]["written"]
+          and S.incident(fire["id"])["tier"] == SD.FYI, (calls["deliver"], S.incident(fire["id"])["tier"]))
+    check("...and the model was not asked (nothing loud yet; it invents details from weak audio)",
+          calls["summ"] == [], calls["summ"])
     clip_of = lambda words: [c for c in calls["clip"] if words in c[2]]
     check("he was away, so the transmission itself went to his phone",
           len(clip_of("smoke showing")) == 1 and clip_of("smoke showing")[0][1], calls["clip"])
@@ -633,9 +651,18 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           and fire2["hits"] == 2 and "multiple_alarm" in fire2["types"], fire2)
     check("...recorded as an escalation", fire2["escalations"] == ["it has gone to a second alarm"],
           fire2["escalations"])
-    check("...and said to him as an update, same key",
-          len(loud()) == 2 and "second alarm" in loud()[1]["text"]
-          and loud()[1]["key"] == f"scanner:{fire['id']}", loud()[-1:])
+    check("a SECOND transmission confirms it: now the URGENT goes, keyed to the incident",
+          len(loud()) == 1 and loud()[0]["tier"] == URGENT and loud()[0]["key"] == f"scanner:{fire['id']}"
+          and loud()[0]["text"].startswith("Scanner, sir: a multiple-alarm fire at 45 Union Avenue")
+          and "Unconfirmed" not in loud()[0]["written"], loud())
+    check("...the model asked without waiting for a quiet moment (URGENT)", calls["summ"] == [True], calls["summ"])
+    first_mid = fire_line[0] and 7000 + calls["deliver"].index(fire_line[0]) + 1
+    closed = [e for e in calls["edit"] if e[0] == first_mid]
+    check("...and the earlier 'Unconfirmed' line is closed: it says the alert follows",
+          closed and "Confirmed - the alert follows." in closed[-1][1] and "Unconfirmed" not in closed[-1][1],
+          closed[-1:])
+    check("...and the recording of the confirming transmission went with the alert",
+          len(clip_of("multiple-alarm")) == 1, calls["clip"])
     h7 = plant(7, "Framnghm FD", "Fire is knocked down, units can clear.", 3.07, ago=1)
     await desk.tick()
     while desk._queue:
@@ -644,7 +671,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("the stand-down closed it", S.incident(fire["id"])["status"] == "over"
           and S.hit(h7)["incident_id"] == fire["id"])
     gas_lines = lambda: [c for c in quiet_feed() if c["key"] == f"scanner-fyi:{gas['id']}"]
-    check("...and nothing more was sent", len(loud()) == 2 and len(gas_lines()) == 1, calls["deliver"])
+    check("...and nothing more was sent", len(loud()) == 1 and len(gas_lines()) == 1, calls["deliver"])
     check("a different street in the same town is a different incident",
           S.incident(S.hit(h4)["incident_id"])["id"] != fire["id"])
 
@@ -687,7 +714,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     got = await desk.on_text(row, "Two patients, both refusing, units can stay.", 0.9, annotate=False)
     check("...a stated fact joins the one open call there" if wpd else "...(no open Waltham PD call to join)",
           (got == wpd["id"]) if wpd else got is None, (got, wpd and wpd["id"]))
-    check("the send was recorded", S.sent_count(URGENT, now - 60) >= 1)
+    check("the send was recorded", S.sent_count(SD.FYI, now - 60) >= 1)
 
     print("\n-- mutual aid, the model's veto, delivery's repeat window --")
     row = {"id": BASE + 20, "ts": now - 3, "end_ts": now - 1, "duration": 5, "name": "Framnghm FD",
@@ -697,8 +724,16 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     await desk.settle()
     aid = S.incident(iid)
     check("a Framingham engine sent to Natick makes a Natick incident", aid and aid["town"] == "Natick", aid)
-    check(f"...told at the Natick tier ({near_natick})", calls["deliver"][-1]["tier"] == near_natick
-          and calls["deliver"][-1]["key"] == f"scanner:{iid}", calls["deliver"][-1])
+    check("...told quietly as unconfirmed (one transmission), not yet at the Natick tier",
+          calls["deliver"][-1]["key"] == f"scanner-fyi:{iid}" and "unconfirmed" in calls["deliver"][-1]["text"],
+          calls["deliver"][-1])
+    row2 = dict(row, id=BASE + 23, ts=now - 2, end_ts=now - 1)
+    S.log_hit(row2)
+    await desk.on_text(row2, "Engine 2 on scene at 88 Eliot Street, working fire, fire showing.", 0.9, annotate=False)
+    await desk.settle()
+    check(f"...and at the Natick tier ({near_natick}) once a second transmission confirms it",
+          calls["deliver"][-1]["tier"] == near_natick and calls["deliver"][-1]["key"] == f"scanner:{iid}",
+          calls["deliver"][-1])
 
     async def veto(inc_, urgent):
         return {"summary": "A drill at the training tower, nothing real.", "active": False}
@@ -706,10 +741,14 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     row = {"id": BASE + 21, "ts": now - 3, "end_ts": now - 1, "duration": 5, "name": "Waltham FD",
            "town": "Waltham", "agency": "FD", "quality": None, "audio_path": ""}
     S.log_hit(row)
-    before = len(calls["deliver"])
     iid = await desk.on_text(row, "Engine 1 respond to 10 Main Street, working fire, fire showing.", 0.9, annotate=False)
     await desk.settle()
-    check("an ALERT the model reads as over is held", len(calls["deliver"]) == before
+    row3 = dict(row, id=BASE + 24, ts=now - 2, end_ts=now - 1)
+    S.log_hit(row3)
+    await desk.on_text(row3, "Ladder 1 to 10 Main Street, working fire.", 0.9, annotate=False)
+    await desk.settle()
+    check("a confirmed ALERT the model reads as over is held (no loud message)",
+          not [c for c in calls["deliver"] if c["key"] == f"scanner:{iid}"]
           and "over" in S.incident(iid)["decided"], S.incident(iid)["decided"])
     desk.summariser = fake_summary
 
@@ -724,9 +763,13 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     S.log_hit(row)
     iid = await desk.on_text(row, "Report of shots fired in the area of Pleasant Street.", 0.9, annotate=False)
     await desk.settle()
+    row4 = dict(row, id=BASE + 25, ts=now - 2, end_ts=now - 1)
+    S.log_hit(row4)
+    await desk.on_text(row4, "Car 4 responding, shots fired on Pleasant Street.", 0.9, annotate=False)
+    await desk.settle()
     shots = S.incident(iid)
-    check("a send delivery held as 'said recently' is not counted as told, and waits",
-          held["n"] == 1 and shots["tier"] == "" and shots["pending"] in (URGENT, ALERT), shots)
+    check("a confirmed send held as 'said recently' is not counted as told, and waits",
+          held["n"] >= 2 and shots["tier"] == "" and shots["pending"] in (URGENT, ALERT), (held, shots))
     desk.deliverer = fake_deliver
     real_now = desk.now
     desk.now = lambda: real_now() + 2800         # past the 45-minute ALERT repeat window
@@ -1142,7 +1185,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
             "first_ts": now - 60, "last_ts": now - 58, "town": "Framingham", "miles": 0.4, "agency": "EMS",
             "channel": "Framingham EMS", "family": "fire", "kind": "working_fire", "label": "a working fire",
             "severity": 9, "types": ["working_fire"], "address": "7 Ash St", "street": "ash st", "roads": [],
-            "units": [], "said": [{"ts": now - 60, "text": "Working fire, 7 Ash Street.", "conf": 0.9}],
+            "units": [], "said": [{"ts": now - 60, "text": "Working fire, 7 Ash Street.", "conf": 0.9},
+                                  {"ts": now - 50, "text": "Engine 2 on scene, working fire.", "conf": 0.9}],
             "hits": 1, "status": "active"})
         await rdesk._consider(hot, trig, "")
     finally:
@@ -1218,6 +1262,43 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("a kind named only in a question is not a report of one", "structure_fire" not in rq.types, rq.types)
     rq = R.read("Why do we have a crash be on anyone A1? I need a crash.", "Natick")
     check("...but the same word in a statement still is", "mva" in rq.types, rq.types)
+
+    print("\n-- the Wayland lookout (4:08 PM, 2026-11-07) --")
+    # Sent as "a well-being check here in Framingham. A patient transported."
+    t891 = ("Okay, do a well being check. Uh we're number 10, then um apartment number thirteen. This was called in "
+            "by Metro Cramium Hospital. Uh this party was transported there last night from us at approximately 1145 "
+            "after we received a call. 72 year old female left off about four to five hours ago. As far as we know, "
+            "on foot. Last thing wearing a black hoodie or sweatshirt, blonde short hair. Even that she is there, uh "
+            "they would like her transport it back to Framingham like I said. Copy.")
+    r891 = R.read(t891, "Wayland")
+    check("a town named as a destination ('back to Framingham') does not move the call", r891.towns == [], r891.towns)
+    check("...a description read out is police looking for someone", "lookout" in r891.types
+          and r891.label == "police looking for someone", (r891.types, r891.label))
+    d891 = R.details(t891)
+    check("...with who: age, clothing, hair, on foot", d891 == ["72-year-old female", "wearing a black hoodie",
+                                                                "blonde short hair", "on foot"], d891)
+    check("...and 'transported there last night' or 'would like her transport' is no transport now",
+          not any("transport" in d for d in d891), d891)
+    for text, want in (("Car 3 responding to Natick for the crash on Route 9.", ["Natick"]),
+                       ("We have a crash in Natick at the mall.", ["Natick"]),
+                       ("Mutual aid to Natick, Engine 2 respond to 88 Eliot Street for a working fire.", ["Natick"]),
+                       ("Patient wants to go back to Framingham.", []),
+                       ("Units coming from Natick, crash on Route 9.", [])):
+        got = R.read(text, "Wayland").towns
+        check(f"town of {text[:46]!r} -> {want or 'the channel town'}", got == want, got)
+    rw = R.read("I just went in and walked out of the parking lot. Can you check?", "Wellesley")
+    check("'walked out of the parking lot' is not a missing person", "missing_person" not in rw.types, rw.types)
+    th = await desk.on_text(rrow(20, "Wellesley PD", "Wellesley", "PD", 40),
+                            "RP wants to report her phone being stolen out of a car.", 0.9, annotate=False)
+    mp = await desk.on_text(rrow(21, "Wellesley PD", "Wellesley", "PD", 30),
+                            "Units be advised, report of a missing person, elderly male eloped from Elm Street.", 0.9,
+                            annotate=False)
+    await desk.settle()
+    check("a theft and a missing person ten minutes apart on one police channel are two calls",
+          th and mp and th != mp and S.incident(th)["label"] == "a theft report", (th, mp, S.incident(th)["label"]))
+    t911 = ("Oh Number five, we were clean. The only female uh who's calling. Um is vomiting and severe pain. "
+            "Uh she broke her arm yesterday, had said it off so but she fell again on a day.")
+    check("'who's calling' frames a call (the 4:13 PM Wayland fall)", R.anchored(t911), R.read(t911, "Wayland").types)
 
     print("\n-- his medical and police calls, his night (his answers, 2026-11-07) --")
     for text, want in (
