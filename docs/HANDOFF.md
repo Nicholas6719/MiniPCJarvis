@@ -5645,6 +5645,34 @@ Wellesley." (be6fc4b, ee23915, hot-swapped 14:02):
 Replay of today's real traffic: 5 messages (four Wellesley crashes, one
 Sudbury) and 2 silent edits ("front-end damage" joined the 11:36 crash).
 
+Then "audit the code to ensure perfection": two independent review agents
+(scanner desk; delivery + Telegram) found 13 real problems, all fixed and
+gated in `test_scanner_desk.py` "what the code review found" (30266fb):
+the quiet feed now has its OWN hourly ceiling (`notify_policy.OWN_CEILING`,
+12/h) so it can never spend the shared ceiling reminders and URGENTs need; an
+URGENT held by the ceiling is retried (pending); editing an unanswered URGENT
+keeps its "Got it" button (`telegram._urgent[tok]["mid"]`); the URGENT clip is
+silent when the alert was; "another report of heavy smoke" no longer splits a
+fire (only traffic/police/ems split); a shaky report confirmed by a second is
+sent; a follow-up during the send reaches the message; one refresh per call at
+a time (`_dirty`); police unit status joins nothing; the re-read treats
+hits > kept lines as incomplete; facts are never read from denials/questions
+(`rules._denied`, clause-scoped); junk words before a street are trimmed;
+phonetic words mean a plate only with a plate in play.
+His answers (1637145): keep speaking calls at the PC; ADD medical and police
+calls (new kinds larceny/suspicious/disturbance/welfare_check/traffic_stop,
+unconscious/breathing/chest_pain/stroke/seizure/fall/medical, all severity
+>= 3); nights are silent not held (`notify_policy.NIGHT_SILENT`, URGENT outside
+Framingham -> silent ALERT, `scanner.night = "hold"` to revert) plus a morning
+summary at 08:00 (`ScannerDesk._morning_summary`, volatile key
+`scanner:morning`). Replay of today: 8 messages.
+Performance (measured, record:false bench): reflexes 0.2-1 s to first audio;
+knowledge turns ~3.3 s to first word = ~230-340 new prompt tokens at ~150
+tok/s prefill + ~20 tok/s decode; the cache works (3 pinned slots). The 780M
+uses 12.3 GB shared + 1.6 GB dedicated for gpt-oss (adapter committed 15.1 GB
+of ~17.4). He approved trying a ~1B draft model carefully: candidate
+ggml-org/gemma-3-1b-it-GGUF Q4_K_M (806 MB, sha256 8ccc5cd1...).
+
 ### Not done / next
 - When he fits the splitter: set the console's input, re-check
   `/api/health` audio (expect peaks -12..-3 dBFS) and the transcripts.
