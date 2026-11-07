@@ -395,6 +395,12 @@ def main() -> int:
             ("what's happening over in natick", "scanner_town"),
             ("anything going on in sudbury tonight", "scanner_town"),
             ("any calls in waltham", "scanner_town"),
+            # towns the seeds never name: the live install asked "did you
+            # mean...?" for Wayland (2026-11-07)
+            ("what's happening in wayland", "scanner_town"),
+            ("anything going on in holliston", "scanner_town"),
+            ("what's happening in southborough right now", "scanner_town"),
+            ("anything happening in sherborn", "scanner_town"),
             ("what did that last call say", "scanner_last"),
             ("what was that on the radio just now", "scanner_last"),
             ("give me a summary of the scanner", "scanner_summary"),
@@ -412,6 +418,14 @@ def main() -> int:
             landed = r[0].name if r else (brain.unsure or {}).get("skill")
             check(f"{said!r} -> {want}", landed == want,
                   f"landed {landed} (args {r and r[1]})")
+        # DECIDED, not merely the near-miss: the check above also accepts the
+        # "did you mean...?" case, which is what Wayland got live.
+        for said in ("what's happening in wayland", "anything going on in holliston",
+                     "what's happening in southborough right now", "anything happening in sherborn"):
+            r = await brain.decide(said, context=empty)
+            check(f"{said!r} is answered, not asked about",
+                  bool(r) and r[0].name == "scanner_town" and r[1].get("town"),
+                  f"{r and r[0].name} {r and r[1]} unsure={brain.unsure}")
         r = await brain.decide("what's happening over in natick", context=empty)
         check("...and the town rides along as a slot",
               bool(r) and r[1].get("town") == "Natick" and r[1].get("ask") == "town",

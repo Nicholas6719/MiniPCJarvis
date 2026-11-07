@@ -292,6 +292,73 @@ def parse_summary(out: str) -> dict | None:
     return None
 
 
+# The console's Scan Doctor (1.3.0) records every change as
+# {kind, index, before, after, why, backup}; its summary is a dict of counts.
+_DOCTOR_VERBS = {     # {n} is "40 channels"
+    "remove": "removed {n}", "drop": "dropped {n} as candidates", "add": "added {n} to the trial bank",
+    "promote": "promoted {n} from the trial bank", "fix": "re-tuned {n}", "keep": "renamed {n}",
+    "trial": "tried new settings on {n}", "restore": "restored {n}",
+}
+
+
+def _doctor_name(c: dict) -> str:
+    for side in ("before", "after"):
+        d = c.get(side)
+        if isinstance(d, dict) and str(d.get("name") or "").strip():
+            return str(d["name"]).strip()
+    return ""
+
+
+def _describe_doctor_v1(rep: dict) -> str:
+    """The 1.3.0 report, spoken: what it changed, grouped, and where it stands.
+    Empty when the report is not in that shape (the generic reader takes over)."""
+    changes = rep.get("changes")
+    summ = rep.get("summary")
+    if not isinstance(changes, list) or not all(isinstance(c, dict) and "kind" in c for c in changes):
+        return ""
+    groups: dict[str, list[dict]] = {}
+    for c in changes:
+        groups.setdefault(str(c.get("kind")), []).append(c)
+    parts = []
+    lvl = groups.pop("level", [])
+    for kind in ("remove", "add", "promote", "fix", "keep", "drop", "trial", "restore"):
+        cs = groups.pop(kind, [])
+        if not cs:
+            continue
+        names = []
+        for c in cs:
+            n = re.sub(r"\s+\d+$", "", _doctor_name(c))
+            if n and n not in names:
+                names.append(n)
+        n = f"{len(cs)} channel{'s' if len(cs) != 1 else ''}"
+        what = _DOCTOR_VERBS.get(kind, kind + " {n}").format(n=n)
+        if names:
+            what += ": " + ", ".join(names[:4]) + (f" and {len(names) - 4} more" if len(names) > 4 else "")
+        whys = {str(c.get("why") or "").strip() for c in cs if c.get("why")}
+        if kind == "remove" and whys:
+            # the reasons share a shape ("X is 22 mi from home, outside your radius")
+            if all("outside your" in w for w in whys):
+                what += ", all outside your radius"
+            elif len(whys) == 1:
+                what += f", because {next(iter(whys)).rstrip('.')}"
+        parts.append(what)
+    for c in groups.values():                     # a kind this desk does not know yet
+        if c:
+            parts.append(f"{len(c)} other change{'s' if len(c) != 1 else ''}")
+    if lvl:
+        after = lvl[-1].get("after") or {}
+        if isinstance(after, dict) and after.get("volume") is not None:
+            parts.append(f"set the scanner's volume to {after['volume']}")
+    line = ("The scan doctor " + "; ".join(parts) + ".") if parts else "The scan doctor hasn't changed anything yet."
+    if isinstance(summ, dict):
+        obs = int(summ.get("observing") or 0)
+        keep = int(summ.get("keep") or 0)
+        if obs or keep:
+            line += (f" It is still listening to {obs} channel{'s' if obs != 1 else ''}"
+                     + (f" and has confirmed {keep} as keepers" if keep else "") + ".")
+    return line
+
+
 def describe_doctor(rep) -> str:
     """The scan optimiser's report, spoken. Its exact shape belongs to the
     console and may change, so this reads the obvious fields defensively."""
@@ -299,6 +366,9 @@ def describe_doctor(rep) -> str:
         return rep.strip()[:400]
     if not isinstance(rep, dict):
         return "The scan doctor's report has nothing I can read out, sir."
+    spoken = _describe_doctor_v1(rep)
+    if spoken:
+        return spoken
     lead = ""
     for k in ("spoken", "summary", "headline", "message"):
         if isinstance(rep.get(k), str) and rep[k].strip():

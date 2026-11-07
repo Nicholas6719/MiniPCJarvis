@@ -355,6 +355,17 @@ EDIT_TARGET_BONUS = 0.10
 
 def _lexical_delta(skill: str, text: str) -> float:
     """Word-level evidence, as opposed to the state of the screen."""
+    if skill == "scanner_town":
+        # "what's happening in Wayland" scored just under the line on the
+        # live install (2026-11-07) and got "did you mean...?" - the seeds
+        # name a dozen towns and there are 351. A real Massachusetts town in
+        # that phrasing is the evidence; "what's happening in the world" has
+        # none and stays the news.
+        try:
+            from brain.skills import slots_scanner_town
+        except Exception:
+            return 0.0
+        return EDIT_TARGET_BONUS if slots_scanner_town(text) else 0.0
     if skill == "holo_make":
         # "show me spider-man as a hologram" NAMES a thing that does not exist
         # yet; the embedding cannot tell it from "show me that as a hologram"
@@ -587,7 +598,7 @@ class Brain:
             sims = sims + self._context_vector(context)
         # Cheap enough to do per turn: one regex over one sentence, and only
         # the examples of a single skill move.
-        for nudged in ("holo_edit", "holo_make"):
+        for nudged in ("holo_edit", "holo_make", "scanner_town"):
             lex = _lexical_delta(nudged, text)
             if lex:
                 sims = sims + np.array(

@@ -680,6 +680,24 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     a = await desk.answer("doctor")
     check("the doctor's changes are read out with their reasons",
           "2 changes" in a["spoken"] and "Newton PD" in a["spoken"] and "digital voice" in a["spoken"], a)
+    # THE REAL SHAPE (console 1.3.0, read off his live report 2026-11-07):
+    # the summary is counts, each change names its channel in before/after.
+    # The first reader answered "nothing I can read out" to exactly this.
+    ch = lambda n, f: {"index": 1, "name": n, "freq": f, "mod": "AUTO", "tone": 0}
+    console.doctor = {"summary": {"observing": 92, "keep": 2, "remove": 11}, "changes": [
+        {"at": 1, "kind": "remove", "index": 17, "before": ch("Holdon PD", 460.3875), "after": None,
+         "why": "Holden is 22.0 mi from home, outside your 20-mile radius", "backup": "b.json"},
+        {"at": 1, "kind": "remove", "index": 23, "before": ch("Leominster PD", 453.325), "after": None,
+         "why": "Leominster is 22.5 mi from home, outside your 20-mile radius", "backup": "b.json"},
+        {"at": 2, "kind": "add", "index": 451, "before": None, "after": ch("Marlborough PD", 470.1),
+         "why": "a must-have town with nothing programmed", "backup": "b.json"},
+        {"at": 3, "kind": "level", "index": 0, "before": {"volume": 5}, "after": {"volume": 13},
+         "why": "loudest level that does not clip", "backup": None}]}
+    a = await desk.answer("doctor")
+    s = a["spoken"]
+    check("the 1.3.0 report is read: removals with their reason, additions, the volume, the standing",
+          "removed 2 channels" in s and "outside your radius" in s and "added 1 channel to the trial bank" in s
+          and "Marlborough PD" in s and "volume to 13" in s and "listening to 92 channels" in s, s)
     a = await desk.answer("last")
     check("'what was that call' names the channel and how long ago",
           a["spoken"].startswith("That was ") and "ago" in a["spoken"], a)
