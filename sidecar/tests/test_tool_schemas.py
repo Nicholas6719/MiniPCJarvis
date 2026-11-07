@@ -63,12 +63,13 @@ def main() -> int:
                        model_tools, task_tools, uia, vision_analyze, vision_tools,
                        watch_tools, weather, workspace_tools, web_tools, windows_tools, text_tools)
     import market_intel
+    import scanner_desk
     for m in (builtin, memory_tools, windows_tools, web_tools, task_tools,
               vision_tools, browser_tools, handoff, file_tools, weather,
               camera_tools, market_tools, news_tools, input_tools, uia,
               projects, location, health, vision_analyze, biometric, fabrication,
               holo_tools, render_tools, model_tools, documents, office, image_tools, phone,
-              workspace_tools, text_tools, watch_tools, market_intel):
+              workspace_tools, text_tools, watch_tools, market_intel, scanner_desk):
         m.register_all()
     from tools.registry import registry
 

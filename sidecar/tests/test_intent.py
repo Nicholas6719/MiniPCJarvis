@@ -384,6 +384,39 @@ def main() -> int:
               bool(r) and r[0].name == "unwatch" and r[1].get("watch") == "download",
               f"{r and r[0].name} {r and r[1]}")
 
+        print("\n-- his police scanner (scanner_desk.py, 2026-11-07) --")
+        # Not seeds. Each lands on the scanner question it asks, and the
+        # neighbours it sits beside - the catch-up, the emergencies sweep,
+        # the news - keep their own sentences.
+        for said, want in (
+            ("anything happening on the scanner right now", "scanner_now"),
+            ("what's the police scanner saying", "scanner_now"),
+            ("whats going on on the scanner tonight", "scanner_now"),
+            ("what's happening over in natick", "scanner_town"),
+            ("anything going on in sudbury tonight", "scanner_town"),
+            ("any calls in waltham", "scanner_town"),
+            ("what did that last call say", "scanner_last"),
+            ("what was that on the radio just now", "scanner_last"),
+            ("give me a summary of the scanner", "scanner_summary"),
+            ("what happened on the scanner last night", "scanner_summary"),
+            ("is my scanner working", "scanner_health"),
+            ("is the scanner still connected", "scanner_health"),
+            ("what did the scan doctor change last night", "scanner_doctor"),
+            ("what did i miss", "briefing"),
+            ("what happened overnight", "briefing"),
+            ("any emergencies near me", "emergencies"),
+            ("what's happening in the world", "news"),
+            ("when was that", "story_time"),
+        ):
+            r = await brain.decide(said, context=empty)
+            landed = r[0].name if r else (brain.unsure or {}).get("skill")
+            check(f"{said!r} -> {want}", landed == want,
+                  f"landed {landed} (args {r and r[1]})")
+        r = await brain.decide("what's happening over in natick", context=empty)
+        check("...and the town rides along as a slot",
+              bool(r) and r[1].get("town") == "Natick" and r[1].get("ask") == "town",
+              f"{r and r[0].name} {r and r[1]}")
+
         # EVERY SKILL, not every entry in the table. The old form iterated
         # CONFIRM_AS itself, so it only ever checked names that already had a
         # phrase — a test that could not fail while "Did you mean wakeack,

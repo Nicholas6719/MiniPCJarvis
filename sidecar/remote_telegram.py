@@ -363,6 +363,54 @@ class TelegramBridge:
             log.warning("telegram upload failed", exc_info=True)
             return False
 
+    async def send_voice_clip(self, wav_path: str, caption: str = "") -> bool:
+        """A short recording (the scanner desk's URGENT transmission) as a voice
+        message he can play from the lock screen: WAV -> OGG/Opus with ffmpeg,
+        then sendVoice. Without ffmpeg, or if it fails, the WAV goes as a
+        document instead. True only if Telegram accepted one of them."""
+        chat = config.get("remote", "telegram_chat_id", default=None)
+        src = Path(wav_path)
+        if not chat or not self.token or not src.exists():
+            return False
+        import shutil
+        import subprocess
+        import tempfile
+        ffmpeg = shutil.which("ffmpeg")
+        ogg = Path(tempfile.gettempdir()) / f"{src.stem}-{pysecrets.token_hex(3)}.ogg"
+        try:
+            if ffmpeg:
+                def _encode() -> bool:
+                    r = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", str(src), "-ac", "1",
+                                        "-c:a", "libopus", "-b:a", "32k", str(ogg)],
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, timeout=30,
+                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    return r.returncode == 0 and ogg.exists() and ogg.stat().st_size > 0
+                try:
+                    encoded = await asyncio.to_thread(_encode)
+                except Exception:
+                    log.warning("ffmpeg could not encode the clip", exc_info=True)
+                    encoded = False
+                if encoded:
+                    try:
+                        if self._client is None:
+                            self._client = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10))
+                        blob = await asyncio.to_thread(ogg.read_bytes)
+                        r = await self._client.post(
+                            f"{API}/bot{self.token}/sendVoice",
+                            data={"chat_id": str(chat), "caption": caption[:1000]},
+                            files={"voice": (ogg.name, blob, "audio/ogg")}, timeout=60)
+                        if bool(r.json().get("ok")):
+                            return True
+                    except Exception:
+                        log.warning("telegram sendVoice failed", exc_info=True)
+            return await self._upload(str(src), kind="document", caption=caption)
+        finally:
+            try:
+                ogg.unlink()
+            except OSError:
+                pass
+
     # ------------------------------------------------------------- the loop
     async def _poll_loop(self) -> None:
         # httpx logs the full request URL at INFO — and the bot token lives IN that

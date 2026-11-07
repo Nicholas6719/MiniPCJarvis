@@ -33,6 +33,16 @@ class STT:
         self._model = None
         self._engine: str | None = None
         self._lock = asyncio.Lock()
+        # HIS VOICE WINS. Every foreground caller (his turn, the endpoint
+        # check, the wake verification, dictation, a Telegram voice note) is
+        # counted while it waits for or holds the model; background work (the
+        # scanner desk) only starts when this is zero and the lock is free.
+        self._foreground = 0
+
+    @property
+    def busy(self) -> bool:
+        """Someone is using the recogniser, or waiting to."""
+        return self._foreground > 0 or self._lock.locked()
 
     @property
     def engine(self) -> str | None:
@@ -96,8 +106,36 @@ class STT:
 
     async def transcribe(self, audio: np.ndarray) -> str:
         """audio: 16 kHz mono float32 in [-1, 1]."""
+        self._foreground += 1
+        try:
+            async with self._lock:
+                model = await asyncio.to_thread(self._ensure)
+                return await asyncio.to_thread(self._run, model, audio)
+        finally:
+            self._foreground -= 1
+
+    async def transcribe_background(self, audio: np.ndarray, max_wait: float = 120.0) -> str | None:
+        """For work nobody is waiting on (the scanner desk): runs only when no
+        foreground caller is using or waiting for the recogniser, so one of
+        his turns never queues behind a radio clip. The caller keeps clips
+        short (the desk cuts them at ~8 s) so a turn that starts mid-clip
+        waits a fraction of a second at most.
+
+        Never LOADS the model: the first load takes seconds under the lock,
+        and that belongs to his first turn or the boot warm-up. None when the
+        model is not loaded yet or no quiet moment came within `max_wait`."""
+        import time as _time
+        deadline = _time.monotonic() + max_wait
+        while self.busy or self._model is None:
+            if _time.monotonic() > deadline:
+                return None
+            await asyncio.sleep(0.1)
+        # no await between the check above and taking the free lock below, so
+        # nothing can slip in between
         async with self._lock:
-            model = await asyncio.to_thread(self._ensure)
+            model = self._model
+            if model is None:
+                return None
             return await asyncio.to_thread(self._run, model, audio)
 
 

@@ -103,6 +103,8 @@ async def lifespan(app: FastAPI):
     text_tools.register_all()     # "proofread this": the clipboard, through the local model
     from tools import watch_tools
     watch_tools.register_all()    # "tell me when the download finishes": watches that outlive the sentence
+    import scanner_desk
+    scanner_desk.register_all()   # the scanner reflexes' internal tool (2026-11-07)
     vision_analyze.register_all() # phase 3 — reuses the existing Gemma vision model
     biometric.register_all()      # phase 4 — ADDITIVE to the spoken confirmation
     fabrication.register_all()    # phase 5 — no printer; NoPrinterBackend only
@@ -188,6 +190,10 @@ async def lifespan(app: FastAPI):
     import awareness as _aw
     _aw.awareness.speak = _aw.speak_via_delivery
     spawn(_aw.awareness.loop())        # notices change; speaks only in the interrupt tiers
+    # His police scanner, through his own BC125AT Console (`--serve`): started
+    # if it does not answer, transcribed when he is not speaking, and only
+    # active danger near him interrupts (scanner_desk.py, 2026-11-07).
+    spawn(scanner_desk.desk.run(), name="scanner-desk")
     from dictation import dictation as _dict
     _dict.orchestrator = orchestrator     # so it refuses to fight a real turn
     from brain.night_school import night_school
