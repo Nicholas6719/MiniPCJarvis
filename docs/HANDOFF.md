@@ -5617,6 +5617,34 @@ the silence as broken. Fixed (commit b6538d0, gated, hot-swapped 12:50):
 Lesson in memory: quiet is not silent - replay a real day through any filter
 before shipping it; zero messages is a bug.
 
+Then his next words: "I need more details than just a crash in Sudbury or
+Wellesley." (be6fc4b, ee23915, hot-swapped 14:02):
+- **One message per call that grows.** `ScannerDesk.written` lays it out:
+  header, kind + street, Where, Units, Known (word-for-word facts from
+  `rules.details`: vehicles, injuries, patients, hospital, airbags, damage,
+  road blocked, smoke/fire showing, everyone out...), every line heard with its
+  time, first/latest. The dispatch recording follows as a silent voice note
+  threaded under it (`send_voice_clip(silent, reply_to)`, `scanner.fyi_audio`).
+- **Follow-ups join the call** (`ScannerDesk._attach`): a line with no call type
+  ("on scene, two patients, transporting one to Emerson") joins the ONE open
+  call on its channel within 15 min (police channels only with a fact or the
+  same street) and his Telegram message is EDITED (`telegram.edit_text`,
+  message id from `delivery` -> `scanner_incidents.msg_id`, at most one edit
+  per 20 s, identical edits skipped). Escalations inside the quiet tier are
+  edits too; ALERT/URGENT escalations still send an UPDATE message.
+- Units said as words ("car three, ambulance one") are read; crashes/police
+  calls 30 min apart, or "another motor vehicle accident", are separate calls.
+- **No model summary on the phone**: tried on two real calls via
+  /debug/llm_probe, gpt-oss invented "no injuries reported" and "responders are
+  on scene" from weak-audio transcripts. The spoken ALERT/URGENT line still uses
+  it (as before); the written message and the town answers use only what was
+  heard. Revisit once the splitter fixes the audio.
+- New columns `msg_id, details, edited_ts` are added by `store._migrate` (done
+  on his DB 13:46). The start-up re-read also re-reads address/units/facts:
+  live log 14:02 dropped '3 Fox Dr' and 'It About One Pl'.
+Replay of today's real traffic: 5 messages (four Wellesley crashes, one
+Sudbury) and 2 silent edits ("front-end damage" joined the 11:36 crash).
+
 ### Not done / next
 - When he fits the splitter: set the console's input, re-check
   `/api/health` audio (expect peaks -12..-3 dBFS) and the transcripts.
