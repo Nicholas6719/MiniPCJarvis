@@ -5592,6 +5592,31 @@ dangerous reading below 0.6 needs a second transmission from the same town:
 nearly went out as "unusually busy" (bursts are stored until 3 days of
 listening, `scanner.burst_min_days`).
 
+### 2026-11-07 afternoon - "I haven't gotten anything from Jarvis yet?!"
+Four hours live: ~500 transmissions, ~120 transcribed, 9 incidents (crashes in
+Wellesley and Sudbury, Natick fire alarms, busy spells) and NOTHING reached
+him - only active danger interrupted, everything else was "stored". He read
+the silence as broken. Fixed (commit b6538d0, gated, hot-swapped 12:50):
+- **The quiet feed** (`scanner_desk.FYI`, `ScannerDesk._fyi`): a real call in
+  his radius (severity >= 3: crash, reported fire, gas leak, CO, wires down,
+  break-in, overdose...; fire alarms / disturbances only in Framingham) heard
+  clearly (a transcript >= 0.6, two transmissions, or a shaky danger reading a
+  second one agreed with) goes out as ONE line: delivery's ALERT route with
+  kind `scanner_fyi`, which `notify_policy` keeps silent on the phone and
+  never interrupting at the PC. Own key `scanner-fyi:<id>` so a later real
+  ALERT is not "a repeat"; no LLM call; quiet hours hold it; 30 a day
+  (`scanner.max_per_day.fyi`); off with `scanner.fyi: false`. Bursts beyond
+  5 mi with a baseline go here too. Replaying today's real transcripts through
+  it: two lines (Wellesley crash 9:43, Sudbury crash 11:22).
+- **Addresses** must be written as names when the transcript has capitals and
+  never sit inside a spelled-out plate (`rules._believable`): "Master 3, Fox
+  drive, Charlie, Romeo 213" was a plate, "cut it about one place" not a street.
+- **Re-read at start** (`ScannerDesk._rejudge`): the day's incidents are read
+  again by today's rules, so the morning's misheard Wayland "structure fire" is
+  now "a fire alarm" in his answers (seen in the live log and live answer).
+Lesson in memory: quiet is not silent - replay a real day through any filter
+before shipping it; zero messages is a bug.
+
 ### Not done / next
 - When he fits the splitter: set the console's input, re-check
   `/api/health` audio (expect peaks -12..-3 dBFS) and the transcripts.
