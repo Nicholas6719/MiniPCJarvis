@@ -327,8 +327,9 @@ DEFAULTS: dict[str, Any] = {
         # is deliberately NOT the proactive window — the first brief of the day
         # is at 07:30 and must not be suppressed by it.
         # 05:30 end is his call (2026-09-01): he is up before the first brief and
-        # wants an emergency to be able to reach him then.
-        "quiet_start": "22:00",
+        # wants an emergency to be able to reach him then. 22:30 start is his
+        # call too (2026-11-07: "5:30 am to 10:30 pm, silent night rule outside").
+        "quiet_start": "22:30",
         "quiet_end": "05:30",
         # "local" | "national". He asked for local-only on 2026-08-30 after a day
         # of the alternative: a California wildfire and a Grand Canyon flood both
@@ -425,8 +426,9 @@ DEFAULTS: dict[str, Any] = {
         # AND inside this window, so its nightly run now ends at 05:30 instead of
         # 08:00 — two and a half hours less training. If that matters more than
         # the earlier start, give night_school its own window rather than
-        # widening this one back.
-        "quiet_start": "22:00",
+        # widening this one back. 22:30 start: his call, 2026-11-07 ("5:30 am to
+        # 10:30 pm") - the scanner's silent night follows this window.
+        "quiet_start": "22:30",
         "quiet_end": "05:30",
         "max_per_hour": 2,
         "disk_free_gb_warn": 50,

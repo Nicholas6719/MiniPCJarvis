@@ -191,7 +191,7 @@ PATTERNS: dict[str, re.Pattern] = {
                   r"|(?:took|grabbed|snatched) (?:her|his|my|a|the) (?:purse|wallet|phone|bag|bike|package))\b"),
     "suspicious": _P(r"\bsuspicious (?:person|vehicle|activity|male|female|party|car|individual|circumstances"
                      r"|subject|people|truck|van)\b|\bsuspicious(?:ly)? (?:looking|acting)\b|\bprowler\b"),
-    "welfare_check": _P(r"\b(?:well[- ]?being check|wellness check|welfare check|check (?:on )?(?:the )?"
+    "welfare_check": _P(r"\b(?:(?:well[- ]?being|wellness|welfare) check(?:ed|ing|s)?|check (?:on )?(?:the )?"
                         r"(?:well[- ]?being|welfare)|check on (?:a|an|the) (?:elderly|resident|party|male|female))\b"),
     "traffic_stop": _P(r"\b(?:traffic stop|motor vehicle stop|m ?v stop|car stop|vehicle stop|pulled (?:over|him over"
                        r"|her over|a car over|a vehicle over)|stopping a (?:car|vehicle))\b"),
@@ -705,11 +705,47 @@ _MUTUAL_AID = re.compile(r"\b(?:mutual aid|cover(?:ing)?|assist(?:ing)?|requeste
 TRUST = 0.35      # below this a transcript is kept but never starts or changes an incident
 
 
+# Words that frame a transmission as a call being run: someone is sent, a
+# caller reported, a unit is on its way or there.
+_DISPATCH = re.compile(r"\b(?:respond(?:s|ed|ing)?|response|dispatch(?:ed|ing)?|reports? of|reported|reporting|"
+                       r"caller|rp|wants? to report|en ?route|on (?:scene|location)|requesting|request(?:ed)?|"
+                       r"box alarm|still alarm|mutual aid|units? (?:respond|to)|call for|calling for)\b", re.I)
+
+
+def anchored(text: str, reading: "Reading | None" = None) -> bool:
+    """Does ONE transmission state something concrete about its call - a
+    street, a unit, a fact, dispatch wording, or the call named as what
+    someone is going FOR ("for a two-car MVA", "out for a well-being check")?
+    "Anyone, A1. Why do we have a crash be on anyone A1? I need a crash"
+    (0.70, Natick FD, 2026-11-07) has the word and nothing else; it reached
+    his phone as "A crash" and made no sense. Such a line waits for a second
+    transmission to agree."""
+    rd = reading or read(text)
+    if rd.address or rd.units or rd.roads:
+        return True
+    if details(text):
+        return True
+    t = normalise(text)
+    if _DISPATCH.search(t):
+        return True
+    for k in rd.types:
+        rx = PATTERNS.get(k)
+        for m in (rx.finditer(t) if rx else ()):
+            before = re.findall(r"[a-z']+", _sentence(t, m.start(), m.end())[0])
+            if "for" in before[-4:]:
+                return True
+    return False
+
+
 def read(text: str, channel_town: str = "") -> Reading:
     """Everything the rules can see in one transmission."""
     t = normalise(text)
     scrubbed = _NEG.sub(" ~neg~ ", t)
-    found = [k for k, rx in PATTERNS.items() if rx.search(scrubbed)]
+    # A kind named only inside a question is not a report of one: "Why do we
+    # have a crash be on anyone A1?" (Natick FD, 2026-11-07) asked, it told
+    # nothing. ~neg~ scrubbing keeps the punctuation, so sentences line up.
+    found = [k for k, rx in PATTERNS.items()
+             if any(not _sentence(scrubbed, m.start(), m.end())[2] for m in rx.finditer(scrubbed))]
     ts = set(found)
     # a vehicle that is "fully involved" is a vehicle fire, not a house
     if "vehicle_fire" in ts and not _STRUCTURE.search(scrubbed):

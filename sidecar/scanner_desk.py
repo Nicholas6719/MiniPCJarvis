@@ -268,6 +268,19 @@ def _remote_turn_default() -> bool:
     return bool(getattr(orch, "remote_turn", False)) if orch is not None else False
 
 
+def _night_window() -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """His quiet hours as ((start h, m), (end h, m)), from the proactive
+    settings the rest of JARVIS uses; None if they cannot be read."""
+    try:
+        s = str(config.get("proactive", "quiet_start", default="22:30"))
+        e = str(config.get("proactive", "quiet_end", default="05:30"))
+        sh, sm = (int(x) for x in s.split(":"))
+        eh, em = (int(x) for x in e.split(":"))
+        return (sh, sm), (eh, em)
+    except (TypeError, ValueError):
+        return None
+
+
 def _in_quiet_hours() -> bool:
     try:
         from delivery import _in_quiet_hours as quiet
@@ -1211,6 +1224,12 @@ class ScannerDesk:
         sure = [s for s in said if s.get("agreed") or float(s.get("conf") or 0) >= self.SURE]
         if not sure and len(said) < 2:
             return False, f"{label} {place}: stored, heard once and not clearly"
+        # ...and one transmission alone must SAY something about the call - a
+        # street, a unit, a fact, dispatch wording. A fluent line that only
+        # contains the word ("I need a crash") waits for a second to agree
+        # (his words, 2026-11-07: "That doesn't make sense does it? Fix that").
+        if len(said) < 2 and not any(s.get("agreed") or rules.anchored(s.get("text") or "") for s in said):
+            return False, f"{label} {place}: stored, heard once with nothing concrete in it"
         return True, f"{label} {place}"
 
     def _rejudge(self, since: float) -> int:
@@ -1625,8 +1644,15 @@ class ScannerDesk:
         True when it went out."""
         if not _cfg("morning_summary", True):
             return False
+        # HIS NIGHT IS HIS QUIET HOURS (proactive.quiet_start/end; his call,
+        # 2026-11-07: awake 05:30-22:30). The summary covers exactly that window
+        # and arrives as it ends, unless scanner.morning_summary_at says when.
+        night = _night_window()
+        if night is None:
+            return False
+        (sh, sm), (eh, em) = night
         try:
-            hh, mm = (int(x) for x in str(_cfg("morning_summary_at", "08:00")).split(":"))
+            hh, mm = (int(x) for x in str(_cfg("morning_summary_at", f"{eh:02d}:{em:02d}")).split(":"))
         except ValueError:
             return False
         t = dt.datetime.fromtimestamp(now)
@@ -1639,8 +1665,13 @@ class ScannerDesk:
             return False
         if not volatile.put(self.MORNING_KEY, {"day": day}, source="scanner"):
             return False                        # claim first: no claim, no message
-        start = due.timestamp() - float(_cfg("night_hours", 10)) * 3600
-        spoken, written = self.night_summary(start, due.timestamp())
+        end_dt = t.replace(hour=eh, minute=em, second=0, microsecond=0)
+        if end_dt > due:
+            end_dt = due                        # a summary asked for before the night ends covers up to then
+        start_dt = end_dt.replace(hour=sh, minute=sm)
+        if start_dt >= end_dt:
+            start_dt -= dt.timedelta(days=1)    # the night began yesterday evening
+        spoken, written = self.night_summary(start_dt.timestamp(), end_dt.timestamp())
         r = await self._deliver(spoken, ALERT, key=f"scanner-night:{day}",
                                 subject="scanner-fyi: the night's calls", written=written)
         log.info("scanner: morning summary -> %s: %s", r.get("delivered"), spoken)
