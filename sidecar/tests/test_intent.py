@@ -408,6 +408,11 @@ def main() -> int:
             ("is my scanner working", "scanner_health"),
             ("is the scanner still connected", "scanner_health"),
             ("what did the scan doctor change last night", "scanner_doctor"),
+            # his words, 2026-11-08 8:13 AM - the model answered and promised
+            # a rule that does not exist
+            ("Are you connected to the scanner?", "scanner_health"),
+            ("Okay when will you notify me about calls", "scanner_rules"),
+            ("when are you going to tell me about scanner calls", "scanner_rules"),
             ("what did i miss", "briefing"),
             ("what happened overnight", "briefing"),
             ("any emergencies near me", "emergencies"),

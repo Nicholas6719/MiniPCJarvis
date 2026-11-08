@@ -91,6 +91,79 @@ def _cut_at(said_row: dict) -> int:
 def _union(old: list, new: list, cap: int) -> list:
     """old + whatever in new is not already there, order kept, at most cap."""
     return list(dict.fromkeys(list(old) + list(new)))[:cap]
+
+
+# CAN I ACTUALLY HEAR IT? From 10:06 PM on 2026-11-07 the scanner's sound did
+# not reach the PC - unplugged for the night, then back at volume 3 instead of
+# 15 - and for 19 hours nothing said so: the console showed every transmission,
+# health said "the audio level is fine", the morning summary said "nothing
+# overnight". Hearing is judged from what the transmissions gave: a long run
+# of them without one understood word is deafness. Calibrated on his real
+# day (2026-11-07, 1,800 transmissions): the longest wordless run while
+# everything worked was 40 and the longest run with no recording at all was
+# 9; the outage reached both thresholds within 25 minutes of his plugging in.
+DEAF_WORDLESS = 80        # this many in a row and not one word understood
+DEAF_UNRECORDED = 25      # ...or this many in a row with no sound at all
+DEAF_SETTLE_S = 180       # the newest few may not be transcribed yet
+DEAF_KEY = "scanner:deaf"
+NIGHT_GAP_S = 7200        # two hours with nothing logged at all is said, not assumed quiet
+LOST_AFTER_S = 600        # console silent, or scanner disconnected, this long before he is told
+GOOD_VOLUME = 15          # every transmission understood on 2026-11-07 was recorded at 15
+
+
+def deaf_spans(hits: list[dict]) -> list[dict]:
+    """The stretches in `hits` (oldest first) when the radio was carrying
+    traffic and none of it reached me as words: [{start, end, n, recorded,
+    silent}]. `silent` means a long run arrived with no sound at all (a
+    cable out, a volume of 0); otherwise the sound was too faint or garbled.
+    Judged by the run of no sound, not the total: on 2026-11-08 a stretch
+    began with nine faint recordings at 10 PM, then nothing at all."""
+    spans, run, unrec, worst = [], [], 0, 0
+
+    def close():
+        if len(run) >= DEAF_WORDLESS or worst >= DEAF_UNRECORDED:
+            spans.append({"start": float(run[0]["ts"]), "end": float(run[-1].get("end_ts") or run[-1]["ts"]),
+                          "n": len(run), "recorded": sum(1 for h in run if h.get("audio_path")),
+                          "silent": worst >= DEAF_UNRECORDED})
+
+    for h in hits:
+        if (h.get("transcript") or "").strip():
+            if run:
+                close()
+            run, unrec, worst = [], 0, 0
+            continue
+        run.append(h)
+        unrec = 0 if h.get("audio_path") else unrec + 1
+        worst = max(worst, unrec)
+    if run:
+        close()
+    return spans
+
+
+def _quiet_gaps(hits: list[dict], start: float, end: float) -> list[tuple[float, float]]:
+    """Stretches of at least NIGHT_GAP_S inside [start, end] with nothing
+    logged at all - a scanner off, unplugged or disconnected looks like this."""
+    marks = [start] + [float(h["ts"]) for h in hits] + [end]
+    return [(a, b) for a, b in zip(marks, marks[1:]) if b - a >= NIGHT_GAP_S]
+
+
+def _hearing_note(spans: list[dict]) -> str:
+    """What I could not hear while the radio was busy, or ''. Only traffic
+    without words counts: that is known deafness, not a guess."""
+    bits = []
+    for s in spans:
+        why = "no sound reached the PC" if s["silent"] else "the sound was too faint to make out"
+        bits.append(f"from {_hm(s['start'])} to {_hm(s['end'])} ({why})")
+    return ("I couldn't hear the scanner " + "; and ".join(bits) + ", so this is incomplete.") if bits else ""
+
+
+def _gap_note(gaps: list[tuple[float, float]]) -> str:
+    """Long stretches with nothing logged, said as what they are: a quiet
+    radio and a scanner that was off look the same from here."""
+    if not gaps:
+        return ""
+    return ("Nothing at all came through " + " or ".join(f"from {_hm(a)} to {_hm(b)}" for a, b in gaps)
+            + " - a quiet radio, or the scanner was off or unplugged.")
 CONSOLE_EXE_NAME = "bc125at console.exe"
 
 
@@ -460,6 +533,8 @@ class ScannerDesk:
         self._tasks: set = set()
         self._last_retry = 0.0
         self._last_prune = 0.0
+        self._lost_since: float | None = None
+        self._last_hear = 0.0
         self._worker = None
         self.stats = Counter()
         self.retry_pause = 5.0            # before retrying a clip the recogniser could not take
@@ -539,6 +614,10 @@ class ScannerDesk:
             if h is None:
                 self._mark_down(now)
                 await self._supervise(now)
+                try:
+                    await self._check_hearing(now)      # a console that stays down is said too
+                except Exception:
+                    self._log_every("hearing", 3600, logging.WARNING, "scanner: the hearing check failed", exc=True)
                 return 10.0
             self._mark_up(h, now)
         if self.after_id is None:
@@ -559,6 +638,10 @@ class ScannerDesk:
                 await self._morning_summary(now)
             except Exception:
                 self._log_every("morning", 3600, logging.WARNING, "scanner: the morning summary failed", exc=True)
+            try:
+                await self._check_hearing(now)
+            except Exception:
+                self._log_every("hearing", 3600, logging.WARNING, "scanner: the hearing check failed", exc=True)
         if now - self._last_prune >= 86400:
             self._last_prune = now
             store.prune(now)
@@ -1781,23 +1864,103 @@ class ScannerDesk:
         log.info("scanner: morning summary -> %s: %s", r.get("delivered"), spoken)
         return str(r.get("delivered")) in SENT
 
+    def hearing_now(self, now: float) -> dict | None:
+        """The deaf stretch still going on now, or None: {start, n, recorded}."""
+        hits = store.hits_since(now - 12 * 3600, until=now - DEAF_SETTLE_S)
+        spans = deaf_spans(hits)
+        if not (spans and hits):
+            return None
+        last = hits[-1]
+        return spans[-1] if spans[-1]["end"] == float(last.get("end_ts") or last["ts"]) else None
+
+    async def _check_hearing(self, now: float) -> str:
+        """Tell him once, silently, when I stop being able to hear the scanner,
+        and once when I can again (his answer, 2026-11-08: "Warn me when sound
+        stops"). Claimed in volatile before it is sent, like the morning
+        summary, so a restart cannot say it twice. Returns "lost", "back" or ""."""
+        if not _cfg("hearing_watch", True) or now - self._last_hear < 60:
+            return ""
+        self._last_hear = now
+        import volatile
+        state = (volatile.get(DEAF_KEY) or {}).get("value") or {}
+        h = self.health or {}
+        lost = None
+        if self.up is False or (self.up and h.get("connected") is False):
+            if self._lost_since is None:
+                self._lost_since = now
+            if now - self._lost_since >= LOST_AFTER_S:
+                why = ("the scanner console isn't answering" if self.up is False
+                       else "the scanner isn't connected to the PC")
+                lost = (self._lost_since,
+                        f"I've lost the scanner, sir: {why} since {_hm(self._lost_since)}. "
+                        "Check its USB cable and that the scanner is switched on.")
+        else:
+            self._lost_since = None
+            deaf = self.hearing_now(now)
+            if deaf:
+                if deaf["silent"]:
+                    lost = (deaf["start"],
+                            f"I can't hear the scanner, sir: {deaf['n']} transmissions since {_hm(deaf['start'])} "
+                            "and no sound reached the PC. Check the audio cable at both ends and the scanner's "
+                            f"volume - {GOOD_VOLUME} is what works.")
+                else:
+                    lost = (deaf["start"],
+                            f"I can't make out the scanner, sir: {deaf['n']} transmissions since "
+                            f"{_hm(deaf['start'])} and not one word I could understand - the sound is too faint. "
+                            f"Turn the scanner's volume up to {GOOD_VOLUME} and check the cable is pushed all the way in.")
+        if lost and not state.get("since"):
+            since, text = lost
+            if not volatile.put(DEAF_KEY, {"since": since}, source="scanner"):
+                return ""                               # claim first: no claim, no message
+            r = await self._deliver(text, ALERT, key=f"scanner-fyi:hearing:{int(since)}",
+                                    subject="scanner-fyi: hearing")
+            log.warning("scanner: can't hear it -> %s: %s", r.get("delivered"), text)
+            return "lost"
+        if not lost and state.get("since"):
+            # back only on real evidence: connected, and two understood
+            # transmissions in the last half hour, so a lone word in a dead
+            # stretch cannot flap it
+            heard = [x for x in store.hits_since(now - 1800) if (x.get("transcript") or "").strip()]
+            if not (self.up and h.get("connected") is not False and len(heard) >= 2):
+                return ""
+            if not volatile.put(DEAF_KEY, {}, source="scanner"):
+                return ""
+            text = (f"I can hear the scanner again, sir. I couldn't from {_hm(float(state['since']))} "
+                    f"to {_hm(now)}.")
+            r = await self._deliver(text, ALERT, key=f"scanner-fyi:hearing-back:{int(float(state['since']))}",
+                                    subject="scanner-fyi: hearing")
+            log.info("scanner: hearing it again -> %s", r.get("delivered"))
+            return "back"
+        return ""
+
     def night_summary(self, start: float, end: float) -> tuple[str, str]:
         """(spoken, written) for the night between start and end."""
         home = home_town().name
         head = f"SCANNER - overnight, {_hm(start)} to {_hm(end)}"
         hits = store.hits_since(start, until=end)
         if not hits:
+            # "Nothing on the scanner overnight" (2026-11-08, 5:30 AM) - sent
+            # while the scanner was unplugged. A night with not one transmission
+            # on seventy channels is a scanner that wasn't listening.
             msg = ("The scanner console was offline overnight, so I have nothing from the radio."
-                   if self.up is False else "Nothing on the scanner overnight, sir.")
+                   if self.up is False else
+                   "The scanner logged nothing at all overnight, sir - it was off, unplugged or not connected, "
+                   "so I can't tell you the night was quiet.")
             return msg, f"{head}\n{msg}"
-        incs = [i for i in store.incidents_since(start) if float(i["first_ts"]) < end
+        note = _hearing_note(deaf_spans(hits))
+        gap = _gap_note(_quiet_gaps(hits, start, end))
+        # what BEGAN in the night: an afternoon busy spell still being touched
+        # at 10:35 PM is not overnight news (the 2026-11-08 brief said it was)
+        incs = [i for i in store.incidents_since(start) if start <= float(i["first_ts"]) < end
                 and (i.get("types") or i.get("burst"))]
         incs.sort(key=lambda i: float(i["first_ts"]))
         calls = [i for i in incs if i.get("types")]
         busy = [i for i in incs if i.get("burst") and not i.get("types")]
         n = len(hits)
-        lines = [head, f"{n} transmissions heard; " + (f"{len(calls)} call{'s' if len(calls) != 1 else ''}:"
-                                                        if calls else "nothing worth a message.")]
+        lines = [head, f"{n} transmissions logged; " + (f"{len(calls)} call{'s' if len(calls) != 1 else ''}:"
+                                                         if calls else "nothing worth a message.")]
+        for i, extra in enumerate(x for x in (note, gap) if x):
+            lines.insert(1 + i, extra)
         for i in calls[:25]:
             town = i.get("town") or "?"
             dist = "home" if town == home else f"{float(i.get('miles') or 0):.0f} mi"
@@ -1815,8 +1978,13 @@ class ScannerDesk:
                     for i in calls[:3]]
             joined = said[0] if len(said) == 1 else ", ".join(said[:-1]) + f" and {said[-1]}"
             spoken = f"Overnight on the scanner, sir: {joined}" + (f", and {len(calls) - 3} more" if len(calls) > 3 else "") + "."
+            if note:
+                spoken += " " + note
+        elif note:
+            spoken = f"I can't call it a quiet night on the scanner, sir. {note}"
         else:
-            spoken = f"A quiet night on the scanner, sir: {n} transmissions, nothing worth a message."
+            spoken = f"A quiet night on the scanner, sir: {n} transmissions, nothing worth a message." + \
+                (f" {gap}" if gap else "")
         return spoken, "\n".join(lines)[:self.MAX_WRITTEN]
 
     # ------------------------------------------------------------ for the briefs
@@ -1844,7 +2012,11 @@ class ScannerDesk:
         if not hits:
             if self.up is False and self.down_since and self.down_since <= since_ts + (now - since_ts) / 2:
                 return "The scanner console was offline, so I have nothing from the radio."
+            if now - since_ts >= NIGHT_GAP_S:
+                return (f"The scanner logged nothing at all since {_hm(since_ts)} - it was off, unplugged "
+                        "or not connected, so I can't say it was quiet.")
             return ""
+        note = " ".join(x for x in (_hearing_note(deaf_spans(hits)), _gap_note(_quiet_gaps(hits, since_ts, now))) if x)
         start, end = dt.datetime.fromtimestamp(since_ts), dt.datetime.fromtimestamp(now)
         hours = (now - since_ts) / 3600
         if end.hour < 12 and hours >= 5 and (start.date() < end.date() or start.hour < 5):
@@ -1853,18 +2025,22 @@ class ScannerDesk:
             lead = "In the last hour on the scanner"
         else:
             lead = f"On the scanner since {_hm(since_ts)}"
+        # TRANSMISSIONS, NOT CALLS: "Overnight on the scanner: 231 calls"
+        # (2026-11-08) was 231 key-ups, most of them one dispatcher; and only
+        # what began in the window - that brief also offered yesterday's 3:54 PM
         n = len(hits)
-        line = f"{lead}: {n} call{'s' if n != 1 else ''}"
-        incs = [i for i in store.incidents_since(since_ts) if self._worth(i)]
+        line = f"{lead}: {n} transmission{'s' if n != 1 else ''}"
+        incs = [i for i in store.incidents_since(since_ts)
+                if float(i["first_ts"]) >= since_ts and self._worth(i)]
         incs.sort(key=lambda i: (-int(i.get("severity") or 0), float(i.get("miles") or 99)))
         if incs:
             line += "; worth knowing: " + ", ".join(self._item(i) for i in incs[:3])
             if len(incs) > 3:
                 line += f", and {len(incs) - 3} more"
-        else:
+        elif not note:
             busiest = Counter(rules.parse_label(h["name"]).spoken for h in hits).most_common(1)
             line += "; nothing worth stopping for" + (f", busiest was {busiest[0][0]}" if busiest else "")
-        return line + "."
+        return line + "." + (f" {note}" if note else "")
 
     def status(self) -> dict:
         now = self.now()
@@ -1901,6 +2077,8 @@ class ScannerDesk:
             return {"spoken": "The scanner desk is switched off in my settings, sir."}
         if ask == "health":
             return {"spoken": await self._say_health()}
+        if ask == "rules":
+            return {"spoken": self._say_rules()}
         if ask == "doctor":
             return {"spoken": await self._say_doctor()}
         if ask == "last":
@@ -1946,10 +2124,18 @@ class ScannerDesk:
                 if i.get("town") and i["town"] != home_town().name:
                     s += f", {miles_words(i.get('miles'))}"
                 items.append(s)
-            line = "In the last hour on the scanner: " + "; ".join(items) + f". {n} calls in all, busiest {busiest}."
+            line = "In the last hour on the scanner: " + "; ".join(items) + \
+                f". {n} transmission{'s' if n != 1 else ''} in all, busiest {busiest}."
         else:
-            line = f"Quiet on the scanner, sir: {n} call{'s' if n != 1 else ''} in the last hour, mostly {busiest}."
-        await self._query_card("The last hour", [_cap(self._item(i)) for i in incs[:5]] or [f"{n} calls, mostly {busiest}"])
+            line = f"Quiet on the scanner, sir: {n} transmission{'s' if n != 1 else ''} in the last hour, mostly {busiest}."
+        deaf = self.hearing_now(now)
+        if deaf:
+            # never "quiet" while deaf: the radio may be busy with calls I can't hear
+            why = "no sound is reaching the PC" if deaf["silent"] else "the sound is too faint to make out"
+            line = (f"{line.replace('Quiet on the scanner, sir: ', 'On the scanner, sir: ')} But I can't hear it "
+                    f"properly: {why}, since {_hm(deaf['start'])}.")
+        await self._query_card("The last hour", [_cap(self._item(i)) for i in incs[:5]]
+                               or [f"{n} transmission{'s' if n != 1 else ''}, mostly {busiest}"])
         return line
 
     async def _say_town(self, name: str) -> str:
@@ -2024,6 +2210,35 @@ class ScannerDesk:
                     f"It's part of {inc['label']}" + _place(inc.get("address") or "") + "."
         return line
 
+    def _say_rules(self) -> str:
+        """How scanner calls reach him, read from the settings decide() uses,
+        so it stays true. Asked "when will you notify me about calls"
+        (2026-11-08, 8:13 AM), the model promised "right away when a new call
+        comes in" - no such rule exists, and he is relying on these."""
+        home = home_town().name
+        near = float(_cfg("near_miles", 5.0))
+        parts = [
+            f"Here's how scanner calls reach you, sir. A call I can name within {geo.radius_mi():.0f} miles - "
+            "a fire, a crash, a medical or a police call - comes to your phone as a silent message with the "
+            "recording, marked unconfirmed until a second transmission backs it up.",
+            f"Only active danger makes a sound: a working fire, shots fired, a crash with people trapped and "
+            f"the like, here in {home} or within {near:.0f} miles, once two transmissions agree.",
+        ]
+        night = _night_window()
+        if night:
+            (sh, sm), (eh, em) = night
+            day0 = dt.datetime(2026, 1, 1)
+            a = _hm(day0.replace(hour=sh, minute=sm).timestamp())
+            b = _hm(day0.replace(hour=eh, minute=em).timestamp())
+            if str(_cfg("night", "silent")) == "hold":
+                parts.append(f"From {a} to {b} I hold everything but danger in {home} for a summary at {b}.")
+            else:
+                parts.append(f"From {a} to {b} it's all silent except danger in {home}, and the night "
+                             f"comes to you as a summary at {b}.")
+        parts.append("If I can't make out what a call is, I can't send it, so garbled dispatches are missed - "
+                     "and I'll tell you if I stop being able to hear the scanner.")
+        return " ".join(parts)
+
     def _say_summary(self) -> str:
         now = self.now()
         line = self.brief_line(now - 12 * 3600)
@@ -2044,18 +2259,39 @@ class ScannerDesk:
         line = " ".join(parts)
         a = h.get("audio") if isinstance(h.get("audio"), dict) else {}
         peak = a.get("recent_peak_dbfs")
+        # "The audio level is fine" (2026-11-08, 8:13 AM) - said with no sound
+        # reaching the PC at all: the console had nothing to judge, and nothing
+        # judged was taken for fine. Hearing is now what the last hour gave me.
+        now = self.now()
+        deaf = self.hearing_now(now)
+        recent = store.hits_since(now - 3600)
+        understood = [x for x in recent if (x.get("transcript") or "").strip()]
         if not a.get("enabled"):
             line += " Desktop audio is off, so I'm working from the log alone."
-        elif a.get("weak_input"):
-            line += " The audio reaching me is weak" + (f", peaking around minus {abs(int(round(float(peak))))} decibels" if isinstance(peak, (int, float)) else "") + \
-                ", so the transcripts will be patchy."
+        elif deaf and deaf["silent"]:
+            line += (f" But I can't hear it: no sound has reached the PC since {_hm(deaf['start'])}, "
+                     f"{deaf['n']} transmissions with nothing. Check the audio cable and the scanner's volume - "
+                     f"{GOOD_VOLUME} is what works.")
+        elif deaf:
+            line += (f" But I can't make it out: the sound has been too faint since {_hm(deaf['start'])}, "
+                     f"{deaf['n']} transmissions without a word I understood. Turn the scanner's volume up "
+                     f"to {GOOD_VOLUME}.")
+        elif understood:
+            line += (f" I'm hearing it: I made out words in {len(understood)} of the last hour's "
+                     f"{len(recent)} transmissions.")
+            if a.get("weak_input"):
+                line += " The audio is weak" + (f", peaking around minus {abs(int(round(float(peak))))} decibels"
+                                                 if isinstance(peak, (int, float)) else "") + ", so some will be patchy."
+        elif recent:
+            line += (f" I haven't made out a word in the last hour's {len(recent)} transmissions yet, "
+                     "so I can't promise I'm hearing it.")
         else:
-            line += " The audio level is fine."
+            line += " Nothing has been transmitted in the last hour, so I can't judge the sound yet."
         last = store.last_hit()
         if last:
-            line += f" The last call was {_ago(self.now() - float(last.get('end_ts') or last['ts']))}, on {rules.parse_label(last.get('name') or '').spoken}."
+            line += f" The last transmission was {_ago(now - float(last.get('end_ts') or last['ts']))}, on {rules.parse_label(last.get('name') or '').spoken}."
         else:
-            line += " I haven't logged a call yet."
+            line += " I haven't logged a transmission yet."
         return line
 
     async def _say_doctor(self) -> str:
@@ -2103,6 +2339,6 @@ def register_all() -> None:
         name="_scanner",
         description="(internal) the scanner desk's spoken answers for the scanner reflexes.",
         parameters={"type": "object", "properties": {
-            "ask": {"type": "string", "enum": ["now", "town", "last", "summary", "health", "doctor"]},
+            "ask": {"type": "string", "enum": ["now", "town", "last", "summary", "health", "doctor", "rules"]},
             "town": {"type": "string"}}, "required": ["ask"]},
         risk=Risk.SAFE, handler=_scanner_tool, timeout=15))

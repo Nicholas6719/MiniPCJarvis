@@ -1391,6 +1391,101 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           and msent[0][0].startswith("Overnight on the scanner, sir: a chest pain call in Maynard"), msent[:1])
     check("...and only his night: a 9:30 PM call (his evening, told live) is not in it",
           "fire alarm" not in mw.lower(), mw)
+
+    print("\n-- can I hear it? (2026-11-08: deaf for 19 hours and nothing said so) --")
+
+    def fake(n, words_every=0, rec=True):
+        return [{"ts": k * 30.0, "end_ts": k * 30.0 + 3, "audio_path": "x.wav" if rec else "",
+                 "transcript": "Engine 2 respond" if words_every and k % words_every == 0 else None}
+                for k in range(n)]
+    check("a normal stretch (words every few transmissions) is not deafness",
+          SD.deaf_spans(fake(300, words_every=6)) == [])
+    check("one short of the wordless threshold is not yet deafness", SD.deaf_spans(fake(SD.DEAF_WORDLESS - 1)) == [])
+    sp = SD.deaf_spans(fake(SD.DEAF_WORDLESS))
+    check("...at it, with sound recorded, it is: too faint to make out",
+          len(sp) == 1 and sp[0]["recorded"] == SD.DEAF_WORDLESS, sp)
+    sp = SD.deaf_spans(fake(SD.DEAF_UNRECORDED, rec=False))
+    check("a run with no sound at all is deafness much sooner: no sound reached the PC",
+          len(sp) == 1 and sp[0]["recorded"] == 0, sp)
+    sp = SD.deaf_spans(fake(9) + fake(30, rec=False))
+    check("nine faint recordings, then no sound at all, is 'no sound' - judged by the run (2026-11-08, 10 PM)",
+          len(sp) == 1 and sp[0]["silent"] and sp[0]["recorded"] == 9, sp)
+    check("...and an understood word ends a stretch",
+          SD.deaf_spans(fake(60) + [dict(fake(1)[0], transcript="Medic 1 en route")] + fake(60)) == [])
+
+    # the live path, on a clock of its own so no other section's hits share the hour
+    hnow = now + 40 * 86400
+    hid = BASE + 7400
+    for k in range(30):
+        S.log_hit({"id": hid + k, "ts": hnow - 2400 + k * 70, "end_ts": hnow - 2400 + k * 70 + 3, "duration": 3,
+                   "name": "Natick FD", "town": "Natick", "agency": "FD", "audio_path": ""})
+    old_inc = S.create_incident({
+        "first_ts": hnow - 30000, "last_ts": hnow - 1000, "town": "Natick", "miles": 5.0, "agency": "FD",
+        "channel": "Natick FD", "family": "fire", "kind": "burst", "label": "unusual activity on Natick Fire",
+        "severity": 3, "types": [], "address": "", "street": "", "roads": [], "units": [], "details": [],
+        "said": [], "hits": 8, "burst": 1, "status": "active"})
+    hsent: list = []
+
+    async def hdeliver(text, tier, key="", subject="", written=""):
+        hsent.append((text, tier, key, subject))
+        return {"delivered": "telegram", "tier": tier}
+
+    class StubConsole:
+        base_url, last_error = "stub", None
+
+        async def health(self):
+            return {"version": "1.3.0", "connected": True, "scanning": True,
+                    "audio": {"enabled": True, "weak_input": None, "recent_peak_dbfs": None,
+                              "message": "No transmissions heard yet, so the input level can't be judged."}}
+    hdesk = SD.ScannerDesk()
+    hdesk.deliverer, hdesk.client, hdesk.up = hdeliver, StubConsole(), True
+    hdesk.health = {"connected": True, "scanning": True, "audio": {"enabled": True}}
+    hdesk.now = lambda: hnow
+    kept_deaf = volatile.get(SD.DEAF_KEY)
+    try:
+        volatile.put(SD.DEAF_KEY, {}, source="gate")
+        h1 = await hdesk._check_hearing(hnow)
+        h2 = await hdesk._check_hearing(hnow + 120)
+        said_health = await hdesk._say_health()
+        n_spoken, n_written = hdesk.night_summary(hnow - 2500, hnow)
+        empty_spoken, _ = hdesk.night_summary(hnow + 86400, hnow + 86400 + 7 * 3600)
+        bline = hdesk.brief_line(hnow - 2500)
+        for k in range(2):
+            S.log_hit({"id": hid + 40 + k, "ts": hnow + 200 + k * 30, "end_ts": hnow + 203 + k * 30, "duration": 3,
+                       "name": "Natick FD", "town": "Natick", "agency": "FD", "audio_path": "y.wav",
+                       "transcript": "Engine 2 respond to 14 Elm Street for a fire alarm activation."})
+        h3 = await hdesk._check_hearing(hnow + 400)
+        h4 = await hdesk._check_hearing(hnow + 500)
+        rules_said = hdesk._say_rules()
+    finally:
+        if kept_deaf:
+            volatile.put(SD.DEAF_KEY, kept_deaf.get("value") or {}, source="gate")
+        else:
+            volatile.forget(SD.DEAF_KEY)
+        S._write("DELETE FROM scanner_hits WHERE id >= ? AND id < ?", (hid, hid + 100))   # the shared gate DB
+        S._write("DELETE FROM scanner_incidents WHERE id = ?", (old_inc,))
+    check("no sound for 30 transmissions: he is told once, silently, what to check",
+          h1 == "lost" and len(hsent) >= 1 and "no sound reached the PC" in hsent[0][0]
+          and "volume" in hsent[0][0] and NP.kind_of(hsent[0][3], hsent[0][2]) == "scanner_fyi"
+          and not NP.audible(hsent[0][1], NP.kind_of(hsent[0][3], hsent[0][2])), hsent[:1])
+    check("...and not again while it lasts",
+          h2 == "" and sum(1 for m in hsent if "no sound reached" in m[0]) == 1, hsent)
+    check("asked if it's working, it says it can't hear - never 'the audio level is fine'",
+          "can't hear it" in said_health and "fine" not in said_health, said_health)
+    check("the night's summary says what it couldn't hear instead of 'a quiet night'",
+          "couldn't hear the scanner" in n_spoken and "quiet night" not in n_spoken.replace("can't call it a quiet night", "")
+          and "no sound reached the PC" in n_written, n_spoken)
+    check("a night with nothing logged at all is never 'nothing on the scanner overnight'",
+          "logged nothing at all" in empty_spoken and "Nothing on the scanner" not in empty_spoken, empty_spoken)
+    check("the brief counts transmissions, not calls, and says it couldn't hear",
+          "30 transmissions" in bline and " calls" not in bline and "couldn't hear" in bline, bline)
+    check("...and leaves out a busy spell that began before its window", "busy spell" not in bline, bline)
+    check("words again: he is told it can hear once more",
+          h3 == "back" and len(hsent) == 2 and "hear the scanner again" in hsent[1][0], hsent[1:])
+    check("...once", h4 == "" and len(hsent) == 2, len(hsent))
+    check("how calls reach him comes from the real rules, with no promise of 'right away'",
+          "silent message" in rules_said and "Only active danger makes a sound" in rules_said
+          and "10:30 PM to 5:30 AM" in rules_said and "right away" not in rules_said, rules_said)
     import delivery as DV3
     spoke: list = []
     real3 = (DV3._in_quiet_hours, DV3.is_present, DV3.delivery._speak, RT2.telegram)
@@ -1462,14 +1557,16 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           a["spoken"].startswith("That was ") and "ago" in a["spoken"], a)
     a = await desk.answer("now")
     check("'what's on the scanner' leads with what matters and counts the rest",
-          "45 Union Avenue" in a["spoken"] and "calls in all" in a["spoken"], a)
+          "45 Union Avenue" in a["spoken"] and "transmissions in all" in a["spoken"], a)
     a = await desk.answer("town", "Sudbury")
     check("'what's happening in Sudbury' gives the incident and the distance",
           a["spoken"].startswith("In Sudbury, ") and "gas leak" in a["spoken"] and "mile" in a["spoken"], a)
     a = await desk.answer("town", "Pittsfield")
     check("a town with no channel on his scanner says so", "not hearing any Pittsfield" in a["spoken"], a)
     a = await desk.answer("summary")
-    check("'scanner summary' is the brief line", "calls" in a["spoken"] and "worth knowing" in a["spoken"], a)
+    # transmissions, not calls (2026-11-08: "231 calls" overnight were 231 key-ups)
+    check("'scanner summary' is the brief line, counting transmissions",
+          "transmissions" in a["spoken"] and " calls" not in a["spoken"] and "worth knowing" in a["spoken"], a)
     line = SD.brief_line(now - 6 * 3600)
     check("brief_line names the incidents worth knowing", "worth knowing" in line and "45 Union Avenue" in line
           and "over by" in line, line)
@@ -1492,7 +1589,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     for said in ("what's happening in the world", "what's happening in business", "what's going on in ukraine",
                  "what's happening in the market"):
         check(f"{said!r} steps aside for the news", slots_scanner_town(said) is None, slots_scanner_town(said))
-    for name in ("scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor"):
+    for name in ("scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor",
+                 "scanner_rules"):
         sk = SKILL_BY_NAME.get(name)
         check(f"{name} runs the internal _scanner tool", sk and sk.tool == "_scanner" and sk.fixed_args.get("ask"))
     from tools.registry import registry

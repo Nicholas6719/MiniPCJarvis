@@ -3438,6 +3438,17 @@ SKILLS: list[Skill] = [
         "what changes did the scan doctor make", "did the scan doctor change anything",
         "what did the scanner doctor recommend", "what did the scan optimizer change"],
         fixed_args={"ask": "doctor"}, speak=say_scanner),
+    # 2026-11-08, 8:13 AM: "Okay when will you notify me about calls" went to
+    # the model, which promised "right away when a new call comes in" - a rule
+    # that does not exist, about alerts he treats as life and death. The
+    # answer now comes from the desk's own settings (ScannerDesk._say_rules).
+    Skill("scanner_rules", "_scanner", [
+        "when will you notify me about calls", "when will you notify me about scanner calls",
+        "what scanner calls do you send me", "how do scanner alerts work",
+        "when do you alert me about calls on the scanner", "what calls will you notify me about",
+        "what makes you send me a scanner alert", "how do you decide which scanner calls to send me",
+        "which calls on the scanner will you tell me about", "when do scanner calls make a sound"],
+        fixed_args={"ask": "rules"}, speak=say_scanner),
     Skill("note_take", "write_note", [
         "take a note", "take a note called groceries: milk and eggs", "take a note for me: the lab is due friday",
         "jot this down: call the registrar", "write this down: locker combination is on the card",
@@ -4667,6 +4678,7 @@ CONFIRM_AS = {
     "scanner_summary": "sum up the scanner",
     "scanner_health": "check the scanner is working",
     "scanner_doctor": "read the scan doctor's report",
+    "scanner_rules": "explain which scanner calls reach you",
 }
 
 
@@ -4751,6 +4763,7 @@ QUERY_SKILLS = frozenset({
     "battery", "volume_get", "where_am_i", "screen", "read_screen", "camera", "face",
     "health", "agenda", "phone_reminders", "watch_list", "been_doing", "reminder_record",
     "scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor",
+    "scanner_rules",
 })
 
 
