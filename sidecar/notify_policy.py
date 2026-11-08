@@ -30,11 +30,14 @@ URGENT = "urgent"
 
 # kinds that never sound, whatever their tier. "scanner_fyi" is the scanner's
 # quiet feed: a crash or a reported fire in his radius, there when he looks.
-QUIET_KINDS = frozenset({"brief", "market", "memory", "nudge", "held", "render", "scanner_fyi"})
+QUIET_KINDS = frozenset({"brief", "market", "memory", "held", "render", "scanner_fyi"})
 # ...and that never cut into what he is doing at the PC either
-NO_INTERRUPT = frozenset({"brief", "market", "memory", "nudge", "scanner_fyi"})
-# kinds that sound at any tier: he asked for them, at a time he chose
-HIS_OWN = frozenset({"reminder", "watch"})
+NO_INTERRUPT = frozenset({"brief", "market", "memory", "scanner_fyi"})
+# kinds that sound at any tier: he asked for them, at a time he chose. The
+# nudge is his reminder again, half an hour on with no Done: it sounds like
+# the reminder (his words, 2026-11-07: "I don't want that, why would it be
+# silent?" - the silent follow-up came in that morning's overhaul)
+HIS_OWN = frozenset({"reminder", "nudge", "watch"})
 # kinds counted against their OWN hourly ceiling, never the shared one: six
 # scanner calls in an hour must not spend the room his reminders need
 # (delivery._over_budget; review of 2026-11-07)
@@ -88,8 +91,9 @@ def audible(tier: str, kind: str) -> bool:
 
 
 def counts_against_budget(kind: str) -> bool:
-    """His own reminders are never rationed; everything else that sounds is."""
-    return kind != "reminder"
+    """His own reminders, and their one follow-up, are never rationed;
+    everything else that sounds is."""
+    return kind not in ("reminder", "nudge")
 
 
 def daily_sound_cap() -> int:
@@ -102,7 +106,7 @@ def daily_sound_cap() -> int:
 
 def interrupts(tier: str, kind: str) -> bool:
     """At the PC: may it cut into what he is doing? URGENT and what he asked
-    for; a price move, a memory note or a nudge waits for a quiet moment."""
+    for; a price move or a memory note waits for a quiet moment."""
     if kind in HIS_OWN or tier == URGENT:
         return True
     return tier == "alert" and kind not in NO_INTERRUPT

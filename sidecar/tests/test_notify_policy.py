@@ -19,7 +19,7 @@ This gate replays all of it against the new policy and holds each rule:
     brief with nothing new; no recital of recurring reminders; the scanner
     desk's line if that desk exists;
   * memory: once a day at most, silently, only when JARVIS himself is slowed;
-  * reminders: his words verbatim, a Done button, one quiet nudge, a record.
+  * reminders: his words verbatim, a Done button, one nudge (it sounds), a record.
 
 Offline and hermetic: no network, no model, no live Telegram. The gate database
 is shared with every other gate and outlives the build, so what this file adds
@@ -507,9 +507,13 @@ def test_budget() -> None:
         check("his reminder still sounds past the budget - reminders are never rationed",
               rem and rem[0]["silent"] is False and rem[0]["buttons"] == [("Done", "done:9")], rem)
         quiet = {m["text"][:12]: m["silent"] for m in tg.sent
-                 if m["tier"] != D.URGENT and not m["text"].startswith("Time for")}
-        check("a price move, a brief, a memory note and a nudge are all silent",
-              len(quiet) == 4 and all(quiet.values()), quiet)
+                 if m["tier"] != D.URGENT and not m["text"].startswith(("Time for", "Still to do"))}
+        check("a price move, a brief and a memory note are all silent",
+              len(quiet) == 3 and all(quiet.values()), quiet)
+        nud = [m for m in tg.sent if m["text"].startswith("Still to do")]
+        # his words, 2026-11-07: "I don't want that, why would it be silent?"
+        check("the nudge sounds like the reminder it follows, past the budget too",
+              len(nud) == 1 and nud[0]["silent"] is False, nud)
         check("kinds: reminder and watch sound at any tier; market never",
               NP.audible("alert", "reminder") and NP.audible("alert", "watch")
               and not NP.audible("urgent", "market") and NP.audible("urgent", "news")
@@ -547,7 +551,7 @@ def test_reminders() -> None:
     import reminder_voice as RV
     import tasks.scheduler as TS
     from tasks.scheduler import scheduler as S
-    print("\n-- reminders: his words, a Done, one quiet nudge, a record --")
+    print("\n-- reminders: his words, a Done, one nudge, a record --")
     db = S.db
     made_tasks, made_occ = [], []
     try:
