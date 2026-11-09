@@ -349,6 +349,7 @@ class TelegramBridge:
         return ok
 
     last_sent_id: int | None = None
+    last_clip_id: int | None = None
 
     async def edit_text(self, message_id: int, text: str) -> bool:
         """Replace the text of a message already sent - silently: an edit never
@@ -414,7 +415,10 @@ class TelegramBridge:
             r = await self._client.post(
                 f"{API}/bot{self.token}/{method}",
                 data=data, files={field: (p.name, blob)}, timeout=120)
-            return bool(r.json().get("ok"))
+            got = r.json()
+            if bool(got.get("ok")):
+                self.last_clip_id = (got.get("result") or {}).get("message_id")
+            return bool(got.get("ok"))
         except Exception:
             log.warning("telegram upload failed", exc_info=True)
             return False
@@ -463,7 +467,11 @@ class TelegramBridge:
                         r = await self._client.post(
                             f"{API}/bot{self.token}/sendVoice",
                             data=data, files={"voice": (ogg.name, blob, "audio/ogg")}, timeout=60)
-                        if bool(r.json().get("ok")):
+                        got = r.json()
+                        if bool(got.get("ok")):
+                            # the scanner desk reads this straight after the
+                            # send returns: a reply to the recording finds its call
+                            self.last_clip_id = (got.get("result") or {}).get("message_id")
                             return True
                     except Exception:
                         log.warning("telegram sendVoice failed", exc_info=True)
@@ -663,6 +671,8 @@ class TelegramBridge:
                 self.acknowledge_all()
                 spoken = await self._hear(voice)
                 if spoken and not self._answers_pending(spoken):
+                    if await self._scanner_followup(spoken, msg):
+                        return
                     await self._remote_turn(spoken)
                 return
             photo = msg.get("photo")
@@ -718,7 +728,51 @@ class TelegramBridge:
             if "thank" in text.lower():
                 await self._send("Of course, sir.")
             return
+        if await self._scanner_followup(text, msg):
+            return
         await self._remote_turn(text)
+
+    async def _scanner_followup(self, text: str, msg: dict) -> bool:
+        """"Tell me more" about a scanner call (his words, 2026-11-08: "if I
+        say okay, tell me more then Jarvis can [tell me] according to what's
+        going on"). It is about a call when he REPLIES to that call's message,
+        its recording or an earlier answer - then any question counts - or
+        when the call is the last thing JARVIS sent him. Answered from the
+        scanner desk: what is going on now, fact-checked. True when it was
+        his, answered or not; False sends it on as a turn."""
+        try:
+            from scanner_desk import FOLLOWUP_RE, desk
+            reply = int((msg.get("reply_to_message") or {}).get("message_id") or 0)
+            asked = bool(FOLLOWUP_RE.match(text or "")) or (bool(reply) and (text or "").rstrip().endswith("?"))
+            if not asked:
+                return False
+            inc = desk.call_for_followup(reply, self.last_sent_id)
+            if not inc:
+                return False
+        except Exception:
+            log.exception("telegram: could not look for the scanner call behind %r", (text or "")[:40])
+            return False
+        log.info("telegram: %r is about scanner call #%s", text[:40], inc["id"])
+        chat = config.get("remote", "telegram_chat_id")
+
+        async def typing() -> None:
+            # Telegram shows "typing..." for five seconds per action; the
+            # account can take the model half a minute
+            while True:
+                await self._api("sendChatAction", chat_id=chat, action="typing")
+                await asyncio.sleep(4.5)
+        shown = spawn(typing(), name="tg-scanner-typing")
+        try:
+            written, _ = await desk.tell_more(int(inc["id"]))
+        except Exception:
+            log.exception("telegram: tell-me-more for scanner call #%s failed", inc["id"])
+            written = "I couldn't read that call just now, sir."
+        finally:
+            if isinstance(shown, asyncio.Task):
+                shown.cancel()
+        if await self._send(written):
+            desk.note_more(int(inc["id"]), self.last_sent_id)
+        return True
 
     # ------------------------------------------------------------- the turn
     def _on_event(self, evt: dict) -> None:

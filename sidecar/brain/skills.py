@@ -3449,6 +3449,14 @@ SKILLS: list[Skill] = [
         "what makes you send me a scanner alert", "how do you decide which scanner calls to send me",
         "which calls on the scanner will you tell me about", "when do scanner calls make a sound"],
         fixed_args={"ask": "rules"}, speak=say_scanner),
+    # "tell me more" about the call he was just sent (2026-11-08); a bare
+    # "tell me more" on his phone is routed by remote_telegram itself
+    Skill("scanner_more", "_scanner", [
+        "tell me more about that scanner call", "tell me more about that call", "what's going on with that call",
+        "what's happening with that scanner call", "more about the scanner call", "give me more on that call",
+        "what else do you know about that call", "any update on that scanner call", "any more on that call",
+        "what's the latest on that scanner call"],
+        fixed_args={"ask": "more"}, speak=say_scanner),
     Skill("note_take", "write_note", [
         "take a note", "take a note called groceries: milk and eggs", "take a note for me: the lab is due friday",
         "jot this down: call the registrar", "write this down: locker combination is on the card",
@@ -4679,6 +4687,7 @@ CONFIRM_AS = {
     "scanner_health": "check the scanner is working",
     "scanner_doctor": "read the scan doctor's report",
     "scanner_rules": "explain which scanner calls reach you",
+    "scanner_more": "tell you more about the scanner call you were sent",
 }
 
 
@@ -4763,7 +4772,7 @@ QUERY_SKILLS = frozenset({
     "battery", "volume_get", "where_am_i", "screen", "read_screen", "camera", "face",
     "health", "agenda", "phone_reminders", "watch_list", "been_doing", "reminder_record",
     "scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor",
-    "scanner_rules",
+    "scanner_rules", "scanner_more",
 })
 
 

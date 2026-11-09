@@ -58,7 +58,7 @@ import geo
 from config import config
 from delivery import ALERT, URGENT
 from events import bus, spawn
-from scanner import rules, store
+from scanner import factcheck, rules, store
 from scanner.client import ConsoleClient
 
 log = logging.getLogger("jarvis.scanner")
@@ -371,21 +371,102 @@ def _in_quiet_hours() -> bool:
         return False
 
 
-SUMMARY_PROMPT = """You turn police and fire radio traffic into one line for a man who lives in \
-Framingham, Massachusetts and wants to know what is happening near him.
-Channel: {channel} ({agency}, {town}, {miles})
-The rules saw: {label}{address}{units}
-Transmissions, oldest first (machine transcripts of weak radio audio; expect errors):
-{said}
+# WHAT IS GOING ON, IN HIS WORDS (2026-11-08). He read a call's raw transcript
+# on his phone and said: "I don't want the actual transmission. I want Jarvis
+# to tell me what's going on." The model writes it; scanner.factcheck then
+# cuts every sentence that leans on a word nobody said, because on weak audio
+# this model has invented "no injuries reported" and "responders on scene".
+# His home town is deliberately NOT in the prompt: it leaked into a summary
+# of a Boston call as "near Framingham, Massachusetts" when it was.
+# The garble rules are from replaying real calls (2026-11-08): told only "add
+# nothing", the model echoed "Rail Party sleeping" word for word and listed a
+# licence plate ("Fox, Charlie, Romeo 213") as the units sent.
+_RULES_OF_WRITING = """- Use only what the transmissions say. Add nothing: no injuries or "no injuries" unless said, \
+no "on scene", no cause, no guess at how serious it is.
+- Much of the audio is garbled. Say what the clear parts mean in your own plain words; leave out any \
+sentence or name that makes no sense - never copy garbled words, never guess at or correct them.
+- Phonetic letters (Alpha, Bravo, Charlie...) and long strings of numbers are plates, case numbers or \
+radio codes - leave them out. Units are only named ones like Engine 1, Ladder 2, Car 3 or Ambulance 1.
+- Say "someone" unless the transmissions say man, woman, male, female, he or she."""
+
+_CALL_FACTS = """Agency: {who} ({town}, {miles})
+The rules guessed: {label}{address}{units} (a keyword guess - if the transmissions say something \
+different, go by the transmissions)
+Transmissions, oldest first (machine transcripts of weak radio audio - expect errors and garbled words):
+{said}"""
+
+SUMMARY_PROMPT = """Someone nearby wants to know what is going on in a police or fire radio call. \
+Tell them in a text message.
+""" + _CALL_FACTS + """
 Answer with JSON only, no other text:
-{{"summary": "<one short spoken sentence: what is happening and where; no unit numbers or codes>", \
-"type": "<2-4 words>", "address": "<street address or intersection, or empty>", \
+{{"summary": "<one or two short plain sentences>", "type": "<2-4 words>", \
+"address": "<street address or intersection, or empty>", \
 "active": <true, or false if the traffic says it is over, a false alarm or nothing found>}}
-Never add anything the transmissions do not say."""
+The summary says what is happening, where, who was sent, and any detail the transmissions give about \
+the people, vehicles or weapons involved - for example "Sudbury Fire sent Car 3 and Ambulance 1 to a \
+two-car crash on Route 20; one driver has neck pain."
+""" + _RULES_OF_WRITING + """
+- No radio codes, no unit numbers, no dates or times (the message already has the time)."""
+
+MORE_PROMPT = """Someone nearby asked what is going on in a police or fire radio call. Tell them \
+everything the radio said about it, in a text message.
+""" + _CALL_FACTS + """
+Answer with JSON only, no other text:
+{{"account": "<two to four short plain sentences, in the order it happened>", \
+"clear": <true if the transmissions clearly say what happened; false if they are too garbled to make out>}}
+Say what happened, where, who was sent and every detail the transmissions give about the people, \
+vehicles or weapons involved.
+""" + _RULES_OF_WRITING + """
+- No radio codes and no dates. Unit names (Engine 1, Ambulance 2) are fine."""
+
+# The background call writes both at once, so "tell me more" is answered from
+# what is already written instead of a half-minute wait (replayed 2026-11-08:
+# 26-40 s for the account alone, asked after the fact).
+BOTH_PROMPT = """Someone nearby wants to know what is going on in a police or fire radio call. \
+Tell them in a text message.
+""" + _CALL_FACTS + """
+Answer with JSON only, no other text:
+{{"summary": "<one or two short plain sentences>", \
+"account": "<two to four short plain sentences: everything the radio said about it, in the order it happened>", \
+"clear": <true if the transmissions clearly say more than the summary does; false if the rest is too garbled \
+to make out>, "type": "<2-4 words>", "address": "<street address or intersection, or empty>", \
+"active": <true, or false if the traffic says it is over, a false alarm or nothing found>}}
+The summary says what is happening, where, who was sent, and any detail the transmissions give about \
+the people, vehicles or weapons involved - for example "Sudbury Fire sent Car 3 and Ambulance 1 to a \
+two-car crash on Route 20; one driver has neck pain." The account is for when they ask for more: \
+every detail, units by name, in order.
+""" + _RULES_OF_WRITING + """
+- No radio codes, no dates or times (the message already has the time); no unit numbers in the summary."""
+
+RETRY_PROMPT = """These words in your answer are not in the transmissions: {bad}.{negative} \
+Write it again using only what the transmissions say - leave out anything they do not support. \
+Same JSON."""
+
+# mode -> (prompt, [(field, longest allowed)]); the first field must be there
+_MODES = {
+    "summary": (SUMMARY_PROMPT, [("summary", 240)]),
+    "more": (MORE_PROMPT, [("account", 600)]),
+    "both": (BOTH_PROMPT, [("summary", 240), ("account", 600)]),
+}
+
+# HIS "TELL ME MORE" (2026-11-08: "if I say okay, tell me more then Jarvis can
+# [tell me] according to what's going on"). A bare "ok" stays an
+# acknowledgement (remote_telegram.ACK_ONLY answers it with silence).
+FOLLOWUP_RE = re.compile(
+    r"^\s*(?:(?:and|so|ok|okay|ok then|yes|yeah|yep|sure|please|jarvis|hmm|oh)[,.!]?\s+)*"
+    r"(?:(?:please\s+)?tell me more(?:\s+about\s+(?:it|that|this|the call|that call|this call))?"
+    r"|(?:any\s+)?more(?:\s+(?:please|info|information|details?))?"
+    r"|(?:any\s+)?(?:details|updates?|news)"
+    r"|what(?:'?s|\s+is)\s+(?:going on|happening)(?:\s+(?:there|with (?:it|that|this)))?"
+    r"|what\s+happened|what(?:'?s|\s+is)\s+(?:it|that|this)(?:\s+about)?"
+    r"|go on|say more|keep going|what else|anything else)"
+    r"(?:\s+please)?\s*[.!?]*\s*$", re.I)
 
 
-def parse_summary(out: str) -> dict | None:
-    """The model's JSON, checked; None when there is nothing usable."""
+def parse_summary(out: str, fields: list[tuple[str, int]] | None = None) -> dict | None:
+    """The model's JSON, checked; None when there is nothing usable. The first
+    of `fields` (default: the summary) must be there; the rest may be empty."""
+    fields = fields or [("summary", 240)]
     blobs = re.findall(r"\{[^{}]*\}", out or "", re.S)
     for b in reversed(blobs):
         try:
@@ -394,14 +475,95 @@ def parse_summary(out: str) -> dict | None:
             continue
         if not isinstance(d, dict):
             continue
-        s = re.sub(r"\s+", " ", str(d.get("summary") or "")).strip().strip('"')
-        if not s or len(s) > 240:
+        got = {}
+        for key, limit in fields:
+            s = re.sub(r"\s+", " ", str(d.get(key) or "")).strip().strip('"')
+            got[key] = s if len(s) <= limit else ""
+        if not got[fields[0][0]]:
             continue
-        act = d.get("active")
-        return {"summary": s, "type": str(d.get("type") or "")[:40],
-                "address": str(d.get("address") or "")[:80],
-                "active": act if isinstance(act, bool) else None}
+        act, clear = d.get("active"), d.get("clear")
+        got.update({"type": str(d.get("type") or "")[:40], "address": str(d.get("address") or "")[:80],
+                    "active": act if isinstance(act, bool) else None,
+                    "clear": clear if isinstance(clear, bool) else None})
+        return got
     return None
+
+
+def call_sources(inc: dict) -> tuple[list[str], list[str]]:
+    """(what was heard, what the rules found word for word) - all a summary
+    of this call may lean on."""
+    lab = rules.parse_label(inc.get("channel") or "")
+    heard = [str(s.get("text") or "") for s in inc.get("said") or []]
+    known = [inc.get("label") or "", inc.get("address") or "", inc.get("town") or "",
+             inc.get("channel") or "", inc.get("agency") or "", lab.spoken] \
+        + list(inc.get("roads") or []) + list(inc.get("units") or []) + list(inc.get("details") or [])
+    return heard, [k for k in known if k]
+
+
+def checked(text: str, inc: dict) -> str:
+    """Only the sentences of `text` that what was heard supports."""
+    heard, known = call_sources(inc)
+    return factcheck.check(text or "", heard, known)[0]
+
+
+def call_prompt(template: str, inc: dict) -> str:
+    said = "\n".join(f'- [{_hm(s.get("ts", 0))}] "{s.get("text", "")}"' for s in inc.get("said") or []) or "- (none)"
+    return template.format(
+        who=rules.parse_label(inc.get("channel") or "").spoken, town=inc.get("town") or "?",
+        miles=miles_words(inc.get("miles")), label=inc.get("label") or "?",
+        address=f"; address {inc['address']}" if inc.get("address") else "",
+        units=f"; units {', '.join(inc['units'])}" if inc.get("units") else "", said=said)
+
+
+async def write_checked(inc: dict, mode: str, ask, budget_s: float) -> dict | None:
+    """The model's words for one call, fact-checked, with one second try when
+    the check cut something: told which words nothing supports, the model
+    usually keeps the fact and drops the guess ("suspect may be armed" ->
+    "someone has a knife"). `ask(messages, timeout)` returns the raw output.
+    Returns the parsed answer with its text replaced by what survived (""
+    when nothing did) and "dropped" listing what was cut; None when the model
+    gave nothing usable in time."""
+    template, fields = _MODES[mode]
+    loop = asyncio.get_running_loop()
+    end = loop.time() + budget_s
+    messages = [{"role": "user", "content": call_prompt(template, inc)}]
+    heard, known = call_sources(inc)
+
+    def judge(got: dict) -> dict:
+        return {k: factcheck.check(got.get(k) or "", heard, known) for k, _ in fields}
+    try:
+        out = await ask(messages, max(1.0, end - loop.time()))
+    except asyncio.TimeoutError:
+        return None
+    got = parse_summary(out, fields)
+    if not got:
+        return None
+    verdict = judge(got)
+    cut = [(s, ws) for _, dropped in verdict.values() for s, ws in dropped]
+    if cut and end - loop.time() > 4.0:
+        bad = sorted({w for _, ws in cut for w in ws if not w.startswith("(")})
+        neg = any(w.startswith("(") for _, ws in cut for w in ws)
+        messages += [{"role": "assistant", "content": out},
+                     {"role": "user", "content": RETRY_PROMPT.format(
+                         bad=", ".join(bad) or "(none)",
+                         negative=" Nothing negative (no, not, none) was said." if neg else "")}]
+        try:
+            got2 = parse_summary(await ask(messages, max(1.0, end - loop.time())), fields)
+        except asyncio.TimeoutError:
+            got2 = None
+        if got2:
+            # field by field, whichever try kept more of what was heard
+            v2 = judge(got2)
+            for k, _ in fields:
+                if len(v2[k][0]) > len(verdict[k][0]):
+                    verdict[k] = v2[k]
+            for flag in ("active", "clear"):
+                if got2.get(flag) is not None:
+                    got[flag] = got2[flag]
+    for k, _ in fields:
+        got[k] = verdict[k][0]
+    got["dropped"] = [s for _, dropped in verdict.values() for s, _ in dropped]
+    return got
 
 
 # The console's Scan Doctor (1.3.0) records every change as
@@ -551,9 +713,16 @@ class ScannerDesk:
         self.summariser = None        # async (incident, urgent) -> dict | None
         self.clip_sender = None       # async (wav path, caption) -> bool
         self.editor = None            # async (message id, text) -> bool
+        self.asker = None             # async (messages) -> raw model output
         self._refreshing: set[int] = set()
         self._dirty: set[int] = set()                         # more arrived while a refresh ran
         self._edited: dict[int, str] = {}                     # id -> the text his message shows
+        # the plain-words summary: how many transmissions it covers, when it
+        # was last asked for, and the calls being summarised right now
+        self._summary_n: dict[int, int] = {}
+        self._summary_ts: dict[int, float] = {}
+        self._summarising: set[int] = set()
+        self._more: dict[int, tuple[int, str]] = {}           # id -> (transmissions, his "tell me more")
 
     # ------------------------------------------------------------ plumbing
     def _log_every(self, key: str, every: float, level: int, msg: str, *args, exc: bool = False) -> None:
@@ -1218,12 +1387,53 @@ class ScannerDesk:
                     await asyncio.sleep(min(wait, self.REFRESH_GAP_S))
                 inc = store.incident(iid)
                 if inc:
+                    self._maybe_resummarise(inc)
                     await self._edit(inc)
                 if iid not in self._dirty:
                     return
         finally:
             self._refreshing.discard(iid)
             self._dirty.discard(iid)
+
+    # ------------------------------------------------------------ what is going on, in plain words
+    RESUMMARY_GAP_S = 120.0       # a growing call is re-told at most this often
+
+    def _maybe_resummarise(self, inc: dict) -> None:
+        """New transmissions since his message was summarised: tell it again
+        (in the background - the edit with what is known goes ahead now)."""
+        iid = int(inc["id"])
+        n = len(inc.get("said") or [])
+        if not n or n <= self._summary_n.get(iid, 0) or iid in self._summarising:
+            return
+        if self.now() - self._summary_ts.get(iid, 0.0) < self.RESUMMARY_GAP_S:
+            return
+        self._spawn_task(self._summary_after(iid), name=f"scanner-summary-{iid}")
+
+    async def _summary_after(self, iid: int) -> None:
+        """A call already on his phone, told in plain words a few seconds
+        later: the summary is edited into the same message, which never makes
+        a sound (his choice, 2026-11-08: "send now, add summary after")."""
+        if iid in self._summarising or not _cfg("llm_summary", True):
+            return
+        inc = store.incident(iid)
+        if not inc or not inc.get("said") or (inc.get("burst") and not inc.get("types")):
+            return
+        self._summarising.add(iid)
+        self._summary_ts[iid] = self.now()
+        n = len(inc["said"])
+        try:
+            got = await self._summarise(inc, urgent=False)
+        finally:
+            self._summarising.discard(iid)
+        self._summary_n[iid] = n
+        self._keep_account(iid, n, got)
+        if len(self._summary_n) > 256:
+            for k in list(self._summary_n)[:128]:
+                self._summary_n.pop(k, None)
+                self._summary_ts.pop(k, None)
+        if got and got.get("summary"):
+            store.update_incident(iid, {"summary": got["summary"]})
+            self._schedule_refresh(iid)
 
     def _unconfirmed(self, inc: dict) -> bool:
         """Only one transmission named it and nothing has backed it up (a busy
@@ -1505,12 +1715,17 @@ class ScannerDesk:
             # a quiet call that grew is the same message, edited - never a second one
             self._schedule_refresh(iid)
             return
-        # The quiet feed is said in the rules' own words: one line is not worth
-        # a model call, and it must never wait behind one.
+        # The quiet feed goes out at once in the rules' own words - it must
+        # never wait behind a model call; its plain-words summary follows,
+        # edited in (_summary_after). A louder tier asks the model first.
         if tier != FYI and _cfg("llm_summary", True) and not (inc["burst"] and not inc["types"]):
+            self._summary_ts[iid] = self.now()
             got = await self._summarise(inc, urgent=tier == URGENT)
+            self._summary_n[iid] = len(inc.get("said") or [])
+            self._keep_account(iid, len(inc.get("said") or []), got)
             if got:
-                store.update_incident(iid, {"summary": got["summary"]})
+                # already fact-checked: "" when nothing in it was supported
+                store.update_incident(iid, {"summary": got.get("summary") or ""})
                 if got.get("active") is False and tier != URGENT:
                     store.update_incident(iid, {"decided": "the model read the traffic as over"})
                     log.info("scanner: #%d held - the model read it as over: %r", iid, got["summary"])
@@ -1567,6 +1782,10 @@ class ScannerDesk:
             # anything heard while the send was in flight found no message to
             # edit; the identical-text check makes this free when nothing came
             self._schedule_refresh(iid)
+            if tier == FYI and not (inc.get("burst") and not inc.get("types")):
+                # a quiet call goes out at once with where it is; what is going
+                # on follows in plain words, edited into the same message
+                self._spawn_task(self._summary_after(iid), name=f"scanner-summary-{iid}")
         if outcome == "spoken":
             await self._card(inc, tier)
         if tier == URGENT and outcome == "telegram" and _cfg("send_audio", True) and trigger:
@@ -1603,47 +1822,72 @@ class ScannerDesk:
         return await delivery.deliver(text, tier, **kw)
 
     async def _summarise(self, inc: dict, urgent: bool) -> dict | None:
+        """The model's line for a call, already fact-checked: its "summary" is
+        only the sentences what was heard supports ("" when none survive).
+        "active" is the model's own reading and stands either way."""
         if self.summariser is not None:
             try:
-                return await self.summariser(inc, urgent)
+                got = await self.summariser(inc, urgent)
             except Exception:
                 log.warning("scanner: the summariser failed", exc_info=True)
                 return None
+            if got:
+                got = dict(got, summary=checked(got.get("summary") or "", inc),
+                           account=checked(got.get("account") or "", inc))
+            return got
         return await self._llm_summary(inc, urgent)
 
-    async def _llm_summary(self, inc: dict, urgent: bool) -> dict | None:
-        """One temp-0 JSON side call for the incidents the rules already think
-        matter. An ALERT waits for a quiet moment first (never beside one of
-        his turns); an URGENT does not wait and gets eight seconds, or goes
-        out in the rules' own words."""
-        from llm.provider import local_llm, wait_for_quiet
-        said = "\n".join(f'- [{_hm(s.get("ts", 0))}] "{s.get("text", "")}"' for s in inc.get("said") or []) or "- (none)"
-        prompt = SUMMARY_PROMPT.format(
-            channel=inc.get("channel") or "?", agency=inc.get("agency") or "?", town=inc.get("town") or "?",
-            miles=miles_words(inc.get("miles")), label=inc.get("label") or "?",
-            address=f"; address {inc['address']}" if inc.get("address") else "",
-            units=f"; units {', '.join(inc['units'])}" if inc.get("units") else "", said=said)
+    def _keep_account(self, iid: int, n: int, got: dict | None) -> None:
+        """The longer account written with the summary, kept for "tell me more"
+        - unless the model judged the rest of the audio too garbled to tell:
+        replayed on real calls, its account of a garbled one was the garble
+        again in other clothes ("First one, Amy P D, at six hundred main
+        street"), which is exactly what he asked not to be sent."""
+        if got and got.get("clear") is False:
+            self._more[iid] = (n, "")
+        elif got and got.get("account"):
+            self._more[iid] = (n, got["account"])
+            if len(self._more) > 64:
+                self._more.pop(next(iter(self._more)))
+
+    async def _llm_ask(self, messages: list[dict], timeout: float) -> str:
+        """One temp-0 side call; raises asyncio.TimeoutError past `timeout`.
+        The asker stub stands in for it in the gates."""
+        if self.asker is not None:
+            return await asyncio.wait_for(self.asker(messages), timeout=timeout)
+        from llm.provider import local_llm
         out = ""
 
-        async def ask() -> None:
+        async def go() -> None:
             nonlocal out
-            async for ch in local_llm.stream([{"role": "user", "content": prompt}], max_tokens=600,
-                                             sampling={"temperature": 0.0}):
+            # a reasoning model thinks out of the same budget it answers from
+            async for ch in local_llm.stream(messages, max_tokens=1200, sampling={"temperature": 0.0}):
                 out += ch.text
                 if ch.done:
                     break
+        await asyncio.wait_for(go(), timeout=timeout)
+        return out
+
+    async def _llm_summary(self, inc: dict, urgent: bool) -> dict | None:
+        """One fact-checked side call for an incident. Anything but an URGENT
+        waits for a quiet moment first (never beside one of his turns) and
+        writes the longer account for "tell me more" in the same call; an
+        URGENT does not wait, writes the summary alone and gets eight seconds,
+        or goes out in the rules' own words."""
         try:
-            if not urgent:
+            if not urgent and self.asker is None:
+                from llm.provider import wait_for_quiet
                 await wait_for_quiet(max_wait=45.0)    # never beside one of his turns
-            await asyncio.wait_for(ask(), timeout=8.0 if urgent else 30.0)
-        except asyncio.TimeoutError:
-            log.info("scanner: the summary for #%s timed out; using the rules' words", inc.get("id"))
-            return None
+            got = await write_checked(inc, "summary" if urgent else "both", self._llm_ask,
+                                      8.0 if urgent else 45.0)
         except Exception:
             log.warning("scanner: the summary side call failed", exc_info=True)
             return None
-        got = parse_summary(out)
-        log.info("scanner: summary for #%s -> %r", inc.get("id"), got and got.get("summary"))
+        if got is None:
+            log.info("scanner: no summary for #%s in time; using the rules' words", inc.get("id"))
+            return None
+        log.info("scanner: summary for #%s -> %r%s", inc.get("id"), got.get("summary"),
+                 f" (cut as unsupported: {got['dropped']!r})" if got.get("dropped") else "")
         return got
 
     # ------------------------------------------------------------ words for him
@@ -1671,8 +1915,8 @@ class ScannerDesk:
             noun = {"fire": "the fire", "traffic": "the crash", "police": "the police call",
                     "ems": "the medical call"}.get(inc.get("family") or "", "the call")
             spoken = f"Update from the scanner on {noun}{spoken_at}" + (f" {where}" if where else "") + f": {update}."
-        elif inc.get("summary"):
-            s = inc["summary"].rstrip(".")
+        elif inc.get("summary") and checked(inc["summary"], inc):
+            s = checked(inc["summary"], inc).rstrip(".")
             if town and town.lower() not in s.lower():
                 s += f", {where}"
             elif town and town != home_town().name and "mile" not in s:
@@ -1683,13 +1927,14 @@ class ScannerDesk:
         extra = self._spoken_details(inc) if not update else ""
         return spoken + (f" {extra}" if extra else ""), self.written(inc, tier, update)
 
-    def _spoken_details(self, inc: dict) -> str:
+    def _spoken_details(self, inc: dict, most: int = 2) -> str:
         """One more sentence for the voice, from what was actually heard:
         "Two vehicles, minor injuries. Sudbury Fire sent Car 3 and Ambulance 1."
-        Empty when nothing more was heard."""
+        Empty when nothing more was heard. The phone's line takes every fact
+        (`most`); the voice, two."""
         if inc.get("burst") and not inc.get("types"):
             return ""
-        facts = [d for d in (inc.get("details") or []) if d != "units on scene"][:2]
+        facts = [d for d in (inc.get("details") or []) if d != "units on scene"][:most]
         out = _cap(", ".join(facts)) + "." if facts else ""
         units = (inc.get("units") or [])[:3]
         if units:
@@ -1699,9 +1944,15 @@ class ScannerDesk:
         return out
 
     def written(self, inc: dict, tier: str, update: str = "") -> str:
-        """The phone's version: short lines he can scan, and everything the
-        radio gave - the summary, where, who was sent, what is known, every
-        line heard with its time. Edited in place as the call develops."""
+        """The phone's version, in his words (2026-11-08): "the heading, the
+        where, and the summary of it" - never the raw transcript ("I don't
+        want the actual transmission. I want Jarvis to tell me what's going
+        on"). The summary is the model's, fact-checked again here so nothing
+        unsupported can reach him whatever is stored; until it is ready, or
+        when nothing in it survives, the line is built from the facts the
+        rules found word for word. Everything else - the units, every fact,
+        the order it happened in - is his on "tell me more". Edited in place
+        as the call develops."""
         home = home_town().name
         town = inc.get("town") or "?"
         dist = "home" if town == home else f"{float(inc.get('miles') or 0):.0f} mi"
@@ -1713,30 +1964,17 @@ class ScannerDesk:
         if inc.get("burst") and not inc.get("types"):
             lines.append(f"Unusual activity on {inc.get('channel')}: {inc.get('summary') or 'far more traffic than usual'}")
         else:
-            # No model summary here, on purpose. Tried on two real calls
-            # (2026-11-07), gpt-oss turned weak-audio transcripts into "no
-            # injuries reported" and "responders are on scene", neither of
-            # which anyone said. What he reads is only what was heard: the
-            # facts the rules found word for word, and the words themselves.
             what = (inc.get("label") or "activity") + (f" - {address}" if address else "")
             # one transmission is evidence, not a conclusion: said so, plainly
             lines.append(f"Unconfirmed: {what} (one transmission so far)" if self._unconfirmed(inc) else _cap(what))
         roads = [r for r in (inc.get("roads") or []) if r not in address]
         if address or roads:
             lines.append("Where: " + ", ".join(x for x in [address] + roads if x))
-        if inc.get("units"):
-            lines.append("Units: " + ", ".join(inc["units"]))
-        if inc.get("details"):
-            lines.append("Known: " + "; ".join(inc["details"]))
         said = inc.get("said") or []
         if said:
-            chans = list(dict.fromkeys(s.get("channel") or inc.get("channel") or "" for s in said))
-            lines.append(f"Heard on {', '.join(c for c in chans if c) or 'the scanner'}:")
-            for s in said[-SAID_KEEP:]:
-                words = re.sub(r"\s+", " ", str(s.get("text") or "")).strip()
-                if len(words) > 220:
-                    words = words[:217].rstrip() + "..."
-                lines.append(f'{_hm(float(s.get("ts") or 0))}  "{words}"')
+            told = self.told(inc)
+            if told:
+                lines.append(told)
         elif inc.get("burst"):
             lines.append("No words yet (digital or unclear audio).")
         starts = [float(x) for x in [inc.get("first_ts")] + [s.get("ts") for s in said[:1]] if x]
@@ -1750,15 +1988,124 @@ class ScannerDesk:
                 foot += f" - latest {_hm(float(inc['last_ts']))}"
             lines.append(foot)
         # ONE Telegram message (4096 characters): the id kept for edits must be
-        # the whole message, never the last of several chunks - the oldest
-        # heard lines give way first
-        heard = [i for i, x in enumerate(lines) if re.match(r"\d{1,2}:\d\d [AP]M  \"", x)]
-        while len("\n".join(lines)) > self.MAX_WRITTEN and len(heard) > 1:
-            del lines[heard.pop(0)]
-            heard = [i - 1 for i in heard]
+        # the whole message, never the last of several chunks
         return "\n".join(lines)[:self.MAX_WRITTEN]
 
     MAX_WRITTEN = 3900
+
+    def told(self, inc: dict) -> str:
+        """What is going on, for his message: the model's summary as far as
+        what was heard supports it, plus any fact the rules heard word for
+        word that it left out (an injury must never be lost to a tidy
+        sentence); without a summary, the rules' own sentence of facts."""
+        summary = checked(inc.get("summary") or "", inc) if inc.get("summary") else ""
+        if not summary:
+            return self._spoken_details(inc, most=8)
+        said = factcheck._words(summary)
+        said += [x for w in said for x in factcheck.IMPLIES.get(w, "").split()]   # "two car crash" is 2 vehicles
+        have = {factcheck._stem(w) for w in said}
+        left = [d for d in (inc.get("details") or []) if d != "units on scene"
+                and not any(factcheck._stem(w) in have for w in factcheck._words(d) if len(w) >= 4)]
+        return summary + (f" Also heard: {'; '.join(left)}." if left else "")
+
+    # ------------------------------------------------------------ "tell me more"
+    FOLLOWUP_WINDOW_S = 6 * 3600      # a bare "tell me more" reaches back this far
+    MORE_BUDGET_S = 40.0              # the model's time for an account he is waiting on
+    REPLY_WINDOW_S = 24 * 3600        # a reply to the call's own message, this far
+
+    def call_for_followup(self, reply_mid: int | None, last_sent_id: int | None) -> dict | None:
+        """The call his "tell me more" is about. A Telegram reply names it:
+        his reply to the call's message, its recording or an earlier answer.
+        Without a reply it is the call only if that call is the last thing
+        JARVIS sent him - after a reminder or the news, "tell me more" is
+        about those, and goes to the conversation as before."""
+        now = self.now()
+        if reply_mid:
+            return store.incident_by_message(int(reply_mid), now - self.REPLY_WINDOW_S)
+        if last_sent_id:
+            return store.incident_by_message(int(last_sent_id), now - self.FOLLOWUP_WINDOW_S)
+        return None
+
+    def note_more(self, iid: int, mid: int | None) -> None:
+        """His "tell me more" answer is about this call too: a second "more",
+        or a reply to the answer, finds it."""
+        if mid:
+            store.update_incident(iid, {"more_mid": int(mid)})
+
+    def latest_told(self) -> dict | None:
+        """The call he was most recently sent (for "tell me more about that
+        call" asked aloud), within the follow-up window."""
+        now = self.now()
+        told = [i for i in store.incidents_since(now - self.FOLLOWUP_WINDOW_S)
+                if i.get("tier") and float(i.get("delivered_ts") or 0) >= now - self.FOLLOWUP_WINDOW_S]
+        return max(told, key=lambda i: float(i["delivered_ts"])) if told else None
+
+    async def tell_more(self, iid: int) -> tuple[str, str]:
+        """(written, spoken): everything known about one call, as it stands
+        now - where, whether it is still going, everything the radio said in
+        plain words (fact-checked, like the summary), the units and the facts
+        heard word for word. Never the raw transcript; the recording is
+        under his message."""
+        inc = store.incident(iid)
+        if not inc:
+            return "I can't find that call any more, sir.", "I can't find that call any more, sir."
+        home = home_town().name
+        town = inc.get("town") or "?"
+        dist = "home" if town == home else f"{float(inc.get('miles') or 0):.0f} mi"
+        address = inc.get("address") or ""
+        head = f"{_cap(inc.get('label') or 'activity')}{' at ' + address if address else ''} - {town} ({dist})."
+        said = inc.get("said") or []
+        # the first word heard, exactly as his message says it ("First heard")
+        starts = [float(x) for x in [inc.get("first_ts")] + [s.get("ts") for s in said[:1]] if x]
+        first = min(starts) if starts else self.now()
+        last = max(float(inc.get("last_ts") or first), first)
+        n = int(inc.get("hits") or len(said) or 1)
+        if inc.get("status") == "over":
+            state = f"It's over: {n} transmission{'s' if n != 1 else ''}, {_hm(first)} to {_hm(last)}."
+        elif self._unconfirmed(inc):
+            state = f"Heard once, at {_hm(first)} - nothing has backed it up yet."
+        elif last - first >= 60:
+            state = f"Still going: {n} transmissions since {_hm(first)}, the latest at {_hm(last)}."
+        else:
+            state = f"{n} transmissions at {_hm(first)}."
+        account = ""
+        stuck = False          # the model never answered - which is not the audio's fault
+        if inc.get("burst") and not inc.get("types"):
+            account = "It's only traffic so far - no words I can make out (digital or unclear audio)."
+        elif said:
+            cached = self._more.get(iid)
+            if cached and cached[0] == len(said):
+                account = cached[1]
+            else:
+                got = None
+                try:
+                    # forty seconds: the first live try (2026-11-08) ran beside
+                    # the start-up cache warm-up and lost a 25-second race
+                    got = await write_checked(inc, "more", self._llm_ask, self.MORE_BUDGET_S)
+                except Exception:
+                    log.warning("scanner: the account of #%s failed", iid, exc_info=True)
+                account = "" if (got or {}).get("clear") is False else ((got or {}).get("account") or "")
+                log.info("scanner: tell-me-more for #%s -> %r%s%s", iid, account,
+                         " (no answer from the model in time)" if got is None else
+                         " (judged too garbled)" if got.get("clear") is False else "",
+                         f" (cut as unsupported: {got['dropped']!r})" if got and got.get("dropped") else "")
+                self._keep_account(iid, len(said), got)
+                stuck = got is None
+            if not account:
+                # HONEST ABOUT WHY (2026-11-08): the first live tries ran
+                # beside the start-up warm-up, got no answer in time, and said
+                # "the audio is too garbled" - which nobody had judged
+                account = (self.told(inc) + " " if self.told(inc) else "") + (
+                    "I couldn't work out the rest just now, sir - ask me again in a minute." if stuck else
+                    "I can't make out more than that, sir - the audio is too garbled.")
+        written = [head, state] + ([account] if account else [])
+        if inc.get("units"):
+            written.append("Units: " + ", ".join(inc["units"]))
+        facts = [d for d in (inc.get("details") or [])]
+        if facts:
+            written.append("Heard: " + "; ".join(facts))
+        spoken = " ".join(x for x in (head, state, account) if x)
+        return "\n".join(written), spoken
 
     async def _card(self, inc: dict, tier: str) -> None:
         """The incident on the HUD while it is said (the brief card; no new UI)."""
@@ -1807,6 +2154,10 @@ class ScannerDesk:
                 from remote_telegram import telegram
                 ok = await telegram.send_voice_clip(str(path), caption, silent=silent, reply_to=reply_to)
                 if ok:
+                    if telegram.last_clip_id:
+                        # read straight after the send (no await between): a
+                        # reply to the recording is about this call too
+                        store.update_incident(int(inc["id"]), {"clip_mid": int(telegram.last_clip_id)})
                     from delivery import delivery
                     delivery.note_sent(kind)        # a second message on his phone counts
                     if not silent:
@@ -2087,6 +2438,12 @@ class ScannerDesk:
             return {"spoken": self._say_summary()}
         if ask == "town":
             return {"spoken": await self._say_town(town)}
+        if ask == "more":
+            inc = self.latest_told()
+            if not inc:
+                return {"spoken": "I haven't sent you a scanner call in the last few hours, sir."}
+            _, spoken = await self.tell_more(int(inc["id"]))
+            return {"spoken": spoken}
         return {"spoken": await self._say_now()}
 
     def _down_line(self) -> str:
@@ -2339,6 +2696,8 @@ def register_all() -> None:
         name="_scanner",
         description="(internal) the scanner desk's spoken answers for the scanner reflexes.",
         parameters={"type": "object", "properties": {
-            "ask": {"type": "string", "enum": ["now", "town", "last", "summary", "health", "doctor", "rules"]},
+            "ask": {"type": "string", "enum": ["now", "town", "last", "summary", "health", "doctor", "rules",
+                                               "more"]},
             "town": {"type": "string"}}, "required": ["ask"]},
-        risk=Risk.SAFE, handler=_scanner_tool, timeout=15))
+        # "more" asks the model for the whole account and may try twice
+        risk=Risk.SAFE, handler=_scanner_tool, timeout=45))

@@ -476,10 +476,9 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("URGENT speaks the kind, the street in full and the town",
           spoken == "Scanner, sir: a structure fire with smoke showing at 45 Union Avenue here in Framingham.", spoken)
     wl_ = written.splitlines()
-    check("...and the phone gets a header, the place and the words he can judge",
+    check("...and the phone gets a header, the place and when - never the raw transmission (2026-11-08)",
           written.startswith("SCANNER - URGENT - Framingham (home)") and "45 Union Ave" in written
-          and "Heard on Framnghm FD:" in wl_
-          and any(re.match(r"\d{1,2}:\d\d [AP]M  \"", x) and "smoke showing" in x for x in wl_)
+          and "Heard on" not in written and not any(re.match(r"\d{1,2}:\d\d [AP]M  \"", x) for x in wl_)
           and wl_[-1].startswith("First heard "), written)
     i3 = inc("Sudbury", ["mva"])
     i3.update(channel="Sudbury FD", address="", summary="", units=["Car 3", "Ambulance 1"],
@@ -491,10 +490,16 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("a quiet call is said with what was heard: the facts and who was sent",
           spoken == "From the scanner: a crash in Sudbury, 5 miles away. 2 vehicles, minor injuries. "
                     "Sudbury Fire sent Car 3 and Ambulance 1.", spoken)
-    check("...and written with where, the units, what is known and every line heard",
-          written.startswith("SCANNER - Sudbury (5 mi)\nA crash\n") and "Units: Car 3, Ambulance 1" in written
-          and "Known: 2 vehicles; minor injuries; units on scene" in written and "Heard on Sudbury FD:" in written
-          and written.count('  "') == 2 and "4 transmissions - latest" in written, written)
+    check("...and written as the heading and what is going on - with no summary yet, the rules' own "
+          "sentence of what was heard word for word, and no transcript",
+          written.startswith("SCANNER - Sudbury (5 mi)\nA crash\n2 vehicles, minor injuries. "
+                             "Sudbury Fire sent Car 3 and Ambulance 1.\n")
+          and "Heard on" not in written and '  "' not in written and "4 transmissions - latest" in written,
+          written)
+    i3s = dict(i3, summary="Sudbury Fire sent Car 3 and Ambulance 1 to a two car crash.")
+    w3s = desk.written(i3s, SD.FYI)
+    check("...with a summary, the summary - and a fact it left out is added, never lost",
+          "\nSudbury Fire sent Car 3 and Ambulance 1 to a two car crash. Also heard: minor injuries.\n" in w3s, w3s)
     i2 = inc("Natick", ["entrapment"], ["Route 9"])
     i2.update(address="Route 9 eastbound at Speen St", channel="Natick FD", said=list(CLEAR), summary="")
     spoken, _ = desk.compose(i2, ALERT)
@@ -619,16 +624,18 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("...said in plain words with the street and the distance - and as unconfirmed, being one transmission",
           g and g[0]["text"].startswith("From the scanner, unconfirmed: a gas leak at 300 Boston Post Road in Sudbury")
           and "mile" in g[0]["text"] and "Unconfirmed: a gas leak" in g[0]["written"], g[:1])
-    check("...and written for the phone: town and distance, no tier shouting, the words he can judge",
+    check("...and written for the phone: town and distance, no tier shouting, what is going on - not the "
+          "transmission (2026-11-08)",
           g and g[0]["written"].startswith("SCANNER - Sudbury (") and "URGENT" not in g[0]["written"]
-          and "odor of gas" in g[0]["written"], g[:1])
+          and "Sudbury Fire sent Tower 1." in g[0]["written"] and "odor of gas" not in g[0]["written"], g[:1])
     fire_line = [c for c in quiet_feed() if c["key"] == f"scanner-fyi:{fire['id']}"]
     check("the fire, heard ONCE, went out as a silent 'Unconfirmed' line - nothing sounded",
           not loud() and len(fire_line) == 1 and fire_line[0]["text"].startswith("From the scanner, unconfirmed:")
           and "Unconfirmed: a structure fire with smoke showing - 45 Union Ave" in fire_line[0]["written"]
           and S.incident(fire["id"])["tier"] == SD.FYI, (calls["deliver"], S.incident(fire["id"])["tier"]))
-    check("...and the model was not asked (nothing loud yet; it invents details from weak audio)",
-          calls["summ"] == [], calls["summ"])
+    check("...and the model was asked only AFTER the quiet lines went out, waiting its turn - never before "
+          "one (it decides nothing loud on one transmission; its words are checked first)",
+          calls["summ"] and not any(calls["summ"]), calls["summ"])
     clip_of = lambda words: [c for c in calls["clip"] if words in c[2]]
     check("he was away, so the transmission itself went to his phone",
           len(clip_of("smoke showing")) == 1 and clip_of("smoke showing")[0][1], calls["clip"])
@@ -655,7 +662,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           len(loud()) == 1 and loud()[0]["tier"] == URGENT and loud()[0]["key"] == f"scanner:{fire['id']}"
           and loud()[0]["text"].startswith("Scanner, sir: a multiple-alarm fire at 45 Union Avenue")
           and "Unconfirmed" not in loud()[0]["written"], loud())
-    check("...the model asked without waiting for a quiet moment (URGENT)", calls["summ"] == [True], calls["summ"])
+    check("...the model asked without waiting for a quiet moment (URGENT), once", calls["summ"].count(True) == 1,
+          calls["summ"])
     first_mid = fire_line[0] and 7000 + calls["deliver"].index(fire_line[0]) + 1
     closed = [e for e in calls["edit"] if e[0] == first_mid]
     check("...and the earlier 'Unconfirmed' line is closed: it says the alert follows",
@@ -691,7 +699,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     new_edits = calls["edit"][edits_before:]
     check("...and his message for that call is edited (silently) - not a second message",
           new_edits and new_edits[-1][0] == gas2["msg_id"] and "transported to Emerson" in new_edits[-1][1]
-          and "Tower 1 on scene" in new_edits[-1][1] and len(gas_lines()) == 1, new_edits[-1:])
+          and "Tower 1 on scene" not in new_edits[-1][1] and len(gas_lines()) == 1, new_edits[-1:])
     ann8 = next((a for a in console.annotations if a["id"] == h8), {})
     check("...and the console shows which call it belongs to", "context" in (ann8.get("tags") or [])
           and str(ann8.get("incident") or "").startswith(f"JARVIS #{gas['id']}"), ann8)
@@ -700,8 +708,11 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           len(calls["edit"]))
 
     S.update_incident(gas["id"], {"summary": "Responders are on scene with no injuries."})
-    check("a model summary never reaches the phone text: only what was heard does",
-          "no injuries" not in desk.written(S.incident(gas["id"]), SD.FYI), "")
+    check("an unchecked summary in the store never reaches the phone: it is checked again as it is written",
+          "no injuries" not in desk.written(S.incident(gas["id"]), SD.FYI), desk.written(S.incident(gas["id"]), SD.FYI))
+    S.update_incident(gas["id"], {"summary": "Tower 1 was sent to 300 Boston Post Road for an odor of gas."})
+    check("...and one that what was heard supports does", "for an odor of gas." in
+          desk.written(S.incident(gas["id"]), SD.FYI), desk.written(S.incident(gas["id"]), SD.FYI))
     S.update_incident(gas["id"], {"summary": ""})
     wpd =S.incident(S.hit(h5)["incident_id"] or 0) if S.hit(h5)["incident_id"] else None
     row = {"id": BASE + 30, "ts": now - 2, "end_ts": now - 1, "duration": 2, "name": "Waltham PD",
@@ -1024,9 +1035,9 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     old_db.execute("CREATE TABLE scanner_incidents (id INTEGER PRIMARY KEY, first_ts REAL, last_ts REAL)")
     added = S._migrate(old_db)
     cols = {r[1] for r in old_db.execute("PRAGMA table_info(scanner_incidents)")}
+    want_cols = ["msg_id", "details", "edited_ts", "clip_mid", "more_mid"]
     check("an install from before today gets the new columns, once",
-          added == ["msg_id", "details", "edited_ts"] and {"msg_id", "details", "edited_ts"} <= cols
-          and S._migrate(old_db) == [], (added, cols))
+          added == want_cols and set(want_cols) <= cols and S._migrate(old_db) == [], (added, cols))
     import remote_telegram as RT
     sent_api: list = []
     tg_obj = RT.telegram
@@ -1217,14 +1228,11 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     long_inc = {"town": "Weston", "miles": 9.0, "types": ["mva"], "label": "a crash", "channel": "Weston FD",
                 "first_ts": now - 600, "last_ts": now, "hits": 10, "units": [], "details": [], "address": "",
                 "said": [{"ts": now - 600 + k, "text": ("word " * 80).strip()} for k in range(10)]}
-    check("review: ten full lines fit one Telegram message as it is",
-          len(rdesk.written(long_inc, SD.FYI)) <= 3900)
-    rdesk.MAX_WRITTEN = 1200                    # the safety net itself, exercised
     lw = rdesk.written(long_inc, SD.FYI)
-    rdesk.MAX_WRITTEN = SD.ScannerDesk.MAX_WRITTEN
-    check("...and past the limit the oldest lines give way, the header and the footer stay",
-          len(lw) <= 1200 and lw.startswith("SCANNER - Weston") and lw.count('  "') < 10
-          and lw.splitlines()[-1].startswith("First heard"), (len(lw), lw.count('  "')))
+    check("a call with ten long transmissions is still a short message: the words are his on "
+          "'tell me more', never pasted in",
+          len(lw) < 300 and "word word" not in lw and lw.startswith("SCANNER - Weston")
+          and lw.splitlines()[-1].startswith("First heard"), lw)
     import delivery as DV2
     saved = (list(DV2.delivery._sent), list(DV2.delivery._quiet_sent))
     import notify_policy as NP2
@@ -1590,7 +1598,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
                  "what's happening in the market"):
         check(f"{said!r} steps aside for the news", slots_scanner_town(said) is None, slots_scanner_town(said))
     for name in ("scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor",
-                 "scanner_rules"):
+                 "scanner_rules", "scanner_more"):
         sk = SKILL_BY_NAME.get(name)
         check(f"{name} runs the internal _scanner tool", sk and sk.tool == "_scanner" and sk.fixed_args.get("ask"))
     from tools.registry import registry
@@ -1740,6 +1748,173 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     got = S.hit(BASE + 30)
     check("a different transmission under an old id replaces it",
           got["name"] == "Natick FD" and got["transcript"] is None, got)
+
+    print("\n-- what is going on, in plain words: checked, then 'tell me more' (2026-11-08) --")
+    # His words: "I don't want the actual transmission. I want Jarvis to tell
+    # me what's going on" - and "if I say okay, tell me more then Jarvis can".
+    from scanner import factcheck as FC
+    heard = ["Two car MVA, car three ambulance one respond.", "Car 3 on scene, minor injuries."]
+    known = ["a crash", "Sudbury FD", "Sudbury Fire", "Car 3", "Ambulance 1"]
+    kept, cut = FC.check("Sudbury Fire sent Car 3 and Ambulance 1 to a two-car crash.", heard, known)
+    check("a sentence every word of which was heard (or found by the rules) stands",
+          kept.startswith("Sudbury Fire sent Car 3"), (kept, cut))
+    kept, cut = FC.check("Sudbury Fire sent Car 3 to a crash. No injuries were reported.",
+                         ["Two car MVA, car three respond."], known)
+    check("'no injuries' - the invention this exists for - goes, and the supported sentence stays",
+          kept == "Sudbury Fire sent Car 3 to a crash." and cut and cut[0][0].startswith("No injuries"), (kept, cut))
+    kept, _ = FC.check("Responders are on scene.", ["Engine 1 respond to 10 Main Street."], ["Waltham Fire"])
+    check("...as does 'on scene' that nobody said", kept == "", kept)
+    kept, _ = FC.check("Boston Police were sent near Framingham, Massachusetts.", ["Units respond, ADW with a knife."],
+                       ["Boston PD", "Boston Police"])
+    check("...and a town only the prompt knew (the Boston call that became 'near Framingham')", kept == "", kept)
+    kept, cut = FC.check("Waltham Fire and police were sent to 600 Main Street.",
+                         ["First one, Amy P D, six hundred main street."], ["Waltham FD 1", "Waltham Fire", "600 Main St"])
+    check("'P D' heard letter by letter is the police, and 'six hundred' is 600", bool(kept), cut)
+    kept, _ = FC.check("Three people are hurt.", ["Two people hurt at the scene."], [])
+    check("a number nobody said goes", kept == "", kept)
+    kept, _ = FC.check("Someone may be armed with a knife.", ["He still has that weapon, the knife."], [])
+    check("a weapon that was heard may be said as 'armed'", bool(kept), kept)
+
+    asked: list = []
+    answers = iter(['{"summary": "Suspect may be armed with a knife.", "account": "A suspect is armed.", '
+                    '"clear": true, "active": true}',
+                    '{"summary": "Someone may have a knife.", "account": "Someone may still have the weapon, a knife.", '
+                    '"clear": true}'])
+
+    async def stub_ask(messages, timeout):
+        asked.append([dict(m) for m in messages])
+        return next(answers)
+    kinc = {"id": 0, "channel": "Boston PD", "town": "Boston", "miles": 20, "label": "a call", "units": [],
+            "details": [], "roads": [], "address": "",
+            "said": [{"ts": now, "text": "I don't know if he still has that weapon, the knife."}]}
+    got = await SD.write_checked(kinc, "both", stub_ask, 30.0)
+    check("a cut sentence earns one second try, told which words nothing supports",
+          len(asked) == 2 and "suspect" in asked[1][-1]["content"] and asked[1][-2]["role"] == "assistant", asked[-1:])
+    check("...and the try that kept more of what was heard is the one used, field by field",
+          got["summary"] == "Someone may have a knife." and got["account"] == "Someone may still have the weapon, a knife."
+          and got["active"] is True, got)
+    check("his home town is not in the prompt (it leaked into a Boston summary)",
+          "Framingham" not in asked[0][0]["content"], "")
+
+    tdesk = SD.ScannerDesk()
+    tdesk.REFRESH_GAP_S = 0.0
+    tid = S.create_incident({
+        "first_ts": now - 340, "last_ts": now - 100, "town": "Sudbury", "miles": 5.0, "agency": "FD",
+        "channel": "Sudbury FD", "family": "traffic", "kind": "mva", "label": "a crash", "severity": 5,
+        "types": ["mva"], "address": "Route 20", "units": ["Car 3", "Ambulance 1"],
+        "details": ["2 vehicles", "minor injuries"],
+        "said": [{"ts": now - 400, "text": "Two car MVA on Route 20, car three ambulance one respond."},
+                 {"ts": now - 100, "text": "Car 3 on scene, minor injuries, one patient to Emerson."}],
+        "hits": 2, "status": "active", "tier": SD.FYI, "delivered_ts": now - 390, "msg_id": 990100})
+    try:
+        tedits: list = []
+
+        async def tedit(mid, text):
+            tedits.append((mid, text))
+            return True
+
+        async def tsumm(inc_, urgent):
+            return {"summary": "Sudbury Fire sent Car 3 and Ambulance 1 to a two car crash on Route 20.",
+                    "account": "Car 3 and Ambulance 1 were sent to a two car crash on Route 20. Car 3 reported "
+                               "minor injuries and one patient to Emerson.", "clear": True, "active": True}
+        tdesk.summariser, tdesk.editor = tsumm, tedit
+        await tdesk._summary_after(tid)
+        await tdesk.settle()
+        check("a quiet call's summary is edited into the message it already sent - no new message",
+              tedits and tedits[-1][0] == 990100 and "two car crash on Route 20." in tedits[-1][1]
+              and "Heard on" not in tedits[-1][1], tedits[-1:])
+
+        async def no_model(messages):
+            raise AssertionError("asked the model")
+        tdesk.asker = no_model
+        w, sp = await tdesk.tell_more(tid)
+        check("'tell me more' answers at once from the account written with the summary",
+              w.startswith("A crash at Route 20 - Sudbury (5 mi).") and "one patient to Emerson" in w
+              and "Units: Car 3, Ambulance 1" in w and "Heard: 2 vehicles; minor injuries" in w and '"' not in w, w)
+        check("...and aloud it is prose, with no lists", "Units:" not in sp and "one patient to Emerson" in sp, sp)
+        first_said = f"First heard {SD._hm(now - 400)}"
+        check("...and its time is the first word heard - the same as his message says (7:20, not 7:21)",
+              SD._hm(now - 400) in w and SD._hm(now - 340) not in w.splitlines()[1]
+              and first_said in tdesk.written(S.incident(tid), SD.FYI), (w, first_said))
+
+        S.update_incident(tid, {"said": S.incident(tid)["said"] + [
+            {"ts": now - 50, "text": "As you're at you on airport, rail party sleeping."}]})
+
+        async def garbled(messages):
+            return '{"account": "Rail party sleeping at the airport.", "clear": false}'
+        tdesk.asker = garbled
+        w2, _ = await tdesk.tell_more(tid)
+        check("when the model judges the audio too garbled, he is told so - not sent the garble again",
+              "too garbled" in w2 and "Rail" not in w2 and "airport" not in w2, w2)
+        S.update_incident(tid, {"said": S.incident(tid)["said"] + [{"ts": now - 40, "text": "Car 3 clearing."}]})
+
+        async def slow(messages):
+            await asyncio.sleep(2)
+            return '{"account": "late", "clear": true}'
+        tdesk.asker, tdesk.MORE_BUDGET_S = slow, 0.5
+        w3, _ = await tdesk.tell_more(tid)
+        tdesk.MORE_BUDGET_S = SD.ScannerDesk.MORE_BUDGET_S
+        check("...but a model that never answered is not blamed on the audio: 'ask me again'",
+              "ask me again" in w3 and "garbled" not in w3, w3)
+
+        S.update_incident(tid, {"clip_mid": 990101})
+        check("his reply to the call's message finds the call", (tdesk.call_for_followup(990100, None) or {}).get("id") == tid)
+        check("...so does a reply to its recording", (tdesk.call_for_followup(990101, None) or {}).get("id") == tid)
+        check("a bare 'tell me more' is about the call when the call is the last thing sent",
+              (tdesk.call_for_followup(None, 990100) or {}).get("id") == tid)
+        check("...and not when something else came after it (a reminder, the news)",
+              tdesk.call_for_followup(None, 990150) is None)
+        for said in ("tell me more", "ok tell me more", "Okay, tell me more", "okay tell me more about it", "more?",
+                     "more please", "what's going on there?", "what happened", "any updates?", "details?", "go on"):
+            check(f"{said!r} asks for more", bool(SD.FOLLOWUP_RE.match(said)))
+        for said in ("ok", "thanks", "tell me more about the weather", "more volume", "what's going on in the world",
+                     "what time is it"):
+            check(f"{said!r} does not", not SD.FOLLOWUP_RE.match(said))
+
+        import inspect
+        import remote_telegram as RT3
+        hsrc = inspect.getsource(RT3.TelegramBridge._handle_update)
+        check("on his phone the scanner's 'tell me more' is looked for before anything runs as a turn",
+              "await self._scanner_followup(text, msg)" in hsrc and "await self._scanner_followup(spoken, msg)" in hsrc
+              and hsrc.index("await self._scanner_followup(text, msg)") < hsrc.index("await self._remote_turn(text)"))
+        tg3 = RT3.telegram
+        sent3: list = []
+        turns3: list = []
+
+        async def send3(text, silent=False, reply_markup=None):
+            sent3.append(text)
+            tg3.last_sent_id = 990160 + len(sent3)
+            return True
+
+        async def api3(method, http_timeout=30, _token=None, **params):
+            return True
+
+        async def turn3(text):
+            turns3.append(text)
+        real3 = (tg3._send, tg3._api, tg3._remote_turn, tg3.last_sent_id, SD.desk)
+        SD.desk = tdesk
+        tg3._send, tg3._api, tg3._remote_turn = send3, api3, turn3
+        try:
+            tg3.last_sent_id = 990100
+            handled = await tg3._scanner_followup("Okay, tell me more", {"text": "Okay, tell me more"})
+            check("'okay, tell me more' after the call is answered from the scanner desk, not as a turn",
+                  handled is True and sent3 and sent3[-1].startswith("A crash at Route 20") and not turns3, sent3[-1:])
+            check("...and his answer is filed under the call, so a second 'more' finds it",
+                  (S.incident(tid) or {}).get("more_mid") == 990161
+                  and (tdesk.call_for_followup(None, 990161) or {}).get("id") == tid)
+            tg3.last_sent_id = 990170                   # a reminder went out after it
+            check("after anything else, a bare 'tell me more' is not the scanner's",
+                  await tg3._scanner_followup("tell me more", {"text": "tell me more"}) is False)
+            handled = await tg3._scanner_followup("is anyone hurt?", {"text": "is anyone hurt?",
+                                                                      "reply_to_message": {"message_id": 990101}})
+            check("a question REPLIED to the call's recording is about the call", handled is True and len(sent3) == 2)
+            handled = await tg3._scanner_followup("that's near my friend's house", {
+                "text": "that's near my friend's house", "reply_to_message": {"message_id": 990100}})
+            check("...but a remark replied to it is not a request for more", handled is False)
+        finally:
+            tg3._send, tg3._api, tg3._remote_turn, tg3.last_sent_id, SD.desk = real3
+    finally:
+        S._write("DELETE FROM scanner_incidents WHERE id = ?", (tid,))       # the gates share one database
 
     print("\n-- the phone clip function exists and no gate calls it --")
     import remote_telegram

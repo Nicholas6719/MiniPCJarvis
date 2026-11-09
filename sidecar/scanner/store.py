@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS scanner_incidents (
     pending TEXT DEFAULT '',         -- a tier waiting on delivery's repeat window
     msg_id INTEGER DEFAULT 0,        -- his Telegram message for it, edited as details arrive
     details TEXT DEFAULT '[]',       -- facts heard: vehicles, injuries, transport...
-    edited_ts REAL DEFAULT 0         -- when that message was last brought up to date
+    edited_ts REAL DEFAULT 0,        -- when that message was last brought up to date
+    clip_mid INTEGER DEFAULT 0,      -- the recording threaded under it
+    more_mid INTEGER DEFAULT 0       -- the last "tell me more" answer about it
 );
 CREATE INDEX IF NOT EXISTS scanner_incidents_last ON scanner_incidents(last_ts);
 CREATE TABLE IF NOT EXISTS scanner_sent (
@@ -81,9 +83,10 @@ _JSON = ("types", "roads", "units", "said", "escalations", "details")
 _INC_COLS = ("first_ts", "last_ts", "town", "miles", "agency", "channel", "family", "kind", "label",
              "severity", "types", "address", "street", "roads", "units", "said", "summary", "hits",
              "burst", "status", "escalations", "tier", "delivered_ts", "decided", "pending",
-             "msg_id", "details", "edited_ts")
+             "msg_id", "details", "edited_ts", "clip_mid", "more_mid")
 # columns added after the first install: (name, definition) - see _migrate
-_ADDED = (("msg_id", "INTEGER DEFAULT 0"), ("details", "TEXT DEFAULT '[]'"), ("edited_ts", "REAL DEFAULT 0"))
+_ADDED = (("msg_id", "INTEGER DEFAULT 0"), ("details", "TEXT DEFAULT '[]'"), ("edited_ts", "REAL DEFAULT 0"),
+          ("clip_mid", "INTEGER DEFAULT 0"), ("more_mid", "INTEGER DEFAULT 0"))
 _HIT_COLS = ("id", "ts", "end_ts", "duration", "channel", "name", "freq", "town", "agency", "quality",
              "audio_path", "transcript", "asr_conf", "incident_id")
 
@@ -290,6 +293,17 @@ def open_on_channel(channel: str, since: float) -> list[dict]:
     return [_inc(r) for r in _rows(
         f"SELECT id, {', '.join(_INC_COLS)} FROM scanner_incidents WHERE channel = ? AND status = 'active' "
         "AND last_ts >= ? ORDER BY last_ts DESC", (channel or "", float(since)))]
+
+
+def incident_by_message(mid: int, since: float) -> dict | None:
+    """The call one of his Telegram messages is about - its own message, the
+    recording under it, or a "tell me more" answer - heard from since `since`."""
+    if not mid:
+        return None
+    r = _rows(f"SELECT id, {', '.join(_INC_COLS)} FROM scanner_incidents WHERE last_ts >= ? AND "
+              "(msg_id = ? OR clip_mid = ? OR more_mid = ?) ORDER BY id DESC LIMIT 1",
+              (float(since), int(mid), int(mid), int(mid)))
+    return _inc(r[0]) if r else None
 
 
 def pending_incidents(since: float) -> list[dict]:
