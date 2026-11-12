@@ -35,7 +35,7 @@ from config import open_db
 
 log = logging.getLogger("jarvis.standing")
 
-KINDS = ("process", "download", "file", "battery")
+KINDS = ("process", "download", "file", "battery", "story")
 # A watch nobody ever collects is a slow leak of promises. A week is long
 # enough for anything worth waiting on and short enough that a forgotten one
 # does not surface months later with no context.
@@ -272,5 +272,68 @@ def check(arrived: list[str] | None = None, *, battery=None,
         except Exception:
             log.debug("standing watch %s failed to evaluate", w["id"], exc_info=True)
 
+    _delete(done)
+    return out
+
+
+# ---------------------------------------------------------------- a news story
+# "Okay thank you Jarvis, please let me know if you hear more about that"
+# (2026-09-30) was answered "I'll keep an eye on it" - and nothing was. A
+# story watch is the fifth kind: it remembers what the story was about and
+# fires, once, on the first NEW headline that is about the same thing.
+_STORY_STOP = frozenset("""about after again against amid among another around because been before being between
+could does doing down during each from further have having here into just more most much must near
+only other over said says same should some such than that their them then there these they this those
+through under until very were what when where which while will with would your first last week year
+years today yesterday tomorrow news report reports update live latest breaking video watch photos""".split())
+
+
+def story_words(headline: str) -> list[str]:
+    """What a headline is about: its distinctive words, in order."""
+    import re
+    out: list[str] = []
+    for w in re.findall(r"[a-z0-9']+", (headline or "").lower()):
+        w = w.strip("'")
+        if w.endswith("'s"):
+            w = w[:-2]
+        if len(w) >= 4 and w not in _STORY_STOP and w not in out:
+            out.append(w)
+    return out[:10]
+
+
+def _same_headline(a: str, b: str) -> bool:
+    return " ".join(story_words(a)) == " ".join(story_words(b))
+
+
+def story_hits(stories: list[dict], now: float | None = None) -> list[tuple[str, str]]:
+    """Fresh headlines that are MORE on a story he asked to follow, as
+    (sentence, dedup key). A watch fires on its first match and is gone. The
+    article he was told about in the first place is not "more"; neither is
+    one published before he asked."""
+    now = time.time() if now is None else now
+    expire(now)
+    watches = [w for w in all_watches() if w["kind"] == "story"]
+    if not watches:
+        return []
+    out: list[tuple[str, str]] = []
+    done: list[int] = []
+    for w in watches:
+        keys = set((w["target"] or "").split())
+        need = 2 if len(keys) >= 3 else len(keys)
+        if not keys:
+            continue
+        for s in stories or []:
+            head = str(s.get("headline") or s.get("title") or "").strip()
+            if not head or _same_headline(head, w["description"]):
+                continue
+            age = s.get("age_minutes")
+            if isinstance(age, (int, float)) and now - float(age) * 60 < float(w["created_ts"]) - 600:
+                continue                      # older than his asking: not news to the watch
+            if len(keys & set(story_words(head))) >= need:
+                src = str(s.get("source") or "").strip()
+                out.append((f"More on the story you asked me to follow, sir: {head.rstrip('.')}"
+                            + (f" ({src})." if src else "."), f"watch:{w['id']}"))
+                done.append(w["id"])
+                break
     _delete(done)
     return out

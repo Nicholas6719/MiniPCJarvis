@@ -843,6 +843,20 @@ def say_watch_file(slots: dict, res: dict) -> str:
     return str(res.get("watching") or "I'll keep an eye on that folder, sir.")
 
 
+def slots_watch_story(t: str) -> dict | None:
+    """ "let me know if you hear more about that" -> the story just discussed;
+    "...more about the Framingham fire" -> that."""
+    m = re.search(r"\b(?:more|anything else|updates?|news) (?:about|on|regarding|with) (.+?)[.?!]*$", (t or "").lower())
+    about = (m.group(1).strip() if m else "")
+    if re.fullmatch(r"(?:that|this|it|that story|this story|that one|the story|them|those)", about or "that"):
+        about = ""
+    return {"about": about}
+
+
+def say_watch_story(slots: dict, res: dict) -> str:
+    return str(res.get("watching") or res.get("error") or "I couldn't set that up, sir.")
+
+
 def slots_watch_battery(t: str) -> dict | None:
     if not (_WATCH_HEAD.search(t) or _WATCH_ANY.search(t)):
         return None
@@ -4502,6 +4516,13 @@ SKILLS: list[Skill] = [
         "watch for the stl to land in downloads", "notify me when the photo arrives in pictures",
         "tell me when the zip shows up in my downloads", "let me know when something lands in documents"],
         slots=slots_watch_file, speak=say_watch_file),
+    Skill("watch_story", "watch_for_story", [
+        # his words, 2026-09-30 - answered "I'll keep an eye on it" with nothing watching
+        "please let me know if you hear more about that", "let me know if you hear more about that",
+        "tell me if there's more on that story", "keep me posted on that story", "follow that story for me",
+        "let me know if anything else comes out about that", "tell me if there are updates on that story",
+        "let me know if there's more news about that", "keep me updated on that story"],
+        slots=slots_watch_story, speak=say_watch_story),
     Skill("watch_battery", "watch_for_battery", [
         "tell me when the battery hits 80 percent", "let me know when it's charged",
         "tell me when the battery is fully charged", "ping me when the battery reaches 90",
@@ -4718,6 +4739,7 @@ CONFIRM_AS = {
     "watch_download": "tell you when the download finishes",
     "watch_file": "tell you when that file appears",
     "watch_battery": "tell you when the battery is charged",
+    "watch_story": "follow that news story for you",
     "watch_list": "say what I'm watching for",
     "been_doing": "say what you've been doing",
     "scanner_now": "check the scanner",

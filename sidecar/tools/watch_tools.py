@@ -83,6 +83,26 @@ def watch_for_battery(percent: int = 100) -> dict:
     return {"id": w["id"], "watching": f"I'll tell you {desc}."}
 
 
+def watch_for_story(about: str = "") -> dict:
+    """Follow a news story: the one just discussed, or one he names."""
+    head = _clean(about) if about else ""
+    if not head:
+        try:
+            from lastseen import last_seen
+            if not last_seen.stale and last_seen.links:
+                head = str(last_seen.links[0].get("title") or "").strip()
+        except Exception:
+            head = ""
+    if not head:
+        return {"error": "I'm not sure which story you mean, sir - tell me what it is about and I'll follow it."}
+    words = standing.story_words(head)
+    if len(words) < 2:
+        return {"error": "That is too little for me to follow, sir - give me a few words of what it is about."}
+    short = head if len(head) <= 70 else head[:67].rsplit(" ", 1)[0] + "..."
+    w = standing.add("story", target=" ".join(words), description=head[:200])
+    return {"id": w["id"], "watching": f"I'll tell you if there is more on \"{short}\", sir - for the next week."}
+
+
 def list_watches() -> dict:
     ws = standing.all_watches()
     return {"watches": [{"id": w["id"], "kind": w["kind"], "description": w["description"],
@@ -96,6 +116,8 @@ def _spoken(ws: list[dict]) -> str:
     parts = []
     for w in ws:
         d = w["description"] or w["kind"]
+        if w["kind"] == "story":
+            d = f"more news on \"{d[:60]}\""
         if w["kind"] == "process" and not w["armed"]:
             d += " (not started yet)"
         parts.append(d)
@@ -119,6 +141,15 @@ def register_all() -> None:
             "name": {"type": "string", "description": "program name, e.g. 'handbrake', 'blender'"}},
             "required": ["name"]},
         risk=Risk.LOW, handler=watch_for_process))
+    registry.register(Tool(
+        name="watch_for_story",
+        description="Follow a news story and tell the user when there is something new about it. Use "
+                    "for 'let me know if you hear more about that', 'keep me posted on that story'. "
+                    "Leave `about` empty for the story just discussed.",
+        parameters={"type": "object", "properties": {
+            "about": {"type": "string", "description": "what the story is about, or empty for the one just discussed"}},
+            "required": []},
+        risk=Risk.LOW, handler=watch_for_story))
     registry.register(Tool(
         name="watch_for_download",
         description="Tell the user when a download finishes landing in his Downloads folder. "

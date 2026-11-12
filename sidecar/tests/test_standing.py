@@ -210,6 +210,57 @@ def main() -> int:
             sys.modules.pop("psutil", None)
         S.cancel("")
 
+    print("\n-- a news story he asked to be kept posted on (2026-11-12) --")
+    # "please let me know if you hear more about that" (2026-09-30) was
+    # answered "I'll keep an eye on it" - and nothing was watching.
+    import tools.watch_tools as WT
+    from lastseen import last_seen
+    S.cancel("")
+    saved_links, saved_at = list(last_seen.links), last_seen.at
+    try:
+        first = "Framingham house fire displaces 3, sends 1 to hospital"
+        last_seen.links, last_seen.at = [{"title": first, "source": "MetroWest Daily News"}], time.time()
+        res = WT.watch_for_story("")
+        check("'more about that' follows the story just discussed, and says which",
+              "watching" in res and "Framingham house fire" in res["watching"], res)
+        check("...as a standing watch he can ask about", "more news on" in WT.list_watches()["spoken"],
+              WT.list_watches()["spoken"])
+        check("the same article again is not 'more'",
+              S.story_hits([{"headline": first.upper(), "source": "Patch", "age_minutes": 5}]) == [])
+        check("...nor is an unrelated story", S.story_hits([
+            {"headline": "Natick approves a new library", "source": "Patch", "age_minutes": 5}]) == [])
+        check("...nor one published before he asked", S.story_hits([
+            {"headline": "Cause of Framingham house fire under investigation", "source": "WCVB",
+             "age_minutes": 600}]) == [])
+        hits = S.story_hits([{"headline": "Natick approves a new library", "source": "Patch", "age_minutes": 5},
+                             {"headline": "Cause of Framingham house fire under investigation", "source": "WCVB",
+                              "age_minutes": 5}])
+        check("a new headline about the same thing is told to him, with its source",
+              len(hits) == 1 and hits[0][0] == "More on the story you asked me to follow, sir: Cause of "
+              "Framingham house fire under investigation (WCVB)." and hits[0][1].startswith("watch:"), hits)
+        check("...once: the watch is gone", S.story_hits([
+            {"headline": "Framingham house fire victims identified", "source": "WCVB", "age_minutes": 1}]) == []
+            and not [w for w in S.all_watches() if w["kind"] == "story"])
+        res = WT.watch_for_story("the Nvidia chief executive leaving")
+        check("he can name the story instead", "watching" in res and "Nvidia" in res["watching"], res)
+        check("...and it matches on what it is about", len(S.story_hits([
+            {"headline": "Nvidia names new chief executive after Huang exit", "source": "CNBC", "age_minutes": 2}])) == 1)
+        last_seen.links, last_seen.at = [], 0.0
+        check("with no story in mind he is asked which, not promised anything",
+              "error" in WT.watch_for_story("") and not [w for w in S.all_watches() if w["kind"] == "story"])
+        from brain.skills import slots_watch_story
+        check("'that' is the story just discussed; a named subject is passed on",
+              slots_watch_story("please let me know if you hear more about that") == {"about": ""}
+              and slots_watch_story("let me know if there's more news about the framingham fire")
+              == {"about": "the framingham fire"})
+        import inspect
+        import briefing
+        check("the news scan checks the story watches every time it reads the feeds",
+              "standing.story_hits" in inspect.getsource(briefing.Briefing.scan))
+    finally:
+        last_seen.links, last_seen.at = saved_links, saved_at
+        S.cancel("")
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 0 if not fails else 1
 

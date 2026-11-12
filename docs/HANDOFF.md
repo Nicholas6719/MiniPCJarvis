@@ -5713,7 +5713,62 @@ backup 20261107-162534-manual) - his OK.
 Next: tone-out detection (log first, learn which channels page, then use a
 tone as corroboration); re-measure per-word confidence after the line-in fix.
 
+### 2026-11-08 evening - "I don't want the actual transmission" (hot-swaps on 90)
+A scanner message is now the heading, "Where:", and WHAT IS GOING ON in plain
+words - never the transcript (4e7f86b). gpt-oss writes it; `scanner/factcheck.py`
+keeps a sentence only if every content word was heard or rules-found, a
+"no/not" needs a negative heard, one retry names the unsupported words. Sent at
+once with the rules' facts line, the summary edited in ~20 s later; the longer
+account for "tell me more" is written in the same background call (a bare
+"tell me more" on Telegram when the call was the last thing sent, or any
+question REPLIED to the call or its recording). The model's own `clear: false`
+hides an account that is only the garble again. Also that day: nudges sound
+(3c8d8eb); the hearing watchdog and honest summaries after 19 deaf hours at
+scanner volume 3 (95d859a) - volume must be 15 on the current cable.
+
+### 2026-11-12 - an audit from four days of the real log (hot-swaps on 90)
+He had not spoken to JARVIS in four days: what it SENDS is the product.
+- THE SCAN DOCTOR DELETED FRAMINGHAM FIRE on 11-08 10:40, deaf at volume 3
+  (every clip "unknown" -> "never understandable"). Zero Framingham hits for
+  four days; a house fire there reached him as news. Restored by hand via the
+  console's `/api/drafts` + `/api/apply` (Framnghm FD now CH54, Acton PD CH7,
+  priority mode back on). NEVER `/api/doctor/restore` on 1.3.0: it wrote the
+  last trial setting. Console fixed and released as 1.3.1 (his other repo,
+  main 069962c, pushed): no verdict on unjudgeable audio, restore writes the
+  original, priority / must-have-last channels are kept and flagged NEEDS YOU,
+  "nothing heard in 48 h" counts only hours the scanner was listening.
+  Install a console build with `build.ps1 -NoInstall` then
+  `.agent/scripts/console_install.cmd` through a one-shot schtasks task.
+- JARVIS side (7df0c5a): pauses the doctor while it cannot hear and resumes it
+  after; tells him what the doctor removes; says once a day if his town has no
+  fire channel or it is silent 36 h on a busy scanner. Busy spells are
+  recorded at 8 transmissions but SENT only from 15 (his answer; 68 wordless
+  messages in four days). Night brief remembers told headlines for a week. A
+  big move in one of his stocks quotes the headline naming the company.
+- Tone-outs (b107b64, `scanner/tones.py`): measured on 4,249 real clips -
+  Ashland 905/770 Hz, Natick FD 2 2265/950, Holliston 1885/1475; long single
+  tones are IDs and tests. His answers: a paged dispatch the rules cannot name
+  goes out SILENTLY; a page never replaces the second transmission for sound.
+- Voice (b107b64): a name used ABOUT him ("...then Jarvis can...") is rejected
+  at the wake; a lone stray word in the conversation window is dismissed.
+- 2d63a01: `honesty.py` replaces an unbacked promise ("I'll keep an eye on
+  it") in a turn where no tool ran; `company` reflex for "I'm so bored" (a
+  prompt rule was A/B'd on the real model and NOT kept - it broke "I'm
+  tired"); fact-check drops plates and private names and keeps a sentence
+  whose trailing clause fails; briefs count busy spells instead of listing
+  them; a "death nearby" story with no town of his is not held for him.
+- Story watch: "let me know if you hear more about that" is a real standing
+  watch (`standing.story_hits`, checked on every news scan, fires once).
+Traps met: a bash heredoc eats backslashes (`\b` became a backspace byte four
+times - write patches with the Write tool); the gates share one database, so
+a gate that plants incidents for a town must delete them before and after;
+scripts run from the agent shell must set JARVIS_DB or they open the mirror
+(which then "repairs" itself).
+
 ### Not done / next
+- Framingham Fire: confirm hits arrive on CH54 and whether it pages (no clips
+  yet). Watch the 15-transmission busy threshold (Waltham and Natick each
+  reached it within an hour of the change).
 - When he fits the splitter: set the console's input, re-check
   `/api/health` audio (expect peaks -12..-3 dBFS) and the transcripts.
 - Scanner burst thresholds and the transcript confidence cut-off (0.35) want

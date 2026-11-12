@@ -520,7 +520,17 @@ class Briefing:
         if not news:
             return list(await self._market_moves()) if market else out
         max_age = float(config.get("briefing", "alert_max_age_minutes", default=180))
-        for story in await self._fresh_stories():
+        fresh = await self._fresh_stories()
+        # the stories he asked to be kept posted on (standing.story_hits): his
+        # own request, so it goes to delivery directly like any standing watch
+        try:
+            import standing
+            for text, key in await asyncio.to_thread(standing.story_hits, fresh):
+                log.info("story watch fired: %s", text)
+                await delivery.deliver(text, ALERT, key=key, subject="watch")
+        except Exception:
+            log.warning("the story watches could not be checked", exc_info=True)
+        for story in fresh:
             tier, why = classify_news(story)
             if tier == NONE:
                 # A story refused as a feature, trial, settlement, column... is
