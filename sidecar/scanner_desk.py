@@ -58,7 +58,7 @@ import geo
 from config import config
 from delivery import ALERT, URGENT
 from events import bus, spawn
-from scanner import factcheck, rules, store
+from scanner import factcheck, rules, store, tones
 from scanner.client import ConsoleClient
 
 log = logging.getLogger("jarvis.scanner")
@@ -774,6 +774,7 @@ class ScannerDesk:
         self._summary_ts: dict[int, float] = {}
         self._summarising: set[int] = set()
         self._more: dict[int, tuple[int, str]] = {}           # id -> (transmissions, his "tell me more")
+        self._pages: dict[str, tuple[float, str]] = {}        # channel -> (when, which) two-tone page
 
     # ------------------------------------------------------------ plumbing
     def _log_every(self, key: str, every: float, level: int, msg: str, *args, exc: bool = False) -> None:
@@ -1176,6 +1177,7 @@ class ScannerDesk:
         self._in_flight = row["id"]
         try:
             audio = await self._load_audio(row)
+            await self._note_page(row, audio)
             audio, _peak = normalise_audio(audio) if audio is not None else (None, -120.0)
             if audio is None:
                 self.stats["silent"] += 1
@@ -1203,6 +1205,48 @@ class ScannerDesk:
         if text:
             await self.on_text(row, text, conf)
 
+    # ------------------------------------------------------------ tone-outs
+    # A TWO-TONE PAGE IS THE DISPATCHER SENDING A STATION OUT (2026-11-12).
+    # Measured on 4,249 real clips: Ashland Fire pages 905/770 Hz, Natick Fire
+    # 2265/950, Holliston 1885/1475, always in the first second or so of a
+    # transmission, and what follows is a dispatch ("smoke detector
+    # activation", "car fire") - sometimes in the same clip, sometimes in the
+    # next. Single long tones were station IDs and daily tests (Sudbury's FCC
+    # announcement, Wayland at 6:30 PM), so only two-tone pages count.
+    # His answers: a paged dispatch whose kind can't be named still goes out
+    # silently; a page does NOT stand in for the second transmission that
+    # lets a danger call sound.
+    PAGE_WINDOW_S = 120.0         # a page covers what its channel says for this long
+
+    async def _note_page(self, row: dict, audio) -> str:
+        """Look for a two-tone page in a transmission's audio and remember it
+        for its channel. Returns the page's key ("905/770") or ""."""
+        if audio is None or not _cfg("tone_outs", True):
+            return ""
+        try:
+            found = [p for p in await asyncio.to_thread(tones.pages, audio) if p.kind == "two-tone"]
+        except Exception:
+            self._log_every("tones", 3600, logging.WARNING, "scanner: the tone detector failed", exc=True)
+            return ""
+        if not found:
+            return ""
+        key = found[0].key
+        row["page"] = key
+        ts = float(row.get("ts") or self.now())
+        self._pages[row.get("name") or ""] = (ts, key)
+        self.stats["pages"] = self.stats.get("pages", 0) + 1
+        log.info("scanner: two-tone page %s on %s (hit %s)", key, row.get("name"), row.get("id"))
+        return key
+
+    def _page_for(self, row: dict) -> str:
+        """The page this transmission belongs to: its own, or one its channel
+        carried in the two minutes before it."""
+        if row.get("page"):
+            return str(row["page"])
+        ts, key = self._pages.get(row.get("name") or "", (0.0, ""))
+        now = float(row.get("ts") or self.now())
+        return key if key and 0 <= now - ts <= self.PAGE_WINDOW_S else ""
+
     # ------------------------------------------------------------ words -> incidents
     async def on_text(self, row: dict, text: str, conf: float, annotate: bool = True) -> int | None:
         """A transcript for one transmission: stored, read by the rules, merged
@@ -1212,6 +1256,13 @@ class ScannerDesk:
         iid, tags = None, []
         if conf >= rules.TRUST:
             reading = rules.read(text, row.get("town") or "")
+            page = self._page_for(row)
+            if page and not reading.types and not reading.resolved and (row.get("agency") or "") in ("FD", "EMS"):
+                # paged, and the rules can't name it: it is still a dispatch
+                kind = rules.KINDS[rules.PAGED]
+                reading.types, reading.severity, reading.family = [rules.PAGED], kind.severity, kind.family
+            if page and reading.types:
+                self._pages.pop(row.get("name") or "", None)    # one page, one dispatch: what follows is follow-up
             tags = list(reading.types) + (["resolved"] if reading.resolved else [])
             shaky_danger = int(reading.severity or 0) >= rules.KINDS["structure_fire"].severity \
                 and conf < self.SURE
@@ -1228,7 +1279,8 @@ class ScannerDesk:
             elif reading.types or reading.resolved:
                 # a shaky dangerous reading that got here had a second
                 # transmission agree with it: that is as good as a clear one
-                iid = self._merge(row, reading, text, conf, agreed=bool(reading.types) and shaky_danger)
+                iid = self._merge(row, reading, text, conf, agreed=bool(reading.types) and shaky_danger,
+                                  page=page if reading.types else "")
                 if iid:
                     store.set_transcript(row["id"], text, conf, iid)
             else:
@@ -1265,7 +1317,7 @@ class ScannerDesk:
         return False
 
     def _merge(self, row: dict, reading: rules.Reading, text: str, conf: float | None = None,
-               agreed: bool = False) -> int | None:
+               agreed: bool = False, page: str = "") -> int | None:
         now = float(row.get("end_ts") or row["ts"])
         town = reading.towns[0] if reading.towns else (row.get("town") or "")
         said_row = {"ts": row["ts"], "text": text[:SAID_TEXT_MAX], "hit": row["id"], "channel": row.get("name") or "",
@@ -1315,7 +1367,7 @@ class ScannerDesk:
                 "kind": reading.top, "label": reading.label, "severity": reading.severity, "types": reading.types,
                 "address": reading.address, "street": reading.street, "roads": reading.roads,
                 "units": reading.units, "said": [said_row], "hits": 1, "details": rules.details(text),
-                "status": "over" if reading.resolved else "active"})
+                "status": "over" if reading.resolved else "active", "paged": page})
             if iid:
                 log.info("scanner: incident #%d - %s%s in %s (%s)", iid, reading.label,
                          f" at {reading.address}" if reading.address else "", town or "an unknown town",
@@ -1327,6 +1379,8 @@ class ScannerDesk:
                         "said": (inc["said"] + [said_row])[-SAID_KEEP:],
                         "details": _union(inc.get("details") or [], rules.details(text), 8)}
         esc = rules.escalation(inc["types"], reading) if reading.types else ""
+        if page and not inc.get("paged"):
+            fields["paged"] = page
         if reading.types:
             types = sorted(set(inc["types"]) | set(reading.types),
                            key=lambda k: -rules.KINDS[k].severity if k in rules.KINDS else 0)
@@ -1666,6 +1720,10 @@ class ScannerDesk:
         # only the transmissions that named the call count: a follow-up line
         # ("on scene") says nothing about whether the call was heard right
         said = [s for s in (inc.get("said") or []) if not s.get("context")]
+        if inc.get("paged") and said:
+            # the dispatcher toned a station out: that it is a dispatch does
+            # not rest on how well a machine heard the words after it
+            return True, f"{label} {place} (paged {inc['paged']})"
         sure = [s for s in said if s.get("agreed") or float(s.get("conf") or 0) >= self.SURE]
         if not sure and len(said) < 2:
             return False, f"{label} {place}: stored, heard once and not clearly"
@@ -1735,6 +1793,8 @@ class ScannerDesk:
                 facts = _union(facts, rules.details(text), 8)
                 if not address and rd.address:
                     address, street = rd.address, rd.street
+            if rules.PAGED in (inc.get("types") or []):
+                types.add(rules.PAGED)       # given by the page, not read from words
             fields: dict = {}
             if types != set(inc["types"]):
                 if not types:
@@ -1978,8 +2038,10 @@ class ScannerDesk:
         lab = rules.parse_label(inc.get("channel") or "")
         unconfirmed = self._unconfirmed(inc)
         lead = "Scanner, sir: " if tier == URGENT else \
-            ("From the scanner, unconfirmed: " if unconfirmed else "From the scanner: ")
+            ("From the scanner, a paged dispatch: " if unconfirmed and inc.get("paged") else
+             "From the scanner, unconfirmed: " if unconfirmed else "From the scanner: ")
         town = inc.get("town") or ""
+        unnamed = (inc.get("types") or []) == [rules.PAGED]
         if inc.get("burst") and not inc.get("types"):
             spoken = f"{lab.spoken} is unusually busy, sir: {inc.get('summary') or 'far more traffic than usual'}. " \
                      "I can't make out the words yet."
@@ -1994,6 +2056,9 @@ class ScannerDesk:
             elif town and town != home_town().name and "mile" not in s:
                 s += f", {miles_words(inc.get('miles'))}"
             spoken = lead + s + "."
+        elif unnamed:
+            spoken = f"From the scanner: {lab.spoken} toned a station out{spoken_at}" + \
+                (f" {where}" if where else "") + ". I couldn't make out what for."
         else:
             spoken = lead + f"{label}{spoken_at}" + (f" {where}" if where else "") + "."
         extra = self._spoken_details(inc) if not update else ""
@@ -2037,8 +2102,15 @@ class ScannerDesk:
             lines.append(f"Unusual activity on {inc.get('channel')}: {inc.get('summary') or 'far more traffic than usual'}")
         else:
             what = (inc.get("label") or "activity") + (f" - {address}" if address else "")
-            # one transmission is evidence, not a conclusion: said so, plainly
-            lines.append(f"Unconfirmed: {what} (one transmission so far)" if self._unconfirmed(inc) else _cap(what))
+            if (inc.get("types") or []) == [rules.PAGED]:
+                # toned out, and the words would not name it
+                lines.append("Paged dispatch - I couldn't make out the call type" + (f" - {address}" if address else ""))
+            elif inc.get("paged") and self._unconfirmed(inc):
+                # one transmission, but the dispatcher's own page came with it
+                lines.append(f"Paged dispatch: {what} (one transmission so far)")
+            else:
+                # one transmission is evidence, not a conclusion: said so, plainly
+                lines.append(f"Unconfirmed: {what} (one transmission so far)" if self._unconfirmed(inc) else _cap(what))
         roads = [r for r in (inc.get("roads") or []) if r not in address]
         if address or roads:
             lines.append("Where: " + ", ".join(x for x in [address] + roads if x))
@@ -2764,8 +2836,9 @@ class ScannerDesk:
             else:
                 parts.append(f"From {a} to {b} it's all silent except danger in {home}, and the night "
                              f"comes to you as a summary at {b}.")
-        parts.append("If I can't make out what a call is, I can't send it, so garbled dispatches are missed - "
-                     "and I'll tell you if I stop being able to hear the scanner.")
+        parts.append("If I can't make out what a call is, I can't send it - unless the dispatcher toned a station "
+                     "out first: a paged dispatch comes through silently even when I can't name it. A page never "
+                     "makes a sound by itself. And I'll tell you if I stop being able to hear the scanner.")
         return " ".join(parts)
 
     def _say_summary(self) -> str:

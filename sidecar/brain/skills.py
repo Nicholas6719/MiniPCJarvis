@@ -4700,6 +4700,25 @@ MARGINAL_WAKE = 0.85          # at or above this, a wake is always his
 _MARGINAL_WAKE = MARGINAL_WAKE
 
 
+_FOLLOWUP_WORDS = frozenset("""why how what when where who which really seriously more again continue stop cancel
+yes no yeah yep nope sure thanks thank please repeat louder quieter next back done wait pause resume
+mute unmute sleep goodnight goodbye bye hello hi nevermind help status time weather news""".split())
+
+
+def stray_followup(text: str) -> bool:
+    """One word caught in the conversation window (no wake word) that asks
+    nothing: "Drivers." A question ("Why?"), an answer ("Yes.") or a
+    one-word command ("Stop.") is his; a lone noun off a sentence said to
+    someone else is not, and must never reach the model as a request."""
+    t = (text or "").strip()
+    if not t or t.endswith("?"):
+        return False
+    words = re.findall(r"[a-z0-9']+", _FILLER_WORDS.sub(" ", t.lower()))
+    if len(words) != 1:
+        return False
+    return words[0] not in _FOLLOWUP_WORDS
+
+
 def not_for_me(text: str, wake_score: float | None) -> bool:
     """A marginal wake followed by a fragment is the television, not him.
 

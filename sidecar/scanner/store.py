@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS scanner_incidents (
     details TEXT DEFAULT '[]',       -- facts heard: vehicles, injuries, transport...
     edited_ts REAL DEFAULT 0,        -- when that message was last brought up to date
     clip_mid INTEGER DEFAULT 0,      -- the recording threaded under it
-    more_mid INTEGER DEFAULT 0       -- the last "tell me more" answer about it
+    more_mid INTEGER DEFAULT 0,      -- the last "tell me more" answer about it
+    paged TEXT DEFAULT ''            -- the two-tone page heard with it ("905/770"), if any
 );
 CREATE INDEX IF NOT EXISTS scanner_incidents_last ON scanner_incidents(last_ts);
 CREATE TABLE IF NOT EXISTS scanner_sent (
@@ -83,10 +84,11 @@ _JSON = ("types", "roads", "units", "said", "escalations", "details")
 _INC_COLS = ("first_ts", "last_ts", "town", "miles", "agency", "channel", "family", "kind", "label",
              "severity", "types", "address", "street", "roads", "units", "said", "summary", "hits",
              "burst", "status", "escalations", "tier", "delivered_ts", "decided", "pending",
-             "msg_id", "details", "edited_ts", "clip_mid", "more_mid")
+             "msg_id", "details", "edited_ts", "clip_mid", "more_mid", "paged")
 # columns added after the first install: (name, definition) - see _migrate
 _ADDED = (("msg_id", "INTEGER DEFAULT 0"), ("details", "TEXT DEFAULT '[]'"), ("edited_ts", "REAL DEFAULT 0"),
-          ("clip_mid", "INTEGER DEFAULT 0"), ("more_mid", "INTEGER DEFAULT 0"))
+          ("clip_mid", "INTEGER DEFAULT 0"), ("more_mid", "INTEGER DEFAULT 0"),
+          ("paged", "TEXT DEFAULT ''"))
 _HIT_COLS = ("id", "ts", "end_ts", "duration", "channel", "name", "freq", "town", "agency", "quality",
              "audio_path", "transcript", "asr_conf", "incident_id")
 

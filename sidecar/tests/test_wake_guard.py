@@ -51,6 +51,32 @@ def main() -> int:
         check("   ...and the fragment rule alone would have let it through",
               not not_for_me(tv, 0.71))
 
+    print("\n-- talking ABOUT him is not calling him (2026-11-08, 7:25 PM) --")
+    # Dictating a message woke him at 0.99 - the name really was said - and a
+    # stray "Drivers." then got an invented answer about drivers and firmware.
+    from audio.wake import spoken_about
+    from brain.skills import stray_followup
+    for about in ("Okay, tell me more than Jarvis can according to what",
+                  "and then Jarvis said the scanner was fine",
+                  "I think Jarvis will handle it", "so what Jarvis does is listen"):
+        check(f"{about[:44]!r} is about him", spoken_about(about))
+    for to in ("hey Jarvis what time is it", "Jarvis, can you open notepad", "ok Jarvis",
+               "I was wondering Jarvis can you open it", "turn off the lights Jarvis",
+               "tell me Jarvis is it raining", "okay so Jarvis will you stop",
+               "Thought you did me. Hey Jarvis, what time is it"):
+        check(f"{to[:44]!r} is to him", not spoken_about(to))
+    orch_src = (ROOT / "orchestrator.py").read_text(encoding="utf-8")
+    nh = orch_src[orch_src.index("async def _name_heard"):][:2500]
+    check("a wake where he is only being talked about is rejected before anything runs",
+          "spoken_about(heard)" in nh and nh.index("spoken_about(heard)") < nh.index("return True, heard"))
+    for stray in ("Drivers.", "Charles.", "Right."):
+        check(f"{stray!r} alone in the open window is a stray word", stray_followup(stray))
+    for his in ("Why?", "Stop.", "Yes", "open notepad", "uh thanks", "what about tomorrow", ""):
+        check(f"{his!r} is still his", not stray_followup(his))
+    check("...and a stray word never reaches the model: it is dismissed in silence",
+          "stray_followup(text)" in orch_src and 'reason="stray word"' in orch_src
+          and orch_src.index("stray_followup(text)") < orch_src.index("the television, in whole sentences"))
+
     print("\n-- his own speech has a shape --")
     for said in ("what time is it", "turn off the camera", "open chrome",
                  "show me that render of the duck again", "volume up", "louder",

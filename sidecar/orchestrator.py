@@ -20,7 +20,7 @@ from audio.stt import stt
 from audio.tts import tts
 from audio.vad import StreamingVAD
 from audio import endpoint, output_watch
-from audio.wake import barge, name_in, strip_wake_name, wake
+from audio.wake import barge, name_in, spoken_about, strip_wake_name, wake
 from audio.sounds import PALETTE
 from audio.speech_text import clean_for_speech, strip_markdown
 import clarify
@@ -1530,6 +1530,7 @@ class Orchestrator:
                                              "the wake word is required", who or "something")
                                 continue
                         log.info("follow-up speech (conversation window)")
+                        self._via_followup = True
                         # He is mid-conversation: the window only opens after a
                         # turn he was given. Nothing marginal about it.
                         self._wake_score_fresh = None
@@ -1546,6 +1547,7 @@ class Orchestrator:
                 if score >= wake.threshold and time.time() - last_fire > 2.0:
                     last_fire = time.time()
                     log.info("wake word detected (%.2f)", score)
+                    self._via_followup = False
                     self._last_wake_score = float(score)   # for the not-for-me gate
                     # ...and a SEPARATE one that a turn consumes. _last_wake_score
                     # lives on into the conversation window, where a follow-up
@@ -2242,6 +2244,17 @@ class Orchestrator:
         if reflex and (not reflex[0].llm_after
                        or (reflex[0].direct_if is not None and reflex[0].direct_if(text))):
             await self._reflex_turn(text, reflex, t_start)
+            return
+        # ---- a stray word in the open window ----------------------------
+        # "Drivers." (2026-11-08): one word caught in the conversation window,
+        # no wake, no command in it - and the model answered "Drivers are
+        # current and the scanner's firmware is up to date", none of it true.
+        from brain.skills import stray_followup
+        if (reflex is None and getattr(self, "_via_followup", False) and self._clarify is None
+                and stray_followup(text)):
+            log.info("dismissed %r in the conversation window: a stray word, not a request", text[:40])
+            await bus.emit("wake_suppressed", reason="stray word", text=text[:60])
+            await self._settle_idle(State.ERROR, State.STARTING)
             return
         # ---- the television, in whole sentences -------------------------
         # A wake below 0.85 that the brain does not recognise AND that does not
@@ -3655,6 +3668,9 @@ class Orchestrator:
                         score, exc_info=True)
             return True, ""
         heard = (heard or "").strip()
+        if name_in(heard) and spoken_about(heard):
+            log.info("wake rejected (%.2f): heard %r - he is talking about me, not to me", score, heard[:80])
+            return False, heard
         if name_in(heard):
             return True, heard
         # KEEP THE AUDIO. On 2026-10-27 15:54 two wakes in a row were rejected

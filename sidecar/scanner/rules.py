@@ -120,7 +120,11 @@ KINDS: dict[str, Kind] = {k.key: k for k in (
     Kind("seizure", "a seizure", "ems", 3, False),
     Kind("fall", "a fall", "ems", 3, False),
     Kind("medical", "a medical call", "ems", 3, False),
+    # A station was toned out (a two-tone page) but the words after it could
+    # not be named as any kind above. Never read from text: the desk gives it.
+    Kind("paged_dispatch", "a dispatch", "fire", 3, False),
 )}
+PAGED = "paged_dispatch"
 TRAFFIC = {"entrapment", "pedestrian_struck", "rollover", "mva"}
 # A burst on a fire channel is a kind with no words behind it.
 BURST = Kind("activity_burst", "unusual activity", "fire", 5, False)

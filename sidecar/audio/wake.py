@@ -136,6 +136,36 @@ def _is_name(word: str, loose: bool = True) -> bool:
     return 5 <= len(w) <= 7 and _dl(w, NAME) <= 1
 
 
+# HE WAS TALKING ABOUT JARVIS, NOT TO HIM (2026-11-08, 7:25 PM). Dictating a
+# message - "Okay, tell me more then Jarvis can according to what's going on" -
+# woke him at 0.99: the name really was said. JARVIS answered the fragment
+# after it, then a stray "Drivers." with an invented line about drivers and
+# firmware. A name in the MIDDLE of a sentence with a third-person verb after
+# it ("Jarvis can", "Jarvis will", "Jarvis said") is him being described.
+# "...Jarvis, can you" and "hey Jarvis" are still him being called.
+_ABOUT_VERBS = frozenset("""can can't cannot will won't would wouldn't should shouldn't could couldn't is isn't
+was wasn't does doesn't did didn't has hasn't had said says told thinks thought knows knew needs
+wants keeps kept just still never always might may must gets got sent sends tells do""".split())
+_QUESTION_VERBS = frozenset("can will would should could is was does did do has".split())
+_ASKING = frozenset("you it there that this the my i we".split())     # "Jarvis, is it raining"
+_CALLING = frozenset("hey hi hello ok okay yo so and but now well alright thanks please".split())
+
+
+def spoken_about(text: str) -> bool:
+    """Is his name used ABOUT him here rather than to call him?"""
+    words = re.findall(r"[a-z']+", (text or "").lower())
+    for i, w in enumerate(words):
+        if not _is_name(w.replace("'s", "")):
+            continue
+        before, after = words[:i], words[i + 1:i + 3]
+        if w.endswith("'s") and len(before) >= 2:
+            return True                              # "Jarvis's answer", "what Jarvis's doing"
+        if (len(before) >= 2 and before[-1] not in _CALLING and after and after[0] in _ABOUT_VERBS
+                and not (after[0] in _QUESTION_VERBS and len(after) > 1 and after[1] in _ASKING)):
+            return True
+    return False
+
+
 def name_in(text: str) -> bool:
     """Is his name anywhere in this transcript, as Parakeet tends to write it?"""
     return any(_is_name(w) for w in re.findall(r"[a-z]+", (text or "").lower()))

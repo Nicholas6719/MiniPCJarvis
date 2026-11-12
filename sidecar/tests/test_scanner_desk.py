@@ -877,6 +877,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("eight or nine transmissions is an ordinary spell; fifteen with history is not",
           SD.ScannerDesk._burst_worth_sending(9, 5) is False and SD.ScannerDesk._burst_worth_sending(15, 5) is True
           and SD.ScannerDesk._burst_worth_sending(40, 1) is False)
+    # the gates share one database: an earlier run's Holliston spell must not take this one
+    S._write("DELETE FROM scanner_incidents WHERE town = ?", ("Holliston",))
     sent_before = len(calls["deliver"])
     real_baseline = desk._baseline
     desk._baseline = lambda name, hour, now_, window: (0.5, 5)
@@ -896,6 +898,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
               calls["deliver"][sent_before:])
     finally:
         desk._baseline = real_baseline
+        S._write("DELETE FROM scanner_incidents WHERE town = ?", ("Holliston",))
 
     print("\n-- what the first live morning taught it (2026-11-07) --")
     # Natick FD's ordinary traffic against a baseline of nothing came within a
@@ -1062,7 +1065,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     old_db.execute("CREATE TABLE scanner_incidents (id INTEGER PRIMARY KEY, first_ts REAL, last_ts REAL)")
     added = S._migrate(old_db)
     cols = {r[1] for r in old_db.execute("PRAGMA table_info(scanner_incidents)")}
-    want_cols = ["msg_id", "details", "edited_ts", "clip_mid", "more_mid"]
+    want_cols = ["msg_id", "details", "edited_ts", "clip_mid", "more_mid", "paged"]
     check("an install from before today gets the new columns, once",
           added == want_cols and set(want_cols) <= cols and S._migrate(old_db) == [], (added, cols))
     import remote_telegram as RT
@@ -1778,6 +1781,79 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     got = S.hit(BASE + 30)
     check("a different transmission under an old id replaces it",
           got["name"] == "Natick FD" and got["transcript"] is None, got)
+
+    print("\n-- tone-outs: the dispatcher's own page (2026-11-12) --")
+    # Measured on 4,249 real clips: Ashland 905/770, Natick 2265/950, always in
+    # a transmission's first second; long single tones were IDs and tests.
+    from scanner import tones as TN
+    sine = lambda hz, s: 0.05 * np.sin(2 * np.pi * hz * np.arange(int(16000 * s)) / 16000)
+    rng = np.random.default_rng(7)
+    hiss = lambda s: 0.01 * rng.standard_normal(int(16000 * s))
+    paged_clip = np.concatenate([hiss(0.6), sine(905, 1.0) + hiss(1.0), sine(770, 3.0) + hiss(3.0),
+                                 hiss(4.0)]).astype(np.float32)
+    pg = TN.pages(paged_clip)
+    check("a two-tone page is found, named by its tones", len(pg) == 1 and pg[0].kind == "two-tone"
+          and pg[0].key == "905/770" and pg[0].start < 1.0, pg)
+    check("one long tone is a different thing (station IDs, daily tests)",
+          [p.kind for p in TN.pages((sine(1000, 6) + hiss(6)).astype(np.float32))] == ["long-tone"])
+    sweep = 0.05 * np.sin(2 * np.pi * np.cumsum(np.linspace(600, 1500, 16000 * 4)) / 16000)
+    check("hiss, a short beep and a siren's sweep are not pages",
+          not TN.pages(hiss(8).astype(np.float32)) and not TN.pages(sweep.astype(np.float32))
+          and not TN.pages(np.concatenate([hiss(1), sine(1000, 0.3), hiss(3)]).astype(np.float32)))
+
+    page_towns = ("Hopkinton", "Dover", "Medfield")
+    for t_ in page_towns:           # the gates share one database: judge only this run's calls
+        S._write("DELETE FROM scanner_incidents WHERE town = ?", (t_,))
+
+    def prow(n, name, town, ago):
+        r = {"id": BASE + 7700 + n, "ts": now - ago, "end_ts": now - ago + 6, "duration": 6, "name": name,
+             "town": town, "agency": "FD", "quality": None, "audio_path": ""}
+        S.log_hit(r)
+        return r
+    sent_before = len(calls["deliver"])
+    r1 = prow(1, "Hopkinton FD", "Hopkinton", 100)
+    k1 = await desk._note_page(r1, paged_clip)
+    check("a page heard on a transmission is remembered for its channel", k1 == "905/770"
+          and desk._page_for(prow(2, "Hopkinton FD", "Hopkinton", 60)) == "905/770"
+          and desk._page_for(prow(3, "Dover FD", "Dover", 60)) == "", k1)
+    check("...for two minutes", desk._page_for(dict(r1, id=1, ts=r1["ts"] + 121, page="")) == "")
+    r4 = prow(4, "Hopkinton FD", "Hopkinton", 55)
+    pid = await desk.on_text(r4, "Station two, at the corner by the old mill, see the caller there.", 0.5, annotate=False)
+    await desk.settle()
+    pinc = S.incident(pid) if pid else {}
+    psent = [c for c in calls["deliver"][sent_before:] if c["key"] == f"scanner-fyi:{pid}"]
+    check("a paged dispatch the rules can't name is still a call (his answer: send it silently)",
+          pid and pinc["types"] == ["paged_dispatch"] and pinc["paged"] == "905/770" and pinc["tier"] == SD.FYI, pinc)
+    check("...one silent line that says what it is and what it isn't",
+          len(psent) == 1 and "Paged dispatch - I couldn't make out the call type" in psent[0]["written"]
+          and "Hopkinton Fire toned a station out" in psent[0]["text"]
+          and NP.audible(ALERT, NP.kind_of("scanner-fyi: x", psent[0]["key"])) is False, psent)
+    r5 = prow(5, "Hopkinton FD", "Hopkinton", 40)
+    again = await desk.on_text(r5, "Copy that, we're on the way over there now.", 0.5, annotate=False)
+    await desk.settle()
+    check("...and one page is one dispatch: the chatter after it starts nothing new",
+          again in (None, pid) and len([c for c in calls["deliver"][sent_before:]
+                                        if c["key"].startswith("scanner-fyi:")]) == 1, again)
+    r6 = prow(6, "Dover FD", "Dover", 30)
+    await desk._note_page(r6, paged_clip)
+    did = await desk.on_text(r6, "Engine 1 respond to 12 Farm Street for a structure fire, smoke showing.", 0.9,
+                             annotate=False)
+    await desk.settle()
+    dinc = S.incident(did) if did else {}
+    dsent2 = [c for c in calls["deliver"][sent_before:] if str(did) in c["key"]]
+    check("a page does NOT stand in for a second transmission: a paged fire heard once stays silent "
+          "(his answer: keep two transmissions)",
+          did and dinc["paged"] == "905/770" and dinc["tier"] == SD.FYI
+          and not [c for c in dsent2 if c["key"].startswith("scanner:")], (dinc.get("tier"), dsent2))
+    check("...but it is called what it is - a paged dispatch, not merely 'unconfirmed'",
+          dsent2 and "Paged dispatch: a structure fire with smoke showing - 12 Farm St (one transmission so far)"
+          in dsent2[0]["written"] and dsent2[0]["text"].startswith("From the scanner, a paged dispatch:"), dsent2)
+    r7 = prow(7, "Medfield FD", "Medfield", 20)
+    nid = await desk.on_text(r7, "Station two, at the corner by the old mill, see the caller there.", 0.5, annotate=False)
+    check("the same garbled words with no page are still not a call", nid is None, nid)
+    check("the rules answer says so", "toned a station out" in desk._say_rules())
+    for t_ in page_towns:
+        S._write("DELETE FROM scanner_incidents WHERE town = ?", (t_,))
 
     print("\n-- the scan doctor, watched (2026-11-12) --")
     # It deleted Framingham Fire while the scanner was deaf; nobody was told,
