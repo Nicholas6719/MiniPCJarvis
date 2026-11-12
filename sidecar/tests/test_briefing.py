@@ -446,18 +446,62 @@ def main() -> int:
     wire[2]["_local_feed"] = True
     picked = [s["headline"] for s in bC.rank_for_brief(wire, 5)]
     check("the emergency leads the night brief", picked and "Gas leak" in picked[0], picked)
-    check("...then the country and his ground, turn and turn about",
-          len(picked) > 2 and "President" in picked[1] and "MBTA" in picked[2], picked)
+    check("...then his ground and the country, whichever weighs more",
+          len(picked) > 2 and {"President", "MBTA"} == {p.split()[0] for p in picked[1:3]}, picked)
     check("...then the wire, so he is still informed",
           any("Senate" in p for p in picked[3:]) and any("Rugby" in p for p in picked[3:]), picked)
     check("...and local colour comes last, if at all",
           not any("library" in p for p in picked)
-          and "library" in bC.rank_for_brief(wire, 8)[-1]["headline"], picked)
+          and any("library" in s_["headline"] for s_ in bC.rank_for_brief(wire, 8)[-2:]), picked)
     check("an actor's illness off a local desk is colour, not the night's news",
           not any("Blue Bloods" in p for p in picked), picked)
     check("the same story off two desks is one story",
           sum("Senate" in p for p in picked) == 1, picked)
     check("the count is honoured", len(bC.rank_for_brief(wire, 3)) == 3)
+
+    # --- what earns a place in the night brief (2026-11-12, real headlines) ---
+    # The old buckets led with a 1914 cent at auction and the Patriots' locker
+    # room, and put the Nvidia chief's resignation and a deadly collapse last.
+    def st_(head, source, local=False, age=20):
+        d = story(head, age=age, source=source)
+        if local:
+            d["_local_feed"] = True
+        return d
+    day = [st_("Satiny copper-orange luster helps a 1914-D Lincoln cent fetch nearly $12,000 at auction", "MassLive", True),
+           st_("Patriots push back on the notion of team having locker room issues", "Boston.com", True),
+           st_("Needham police search for missing 18-year-old man", "MassLive", True),
+           st_("Microsoft confirms Outlook outage affecting users worldwide", "WCVB Boston", True),
+           st_("Here's how Jensen Huang's abrupt resignation unfolded at Nvidia", "CBS", age=7),
+           st_("Nvidia CEO Jensen Huang resigns in wake of affair, spy scandal", "CBS", age=30),
+           st_("'How does a building just fall?' Neighbours grieve after deadly Brooklyn building collapse", "BBC"),
+           st_("Two men found guilty of spying for Iran over plan to target UK-based journalists", "BBC"),
+           st_("Witness describes deadly D.C. shooting", "CBS"),
+           st_("Natick Celebrates Veterans Day With Parade, Ceremony And Community Luncheon", "Natick Patch", True),
+           st_("Man Convicted In 2007 Lincoln-Sudbury High School Murder Seeks Parole", "Sudbury Patch", True, age=2800)]
+    bR = br.Briefing()
+    top = [s_["headline"] for s_ in bR.rank_for_brief(day, 5)]
+    check("a missing teenager in a town of his is in the night brief", any("Needham" in t for t in top), top)
+    check("...and the coin auction, the locker room and the parade are not",
+          not any(w in " ".join(top) for w in ("Lincoln cent", "Patriots", "Parade")), top)
+    check("one story off two headlines is told once - the event, not the explainer",
+          sum("Huang" in t for t in top) == 1 and any(t.startswith("Nvidia CEO") for t in top), top)
+    check("neither side takes the whole brief: at most three of five from his desks or from the wire",
+          1 <= sum(bool(s_.get("_local_feed")) for s_ in bR.rank_for_brief(day, 5)) <= 3, top)
+    old_sc, _ = bR.news_score(day[-1])
+    fresh_sc, _ = bR.news_score(dict(day[-1], age_minutes=30))
+    check("yesterday's story weighs less than today's", old_sc < fresh_sc, (old_sc, fresh_sc))
+    real_wl = br.config.data.get("markets")
+    br.config.data["markets"] = dict(real_wl or {}, watchlist=["NVDA"])
+    try:
+        own, why_own = bR.news_score(day[5])
+        br.config.data["markets"]["watchlist"] = []
+        other, _ = bR.news_score(day[5])
+    finally:
+        if real_wl is None:
+            br.config.data.pop("markets", None)
+        else:
+            br.config.data["markets"] = real_wl
+    check("a story about a company he owns weighs more", own == other + 3, (own, other, why_own))
 
     # the two must not disagree about the numbers, only about their shape
     check("the screen shows a signed percentage", "-4.07%" in shown, shown)

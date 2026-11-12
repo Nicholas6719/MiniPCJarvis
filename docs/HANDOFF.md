@@ -5759,6 +5759,16 @@ He had not spoken to JARVIS in four days: what it SENDS is the product.
   them; a "death nearby" story with no town of his is not held for him.
 - Story watch: "let me know if you hear more about that" is a real standing
   watch (`standing.story_hits`, checked on every news scan, fires once).
+- Afternoon (f70a6c2, 7ebbbce, and the ranking commit): a busy spell is never
+  an ALERT (near him it spent the day's ALERT cap, 8 of 8, by noon - a real
+  danger call would have been refused) and a named danger call past its cap
+  is sent silently, never dropped. Night-brief news is SCORED
+  (`Briefing.news_score`): something happened +3, a town of his by name +3/4,
+  national weight +3, a company he owns +3, sport/soft -5, age; one story
+  told once (explainers lose to the event), at most 3 of 5 from either side.
+  A headline counts as told only when its brief is delivered, and the ledger
+  of delivered briefs is consulted too. `/debug/brief` puts back what looking
+  consumed. The delivery ledger keeps 1,500 characters.
 Traps met: a bash heredoc eats backslashes (`\b` became a backspace byte four
 times - write patches with the Write tool); the gates share one database, so
 a gate that plants incidents for a town must delete them before and after;

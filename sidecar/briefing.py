@@ -1246,64 +1246,133 @@ class Briefing:
         valid = [s for s in (times or []) if minutes(s) >= 0]
         return bool(valid) and str(slot) == str(min(valid, key=minutes))
 
-    def rank_for_brief(self, stories: list[dict], count: int) -> list[dict]:
-        """The day's news, in the order he would want to hear it.
+    # WHAT MAKES A STORY WORTH HIS EVENING (2026-11-12, his yes to a rework).
+    # The old order was buckets: anything off one of his desks was "near him",
+    # so a 1914 cent at auction and a Patriots locker-room story led the night
+    # brief while the Nvidia chief's resignation (a company he owns), a deadly
+    # building collapse and a missing Needham teenager came last - and a
+    # two-day-old story led because it had once been an alarm. A story now
+    # earns its place: something happened, it is his town or his country or
+    # his money, and it happened today.
+    _HARD_NEWS = re.compile(
+        r"\b(?:dead|deadly|dies|died|killed|kills|fatal\w*|shooting|shot|stabb\w+|collapse[sd]?|explosion|"
+        r"fire|crash\w*|missing|search(?:es|ing)? for|rescue[sd]?|evacuat\w+|outage|storm|snow|flood\w*|"
+        r"tornado|hurricane|earthquake|attack\w*|arrest\w*|charged|guilty|convicted|resign\w*|ousted|"
+        r"lawsuit|recall\w*|hostage|spy\w*|spying|scandal|bann?(?:s|ed|ing)|closure|shut ?down|emergency|"
+        r"gas leak|hazmat|amber alert|lockdown|lowest in|highest in|record (?:low|high))\b", re.I)
+    _CIVIC = re.compile(r"\b(?:senate|house (?:passes|votes|approves)|governor|legislature|mayor|city council|"
+                        r"select board|town meeting|bill|budget|tax(?:es)?|mbta|commuter rail|school committee)\b", re.I)
+    _SOFT_NEWS = re.compile(
+        r"\b(?:patriots|red sox|celtics|bruins|nfl|nba|mlb|nhl|playoffs?|touchdown|quarterback|locker room|"
+        r"sprinter|signs nli|takeaways|roster|draft pick|auction|luster|library|weekend hours|fundraiser|ribbon.cutting|craft fair|concert|exhibit|celebrat\w+|honou?rs|"
+        r"ceremony|parade|luncheon|health guide|gift guide|debuts?|grand opening|recipes?|horoscope|podcast|"
+        r"picks for|best books|checkout trick|giveaway|contest|festival|obituar\w+|educator honor|"
+        r"opens up about|weird symptom)\b", re.I)
+    _WIRES = ("cbs", "bbc", "npr", "ap", "associated press", "reuters", "abc", "nbc news", "pbs", "sky")
 
-        Emergencies first, then what happened near him, then national news
-        of weight, then the rest of the wire - the general news he asked to
-        stay informed of. This deliberately uses the FULL classifier, not the
-        emergencies-only gate: that gate decides what may interrupt him by day,
-        and the night brief is the opposite of an interruption.
-        """
-        from significance import (NATIONAL_WEIGHT, _classify_news_full, _is_obituary, _text_of,
-                                  is_local)
-        # Five buckets, then an ORDER that mixes them. The first live night
-        # brief (release 27) was five Massachusetts-desk items - penguin vests
-        # off WCVB among them - and nothing from the wire, because "near him"
-        # outranked everything that was not an emergency. Informed means both:
-        # what happened in the country, and what happened near him, the
-        # emergencies first and the fluff last.
-        buckets: dict[str, list[dict]] = {k: [] for k in ("alarm", "national", "local", "wire", "colour")}
-        for st in stories:
-            tier, why = _classify_news_full(st)
-            near, _town = is_local(st)
-            if tier in (URGENT, ALERT):
-                buckets["alarm"].append(st)
-            elif NATIONAL_WEIGHT.search(_text_of(st)):
-                buckets["national"].append(st)
-            elif "death" in why or _is_obituary(_text_of(st)):
-                # an obituary, an illness, a far-off death reprinted by a local
-                # desk - a 'Blue Bloods' actor's cancer reached the first night
-                # brief as Massachusetts news. Colour, not what happened today.
-                buckets["colour"].append(st)
-            elif near and tier != NONE and why not in ("local routine", "local colour"):
-                buckets["local"].append(st)
-            elif not near:
-                buckets["wire"].append(st)
-            else:
-                buckets["colour"].append(st)
-        ordered: list[dict] = list(buckets["alarm"])
-        # national and local, turn and turn about, the country first
-        a, b = buckets["national"], buckets["local"]
-        for i in range(max(len(a), len(b))):
-            if i < len(a):
-                ordered.append(a[i])
-            if i < len(b):
-                ordered.append(b[i])
-        ordered += buckets["wire"] + buckets["colour"]
-        seen: set[str] = set()
+    def news_score(self, st: dict) -> tuple[int, list[str]]:
+        """(score, why) for one story in the night brief. Higher is told first."""
+        from significance import NATIONAL_WEIGHT, _classify_news_full, _is_obituary, _text_of, is_local, places
+        import geo
+        text = _text_of(st)
+        head = str(st.get("headline") or "")
+        tier, why = _classify_news_full(st)
+        score, said = 0, []
+
+        def add(n: int, what: str) -> None:
+            nonlocal score
+            score += n
+            said.append(f"{what} {n:+d}")
+        if tier in (URGENT, ALERT):
+            add(5, "an alarm")
+        hard = bool(self._HARD_NEWS.search(head))
+        if hard:
+            add(3, "something happened")
+        national = bool(NATIONAL_WEIGHT.search(text))
+        if national:
+            add(3, "national weight")
+        elif self._CIVIC.search(head):
+            add(2, "civic")
+        colour = why in ("local routine", "local colour")
+        try:
+            inside = [f for f in places(st) if geo.within_radius(f.miles)]
+        except Exception:
+            inside = []
+        if inside and not colour:
+            _near, own = is_local(st)
+            add(4 if own else 3, "names a town of his")
+        if colour:
+            add(-2, "local colour")
+        if self._holding_in(head):
+            add(3, "a company he owns")
+        src = str(st.get("source") or "").lower()
+        if hard and src.startswith(self._WIRES):
+            add(1, "the wire")
+        if self._SOFT_NEWS.search(head):
+            add(-5, "sport or soft")
+        elif ("death" in why or _is_obituary(text)) and not inside and not hard and not national:
+            add(-4, "an obituary or far-off illness")
+        if re.match(r"\s*['\"‘“]?(?:here'?s (?:how|what|why)|what to know|how does|witness describes|"
+                    r"takeaways|\d+ things)", head, re.I):
+            add(-1, "an explainer, not the event")
+        age = st.get("age_minutes")
+        if isinstance(age, (int, float)):
+            if age <= 720:
+                add(1, "today")
+            elif age > 4320:
+                add(-6, "three days old")
+            elif age > 2160:
+                add(-3, "a day and a half old")
+        return score, said
+
+    @staticmethod
+    def _holding_in(head: str) -> bool:
+        try:
+            from analyst import display_name
+            names = [display_name(sym) for sym in (config.get("markets", "watchlist", default=[]) or [])]
+        except Exception:
+            names = []
+        low = (head or "").lower()
+        return any(n and len(n.split()[0]) >= 4 and re.search(rf"\b{re.escape(n.split()[0].lower())}\b", low)
+                   for n in names)
+
+    def rank_for_brief(self, stories: list[dict], count: int) -> list[dict]:
+        """The day's news, in the order he would want to hear it: scored
+        (news_score), the same story told once, and never all from one side -
+        at most three in five off his local desks, at most three off the
+        wire, while the other side has anything left to say."""
+        import standing
+        scored = []
+        for n, st in enumerate(stories):
+            sc, why = self.news_score(st)
+            age = st.get("age_minutes")
+            scored.append((-sc, age if isinstance(age, (int, float)) else 1e9, n, st, why))
+        scored.sort(key=lambda x: x[:3])
+        want = max(1, count)
+        side_cap = max(1, (want * 3 + 4) // 5)
+        seen: list[tuple[str, set]] = []
         picked: list[dict] = []
-        for st in ordered:
+        passed: list[dict] = []
+        sides = {True: 0, False: 0}
+        for _neg, _age, _n, st, why in scored:
             head = self._tidy(st.get("headline"))
-            if not head or head.lower() in seen:
+            if not head:
                 continue
-            if any(self._same_story(head, h) for h in seen):
+            words = set(standing.story_words(head))
+            if any(head.lower() == h or self._same_story(head, h) or len(words & w) >= 3 for h, w in seen):
                 continue
-            seen.add(head.lower())
+            seen.append((head.lower(), words))
+            # "his side" is his ground: one of his desks, or a town of his by name
+            local = bool(st.get("_local_feed")) or any(w.startswith("names a town of his") for w in why)
+            if sides[local] >= side_cap:
+                passed.append(st)          # its side has had its share: only if the other runs dry
+                continue
+            sides[local] += 1
+            st["_rank_why"] = ", ".join(why)
             picked.append(st)
-            if len(picked) >= max(1, count):
+            if len(picked) >= want:
                 break
-        return picked
+        return (picked + passed)[:want]
 
     async def compose_brief(self, sections=None) -> str:
         """The spoken brief: flowing sentences, because he is hearing it.
