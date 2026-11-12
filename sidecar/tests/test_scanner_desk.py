@@ -2002,6 +2002,20 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("a number nobody said goes", kept == "", kept)
     kept, _ = FC.check("Someone may be armed with a knife.", ["He still has that weapon, the knife."], [])
     check("a weapon that was heard may be said as 'armed'", bool(kept), kept)
+    kept, cut = FC.check("2DB342 being operated by Daniel Perone possibly intoxicated. Family disturbance reported.",
+                         ["2DB342 being operated by Daniel Perone possibly intoxicated, family disturbance reported"],
+                         ["Boston PD"])
+    check("a plate and a private person's name never reach his phone, heard or not (2026-11-11)",
+          kept == "Family disturbance reported." and "2DB342" in cut[0][0], (kept, cut))
+    kept, cut = FC.check("Engine 8 responding to 22 West 1st Street for two males having trouble breathing, "
+                         "with police also on scene.",
+                         ["Engine 8 responding to 22 West 1st Street for two males having trouble breathing"],
+                         ["Waltham Fire"])
+    check("a trailing clause nobody said is cut without losing the sentence it hung on",
+          kept == "Engine 8 responding to 22 West 1st Street for two males having trouble breathing." and cut, (kept, cut))
+    kept, _ = FC.check("No injuries, with Engine 3 responding to Warren Street.",
+                       ["engine 3 responding warren street"], [])
+    check("...but an invented OPENING clause still takes the whole sentence with it", kept == "", kept)
 
     asked: list = []
     answers = iter(['{"summary": "Suspect may be armed with a knife.", "account": "A suspect is armed.", '

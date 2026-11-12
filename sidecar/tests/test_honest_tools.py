@@ -263,6 +263,37 @@ def main() -> int:
     finally:
         config.data["folders"] = saved_folders
 
+    print("\n-- a reply may not promise what nothing will do (2026-11-12) --")
+    # All three are out of his transcript; nothing was watching, and nothing ran.
+    import honesty
+    for said in ("I\u2019ll keep an eye on it.",
+                 "I\u2019ll alert you right away when a new call comes in, sir.",
+                 "I will let you know if anything changes."):
+        check(f"{said[:40]!r} is a promise to watch", honesty.unbacked_promise(said) == honesty.CANT_WATCH)
+    for said in ("I\u2019ll start by scanning the project folder for any recent changes.",
+                 "Once that\u2019s done, I\u2019ll review the logs.", "Then I\u2019ll check the log files for errors."):
+        check(f"{said[:40]!r} is a promise to go and work", honesty.unbacked_promise(said) == honesty.CANT_WORK)
+    for said in ("It is four in the afternoon, sir.", "I'll open it now.", "Paris is the capital of France.",
+                 "I can set a reminder for that if you like.", "Maybe try a walk, sir."):
+        check(f"{said[:40]!r} promises nothing", honesty.unbacked_promise(said) is None)
+    import orchestrator as O
+    o = O.Orchestrator.__new__(O.Orchestrator)
+    cuts: list = []
+    got1 = o._keep_honest("I\u2019ll keep an eye on it.", [], cuts)
+    got2 = o._keep_honest("I\u2019ll let you know the moment I hear more.", [], cuts)
+    check("with no tool run, the promise becomes the truth - once",
+          got1 == honesty.CANT_WATCH and got2 == "" and len(cuts) == 2, (got1, got2))
+    check("a turn that really set something up keeps its words",
+          o._keep_honest("I\u2019ll remind you at five, sir.", [("set_reminder", True)], []) ==
+          "I\u2019ll remind you at five, sir.")
+    o._no_tools_first = True
+    check("...and so does one where the brain already ran the tool",
+          o._keep_honest("I\u2019ll keep an eye on the downloads, sir.", [], []).startswith("I\u2019ll keep"))
+    src = Path(O.__file__).read_text(encoding="utf-8")
+    gen = src[src.index("async def _llm_with_tools"):]
+    check("every sentence the model speaks passes through it, and the transcript says what was said",
+          gen.count("self._keep_honest(") >= 2 and "for said_, instead in promise_cuts" in gen)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

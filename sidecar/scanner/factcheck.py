@@ -158,19 +158,50 @@ def sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p and p.strip(" .;-")]
 
 
+# A PLATE OR A PERSON IS NOT HIS NEWS (2026-11-11): "2DB342 being operated by
+# Daniel Perone possibly intoxicated" reached his phone - a registration and a
+# private person's name off a police channel, word for word. A registration
+# (letters and digits run together, five to eight long) is never repeated, and
+# neither is whoever something is "operated by", "registered to" or "owned by".
+_PLATE = re.compile(r"\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{5,8}\b")
+_NAMED = re.compile(r"\b(?:operated|driven|owned) by\s+[A-Z][a-z]+|\bregistered to\s+[A-Z][a-z]+|"
+                    r"\b(?:named|identified as|name is|by the name of)\s+[A-Z][a-z]+")
+_CLAUSE = re.compile(r",\s+(?:with|and|but|while|as)\s+|\s+-\s+")
+
+
+def _judge(s: str, src: "Sources") -> list[str]:
+    """The words nothing supports in one sentence or clause ([] = it stands)."""
+    words = _words(s)
+    bad = [w for w in words if w not in NEGATIVES and not src.supports(w)]
+    if any(w in NEGATIVES for w in words) and not src.negative:
+        bad.append("(a negative nobody said)")
+    if _PLATE.search(s) and not re.fullmatch(r"\d+(?:st|nd|rd|th)", _PLATE.search(s).group(0).lower()):
+        bad.append("(a plate or ID number - leave it out)")
+    if _NAMED.search(s):
+        bad.append("(a person's name - leave it out)")
+    return bad
+
+
 def check(text: str, heard: list[str], known: list[str]) -> tuple[str, list[tuple[str, list[str]]]]:
     """(what survives, [(dropped sentence, the words nothing supports)]).
-    What survives is "" when no sentence does."""
+    What survives is "" when no sentence does. A sentence whose OPENING clause
+    stands keeps that clause when only a trailing one fails ("Engine 8
+    responding to 22 West Street for two males having trouble breathing, with
+    police also on scene" lost everything to its last five words on
+    2026-11-11): cutting an add-on never changes what the main clause says."""
     src = Sources(heard, known)
     kept, dropped = [], []
     for s in sentences(text):
-        words = _words(s)
-        bad = [w for w in words if w not in NEGATIVES and not src.supports(w)]
-        if any(w in NEGATIVES for w in words) and not src.negative:
-            bad.append("(a negative nobody said)")
+        bad = _judge(s, src)
         if bad:
+            clauses = [c.strip() for c in _CLAUSE.split(s) if c and c.strip()]
+            good = []
+            if len(clauses) > 1 and not _judge(clauses[0], src) and len(_words(clauses[0])) >= 4:
+                good = [clauses[0]] + [c for c in clauses[1:] if not _judge(c, src)]
             dropped.append((s, bad))
-        else:
-            s = s.rstrip(" ;,:")
-            kept.append(s[0].upper() + s[1:] + ("" if s[-1] in ".!?" else "."))
+            if not good:
+                continue
+            s = ", and ".join(c.rstrip(" .;,:") for c in good)
+        s = s.rstrip(" ;,:")
+        kept.append(s[0].upper() + s[1:] + ("" if s[-1] in ".!?" else "."))
     return " ".join(kept), dropped

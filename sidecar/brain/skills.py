@@ -2629,6 +2629,40 @@ def say_greeting(slots: dict, _r: dict) -> str:
     return persona.greeting(_t.localtime().tm_hour)
 
 
+# "JARVIS I'M SO BORED" -> "Maybe try a quick search for something interesting,
+# sir." (2026-10-04). A remark about himself is not a request, and the model
+# answers it like a help desk - or, tried again on 2026-11-12 with a prompt
+# rule, with "Very good, Nicholas" to "I'm tired". So it is a reflex: one
+# human line, and one thing he can SAY that really works (never an offer that
+# nothing would follow up).
+_COMPANY = (
+    (r"\bbored\b|\bnothing to do\b",
+     ("A dangerous condition in an engineer, sir. Say 'the news' and I'll read you the headlines.",
+      "Then the day has room in it, sir. Say 'the news', or ask me anything you have been wondering about.")),
+    (r"\b(?:can'?t|cannot|couldn'?t) sleep\b|\bwide awake\b|\binsomnia\b",
+     ("I'm sorry to hear it, sir. I'll keep quiet - nothing from me makes a sound before morning unless it is urgent.",)),
+    (r"\btired\b|\bexhausted\b|\bworn out\b|\bwiped\b|\bsleepy\b",
+     ("It has been a long one, sir. Say 'my reminders' and I'll go through what is left - or leave it till morning.",
+      "Then I'll keep it short, sir. Say 'my reminders' if you want what is left; otherwise it can wait.")),
+    (r"\bstressed\b|\boverwhelmed\b|\banxious\b",
+     ("One thing at a time, sir. Say 'my reminders' and I'll tell you what actually needs you.",)),
+    (r"\b(?:rough|bad|long|hard|terrible|awful) (?:day|night|week|one)\b",
+     ("I'm sorry to hear it, sir. I'm here if you want anything.",
+      "That it has, sir. I'm here if you want anything.")),
+    (r"\bhungry\b|\bstarving\b",
+     ("I can't cook, sir, I'm afraid - but I can time whatever you make. Say 'set a timer for ten minutes'.",)),
+)
+
+
+def say_company(slots: dict, _r: dict) -> str:
+    import time as _t
+    t = (slots or {}).get("said", "")
+    for pattern, lines in _COMPANY:
+        if re.search(pattern, t):
+            return lines[int(_t.time() // 3600) % len(lines)]
+    return "I'm here, sir."
+
+
 def slots_greeting(t: str) -> dict:
     return {"said": (t or "").lower()}
 
@@ -4531,6 +4565,12 @@ SKILLS: list[Skill] = [
         # ...and a range of them
         "just give me 1 through 4", "only show 2 to 5", "give me 1-4"],
         slots=slots_ui, speak=say_ui),
+    Skill("company", None, [
+        "i'm bored", "i'm so bored", "jarvis i'm so bored", "i am bored", "i've got nothing to do",
+        "i'm tired", "i'm so tired", "i'm exhausted", "i'm worn out", "i can't sleep", "i'm wide awake",
+        "rough day", "it's been a rough day", "i had a bad day", "it's been a long day",
+        "i'm stressed", "i'm stressed out", "i'm overwhelmed", "i'm hungry", "i'm starving"],
+        slots=slots_greeting, speak=say_company),
     Skill("greeting", None, [
         "good morning", "good afternoon", "good evening", "hello", "hello jarvis",
         "hi jarvis", "hey jarvis how are you", "how are you", "how are you today",

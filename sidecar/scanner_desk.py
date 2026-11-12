@@ -435,7 +435,8 @@ no "on scene", no cause, no guess at how serious it is.
 sentence or name that makes no sense - never copy garbled words, never guess at or correct them.
 - Phonetic letters (Alpha, Bravo, Charlie...) and long strings of numbers are plates, case numbers or \
 radio codes - leave them out. Units are only named ones like Engine 1, Ladder 2, Car 3 or Ambulance 1.
-- Say "someone" unless the transmissions say man, woman, male, female, he or she."""
+- Say "someone" unless the transmissions say man, woman, male, female, he or she.
+- Never give a person's name or a vehicle's plate, even when the radio does."""
 
 _CALL_FACTS = """Agency: {who} ({town}, {miles})
 The rules guessed: {label}{address}{units} (a keyword guess - if the transmissions say something \
@@ -594,7 +595,9 @@ async def write_checked(inc: dict, mode: str, ask, budget_s: float) -> dict | No
         messages += [{"role": "assistant", "content": out},
                      {"role": "user", "content": RETRY_PROMPT.format(
                          bad=", ".join(bad) or "(none)",
-                         negative=" Nothing negative (no, not, none) was said." if neg else "")}]
+                         negative=(" Nothing negative (no, not, none) was said." if neg else "")
+                         + (" Leave out plate numbers and people's names."
+                            if any("leave it out" in w for _, ws in cut for w in ws) else ""))}]
         try:
             got2 = parse_summary(await ask(messages, max(1.0, end - loop.time())), fields)
         except asyncio.TimeoutError:
@@ -2628,10 +2631,22 @@ class ScannerDesk:
         incs = [i for i in store.incidents_since(since_ts)
                 if float(i["first_ts"]) >= since_ts and self._worth(i)]
         incs.sort(key=lambda i: (-int(i.get("severity") or 0), float(i.get("miles") or 99)))
+        # A BUSY SPELL IS A COUNT, NOT NEWS: the 2026-11-11 morning brief gave
+        # two of its three "worth knowing" places to "a busy spell on Natick
+        # Fire around 12:27 AM". Calls that could be named are named; spells
+        # with no words are counted in five words at the end.
+        spells = [i for i in incs if i.get("burst") and not i.get("types")]
+        incs = [i for i in incs if not (i.get("burst") and not i.get("types"))]
+        busy = f"{len(spells)} busy spell{'s' if len(spells) != 1 else ''} with no words I could make out" \
+            if spells else ""
         if incs:
             line += "; worth knowing: " + ", ".join(self._item(i) for i in incs[:3])
             if len(incs) > 3:
                 line += f", and {len(incs) - 3} more"
+            if busy:
+                line += f"; also {busy}"
+        elif busy:
+            line += f"; nothing I could name, {busy}"
         elif not note:
             busiest = Counter(rules.parse_label(h["name"]).spoken for h in hits).most_common(1)
             line += "; nothing worth stopping for" + (f", busiest was {busiest[0][0]}" if busiest else "")

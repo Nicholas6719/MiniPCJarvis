@@ -414,6 +414,13 @@ def main() -> int:
             ("Okay when will you notify me about calls", "scanner_rules"),
             ("when are you going to tell me about scanner calls", "scanner_rules"),
             ("tell me more about that scanner call", "scanner_more"),
+            # his words, 2026-10-04: answered "maybe try a quick search for something interesting"
+            ("Jarvis I'm so bored", "company"),
+            ("i'm really tired tonight", "company"),
+            ("i can't sleep", "company"),
+            ("the news", "news"),
+            ("my reminders", "reminders"),
+            ("set a timer for ten minutes", "reminder"),
             ("any update on that call", "scanner_more"),
             ("what else do you know about the scanner call", "scanner_more"),
             ("what did i miss", "briefing"),

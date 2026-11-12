@@ -3237,6 +3237,22 @@ class Orchestrator:
         await queue.put(clean_for_speech(reply))
         return reply
 
+    def _keep_honest(self, sentence: str, used_tools: list, cuts: list) -> str:
+        """A sentence that promises to watch, to tell him later or to go and
+        work, in a turn where nothing was actually set up, becomes the truth
+        (see honesty.py); a second such sentence in the same reply is dropped.
+        Returns what to say ("" for nothing)."""
+        if used_tools or getattr(self, "_no_tools_first", False):
+            return sentence                 # something really ran: its words stand
+        import honesty
+        instead = honesty.unbacked_promise(sentence)
+        if instead is None:
+            return sentence
+        first = not any(c[1] for c in cuts)
+        cuts.append((sentence, instead if first else ""))
+        log.info("an unbacked promise was not spoken: %r -> %r", sentence[:80], instead if first else "(dropped)")
+        return instead if first else ""
+
     async def _llm_with_tools(self, messages: list[dict],
                               speak_queue: asyncio.Queue) -> str:
         """Run the LLM, executing tool calls in a loop, streaming sentences to TTS."""
@@ -3259,6 +3275,7 @@ class Orchestrator:
         if getattr(self, "_no_tools_first", False):
             must_use_tool = False   # the brain already ran the tool; the model only composes
         used_tools: list[tuple[str, bool]] = []   # (name, ok) - for self-training
+        promise_cuts: list[tuple[str, str]] = []  # (what the model wrote, what was said instead)
         # for the follow-up rule (see strip_repeat): what he was told last time
         from brain.skills import strip_repeat
         prev_reply = next((str(m.get("content") or "") for m in reversed(self._history)
@@ -3386,6 +3403,9 @@ class Orchestrator:
                                     # "Lima, Santiago, sir." -> "Santiago, sir." for the
                                     # ear; the transcript must say the same thing
                                     lead_cut = (raw_first, sentence)
+                            sentence = self._keep_honest(sentence, used_tools, promise_cuts)
+                            if not sentence:
+                                continue
                             spoke_any = True
                             await speak_queue.put(clean_for_speech(sentence))
                 if chunk.done:
@@ -3425,8 +3445,10 @@ class Orchestrator:
                     tail, _only = strip_repeat(tail, prev_reply)
                     if tail != raw_tail:
                         lead_cut = (raw_tail, tail)
-                spoke_any = True
-                await speak_queue.put(clean_for_speech(tail))
+                tail = self._keep_honest(tail, used_tools, promise_cuts)
+                if tail:
+                    spoke_any = True
+                    await speak_queue.put(clean_for_speech(tail))
             elif held_repeat is not None:
                 # the whole reply WAS the repeat - "repeat that" - say it
                 spoke_any = True
@@ -3436,6 +3458,11 @@ class Orchestrator:
                 full_text = full_text.strip()[len(dropped_repeat):].strip()
             if lead_cut and lead_cut[0] in full_text:
                 full_text = full_text.replace(lead_cut[0], lead_cut[1], 1)
+            for said_, instead in promise_cuts:
+                # the transcript says what he heard, not what the model wrote
+                if said_ in full_text:
+                    full_text = re.sub(r"\s{2,}", " ", full_text.replace(said_, instead, 1)).strip()
+            promise_cuts.clear()
 
             if not tool_calls:
                 if not SPEAKABLE.search(round_text) and empty_retries < 1:

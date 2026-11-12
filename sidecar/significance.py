@@ -1355,6 +1355,16 @@ def _news_tier(story: dict) -> tuple[str, str]:
         return URGENT, why
     tier, full_why = _classify_news_full(story)
     if tier in (URGENT, ALERT):
+        if why == "no town he can be sure of" and tier == ALERT and full_why.startswith("a death nearby"):
+            # NOT HIS, SO NOT HELD FOR HIM. "12 dead in crashes on Bulgarian
+            # motorway" and "Country music's devastating year: 3 more deaths"
+            # were each read as "a death nearby" off a local desk, failed the
+            # gate for having no town near him - and were then held and put
+            # under "Also:" in his morning brief (2026-11-10, 11-11). News
+            # that was only ever "nearby" and turns out to have no town of his
+            # is ordinary news: the night brief may still rank it, but nothing
+            # holds it for him. (A national emergency is still held.)
+            return NONE, f"not held: {why} (was {tier}: {full_why})"
         return NOTABLE, f"for the brief: {why} (was {tier}: {full_why})"
     if tier == NOTABLE and emergencies_only():
         if full_why.startswith("not breaking news"):
