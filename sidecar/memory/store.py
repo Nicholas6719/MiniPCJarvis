@@ -549,7 +549,7 @@ class MemoryStore:
                 "VALUES (?,?,?,?,?,?,?,?)",
                 (float(row.get("ts") or time.time()), str(row.get("tier") or ""),
                  str(row.get("outcome") or "nothing"), str(row.get("why") or ""),
-                 str(row.get("subject") or "")[:120], str(row.get("text") or "")[:300],
+                 str(row.get("subject") or "")[:120], str(row.get("text") or "")[:1500],   # whole briefs: an audit needs to read them
                  int(bool(row.get("replayed"))), int(bool(row.get("sound")))))
             self.db.commit()
             return cur.lastrowid

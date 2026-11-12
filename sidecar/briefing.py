@@ -459,6 +459,8 @@ class Briefing:
                                    written=written)
         if str((r or {}).get("delivered") or "nothing") == "nothing":
             return                       # not said (budget, a test mute): it is not "the last brief"
+        note_brief_told(getattr(self, "_picked_news", None) or [])
+        self._picked_news = []
         remember = {"last_lines": lines[-60:], "last_brief_ts": time.time()}
         titles = {t for t, _l in sections} if isinstance(sections, list) else set()
         if titles & {"Markets", "Yours"}:
@@ -1171,7 +1173,10 @@ class Briefing:
                 # calling it per story in a loop left only the last one - and "give
                 # me the article" opened story three whatever he asked for.
                 self._remember_all(said_all)
-                note_brief_told(picked)
+                # told only once the brief is really DELIVERED (_maybe_brief):
+                # composing one to look at (/debug/brief) must not hide its
+                # stories from the brief he actually gets tonight
+                self._picked_news = list(picked)
                 for said in said_all:
                     body = said.get("summary") or said.get("headline") or ""
                     src = said.get("source") or "the news"

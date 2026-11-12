@@ -82,6 +82,8 @@ def main() -> int:
         bn.rank_for_brief = lambda stories, count: list(stories)[:count]
         first = asyncio.run(bn._news_sections([], True))
         check("the night brief tells a story", first and first[0][0] == "News" and "house fire" in first[0][1][0][0], first)
+        check("composing a brief to look at marks nothing as told", br.brief_told() == set(), br.brief_told())
+        br.note_brief_told(bn._picked_news)          # what _maybe_brief does once it is delivered
         again = dict(fire, headline="Framingham House Fire Displaces 3, Sends 1 To Hospital")
         other = story("Natick approves a new library", age=300)
         bn._fresh_stories = lambda: _fake_stories([again, other])

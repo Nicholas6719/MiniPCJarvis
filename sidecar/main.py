@@ -1140,10 +1140,17 @@ async def debug_brief(body: dict, x_jarvis_token: str | None = Header(None)):
     # to verify is worse than none.
     # `final` builds the night brief - the one that carries the news - so what
     # he will get at 20:00 can be looked at during the day.
+    # LOOKING MUST NOT CHANGE WHAT HE GETS (2026-11-12): composing consumes
+    # the news held for his next brief and notes the stories picked, so a
+    # look that is not sent puts both back.
+    held_before = list(briefing._held)
     sections = await briefing._sections(final=bool(body.get("final")),
                                         first=bool(body.get("first")))
     text = await briefing.compose_brief(sections)
     written = await briefing.compose_brief_written(sections)
+    if not body.get("send"):
+        briefing._held = held_before
+        briefing._picked_news = []
     if body.get("send"):
         from delivery import BRIEF, delivery
         return {"brief": text, "written": written,

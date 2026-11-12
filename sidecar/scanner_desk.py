@@ -1650,12 +1650,15 @@ class ScannerDesk:
         elif roads and types & (rules.TRAFFIC | {"road_closure"}):
             tier, why = ALERT, f"{inc.get('label')} on {', '.join(roads)}, {place}"
         elif inc.get("burst") and not types:
-            if near:
-                tier, why = ALERT, f"unusual activity on {inc.get('channel')} {place}"
-            elif not _cfg("fyi", True):
+            # A BUSY SPELL IS NEVER AN ALERT (2026-11-12). Near him it used to
+            # be one, and wordless "Natick Fire is unusually busy" lines spent
+            # the whole day's ALERT allowance (8 of 8) by noon on 11-11 and
+            # 11-12: a real fire in Natick that afternoon would have been
+            # refused as "daily alert cap reached". A count is a quiet line.
+            if not _cfg("fyi", True):
                 return None, f"a burst {place} is not worth an interruption"
-            else:
-                tier, why = FYI, f"a busy spell on {inc.get('channel')} {place}"
+            tier, why = FYI, (f"unusual activity on {inc.get('channel')} {place}" if near
+                              else f"a busy spell on {inc.get('channel')} {place}")
         else:
             ok, why = self._fyi(inc, types, town == home, place)
             if not ok:
@@ -1687,6 +1690,11 @@ class ScannerDesk:
         cap = int(caps.get(tier, _DAILY_CAP[tier])) if isinstance(caps, dict) else _DAILY_CAP[tier]
         used = store.sent_count(tier, now - 86400)
         if used >= cap:
+            if tier in (URGENT, ALERT) and types:
+                # A CAP MAY QUIETEN A REAL CALL; IT MAY NEVER LOSE ONE. The cap
+                # is there so a bad day cannot ring his phone all afternoon -
+                # so past it a named danger call still reaches him, silently.
+                return FYI, f"{why} - daily {tier} cap reached ({used} of {cap}): sent silently instead"
             return None, f"daily {tier} cap reached ({used} of {cap}) - {why}"
         return tier, why
 

@@ -407,8 +407,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
                                       {"ts": time.time(), "conf": 0.76,
                                        "text": "And A1 apparatus cuts for any about after a crash. 38 air street."}]),
          SD.FYI),
-        ("a burst on Ashland FD", inc("Ashland", [], burst=1, channel="Ashland FD"),
-         ALERT if geo.town("Ashland").miles <= 5 else SD.FYI),
+        # a busy spell is never an alert: near him it spent the day's ALERT cap by noon (2026-11-12)
+        ("a burst on Ashland FD, near him", inc("Ashland", [], burst=1, channel="Ashland FD"), SD.FYI),
         ("a burst on Hudson FD, beyond five miles", inc("Hudson", [], burst=1, channel="Hudson FD"), SD.FYI),
         # ONE TRANSMISSION NEVER SOUNDS OR INTERRUPTS (his answer, 2026-11-07)
         ("a working fire in Framingham heard ONCE -> a silent unconfirmed line",
@@ -828,12 +828,11 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     ashland_near = geo.town("Ashland").miles <= 5.0
     new = [c for c in calls["deliver"][sent_before:] if c["key"].startswith("scanner:")]
     newq = [c for c in calls["deliver"][sent_before:] if c["key"].startswith("scanner-fyi:")]
-    check("a burst near him reaches him as an ALERT" if ashland_near else "no burst beyond five miles is an alert",
-          (len(new) == 1 and new[0]["tier"] == ALERT and "unusually busy" in new[0]["text"]) if ashland_near
-          else not new, new)
-    check("...and Hudson's is one quiet line that says it can't make out the words",
-          len(newq) == (1 if ashland_near else 2) and "Hudson Fire is unusually busy" in " ".join(c["text"] for c in newq)
-          and "can't make out the words" in newq[-1]["text"], newq)
+    check("no busy spell is an alert, near him or not: a count never spends the day's alerts", not new, new)
+    check("...each is one quiet line that says it can't make out the words",
+          len(newq) == 2 and "Hudson Fire is unusually busy" in " ".join(c["text"] for c in newq)
+          and "Ashland Fire is unusually busy" in " ".join(c["text"] for c in newq)
+          and "can't make out the words" in newq[-1]["text"] and ashland_near in (True, False), newq)
 
     print("\n-- small calls never swallow big signals --")
 
@@ -1559,7 +1558,10 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     for _ in range(max(0, cap - used)):
         S.record_sent(fire["id"], URGENT, "telegram", "gate filler")
     got, why = desk.decide(inc("Framingham", ["shots_fired"]))
-    check(f"after {cap} URGENTs in a day the next is held", got is None and "cap" in why, why)
+    check(f"after {cap} URGENTs in a day the next still reaches him - silently, never lost",
+          got == SD.FYI and "cap reached" in why and "sent silently" in why, (got, why))
+    got, why = desk.decide(inc("Hudson", [], burst=1, channel="Hudson FD"))
+    check("...a cap can still hold what is only a count", got in (SD.FYI, None), (got, why))
 
     print("\n-- his questions --")
     console.doctor = None
