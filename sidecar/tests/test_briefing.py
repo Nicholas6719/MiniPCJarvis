@@ -91,6 +91,10 @@ def main() -> int:
         told2 = " ".join(x[0] for x in second[0][1]) if second else ""
         check("...and the next night's does not tell it again, only what is new",
               "library" in told2 and "fire" not in told2.lower(), told2)
+        sent = "news framingham house fire displaces 3 sends 1 to hospital metrowest daily news rep thomas massie"
+        check("a story a delivered brief already carried is told, even from before the list existed",
+              br.already_briefed(fire, set(), sent) and not br.already_briefed(other, set(), sent)
+              and not br.already_briefed(story("Fire"), set(), "a fire somewhere"))
     finally:
         newsroom.summarize_all = real_sum
         volatile.forget(br.BRIEF_TOLD_KEY)

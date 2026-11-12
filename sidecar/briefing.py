@@ -128,6 +128,27 @@ def brief_told() -> set:
         return set()
 
 
+def briefs_sent_text() -> str:
+    """Every brief delivered this week, as one normalised string: the record of
+    what he was actually told. The told-list above only began on 2026-11-12,
+    and a story already told on the 10th and 11th was lined up for a third
+    night; the ledger of deliveries remembers further back than the list."""
+    try:
+        from memory.store import memory
+        rows = memory.recent_deliveries(time.time() - BRIEF_TOLD_DAYS * 86400, limit=400)
+    except Exception:
+        log.debug("could not read the briefs already sent", exc_info=True)
+        return ""
+    texts = [str(r.get("text") or "") for r in rows
+             if str(r.get("subject") or "").startswith("brief") and str(r.get("outcome") or "") != "nothing"]
+    return " | ".join(" ".join("".join(ch.lower() if ch.isalnum() else " " for ch in t).split()) for t in texts)
+
+
+def already_briefed(story: dict, told: set, sent_text: str) -> bool:
+    k = story_key(story)
+    return bool(k) and (k in told or (len(k) >= 20 and k in sent_text))
+
+
 def note_brief_told(stories: list) -> None:
     try:
         import volatile
@@ -1161,8 +1182,8 @@ class Briefing:
             # displaces 3" led the night brief on 2026-11-10 and again on
             # 11-11: a story stays in a publisher's feed for days, and nothing
             # remembered that it had been told.
-            told = brief_told()
-            fresh = [s for s in await self._fresh_stories() if story_key(s) not in told]
+            told, sent_text = brief_told(), briefs_sent_text()
+            fresh = [s for s in await self._fresh_stories() if not already_briefed(s, told, sent_text)]
             picked = self.rank_for_brief(fresh, count)
             # The brief says what happened, not what was printed.
             news: list[tuple[str, str]] = []

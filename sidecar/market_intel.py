@@ -205,7 +205,7 @@ def earnings_line(rows: list[dict], today: dt.date | None = None) -> str:
         hour = {"bmo": " before the open", "amc": " after the close"}.get(str(r.get("hour") or ""), "")
         mine = ", which you own" if r.get("held") else ""
         said.append(f"{r.get('name') or r.get('symbol')} {when}{hour}{mine}")
-    return ("Earnings ahead: " + "; ".join(said)) if said else ""
+    return ("Earnings: " + "; ".join(said)) if said else ""       # the section is already called "Ahead"
 
 
 def context_line(ctx: dict) -> str:

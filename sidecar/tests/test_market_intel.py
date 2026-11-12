@@ -82,7 +82,7 @@ def main() -> int:
             {"symbol": "XYZ", "name": "XYZ", "date": "2026-09-08", "hour": "", "held": False}]
     line = mi.earnings_line(rows, today)
     check("earnings ahead reads as a sentence",
-          line == "Earnings ahead: Apple on Thursday after the close, which you own; "
+          line == "Earnings: Apple on Thursday after the close, which you own; "
                   "Nvidia on Wednesday before the open; XYZ tomorrow", line)
     check("nothing ahead is silence", mi.earnings_line([], today) == "")
 
