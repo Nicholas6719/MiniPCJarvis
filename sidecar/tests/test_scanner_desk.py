@@ -805,13 +805,14 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     n0 = 5000
     for name in ("Ashland FD", "Wayland FD", "Hudson FD"):
         burst = []
-        for j in range(9):
+        many = 9 if name == "Wayland FD" else 16      # sent only from fifteen (his answer, 2026-11-12)
+        for j in range(many):
             hid = BASE + n0
             n0 += 1
-            ts = now - 540 + j * 60
+            ts = now - 540 + j * (540 // many)
             burst.append({"id": hid, "start": ts, "end": ts + 4, "duration": 4, "channel": 9, "name": name,
                           "freq": 33.9, "audio_path": "", "quality": {"class": "digital", "confidence": 0.9}})
-        desk.after_id = BASE + n0 - 10
+        desk.after_id = BASE + n0 - many - 1
         await desk.ingest(burst)
     await desk.settle()
     bursts = {i["channel"]: i for i in S.incidents_since(now - 900) if i["burst"] and not i["types"]}
@@ -869,6 +870,32 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     await desk.settle()
     check("a finished fire does not absorb a new call elsewhere in town",
           brush and brush != fire["id"] and S.incident(fire["id"])["status"] == "over", (brush, fire["id"]))
+
+    print("\n-- only the truly unusual busy spell is sent (his answer, 2026-11-12) --")
+    # 68 "unusually busy" messages in four days, 55 at exactly eight
+    # transmissions in ten minutes - one ordinary medical call.
+    check("eight or nine transmissions is an ordinary spell; fifteen with history is not",
+          SD.ScannerDesk._burst_worth_sending(9, 5) is False and SD.ScannerDesk._burst_worth_sending(15, 5) is True
+          and SD.ScannerDesk._burst_worth_sending(40, 1) is False)
+    sent_before = len(calls["deliver"])
+    real_baseline = desk._baseline
+    desk._baseline = lambda name, hour, now_, window: (0.5, 5)
+    try:
+        await burst_on("Holliston FD", BASE + 6300)
+        holl = [i for i in S.incidents_since(now - 900, "Holliston") if i["burst"] and not i["types"]]
+        check("an ordinary busy spell is recorded for the briefs...", len(holl) == 1 and not holl[0]["tier"], holl)
+        check("...and not sent", len(calls["deliver"]) == sent_before, calls["deliver"][sent_before:])
+        more = [{"id": BASE + 6320 + j, "start": now - 60 + j * 5, "end": now - 58 + j * 5, "duration": 2,
+                 "channel": 9, "name": "Holliston FD", "freq": 33.5, "audio_path": "",
+                 "quality": {"class": "digital", "confidence": 0.9}} for j in range(8)]
+        desk.after_id = BASE + 6319
+        await desk.ingest(more)
+        await desk.settle()
+        grown = [c for c in calls["deliver"][sent_before:] if "Holliston Fire is unusually busy" in c["text"]]
+        check("...until it grows into a truly unusual one: then it is sent, once", len(grown) == 1,
+              calls["deliver"][sent_before:])
+    finally:
+        desk._baseline = real_baseline
 
     print("\n-- what the first live morning taught it (2026-11-07) --")
     # Natick FD's ordinary traffic against a baseline of nothing came within a
@@ -1441,6 +1468,9 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     class StubConsole:
         base_url, last_error = "stub", None
 
+        async def doctor_status(self):
+            return None
+
         async def health(self):
             return {"version": "1.3.0", "connected": True, "scanning": True,
                     "audio": {"enabled": True, "weak_input": None, "recent_peak_dbfs": None,
@@ -1748,6 +1778,128 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     got = S.hit(BASE + 30)
     check("a different transmission under an old id replaces it",
           got["name"] == "Natick FD" and got["transcript"] is None, got)
+
+    print("\n-- the scan doctor, watched (2026-11-12) --")
+    # It deleted Framingham Fire while the scanner was deaf; nobody was told,
+    # and a house fire in his own town reached him as a line in the news.
+    home_name = SD.home_town().name
+    rm = lambda name, at, why="never understandable under any setting tried (poor)": {
+        "at": at, "kind": "remove", "index": 51, "why": why, "after": None,
+        "before": {"index": 51, "name": name, "freq": 483.7625, "priority": True}}
+    one = SD.doctor_removed_text([rm("Framnghm FD", 1.0)], home_name)
+    check("a removed channel is named the way he says it, with the doctor's reason - and his own town is said so",
+          one.startswith(f"The scan doctor took {home_name} Fire off the scanner, sir: never understandable")
+          and "your own town" in one, one)
+    many = SD.doctor_removed_text([rm("Sudbury FD", 1.0, "nothing heard in 48 h"), rm("Framnghm FD", 2.0),
+                                   rm("Natick FD", 3.0), rm("Wayland PD", 4.0), rm("Weston FD", 5.0)], home_name)
+    check("...several are counted, his own town first, the rest summed up",
+          many.startswith(f"The scan doctor took 5 channels off the scanner, sir: {home_name} Fire (")
+          and "and 1 more." in many and "your own town" in many, many)
+    check("the scanner's own-town fire channels are found by name, whatever he typed",
+          SD.home_fire_channels([{"name": "Framnghm FD", "freq": 483.7625}, {"name": "Framingham PD", "freq": 471.7},
+                                 {"name": "Sudbury FD", "freq": 482.75}, {"name": "Framnghm FD", "freq": 0.0}],
+                                home_name) == ["Framnghm FD"])
+
+    class DocConsole(StubConsole):
+        def __init__(self):
+            self.running, self.apply, self.calls, self.changes = True, True, [], []
+            self.channels = [{"name": "Framnghm FD", "freq": 483.7625}, {"name": "Sudbury FD", "freq": 482.75}]
+
+        async def doctor_status(self):
+            return {"running": self.running, "apply": self.apply}
+
+        async def doctor_stop(self, revert=True):
+            self.calls.append(("stop", revert))
+            self.running = False
+            return True
+
+        async def doctor_start(self, apply):
+            self.calls.append(("start", apply))
+            self.running = True
+            return True
+
+        async def doctor_report(self):
+            return {"changes": list(self.changes)}
+
+        async def state(self):
+            return {"channels": list(self.channels)}
+    dsent: list = []
+
+    async def ddeliver(text, tier, key="", subject="", written=""):
+        dsent.append({"text": text, "tier": tier, "key": key, "subject": subject})
+        return {"delivered": "telegram", "tier": tier}
+    dnow = [now + 80 * 86400]
+    doc = DocConsole()
+    ddesk = SD.ScannerDesk()
+    ddesk.deliverer, ddesk.client, ddesk.up, ddesk.now = ddeliver, doc, True, lambda: dnow[0]
+    kept_keys = {k: volatile.get(k) for k in (SD.DOCTOR_SEEN_KEY, SD.DOCTOR_PAUSED_KEY, SD.HOME_GAP_KEY)}
+    try:
+        for k in kept_keys:
+            volatile.forget(k)
+        doc.changes = [rm("Maynard PD", dnow[0] - 5000, "nothing heard in 48 h")]
+        d1 = await ddesk._check_doctor(dnow[0])
+        check("the first look at the doctor's history only marks the place: old removals are not news",
+              d1 == "" and not dsent, (d1, dsent))
+        doc.changes.append(rm("Framnghm FD", dnow[0] + 100))
+        d2 = await ddesk._check_doctor(dnow[0] + 60)
+        check("...and it is looked at every half hour, not every minute", d2 == "" and not dsent, d2)
+        dnow[0] += 1801
+        d3 = await ddesk._check_doctor(dnow[0])
+        check("a channel the doctor removes is said once, silently, his own town named",
+              d3 == "removed" and len(dsent) == 1 and f"{home_name} Fire" in dsent[0]["text"]
+              and dsent[0]["subject"].startswith("scanner-fyi") and NP.audible(ALERT, NP.kind_of(
+                  dsent[0]["subject"], dsent[0]["key"])) is False, dsent)
+        dnow[0] += 1801
+        check("...and not again", await ddesk._check_doctor(dnow[0]) == "" and len(dsent) == 1, dsent)
+        doc.channels = [{"name": "Sudbury FD", "freq": 482.75}]
+        dnow[0] += 1801
+        d4 = await ddesk._check_doctor(dnow[0])
+        check("a scanner with no fire channel for his own town is said - he cannot hear a fire at home",
+              d4 == "home" and len(dsent) == 2 and f"Nothing on the scanner is tuned to {home_name} Fire" in dsent[1]["text"]
+              and ddesk.home_gap, dsent[-1:])
+        dnow[0] += 1801
+        check("...once a day", await ddesk._check_doctor(dnow[0]) == "" and len(dsent) == 2, dsent)
+        check("...and the health answer carries it too", "tuned to" in await ddesk._say_health())
+        doc.channels = [{"name": "Framnghm FD", "freq": 483.7625}, {"name": "Sudbury FD", "freq": 482.75}]
+        volatile.forget(SD.HOME_GAP_KEY)
+        real_hits, real_count = S.hits_since, S.count_hits
+        S.hits_since = lambda since, town="", until=None: [{"transcript": "words"}] * 400
+        S.count_hits = lambda name, since, until=None: 0
+        ddesk.hearing_now = lambda now_: None
+        try:
+            dnow[0] += 1801
+            s1 = await ddesk._check_doctor(dnow[0])
+            n1 = len(dsent)
+            dnow[0] += 37 * 3600
+            s2 = await ddesk._check_doctor(dnow[0])
+        finally:
+            S.hits_since, S.count_hits = real_hits, real_count
+        check("a home channel just put back is given a day and a half before its silence is news",
+              s1 == "" and n1 == 2, (s1, n1))
+        check("...then, silent while the rest of the scanner is busy, it is said",
+              s2 == "home" and "haven't heard" in dsent[-1]["text"], (s2, dsent[-1:]))
+        doc.channels = [{"name": "Sudbury FD", "freq": 482.75}]
+        p1 = await ddesk._pause_doctor(dnow[0])
+        check("when I can't hear the scanner the doctor is stopped, its half-done trials undone",
+              p1 is True and doc.calls == [("stop", True)] and doc.running is False, doc.calls)
+        p2 = await ddesk._resume_doctor()
+        check("...and carried on, in the mode it was in, when I can hear again",
+              p2 is True and doc.calls[-1] == ("start", True), doc.calls)
+        check("a doctor I did not pause is never started by me", await ddesk._resume_doctor() is False
+              and len(doc.calls) == 2, doc.calls)
+        doc.running = False
+        check("...and one that is not running is left alone", await ddesk._pause_doctor(dnow[0]) is False
+              and len(doc.calls) == 2 and await ddesk._resume_doctor() is False, doc.calls)
+        import inspect as _insp
+        hsrc2 = _insp.getsource(SD.ScannerDesk._check_hearing)
+        check("the hearing watchdog pauses the doctor as it warns him, and resumes it as it hears again",
+              "await self._pause_doctor(now)" in hsrc2 and "await self._resume_doctor()" in hsrc2)
+    finally:
+        for k, v in kept_keys.items():
+            if v and v.get("value") is not None:
+                volatile.put(k, v["value"], source="gate")
+            else:
+                volatile.forget(k)
 
     print("\n-- what is going on, in plain words: checked, then 'tell me more' (2026-11-08) --")
     # His words: "I don't want the actual transmission. I want Jarvis to tell

@@ -65,6 +65,57 @@ class Recorder:
 
 
 def main() -> int:
+    # --- a story told one night is not told the next (2026-11-12) -------------
+    # "Framingham house fire displaces 3" led the night brief on 11-10 and 11-11.
+    import newsroom
+    import volatile
+    volatile.forget(br.BRIEF_TOLD_KEY)          # the gates share one database: judge only this run
+    real_sum = newsroom.summarize_all
+
+    async def fake_sum(picked, limit=5):
+        return [{"headline": s["headline"], "summary": s["headline"], "source": "Gate News"} for s in picked[:limit]]
+    newsroom.summarize_all = fake_sum
+    try:
+        bn = br.Briefing()
+        fire = story("Framingham house fire displaces 3, sends 1 to hospital", age=600)
+        bn._fresh_stories = lambda: _fake_stories([fire])
+        bn.rank_for_brief = lambda stories, count: list(stories)[:count]
+        first = asyncio.run(bn._news_sections([], True))
+        check("the night brief tells a story", first and first[0][0] == "News" and "house fire" in first[0][1][0][0], first)
+        again = dict(fire, headline="Framingham House Fire Displaces 3, Sends 1 To Hospital")
+        other = story("Natick approves a new library", age=300)
+        bn._fresh_stories = lambda: _fake_stories([again, other])
+        second = asyncio.run(bn._news_sections([], True))
+        told2 = " ".join(x[0] for x in second[0][1]) if second else ""
+        check("...and the next night's does not tell it again, only what is new",
+              "library" in told2 and "fire" not in told2.lower(), told2)
+    finally:
+        newsroom.summarize_all = real_sum
+        volatile.forget(br.BRIEF_TOLD_KEY)
+
+    # --- a big move in one of his names says why (2026-11-12) -----------------
+    # "Nvidia is down 14.06%" arrived with no reason; the reason was a headline.
+    import tools.market_tools as MT
+    real_cn = MT.get_company_news
+
+    async def fake_cn(symbol, days=5, count=5):
+        return {"items": [{"headline": "3 chip stocks to buy before 2027", "source": "Fool"},
+                          {"headline": "Jensen Huang is out at Nvidia after 33 years", "source": "MassLive"}]}
+    MT.get_company_news = fake_cn
+    try:
+        why = asyncio.run(br.move_reason("NVDA", "Nvidia"))
+        check("a move's reason is the headline that names the company, quoted with its source",
+              why == " In the news: Jensen Huang is out at Nvidia after 33 years (MassLive).", why)
+        check("...and no headline about it means no reason, not a guess",
+              asyncio.run(br.move_reason("AMC", "AMC Entertainment")) == "")
+
+        async def broken(symbol, days=5, count=5):
+            raise RuntimeError("finnhub is down")
+        MT.get_company_news = broken
+        check("...and a feed that fails never holds the alert up", asyncio.run(br.move_reason("NVDA", "Nvidia")) == "")
+    finally:
+        MT.get_company_news = real_cn
+
     # --- quiet hours: the whole point of the two rules ------------------------
     at = dt.datetime(2026, 8, 30, 3, 0)
     check("3 a.m. is quiet hours", br._in_quiet_hours(at))

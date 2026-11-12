@@ -102,6 +102,43 @@ class ConsoleClient:
         except Exception:
             return None
 
+    async def _json(self, path: str, timeout: float = 10.0) -> dict | None:
+        r = await self._get(path, timeout=timeout)
+        if r is None or r == 404:
+            return None
+        try:
+            got = r.json()
+        except Exception:
+            return None
+        return got if isinstance(got, dict) else None
+
+    async def state(self) -> dict | None:
+        """The scanner's memory as the console last read it (channels, settings)."""
+        return await self._json("/api/state")
+
+    async def doctor_status(self) -> dict | None:
+        return await self._json("/api/doctor/status", timeout=5.0)
+
+    async def _post(self, path: str, body: dict, timeout: float = 30.0) -> bool:
+        try:
+            r = await self._c().post(path, json=body, timeout=timeout)
+        except Exception as e:
+            self.last_error = f"{path}: {type(e).__name__}"
+            return False
+        if r.status_code >= 400:
+            self.last_error = f"{path}: HTTP {r.status_code}"
+            return False
+        return True
+
+    async def doctor_stop(self, revert: bool = True) -> bool:
+        """Stop the scan optimiser; `revert` puts channels it was trying new
+        settings on back as they were (its own backed-up write path)."""
+        return await self._post("/api/doctor/stop", {"revert": bool(revert)})
+
+    async def doctor_start(self, apply: bool) -> bool:
+        """Carry the optimiser's campaign on (never `fresh`: its evidence is kept)."""
+        return await self._post("/api/doctor/start", {"apply": bool(apply), "fresh": False})
+
     async def clip(self, hit_id: int) -> bytes | None:
         """A transmission's WAV over HTTP, for when its file cannot be read directly."""
         r = await self._get("/api/clip", timeout=10.0, id=int(hit_id))

@@ -110,6 +110,54 @@ NIGHT_GAP_S = 7200        # two hours with nothing logged at all is said, not as
 LOST_AFTER_S = 600        # console silent, or scanner disconnected, this long before he is told
 GOOD_VOLUME = 15          # every transmission understood on 2026-11-07 was recorded at 15
 
+# THE SCAN DOCTOR DELETED FRAMINGHAM FIRE (2026-11-08, 10:40 AM), his own town's
+# priority channel, while the scanner was deaf at volume 3: every clip was
+# "unknown", so it was "never understandable under any setting tried". Nobody
+# was told. A house fire in Framingham on 11-10 (3 displaced, 1 to hospital)
+# reached him as a line in the evening news, and the audit of 11-12 found four
+# days without one Framingham transmission. So: the doctor is paused while I
+# can't hear, he is told what it removes, and a home town with no fire channel
+# (or one gone silent while the rest of the scanner is busy) is said once a day.
+DOCTOR_EVERY_S = 1800
+DOCTOR_SEEN_KEY = "scanner:doctor-seen"
+DOCTOR_PAUSED_KEY = "scanner:doctor-paused"
+HOME_GAP_KEY = "scanner:home-gap"
+HOME_SILENT_S = 36 * 3600     # Framingham Fire logged about 19 transmissions a day
+HOME_SILENT_OTHERS = 300      # ...and this many elsewhere proves the scanner was listening
+
+
+def doctor_removed_text(removed: list[dict], home: str) -> str:
+    """What the scan doctor took off the scanner, home town first."""
+    items = []
+    for c in removed:
+        b = c.get("before") or {}
+        lab = rules.parse_label(str(b.get("name") or "").strip())
+        why = re.sub(r"\s+", " ", str(c.get("why") or "")).strip().rstrip(".")
+        items.append((0 if lab.town and lab.town.name == home else 1, lab.spoken, why[:90]))
+    items.sort(key=lambda x: x[0])
+    said = [f"{name} ({why})" if why else name for _, name, why in items[:4]]
+    more = len(items) - len(said)
+    if len(items) == 1:
+        text = f"The scan doctor took {items[0][1]} off the scanner, sir" + (f": {items[0][2]}." if items[0][2] else ".")
+    else:
+        text = (f"The scan doctor took {len(items)} channels off the scanner, sir: " + "; ".join(said)
+                + (f"; and {more} more." if more > 0 else "."))
+    if items[0][0] == 0:
+        text += f" {items[0][1]} is your own town - I can no longer hear it until it is put back."
+    return text
+
+
+def home_fire_channels(channels: list[dict], home: str) -> list[str]:
+    """The names of the scanner's channels that are his own town's fire department."""
+    out = []
+    for c in channels or []:
+        if not isinstance(c, dict) or not c.get("freq") or c.get("lockout"):
+            continue
+        lab = rules.parse_label(str(c.get("name") or "").strip())
+        if lab.town and lab.town.name == home and lab.agency == "FD":
+            out.append(str(c.get("name") or "").strip())
+    return out
+
 
 def deaf_spans(hits: list[dict]) -> list[dict]:
     """The stretches in `hits` (oldest first) when the radio was carrying
@@ -697,6 +745,9 @@ class ScannerDesk:
         self._last_prune = 0.0
         self._lost_since: float | None = None
         self._last_hear = 0.0
+        self._last_doctor = 0.0
+        self.home_gap = ""            # what is wrong with his own town's fire channel, if anything
+        self._home_watched: float | None = None   # when its channel was first seen on the scanner (this run)
         self._worker = None
         self.stats = Counter()
         self.retry_pause = 5.0            # before retrying a clip the recogniser could not take
@@ -811,6 +862,10 @@ class ScannerDesk:
                 await self._check_hearing(now)
             except Exception:
                 self._log_every("hearing", 3600, logging.WARNING, "scanner: the hearing check failed", exc=True)
+            try:
+                await self._check_doctor(now)
+            except Exception:
+                self._log_every("doctor", 3600, logging.WARNING, "scanner: the scan doctor check failed", exc=True)
         if now - self._last_prune >= 86400:
             self._last_prune = now
             store.prune(now)
@@ -1002,6 +1057,9 @@ class ScannerDesk:
                     fields.update(hits=max(int(inc["hits"] or 0), n),
                                   summary=self._burst_summary(n, base, days, window))
                 store.update_incident(inc["id"], fields)
+                if inc["burst"] and not inc["types"] and not inc["tier"] and self._burst_worth_sending(n, days):
+                    # a stored spell that has grown into a truly unusual one
+                    self._spawn_task(self._consider(inc["id"], row, ""), name=f"scanner-consider-{inc['id']}")
                 return
         lab = rules.parse_label(name)
         t = geo.town(town)
@@ -1022,8 +1080,22 @@ class ScannerDesk:
             log.info("scanner: #%d stored, not sent - only %d day(s) of history for %s (need %d)",
                      iid, days, name, min_days)
             return
+        if iid and not self._burst_worth_sending(n, days):
+            log.info("scanner: #%d stored for the briefs, not sent - %d transmissions is an ordinary busy spell "
+                     "(sent from %d)", iid, n, int(_cfg("burst_send_min", 15)))
+            return
         if iid:
             self._spawn_task(self._consider(iid, row, ""), name=f"scanner-consider-{iid}")
+
+    @staticmethod
+    def _burst_worth_sending(n: int, days: int) -> bool:
+        """ONLY THE TRULY UNUSUAL (his answer, 2026-11-12). In four days 68
+        "unusually busy" messages reached his phone, 55 of them at exactly
+        eight transmissions in ten minutes - one ordinary medical call - and
+        48 never became a call that could be named. A spell is still recorded
+        at eight (the briefs and the morning summary list it); it is sent only
+        from fifteen, on a channel with enough history to know its normal."""
+        return n >= int(_cfg("burst_send_min", 15)) and days >= int(_cfg("burst_min_days", 3))
 
     @staticmethod
     def _burst_summary(n: int, base: float, days: int, window: float) -> str:
@@ -2263,6 +2335,8 @@ class ScannerDesk:
             since, text = lost
             if not volatile.put(DEAF_KEY, {"since": since}, source="scanner"):
                 return ""                               # claim first: no claim, no message
+            if await self._pause_doctor(now):
+                text += " I've paused the scan doctor, so it can't judge channels I can't hear."
             r = await self._deliver(text, ALERT, key=f"scanner-fyi:hearing:{int(since)}",
                                     subject="scanner-fyi: hearing")
             log.warning("scanner: can't hear it -> %s: %s", r.get("delivered"), text)
@@ -2278,11 +2352,109 @@ class ScannerDesk:
                 return ""
             text = (f"I can hear the scanner again, sir. I couldn't from {_hm(float(state['since']))} "
                     f"to {_hm(now)}.")
+            if await self._resume_doctor():
+                text += " The scan doctor is running again."
             r = await self._deliver(text, ALERT, key=f"scanner-fyi:hearing-back:{int(float(state['since']))}",
                                     subject="scanner-fyi: hearing")
             log.info("scanner: hearing it again -> %s", r.get("delivered"))
             return "back"
         return ""
+
+    # ------------------------------------------------------------ the scan doctor, watched
+    async def _pause_doctor(self, now: float) -> bool:
+        """Stop the console's scan optimiser while the scanner can't be heard
+        (it deletes channels it cannot understand), undoing the settings it
+        was in the middle of trying. True when it was running and is stopped."""
+        if self.up is not True:
+            return False
+        try:
+            import volatile
+            client = self._ensure_client()
+            st = await client.doctor_status()
+            if not (isinstance(st, dict) and st.get("running")):
+                return False
+            if not volatile.put(DOCTOR_PAUSED_KEY, {"apply": bool(st.get("apply")), "at": now}, source="scanner"):
+                return False
+            ok = await client.doctor_stop(revert=True)
+            if not ok:
+                volatile.put(DOCTOR_PAUSED_KEY, {}, source="scanner")
+            log.warning("scanner: scan doctor %s while the scanner can't be heard",
+                        "paused" if ok else f"could NOT be paused ({client.last_error})")
+            return ok
+        except Exception:
+            log.warning("scanner: could not pause the scan doctor", exc_info=True)
+            return False
+
+    async def _resume_doctor(self) -> bool:
+        """Carry the scan doctor on if - and only if - I was the one who paused it."""
+        try:
+            import volatile
+            paused = (volatile.get(DOCTOR_PAUSED_KEY) or {}).get("value") or {}
+            if "apply" not in paused:
+                return False
+            ok = await self._ensure_client().doctor_start(bool(paused["apply"]))
+            if ok:
+                volatile.put(DOCTOR_PAUSED_KEY, {}, source="scanner")
+            log.info("scanner: scan doctor %s now that the scanner can be heard", "resumed" if ok else "NOT resumed")
+            return ok
+        except Exception:
+            log.warning("scanner: could not resume the scan doctor", exc_info=True)
+            return False
+
+    async def _check_doctor(self, now: float) -> str:
+        """Every half hour: tell him (silently, once) what the scan doctor has
+        removed since I last looked, and once a day if his own town has no
+        fire channel on the scanner or it has gone silent while the rest of
+        the scanner is busy. Returns "removed", "home" or ""."""
+        if not _cfg("doctor_watch", True) or self.up is not True or now - self._last_doctor < DOCTOR_EVERY_S:
+            return ""
+        self._last_doctor = now
+        import volatile
+        client = self._ensure_client()
+        home = home_town().name
+        out = ""
+        rep = await client.doctor_report()
+        if isinstance(rep, dict) and isinstance(rep.get("changes"), list):
+            removes = [c for c in rep["changes"] if isinstance(c, dict) and c.get("kind") == "remove"
+                       and isinstance(c.get("before"), dict) and c["before"].get("name")]
+            newest = max([float(c.get("at") or 0) for c in rep["changes"] if isinstance(c, dict)] + [0.0])
+            seen = (volatile.get(DOCTOR_SEEN_KEY) or {}).get("value") or {}
+            if "at" not in seen:
+                # the first look only marks the place: history is not news
+                volatile.put(DOCTOR_SEEN_KEY, {"at": newest}, source="scanner")
+            else:
+                new = [c for c in removes if float(c.get("at") or 0) > float(seen["at"])]
+                if newest > float(seen["at"]) and volatile.put(DOCTOR_SEEN_KEY, {"at": newest}, source="scanner") and new:
+                    text = doctor_removed_text(new, home)
+                    r = await self._deliver(text, ALERT, key=f"scanner-fyi:doctor:{int(newest)}",
+                                            subject="scanner-fyi: doctor")
+                    log.warning("scanner: the scan doctor removed %d channel(s) -> %s: %s", len(new),
+                                r.get("delivered"), text)
+                    out = "removed"
+        st = await client.state()
+        if isinstance(st, dict) and isinstance(st.get("channels"), list) and st["channels"]:
+            mine = home_fire_channels(st["channels"], home)
+            gap = ""
+            if not mine:
+                self._home_watched = None
+                gap = (f"Nothing on the scanner is tuned to {home} Fire, sir, so I can't hear fire calls in your "
+                       "own town. The channel has been removed - it needs putting back in the console.")
+            elif self._home_watched is None:
+                self._home_watched = now          # silence is counted from when I began watching it
+            elif now - self._home_watched >= HOME_SILENT_S and not self.hearing_now(now) \
+                    and not any(store.count_hits(n, now - HOME_SILENT_S) for n in mine):
+                others = len(store.hits_since(now - HOME_SILENT_S))
+                if others >= HOME_SILENT_OTHERS:
+                    gap = (f"I haven't heard {home} Fire in a day and a half, sir, though the scanner logged "
+                           f"{others} transmissions elsewhere. Its channel may be mistuned - worth a look in the console.")
+            self.home_gap = gap
+            day = dt.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+            if gap and (volatile.get(HOME_GAP_KEY) or {}).get("value", {}).get("day") != day \
+                    and volatile.put(HOME_GAP_KEY, {"day": day}, source="scanner"):
+                r = await self._deliver(gap, ALERT, key=f"scanner-fyi:home-gap:{day}", subject="scanner-fyi: home")
+                log.warning("scanner: home town not covered -> %s: %s", r.get("delivered"), gap)
+                out = out or "home"
+        return out
 
     def night_summary(self, start: float, end: float) -> tuple[str, str]:
         """(spoken, written) for the night between start and end."""
@@ -2649,6 +2821,8 @@ class ScannerDesk:
             line += f" The last transmission was {_ago(now - float(last.get('end_ts') or last['ts']))}, on {rules.parse_label(last.get('name') or '').spoken}."
         else:
             line += " I haven't logged a transmission yet."
+        if self.home_gap:
+            line += " " + self.home_gap.replace(", sir,", ",").replace(", sir.", ".")
         return line
 
     async def _say_doctor(self) -> str:

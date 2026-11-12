@@ -82,6 +82,67 @@ def _in_quiet_hours(now: dt.datetime | None = None) -> bool:
     return (start <= t or t < end) if start > end else (start <= t < end)
 
 
+async def move_reason(symbol, name: str) -> str:
+    """" In the news: <headline> (<source>)." for a big move in one of his
+    names, or "". "Nvidia is down 14.06%" reached his phone on 2026-11-12
+    with no reason, while the reason sat in the feed as a headline that was
+    rightly not breaking news on its own. The headline must name the company
+    (a feed's top item is as often "3 stocks to buy now"), is quoted, never
+    paraphrased, and never holds the alert up for more than a few seconds."""
+    try:
+        from tools.market_tools import get_company_news
+        got = await asyncio.wait_for(get_company_news(str(symbol), days=2, count=10), timeout=6.0)
+    except Exception:
+        log.debug("no company news for the move in %s", symbol, exc_info=True)
+        return ""
+    words = [w.lower() for w in re.findall(r"[A-Za-z]{4,}", str(name or ""))[:1]] + [str(symbol or "").lower()]
+    for it in (got or {}).get("items") or []:
+        head = re.sub(r"\s+", " ", str(it.get("headline") or "")).strip()
+        low = head.lower()
+        if 20 <= len(head) <= 160 and any(w and re.search(rf"\b{re.escape(w)}\b", low) for w in words):
+            src = str(it.get("source") or "").strip()
+            return f" In the news: {head.rstrip('.')}" + (f" ({src})." if src else ".")
+    return ""
+
+
+BRIEF_TOLD_KEY = "brief:news-told"
+BRIEF_TOLD_DAYS = 7
+
+
+def story_key(story: dict) -> str:
+    """A story's headline as the same story carries it tomorrow: its words,
+    without case or punctuation."""
+    head = str((story or {}).get("headline") or (story or {}).get("title") or "")
+    return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in head).split())[:120]
+
+
+def brief_told() -> set:
+    """The headlines a news brief has already told him this week."""
+    try:
+        import volatile
+        got = (volatile.get(BRIEF_TOLD_KEY) or {}).get("value") or {}
+        cut = time.time() - BRIEF_TOLD_DAYS * 86400
+        return {k for k, ts in got.items() if isinstance(ts, (int, float)) and ts >= cut}
+    except Exception:
+        log.debug("could not read what the briefs have told", exc_info=True)
+        return set()
+
+
+def note_brief_told(stories: list) -> None:
+    try:
+        import volatile
+        got = (volatile.get(BRIEF_TOLD_KEY) or {}).get("value") or {}
+        cut = time.time() - BRIEF_TOLD_DAYS * 86400
+        got = {k: ts for k, ts in got.items() if isinstance(ts, (int, float)) and ts >= cut}
+        for s in stories or []:
+            k = story_key(s)
+            if k:
+                got[k] = time.time()
+        volatile.put(BRIEF_TOLD_KEY, got, source="brief")
+    except Exception:
+        log.debug("could not record what the brief told", exc_info=True)
+
+
 def _judged(story: dict, tier: str, why: str, stage: str = "headline") -> None:
     """Log and keep a news decision with the text it was judged on: every
     URGENT, everything held for the brief instead, and the model's verdict
@@ -731,6 +792,7 @@ class Briefing:
                 if tier in (ALERT, URGENT):
                     # HIS WATCHLIST, KEPT - BUT QUIETLY (2026-11-07): never
                     # above ALERT, so a price never sounds or gets chased.
+                    line += await move_reason(row.get("symbol"), name)
                     out.append((line, ALERT, key))
                 # a smaller move is NOT held: every brief already lists his
                 # holdings, so holding it printed the same line twice
@@ -1083,7 +1145,13 @@ class Briefing:
         want_news = mode == "all" or (mode == "last" and final)
         if want_news:
             count = int(config.get("briefing", "night_news_count", default=5)) if final else 3
-            picked = self.rank_for_brief(await self._fresh_stories(), count)
+            # NOT THE SAME STORY TWO NIGHTS RUNNING. "Framingham house fire
+            # displaces 3" led the night brief on 2026-11-10 and again on
+            # 11-11: a story stays in a publisher's feed for days, and nothing
+            # remembered that it had been told.
+            told = brief_told()
+            fresh = [s for s in await self._fresh_stories() if story_key(s) not in told]
+            picked = self.rank_for_brief(fresh, count)
             # The brief says what happened, not what was printed.
             news: list[tuple[str, str]] = []
             if picked:
@@ -1093,6 +1161,7 @@ class Briefing:
                 # calling it per story in a loop left only the last one - and "give
                 # me the article" opened story three whatever he asked for.
                 self._remember_all(said_all)
+                note_brief_told(picked)
                 for said in said_all:
                     body = said.get("summary") or said.get("headline") or ""
                     src = said.get("source") or "the news"
