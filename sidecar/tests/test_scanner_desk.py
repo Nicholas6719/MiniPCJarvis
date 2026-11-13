@@ -1633,7 +1633,7 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
                  "what's happening in the market"):
         check(f"{said!r} steps aside for the news", slots_scanner_town(said) is None, slots_scanner_town(said))
     for name in ("scanner_now", "scanner_town", "scanner_last", "scanner_summary", "scanner_health", "scanner_doctor",
-                 "scanner_rules", "scanner_more"):
+                 "scanner_rules", "scanner_more", "scanner_loud", "scanner_quiet"):
         sk = SKILL_BY_NAME.get(name)
         check(f"{name} runs the internal _scanner tool", sk and sk.tool == "_scanner" and sk.fixed_args.get("ask"))
     from tools.registry import registry
@@ -1856,6 +1856,63 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     check("the rules answer says so", "toned a station out" in desk._say_rules())
     for t_ in page_towns:
         S._write("DELETE FROM scanner_incidents WHERE town = ?", (t_,))
+
+    print("\n-- emergency mode: local calls sound at once (2026-11-13) --")
+    # His words, outages and grounded planes: "if anything is happening locally
+    # I don't want those notifications to be silent and I need to know imminently".
+    ek = NP.kind_of("scanner-local: a medical call - Framingham", "scanner-local:5")
+    check("an emergency-mode call is its own kind: it sounds at ALERT, interrupts, and is never rationed",
+          ek == "scanner_local" and NP.audible(ALERT, ek) and NP.interrupts(ALERT, ek)
+          and NP.counts_against_budget(ek) is False, ek)
+    check("...while the ordinary quiet feed is still silent", NP.audible(ALERT, NP.kind_of("scanner-fyi: x", "scanner-fyi:5")) is False)
+    em_before = config.data.setdefault("scanner", {}).get("emergency_mode")
+    real_save = config.save
+    config.save = lambda *a, **k: None            # the gate must not write his settings
+    try:
+        near_call = inc("Framingham", ["medical"])
+        far_call = inc("Hudson", ["mva"])
+        far_fire = inc("Hudson", ["working_fire"])
+        spell = inc("Framingham", [], burst=1, channel="Framnghm FD")
+        check("outside emergency mode nothing is 'loud local'",
+              not desk.loud_local(near_call) and not desk.loud_local(far_fire))
+        said_on = desk.set_emergency(True)
+        check("turning it on says exactly what will now sound, and how to end it",
+              "Emergency mode is on" in said_on and "scanner normal mode" in said_on
+              and config.data["scanner"]["emergency_mode"] is True, said_on)
+        check("in emergency mode a named call in his town sounds", desk.loud_local(near_call))
+        check("...a routine call eight miles off does not", not desk.loud_local(far_call))
+        check("...danger anywhere in his radius does", desk.loud_local(far_fire))
+        check("...and a busy spell is still only a count", not desk.loud_local(spell))
+        check("the rules answer says emergency mode is on", "EMERGENCY MODE IS ON" in desk._say_rules())
+        S._write("DELETE FROM scanner_incidents WHERE town = ? AND address = ?", ("Framingham", "12 Oak St"))
+        erow = {"id": BASE + 7800, "ts": now - 20, "end_ts": now - 14, "duration": 6, "name": "Framnghm FD",
+                "town": "Framingham", "agency": "FD", "quality": None, "audio_path": ""}
+        S.log_hit(erow)
+        eid = S.create_incident({
+            "first_ts": now - 20, "last_ts": now - 14, "town": "Framingham", "miles": 0.4, "agency": "FD",
+            "channel": "Framnghm FD", "family": "ems", "kind": "medical", "label": "a medical call",
+            "severity": 3, "types": ["medical"], "address": "12 Oak St", "street": "oak st", "roads": [],
+            "units": ["Ambulance 2"], "said": [{"ts": now - 20, "conf": 0.9, "text":
+                      "Ambulance 2 respond to 12 Oak Street for a medical, 70 year old male."}],
+            "hits": 1, "status": "active"})
+        n_before = len(calls["deliver"])
+        await desk._consider(eid, erow, "")
+        await desk.settle()
+        esent = calls["deliver"][n_before:]
+        check("ONE transmission in his own town goes out at once, under the kind that sounds",
+              len(esent) == 1 and esent[0]["key"] == f"scanner-local:{eid}" and esent[0]["tier"] == ALERT
+              and "Unconfirmed: a medical call - 12 Oak St" in esent[0]["written"], esent)
+        check("...and it is recorded as told, so a follow-up edits the message instead of sounding again",
+              S.incident(eid)["tier"] == SD.FYI and S.incident(eid)["msg_id"], S.incident(eid))
+        said_off = desk.set_emergency(False)
+        check("turning it off puts the quiet feed back", "off" in said_off and not desk.loud_local(near_call))
+        S._write("DELETE FROM scanner_incidents WHERE id = ?", (eid,))
+    finally:
+        config.save = real_save
+        if em_before is None:
+            config.data["scanner"].pop("emergency_mode", None)
+        else:
+            config.data["scanner"]["emergency_mode"] = em_before
 
     print("\n-- the scan doctor, watched (2026-11-12) --")
     # It deleted Framingham Fire while the scanner was deaf; nobody was told,

@@ -37,11 +37,17 @@ NO_INTERRUPT = frozenset({"brief", "market", "memory", "scanner_fyi"})
 # nudge is his reminder again, half an hour on with no Done: it sounds like
 # the reminder (his words, 2026-11-07: "I don't want that, why would it be
 # silent?" - the silent follow-up came in that morning's overhaul)
-HIS_OWN = frozenset({"reminder", "nudge", "watch"})
+# "scanner_local" is the scanner in EMERGENCY MODE (his words, 2026-11-13,
+# outages and grounded planes: "if anything is happening locally I don't want
+# those notifications to be silent and I need to know imminently"): a call in
+# his town or within near_miles, or danger anywhere in his radius, sounds on
+# its first transmission, day and night, and is never rationed by the daily
+# sound budget. It exists only while scanner.emergency_mode is on.
+HIS_OWN = frozenset({"reminder", "nudge", "watch", "scanner_local"})
 # kinds counted against their OWN hourly ceiling, never the shared one: six
 # scanner calls in an hour must not spend the room his reminders need
 # (delivery._over_budget; review of 2026-11-07)
-OWN_CEILING = frozenset({"scanner_fyi"})
+OWN_CEILING = frozenset({"scanner_fyi", "scanner_local"})
 DEFAULT_QUIET_PER_HOUR = 12
 # kinds never SPOKEN inside his quiet hours, even with him at the PC: the
 # scanner's night calls go to his phone silently (his answer, 2026-11-07:
@@ -54,6 +60,8 @@ def kind_of(subject: str = "", key: str = "") -> str:
     """What sort of message this is, from what the caller called it."""
     s = (subject or "").strip().lower()
     k = (key or "").strip().lower()
+    if k.startswith("scanner-local:") or s.startswith("scanner-local"):
+        return "scanner_local"
     if s == "reminder" or k.startswith("task:"):
         return "reminder"
     if s == "nudge" or k.startswith("nudge:"):
@@ -93,7 +101,7 @@ def audible(tier: str, kind: str) -> bool:
 def counts_against_budget(kind: str) -> bool:
     """His own reminders, and their one follow-up, are never rationed;
     everything else that sounds is."""
-    return kind not in ("reminder", "nudge")
+    return kind not in ("reminder", "nudge", "scanner_local")
 
 
 def daily_sound_cap() -> int:

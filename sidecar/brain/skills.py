@@ -3499,6 +3499,17 @@ SKILLS: list[Skill] = [
         fixed_args={"ask": "rules"}, speak=say_scanner),
     # "tell me more" about the call he was just sent (2026-11-08); a bare
     # "tell me more" on his phone is routed by remote_telegram itself
+    # EMERGENCY MODE (2026-11-13): local calls sound at once until he ends it
+    Skill("scanner_loud", "_scanner", [
+        "scanner emergency mode", "turn on scanner emergency mode", "scanner emergency mode on",
+        "make the scanner alerts loud", "i want scanner alerts with sound", "make scanner notifications sound",
+        "i want to hear every local scanner call", "don't keep scanner calls silent"],
+        fixed_args={"ask": "loud"}, speak=say_scanner),
+    Skill("scanner_quiet", "_scanner", [
+        "scanner normal mode", "turn off scanner emergency mode", "scanner emergency mode off",
+        "make the scanner alerts silent again", "stand down the scanner", "end scanner emergency mode",
+        "scanner back to normal"],
+        fixed_args={"ask": "quiet"}, speak=say_scanner),
     Skill("scanner_more", "_scanner", [
         "tell me more about that scanner call", "tell me more about that call", "what's going on with that call",
         "what's happening with that scanner call", "more about the scanner call", "give me more on that call",
@@ -4750,6 +4761,8 @@ CONFIRM_AS = {
     "scanner_doctor": "read the scan doctor's report",
     "scanner_rules": "explain which scanner calls reach you",
     "scanner_more": "tell you more about the scanner call you were sent",
+    "scanner_loud": "turn on scanner emergency mode",
+    "scanner_quiet": "turn off scanner emergency mode",
 }
 
 

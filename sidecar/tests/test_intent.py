@@ -414,6 +414,9 @@ def main() -> int:
             ("Okay when will you notify me about calls", "scanner_rules"),
             ("when are you going to tell me about scanner calls", "scanner_rules"),
             ("tell me more about that scanner call", "scanner_more"),
+            ("turn on scanner emergency mode", "scanner_loud"),
+            ("I don't want scanner notifications to be silent", "scanner_loud"),
+            ("scanner normal mode", "scanner_quiet"),
             # his words, 2026-09-30
             ("Okay thank you Jarvis, please let me know if you hear more about that", "watch_story"),
             ("keep me posted on that story", "watch_story"),

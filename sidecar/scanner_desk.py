@@ -1888,8 +1888,13 @@ class ScannerDesk:
         if not store.update_incident(iid, {"tier": tier, "delivered_ts": now, "decided": why, "pending": ""}):
             log.error("scanner: could not record #%d before sending it - not sending", iid)
             return
+        loud = tier == FYI and self.loud_local(inc)
         try:
-            if tier == FYI:
+            if loud:
+                # EMERGENCY MODE: the same line, the same route - with a sound
+                r = await self._deliver(text, ALERT, key=f"scanner-local:{iid}",
+                                        subject=f"scanner-local: {inc['label']} - {inc['town']}", written=written)
+            elif tier == FYI:
                 # delivery's ALERT route (now, at the PC or on his phone) with
                 # a kind notify_policy keeps silent and never interrupting,
                 # under its own key so a later real ALERT is not "a repeat"
@@ -1940,6 +1945,38 @@ class ScannerDesk:
             # the dispatch itself, silent, threaded under its line: the words
             # are a machine's guess at weak audio, the recording is not
             await self._send_clip(inc, trigger, silent=True, reply_to=msg_id, kind="scanner_fyi")
+
+    # ------------------------------------------------------------ emergency mode
+    @staticmethod
+    def emergency() -> bool:
+        return bool(_cfg("emergency_mode", False))
+
+    def loud_local(self, inc: dict) -> bool:
+        """In emergency mode: is this a call that must SOUND at once? Any call
+        the rules can name (or a paged dispatch) in his own town or within
+        near_miles, and any danger call anywhere in his radius - on its first
+        transmission, confirmed or not, day or night. A busy spell is still
+        only a count. (2026-11-13: "if anything is happening locally I don't
+        want those notifications to be silent".)"""
+        if not self.emergency():
+            return False
+        types = [t for t in (inc.get("types") or []) if t in rules.KINDS]
+        if not types:
+            return False
+        town, miles = inc.get("town") or "", inc.get("miles")
+        near = town == home_town().name or (miles is not None and float(miles) <= float(_cfg("near_miles", 5.0)))
+        danger = any(rules.KINDS[t].danger for t in types)
+        return near or danger
+
+    def set_emergency(self, on: bool) -> str:
+        config.set("scanner", "emergency_mode", value=bool(on))
+        log.warning("scanner: emergency mode %s", "ON" if on else "off")
+        near = float(_cfg("near_miles", 5.0))
+        if on:
+            return (f"Emergency mode is on, sir. Every scanner call I can name in {home_town().name} or within "
+                    f"{near:g} miles, and any danger call within {geo.radius_mi():.0f}, will sound on your phone "
+                    "the moment I hear it, day or night. Say 'scanner normal mode' to end it.")
+        return "Emergency mode is off, sir. Scanner calls are quiet again unless they are confirmed danger near you."
 
     async def _retry_pending(self) -> None:
         """An update delivery held as 'said recently' goes out once its repeat
@@ -2705,6 +2742,8 @@ class ScannerDesk:
             return {"spoken": self._say_summary()}
         if ask == "town":
             return {"spoken": await self._say_town(town)}
+        if ask in ("loud", "quiet"):
+            return {"spoken": self.set_emergency(ask == "loud")}
         if ask == "more":
             inc = self.latest_told()
             if not inc:
@@ -2859,6 +2898,10 @@ class ScannerDesk:
             else:
                 parts.append(f"From {a} to {b} it's all silent except danger in {home}, and the night "
                              f"comes to you as a summary at {b}.")
+        if self.emergency():
+            parts.insert(1, "EMERGENCY MODE IS ON: every call I can name here or within "
+                         f"{float(_cfg('near_miles', 5.0)):g} miles, and any danger call in range, sounds at once, "
+                         "confirmed or not, day and night.")
         parts.append("If I can't make out what a call is, I can't send it - unless the dispatcher toned a station "
                      "out first: a paged dispatch comes through silently even when I can't name it. A page never "
                      "makes a sound by itself. And I'll tell you if I stop being able to hear the scanner.")
@@ -2967,7 +3010,7 @@ def register_all() -> None:
         description="(internal) the scanner desk's spoken answers for the scanner reflexes.",
         parameters={"type": "object", "properties": {
             "ask": {"type": "string", "enum": ["now", "town", "last", "summary", "health", "doctor", "rules",
-                                               "more"]},
+                                               "more", "loud", "quiet"]},
             "town": {"type": "string"}}, "required": ["ask"]},
         # "more" asks the model for the whole account and may try twice
         risk=Risk.SAFE, handler=_scanner_tool, timeout=45))
