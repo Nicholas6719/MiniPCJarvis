@@ -12,6 +12,16 @@ speech recognition, the speech synthesis, the embeddings and the memory all run 
 one mini PC with an AMD 780M integrated GPU and no CUDA anywhere. There is no
 account, no cloud round-trip, and no transcript leaving the machine.
 
+### Where to start reading
+
+| If you want to know | Read |
+| --- | --- |
+| what it does and how it is put together | this page |
+| how a request travels through the code, and what every module is for | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| how it answers most requests without the language model, and how to build the same thing elsewhere | [`docs/BRAIN.md`](docs/BRAIN.md) |
+| why a particular decision was made | [`docs/HANDOFF.md`](docs/HANDOFF.md), the engineering log |
+| what may run without asking, and where secrets live | [`docs/SECURITY.md`](docs/SECURITY.md) |
+
 ---
 
 ## What it feels like to use
@@ -87,6 +97,23 @@ else gets silence). Risk-gated tools pause on inline DO IT / NO buttons. Voice
 notes work — OGG/Opus in, transcribed and answered. Screenshots and files come back
 as real Telegram media.
 
+**Tell you things without being asked.** Four briefs a day (weather, markets, your
+holdings, and in the evening the day's news, scored so a missing teenager outranks
+a coin auction). Reminders with a follow-up if you do not tap Done. "Tell me when
+that download finishes" and "let me know if you hear more about that story" are
+real standing watches. Everything unprompted goes through one door
+(`delivery.py`) that decides speech or phone, refuses to repeat itself, and has
+hard hourly and daily ceilings.
+
+**Listen to the police and fire scanner.** With a Uniden BC125AT attached, every
+transmission is transcribed, read by rules for the kind of call, the address and
+the units, and merged into incidents. A call near you becomes one Telegram message
+that is edited as the call develops: a heading, where, and a plain-English summary
+written by the model and then fact-checked sentence by sentence against the words
+actually heard. Two-tone station pages are detected, so a dispatch still reaches
+you when the words were too garbled to name. Nothing makes a sound on a single
+transmission unless you turn emergency mode on.
+
 **Dictate.** Hold `Ctrl+Shift+D`, speak, release, and the words land in whatever
 app has focus, via the clipboard (with your previous clipboard restored). It is
 deliberately *not* a conversation: nothing reaches the brain, the LLM, the fact
@@ -153,7 +180,7 @@ the way it is.
 | --- | --- | --- |
 | Language model | **gpt-oss-20b** (MXFP4) on **llama.cpp llama-server**, Vulkan | ~27 tok/s on a Radeon 780M iGPU. Dynamic port, per-session API key, job-object child so an 11 GB process can never be orphaned. Will adopt an existing server on :8080 if it serves the same model. |
 | Speech to text | **Parakeet TDT 0.6B v3** (int8, `onnx-asr`, CPU) | 139 ms median / 0.6% WER in the bake-off, vs 450 ms / 5.1% for whisper base.en. faster-whisper is the fallback. |
-| Speech to speech-out | **Kokoro** ONNX (Piper as the low-latency fallback) | Sentences flush to TTS as they complete, so speech starts before the answer is finished. |
+| Text to speech | **Pocket TTS** (Kyutai, streaming, the "George" voice); Kokoro ONNX as the fallback | Sentences flush to TTS as they complete, so speech starts before the answer is finished. |
 | Voice activity | **Silero VAD** (ONNX) | Also drives barge-in — playback aborts ~200 ms into sustained speech. |
 | Wake word | **openWakeWord** "hey jarvis" | ~1.8 ms per 80 ms frame, about 2% of one core. |
 | Embeddings | **bge-small** via fastembed (ONNX) | Powers both the brain router (~10 ms) and semantic memory recall. |
@@ -291,16 +318,20 @@ src-tauri/   Rust core — window, tray, hotkeys, Credential Manager, sidecar su
 src/         React + TypeScript HUD — arc reactor, stage, wedges, panels, zustand store
 sidecar/     Python AI backend
   orchestrator.py    the turn engine
-  brain/             learned intent router, fact store, night school
+  brain/             learned intent router, fact store, night school (docs/BRAIN.md)
   audio/             STT, TTS, VAD, wake word, endpointing, dictation plumbing
   llm/               llama-server supervision, prompts, provider interface
-  tools/             ~70 registered tools, risk-tiered
+  tools/             ~140 registered tools, risk-tiered
   memory/            SQLite + embeddings
+  delivery.py        the single door for anything unprompted: speak, or his phone
+  briefing.py        news watch, markets and the four daily briefs
+  scanner_desk.py    police and fire scanner: calls read, checked, sent
   tests/             offline gates and the e2e suites
 scripts/     dev, build, release, suites, model trials
-docs/        ARCHITECTURE · HANDOFF · SECURITY · TROUBLESHOOTING · CHANGELOG · roadmaps
+docs/        ARCHITECTURE · BRAIN · HANDOFF · SECURITY · TROUBLESHOOTING · CHANGELOG · roadmaps
 ```
 
-**Start with `docs/HANDOFF.md`.** It is a living engineering log, newest sections
-last, and it records the reasoning and the dead ends behind almost every decision
-above.
+**To understand the code, start with `docs/ARCHITECTURE.md`**, then
+`docs/BRAIN.md`. **To understand a decision, search `docs/HANDOFF.md`**: it is a
+living engineering log, newest sections last, and it records the reasoning and
+the dead ends behind almost every choice above.
