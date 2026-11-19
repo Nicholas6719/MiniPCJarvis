@@ -85,6 +85,12 @@ KINDS: dict[str, Kind] = {k.key: k for k in (
     Kind("co_alarm", "a carbon monoxide call", "fire", 3, False),
     Kind("wires_down", "wires down", "fire", 3, False),
     Kind("alarm", "a fire alarm", "fire", 2, False),
+    # Several companies sent to one address with the call type lost in the
+    # noise. Never matched from words: read() gives it when three or more
+    # fire apparatus of two or more sorts are named and nothing else is.
+    # Framingham Fire, 2026-11-14: "742 Eagle Rock Apartments. Engine one,
+    # rescue one, tower one, ladder three, car two" reached nobody.
+    Kind("fire_response", "a full fire response", "fire", 4, False),
     Kind("shots_fired", "shots fired", "police", 10, True),
     Kind("armed_person", "an armed person", "police", 9, True),
     Kind("pursuit", "a police pursuit", "police", 8, True),
@@ -170,7 +176,15 @@ PATTERNS: dict[str, re.Pattern] = {
     "alarm": _P(r"\b(?:fire alarm|fire activation|alarm (?:activation|sounding|going off|system)|box alarm|master box"
                 r"|municipal box|pull station|smoke detector|sprinkler (?:alarm|activation|head)"
                 r"|water ?flow(?: alarm)?)\b"),
-    "shots_fired": _P(r"\b(?:shots? fired|shots? (?:heard|being fired)|gun ?shots?|gun ?fire|shooting"
+    # "shooting" alone is not a shooting. 2026-11-18, Ashland FIRE: "Just
+    # watching copyright nine button shooting rather than the walk out" SOUNDED
+    # on his phone as shots fired four miles away. The word counts only as a
+    # thing reported ("a shooting", "they have shooting with a fatality") or
+    # with what was shot ("shooting an AK-47"); five real lines in his own log
+    # say it one of those ways, five garbled ones do not.
+    "shots_fired": _P(r"\b(?:shots? fired|shots? (?:heard|being fired)|gun ?shots?|gun ?fire"
+                      r"|(?:a|the|have|had|reported|possible|another|fatal) shooting(?! (?:range|star|for|unit|number))"
+                      r"|shooting (?:with|victim|incident|scene|suspect|at \d|an? (?:ak[- ]?\d*|gun|rifle|firearm|weapon|pistol|handgun))"
                       r"|person shot|(?:has been|was|been|got) shot|gunshot wounds?|gsw|shot ?spotter)\b"),
     "armed_person": _P(r"\b(?:armed (?:person|subject|suspect|male|female|individual|man|woman|robbery|party)"
                        r"|(?:man|male|female|woman|subject|person|party|someone|suspect) (?:with|armed with|holding"
@@ -242,7 +256,9 @@ PATTERNS: dict[str, re.Pattern] = {
     "seizure": _P(r"\b(?:seiz(?:ure|ures|ing)|convuls(?:ion|ions|ing))\b"),
     "fall": _P(r"\b(?:fell|fallen|has fallen|(?:a|the) fall\b(?! (?:alarm|season))|fall victim|slip(?:ped)? and fell"
                r"|lift assist|fell down)\b"),
-    "medical": _P(r"\b(?:medical (?:call|emergency|aid|alarm|assist(?:ance)?)|for a medical|ems call|sick (?:person"
+    "medical": _P(r"\bmedical[.,]? (?:at |for |on )?(?:\d|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven"
+                  r"|twelve|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b)"
+                  r"|\b(?:medical (?:call|emergency|aid|alarm|assist(?:ance)?)|for a medical|ems call|sick (?:person"
                   r"|party|male|female|child)|abdominal pains?|allergic reaction|diabetic(?: emergency| problem)?"
                   r"|bleeding|laceration|psych(?:iatric)? (?:emergency|eval(?:uation)?)|mental health"
                   r"|emotionally disturbed|intoxicated (?:person|party|male|female)|nose ?bleed"
@@ -488,7 +504,11 @@ def _believable(span: dict, tokens: list[str], cased: bool, caps: tuple[set[str]
             (any(_PLATE_WORD.match(x.strip(".,'")) for x in window) and
              sum(1 for x in window if x.strip(".,'") in _PHONETIC) >= 2):
         return None
-    if span["name"].startswith("Route") or not cased:
+    if span["name"].startswith("Route"):
+        return span
+    if len("".join(span["key"].split()[:-1])) < 2:
+        return None                    # "G Street": a letter the radio dropped a name around
+    if not cased:
         return span
     anywhere, inner = caps
     name = span["key"].split()[:-1]
@@ -781,8 +801,47 @@ def anchored(text: str, reading: "Reading | None" = None) -> bool:
     return False
 
 
+# Dispatch words as Parakeet writes them off a weak signal. Every one is from
+# Framingham Fire's own traffic, 2026-11-14..19, where the same dispatch was
+# read twice and the second reading gave the word away: "Entonces five ...
+# Engine five", "Anger 1, Angular 2 ... Anulance 2", "fox alone" / "box
+# along" beside "Box 268". Only ever beside a number (or as the two-word box
+# phrase), so ordinary speech is left alone.
+_N_NEXT = (r"(?=\s+(?:\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b)")
+_HEARD_AS: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(rf"\b(?:entonces|enton|anger|angry|england){_N_NEXT}", re.I), "Engine"),
+    (re.compile(rf"\b(?:anulance|angular|ambulence){_N_NEXT}", re.I), "Ambulance"),
+    (re.compile(rf"\bcard{_N_NEXT}", re.I), "Car"),
+    (re.compile(rf"\b(?:later|larry){_N_NEXT}", re.I), "Ladder"),
+    (re.compile(r"\b(?:fox|box) (?:alone|along)\b", re.I), "box alarm"),
+    (re.compile(rf"\bboxing{_N_NEXT}", re.I), "box alarm"),
+)
+
+
+def repair(text: str) -> str:
+    """The transmission with its misheard dispatch words put right."""
+    t = text or ""
+    for rx, word in _HEARD_AS:
+        t = rx.sub(word, t)
+    return t
+
+
+_APPARATUS = {"engine", "ladder", "tower", "rescue", "truck", "squad", "tanker"}
+# companies named because they are leaving, not because they are being sent
+_GOING_HOME = re.compile(r"\b(?:clear|cleared|clearing|returning|return|available|in service|in quarters"
+                         r"|cancel(?:led|ed)?)\b")
+
+
+def full_response(units: list[str]) -> bool:
+    """Three or more fire apparatus of at least two sorts: a structure
+    assignment, not an engine and an ambulance on a medical."""
+    rigs = [u for u in units if u.split()[0].lower() in _APPARATUS]
+    return len(rigs) >= 3 and len({u.split()[0].lower() for u in rigs}) >= 2
+
+
 def read(text: str, channel_town: str = "") -> Reading:
     """Everything the rules can see in one transmission."""
+    text = repair(text)
     t = normalise(text)
     scrubbed = _NEG.sub(" ~neg~ ", t)
     # A kind named only inside a question is not a report of one: "Why do we
@@ -840,6 +899,9 @@ def read(text: str, channel_town: str = "") -> Reading:
         r.street = r.roads[0].lower()
     r.units = extract_units(text)
     r.towns = _other_towns(text, t, channel_town)
+    if not r.types and r.address and full_response(r.units) and not RESOLVED.search(t)             and not _GOING_HOME.search(t):
+        k = KINDS["fire_response"]
+        r.types, r.severity, r.family = [k.key], k.severity, k.family
     return r
 
 

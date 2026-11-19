@@ -5798,6 +5798,62 @@ scripts run from the agent shell must set JARVIS_DB or they open the mirror
 2. Dataset export (JSONL of turns) for real LoRA fine-tuning later.
 3. OS-like UI expansion (files, settings panels inside the HUD).
 
+### 2026-11-19 - the scanner, reshaped to his description (two hot-swaps)
+
+Audit of the real log and database since 11-13 (he has not spoken to JARVIS
+since 11-08: everything he gets is proactive). His words after it: "a call
+comes in for Framingham ... it should just say the station, example
+Framingham PD - active shooter at Beaver Street, and then it listens for
+updates on that situation and prioritizes that and tells me immediately when
+information becomes available." His answers: too much noise, content unclear,
+Framingham + neighbours.
+
+Found and fixed (all gated in `tests/test_scanner_desk.py`):
+
+- **Framingham Fire was heard and never told.** Six days of clear dispatches
+  ("Medical 470 Franklin Street ... Engine 1, Ambulance 2") named nothing: the
+  rules knew "for a medical call", Framingham says "Medical, <address>".
+  `rules.repair()` puts right the words Parakeet mishears beside a number
+  (Entonces/Anger -> Engine, Anulance -> Ambulance, "fox alone" -> box alarm);
+  new kind `fire_response` (3+ apparatus of 2+ sorts at an address).
+- **The frequency is the truth, the name is not.** On a priority jump the
+  scanner reports Framingham's frequency under the previous channel's name:
+  1,874 transmissions were filed under 17 other channels. The desk now maps
+  frequency -> name from `/api/state` (`channels_by_freq`, `_learn_channels`)
+  and re-files history once per start (`store.refile_hits`). The console
+  itself still records the wrong name (its own stats and the Scan Doctor see it).
+- **A call Telegram refused was lost** (51 minutes of Bad Gateway on 11-18, a
+  working fire in Sudbury). `pending = "net:<tier>"`, retried each minute for
+  two hours, sent with "Delayed, sir ... Heard at 9:19 AM".
+- **"shooting" alone sounded as shots fired** (garbled Ashland Fire line).
+  The word now needs to be a thing reported or have what was shot.
+- A fact that is the call itself is not said twice; a one-letter street is
+  not a street; `standing.py` guards its shared connection with a lock.
+
+The reshape:
+
+- Message: `headline()` = "Framingham Fire - Medical call at 470 Franklin St",
+  then the unconfirmed line, what is going on, and a footer with town,
+  distance, first heard, transmissions.
+- **Updates are pushed** (`_push_update`, `news`): the call's message is still
+  edited to hold the whole picture, and what is NEW goes out as its own
+  "UPDATE - <headline>" message - at most one per 45 s and 8 per call, silent
+  unless the call is itself danger. A reworded summary is not news (two new
+  word stems, or a new fact/unit/place/over).
+- **His towns** (`ring()`, `DEFAULT_RING`): everything named in Framingham;
+  severity >= 4 from the towns that touch it (`neighbour_min_severity`);
+  further away only danger that a second transmission confirmed. Unnamed pages
+  and busy spells outside Framingham are stored, not sent (`unnamed_pages`,
+  `bursts_beyond_home` restore them). On last week's traffic: 111 sent -> 21.
+- Emergency mode now sounds for Framingham and for serious calls in the ring.
+- A transmission on the channel of a live call he was told about is
+  transcribed first (`_next_row`).
+
+Not done: Framingham **Police** is digital and cannot be decoded by a
+BC125AT - police matters reach him only when Fire/EMS is sent. CH54 is still
+tone 127 (search); `tone_seen` is 80 on 210 real hits, so tone 80 would cut
+~1,900 noise hits, at the risk of missing weak ones - his call.
+
 ## User's standing priorities
 Mic must always work (done, verified w/ Wispr) → speed ("quicker = more real") →
 brain/training → OS-like UI (never leave the app) → everything verified on the REAL

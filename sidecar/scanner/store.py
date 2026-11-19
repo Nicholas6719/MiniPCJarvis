@@ -210,6 +210,26 @@ def hits_since(ts: float, town: str = "", until: float | None = None) -> list[di
     return [_hit(r) for r in _rows(sql + " ORDER BY ts", tuple(args))]
 
 
+def refile_hits(freq: float, name: str, town: str, agency: str) -> int:
+    """Every stored transmission ON this frequency filed under another name
+    becomes this channel's. Returns how many moved."""
+    try:
+        db = conn()
+    except Exception:
+        log.exception("scanner store unavailable")
+        return 0
+    try:
+        cur = db.execute("UPDATE scanner_hits SET name=?, town=?, agency=? "
+                         "WHERE freq BETWEEN ? AND ? AND name != ?",
+                         (name, town or "", agency or "", float(freq) - 0.0006, float(freq) + 0.0006, name))
+        db.commit()
+        return int(cur.rowcount or 0)
+    except Exception:
+        _rollback(db)                     # never leave the write lock held
+        log.exception("scanner store: refiling by frequency failed")
+        return 0
+
+
 def count_hits(name: str, since: float, until: float | None = None) -> int:
     if until is None:
         r = _rows("SELECT COUNT(*) FROM scanner_hits WHERE name=? AND ts >= ?", (name, float(since)))

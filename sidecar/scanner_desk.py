@@ -66,6 +66,32 @@ log = logging.getLogger("jarvis.scanner")
 RATE = 16000
 CURSOR_KEY = "scanner:cursor"
 SENT = ("spoken", "telegram")
+# A call his phone could not be reached for is tried again every minute for
+# this long, then let go. 2026-11-18: Telegram answered "Bad Gateway" for 51
+# minutes, a working fire in Sudbury (5 miles) was "held" once and never sent.
+# HIS TOWNS (his answer, 2026-11-19: "Framingham + neighbours"; "too much
+# noise"). The towns that touch Framingham. Anything further reaches him only
+# when it is major AND confirmed. scanner.ring overrides the list.
+DEFAULT_RING = ("Natick", "Ashland", "Sudbury", "Wayland", "Southborough", "Marlborough", "Sherborn")
+UPDATE_MAX = 8                # pushed updates per call: after that its message is only edited
+
+
+def ring() -> set[str]:
+    """His own town and the towns around it, by name."""
+    got = _cfg("ring", None)
+    names = [str(x) for x in got] if isinstance(got, (list, tuple)) and got else list(DEFAULT_RING)
+    return {home_town().name, *names}
+
+
+def headword(label: str) -> str:
+    """'a medical call' -> 'Medical call', 'shots fired' -> 'Shots fired'."""
+    w = re.sub(r"^(?:a|an)\s+", "", (label or "activity").strip())
+    return w[:1].upper() + w[1:]
+
+
+UNSENT = "net:"
+UNSENT_MAX_S = 2 * 3600.0
+UNSENT_WHY = ("telegram did not accept it",)
 # THE QUIET FEED (2026-11-07, his words after four hours of nothing: "I haven't
 # gotten anything from Jarvis yet?! ... No way there hasn't been anything in
 # over an hour"). The desk heard 400 transmissions and built two crashes, two
@@ -157,6 +183,27 @@ def home_fire_channels(channels: list[dict], home: str) -> list[str]:
         if lab.town and lab.town.name == home and lab.agency == "FD":
             out.append(str(c.get("name") or "").strip())
     return out
+
+
+def freq_key(freq) -> int:
+    """A frequency as a whole number of 100 Hz steps, or 0."""
+    try:
+        return int(round(float(freq) * 10000))
+    except (TypeError, ValueError):
+        return 0
+
+
+def channels_by_freq(channels: list[dict]) -> dict[int, str]:
+    """{frequency: the one channel name programmed on it}. A frequency two
+    differently named channels share tells nothing and is left out."""
+    seen: dict[int, set[str]] = {}
+    for c in channels or []:
+        if not isinstance(c, dict) or c.get("lockout"):
+            continue
+        k, name = freq_key(c.get("freq")), str(c.get("name") or "").strip()
+        if k and name:
+            seen.setdefault(k, set()).add(name)
+    return {k: next(iter(v)) for k, v in seen.items() if len(v) == 1}
 
 
 def deaf_spans(hits: list[dict]) -> list[dict]:
@@ -751,6 +798,19 @@ class ScannerDesk:
         self._last_doctor = 0.0
         self.home_gap = ""            # what is wrong with his own town's fire channel, if anything
         self._home_watched: float | None = None   # when its channel was first seen on the scanner (this run)
+        # THE FREQUENCY IS THE TRUTH, THE NAME IS NOT. When the scanner jumps
+        # to its priority channel it reports that channel's frequency with
+        # the name of the channel it was on. 2026-11-13..19: 1,200
+        # Framingham Fire transmissions were filed under seventeen other
+        # channels - "Medical 571 Union Avenue, Engine 1, Ambulance 2" went
+        # down as Natick, and a Framingham medical was SENT as Waltham's.
+        # what his phone has been told about each call: updates are the difference
+        self._pushed: dict[int, dict] = {}
+        self._update_waiting: set[int] = set()
+        self._update_due: set[int] = set()
+        self._by_freq: dict[int, str] = {}
+        self._by_freq_ts = 0.0
+        self._refiled = False
         self._worker = None
         self.stats = Counter()
         self.retry_pause = 5.0            # before retrying a clip the recogniser could not take
@@ -846,6 +906,10 @@ class ScannerDesk:
             self._mark_up(h, now)
         if self.after_id is None:
             self.after_id = self._load_cursor()
+        try:
+            await self._learn_channels(now)
+        except Exception:
+            self._log_every("channels", 3600, logging.WARNING, "scanner: could not read the channel list", exc=True)
         got = await client.feed(self.after_id, limit=200)
         if got is None:
             # health answered and the feed did not: an older console, or one
@@ -936,6 +1000,32 @@ class ScannerDesk:
         except Exception:
             log.debug("scanner: cursor not saved", exc_info=True)
 
+    async def _learn_channels(self, now: float) -> None:
+        """Which name belongs to which frequency, from the scanner's own
+        programming: asked every ten minutes, and at once while unknown."""
+        if self._by_freq and now - self._by_freq_ts < 600:
+            return
+        if not self._by_freq and now - self._by_freq_ts < 30:
+            return
+        self._by_freq_ts = now
+        st = await self._ensure_client().state()
+        if not (isinstance(st, dict) and isinstance(st.get("channels"), list)):
+            return
+        got = channels_by_freq(st["channels"])
+        if not got:
+            return
+        self._by_freq = got
+        if not self._refiled:
+            self._refiled = True
+            moved = 0
+            for k, name in got.items():
+                lab = rules.parse_label(name)
+                moved += await asyncio.to_thread(store.refile_hits, k / 10000.0, name,
+                                                 lab.town.name if lab.town else "", lab.agency)
+            if moved:
+                log.warning("scanner: %d stored transmissions were filed under the wrong channel "
+                            "(the priority jump); put right by frequency", moved)
+
     # ------------------------------------------------------------ the feed
     def _row(self, h: dict) -> dict | None:
         try:
@@ -945,6 +1035,10 @@ class ScannerDesk:
         except (KeyError, TypeError, ValueError):
             return None
         name = str(h.get("name") or "").strip()
+        true = self._by_freq.get(freq_key(h.get("freq")))
+        if true and true != name:
+            self.stats["refiled"] += 1
+            name = true
         lab = rules.parse_label(name)
         q = h.get("quality") if isinstance(h.get("quality"), dict) else None
         try:
@@ -1116,6 +1210,31 @@ class ScannerDesk:
         self._queue.append(row)
         self._wake.set()
 
+    def _next_row(self) -> dict:
+        """The next recording to read. HIS VISION (2026-11-19): a call he has
+        been told about "prioritizes that" - a transmission on the channel of
+        a live call already on his phone jumps the queue; otherwise oldest first."""
+        live = self._live_channels()
+        if live:
+            for i, row in enumerate(self._queue):
+                if row.get("name") in live:
+                    del self._queue[i]
+                    self.stats["jumped"] += 1 if i else 0
+                    return row
+        return self._queue.popleft()
+
+    def _live_channels(self) -> set[str]:
+        now = self.now()
+        if now - getattr(self, "_live_ts", 0.0) > 15:
+            self._live_ts = now
+            try:
+                self._live = {i["channel"] for i in store.incidents_since(now - 1800)
+                              if i.get("status") == "active" and i.get("delivered_ts") and i.get("types")
+                              and now - float(i.get("last_ts") or 0) < 900}
+            except Exception:
+                self._live = set()
+        return getattr(self, "_live", set())
+
     async def _transcribe_loop(self) -> None:
         while True:
             try:
@@ -1123,7 +1242,7 @@ class ScannerDesk:
                     self._wake.clear()
                     await self._wake.wait()
                     continue
-                await self._transcribe_one(self._queue.popleft())
+                await self._transcribe_one(self._next_row())
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1518,11 +1637,107 @@ class ScannerDesk:
                 if inc:
                     self._maybe_resummarise(inc)
                     await self._edit(inc)
+                    try:
+                        await self._push_update(inc)
+                    except Exception:
+                        log.warning("scanner: could not push an update for #%s", iid, exc_info=True)
                 if iid not in self._dirty:
                     return
         finally:
             self._refreshing.discard(iid)
             self._dirty.discard(iid)
+
+    # ------------------------------------------------------------ updates, as they are heard
+    UPDATE_GAP_S = 45.0           # at most one pushed update per call per this long
+    def _snapshot(self, inc: dict) -> dict:
+        return {"label": inc.get("label") or "", "address": inc.get("address") or "",
+                "details": list(inc.get("details") or []), "units": list(inc.get("units") or []),
+                "over": inc.get("status") == "over",
+                "summary": checked(inc.get("summary") or "", inc) if inc.get("summary") else ""}
+
+    @staticmethod
+    def _stems(text: str) -> set[str]:
+        return {factcheck._stem(w) for w in factcheck._words(text or "") if len(w) >= 4}
+
+    def news(self, old: dict, inc: dict) -> str:
+        """What is new about this call since his phone was last told, in
+        plain words - "" when nothing is. A summary that only says the same
+        thing another way is not news: it must bring two words the last one
+        did not have, or the rules must have heard a new fact, unit or place."""
+        now_ = self._snapshot(inc)
+        lines: list[str] = []
+        if now_["label"] and now_["label"] != old.get("label") and (inc.get("tier") or FYI) == FYI:
+            lines.append(f"Now {now_['label']}.")
+        if now_["address"] and now_["address"] != old.get("address"):
+            lines.append(f"Location: {rules.spoken_address(now_['address'])}.")
+        fresh = len(self._stems(now_["summary"]) - self._stems(old.get("summary") or "")
+                    - self._stems(" ".join(old.get("details") or []) + " " + " ".join(old.get("units") or [])))
+        facts = [d for d in now_["details"] if d not in (old.get("details") or []) and d != "units on scene"]
+        units = [u for u in now_["units"] if u not in (old.get("units") or [])]
+        if now_["summary"] and old.get("summary") and fresh >= 2:
+            lines.append(self.told(inc))
+        else:
+            if facts:
+                lines.append(_cap(", ".join(facts)) + ".")
+            if units:
+                who = rules.parse_label(inc.get("channel") or "").spoken
+                names = units[0] if len(units) == 1 else ", ".join(units[:-1]) + f" and {units[-1]}"
+                lines.append(f"{who} {'also ' if old.get('units') else ''}sent {names}.")
+        if now_["over"] and not old.get("over"):
+            lines.append("The traffic says it is over.")
+        return " ".join(x for x in lines if x)
+
+    async def _push_update(self, inc: dict) -> None:
+        """HIS VISION (2026-11-19): "it listens for updates on that situation
+        ... and tells me immediately when information becomes available."
+        The call's own message is still edited to stay the whole picture; what
+        is NEW also goes to him as its own message, at most one per
+        self.UPDATE_GAP_S and UPDATE_MAX per call. It sounds only for a call that
+        is itself danger; everything else arrives silently."""
+        iid = int(inc["id"])
+        if not inc.get("msg_id") or not inc.get("tier") or (inc.get("burst") and not inc.get("types")):
+            return
+        old = self._pushed.get(iid)
+        if old is None:
+            # a restart: what he has is whatever is there now - never re-told
+            self._pushed[iid] = dict(self._snapshot(inc), ts=self.now(), n=0)
+            return
+        if not old.get("summary"):
+            old["summary"] = self._snapshot(inc)["summary"]     # the first telling is edited in, not pushed
+        body = self.news(old, inc)
+        if not body or int(old.get("n", 0)) >= UPDATE_MAX:
+            return
+        now = self.now()
+        wait = float(old.get("ts") or 0) + self.UPDATE_GAP_S - now
+        if wait > 0 and iid not in self._update_due:
+            if iid not in self._update_waiting:
+                self._update_waiting.add(iid)
+                self._spawn_task(self._update_later(iid, wait), name=f"scanner-update-wait-{iid}")
+            return
+        self._update_due.discard(iid)
+        n = int(old.get("n", 0)) + 1
+        head = self.headline(inc, inc.get("tier") or FYI)
+        types = [t for t in (inc.get("types") or []) if t in rules.KINDS]
+        loud = any(rules.KINDS[t].danger for t in types) and not self.quiet_hours()
+        kind = "scanner-local" if loud else "scanner-fyi"
+        # claimed before it is sent: a failed send is not retried as a flood
+        self._pushed[iid] = dict(self._snapshot(inc), ts=now, n=n)
+        r = await self._deliver(f"Update, {head}: {body}", ALERT, key=f"{kind}:{iid}:u{n}",
+                                subject=f"{kind}: update - {inc.get('label')} - {inc.get('town')}",
+                                written=f"UPDATE - {head}\n{body}")
+        log.info("scanner update %d for #%d -> %s: %s", n, iid, r.get("delivered"), body)
+        if len(self._pushed) > 256:
+            self._pushed = dict(list(self._pushed.items())[-128:])
+
+    async def _update_later(self, iid: int, wait: float) -> None:
+        try:
+            await asyncio.sleep(max(0.0, wait) + 0.05)
+        finally:
+            self._update_waiting.discard(iid)
+        # it has waited its turn by the wall clock: it goes now, whatever
+        # self.now() says (a clock that stands still must not park it forever)
+        self._update_due.add(iid)
+        self._schedule_refresh(iid)
 
     # ------------------------------------------------------------ what is going on, in plain words
     RESUMMARY_GAP_S = 120.0       # a growing call is re-told at most this often
@@ -1645,6 +1860,12 @@ class ScannerDesk:
         danger = any(rules.KINDS[t].danger for t in types if t in rules.KINDS) or \
             ("road_closure" in types and bool(types & rules.TRAFFIC))
         roads = inc.get("roads") or []
+        mine = town in ring()
+        if types == {rules.PAGED} and not _cfg("unnamed_pages", False):
+            # "Natick Fire toned a station out. I couldn't make out what for"
+            # told him nothing, seven times in a week (his answer, 2026-11-19:
+            # "content is unclear"). Kept, and sent the moment the words name it.
+            return None, f"a page {place} with no call named yet: stored until the words name it"
         if danger:
             tier, why = (URGENT if near else ALERT), f"{inc.get('label')} {place}"
         elif roads and types & (rules.TRAFFIC | {"road_closure"}):
@@ -1657,9 +1878,13 @@ class ScannerDesk:
             # refused as "daily alert cap reached". A count is a quiet line.
             if not _cfg("fyi", True):
                 return None, f"a burst {place} is not worth an interruption"
+            if town != home and not _cfg("bursts_beyond_home", False):
+                return None, f"a busy spell {place}: stored, a count outside his own town is noise"
             tier, why = FYI, (f"unusual activity on {inc.get('channel')} {place}" if near
                               else f"a busy spell on {inc.get('channel')} {place}")
         else:
+            if not mine:
+                return None, f"{inc.get('label') or 'activity'} {place}: stored, outside his towns and not major"
             ok, why = self._fyi(inc, types, town == home, place)
             if not ok:
                 return None, why
@@ -1675,6 +1900,9 @@ class ScannerDesk:
             ok, held = self._believed(inc, inc.get("label") or "activity", place)
             if not ok:
                 return None, held
+            if not mine:
+                # far away AND heard once: the Waltham "chemical smell" at 11:37 PM
+                return None, f"{why} - outside his towns and heard once: stored until a second agrees"
             tier, why = FYI, f"{why} - unconfirmed, one transmission: silent until a second agrees"
         if self.quiet_hours() and not (tier == URGENT and town == home):
             # HIS NIGHT (his answer, 2026-11-07: "send silently plus in morning
@@ -1723,6 +1951,10 @@ class ScannerDesk:
         sev = max((rules.KINDS[t].severity for t in types if t in rules.KINDS), default=0)
         if sev < int(_cfg("fyi_min_severity", 3)) and not (home and sev >= 2):
             return False, f"{label} {place}: stored, too routine to mention"
+        if not home and sev < int(_cfg("neighbour_min_severity", 4)):
+            # a fall, a traffic stop, a routine medical next door: his own
+            # town's he wants, a neighbour's are the noise (2026-11-19)
+            return False, f"{label} {place}: stored, routine and not in his own town"
         return self._believed(inc, label, place)
 
     def _believed(self, inc: dict, label: str, place: str) -> tuple[bool, str]:
@@ -1844,10 +2076,11 @@ class ScannerDesk:
         inc = store.incident(iid)
         if not inc:
             return
+        unsent = str(inc.get("pending") or "").startswith(UNSENT)
         tier, why = self.decide(inc)
         if tier is None:
-            if why != inc["decided"]:
-                store.update_incident(iid, {"decided": why})
+            if why != inc["decided"] or unsent:
+                store.update_incident(iid, {"decided": why, "pending": ""} if unsent else {"decided": why})
                 log.info("scanner: #%d not sent - %s", iid, why)
             return
         have, want = _RANK.get(inc["tier"] or "", 0), _RANK[tier]
@@ -1883,6 +2116,11 @@ class ScannerDesk:
             update = update and _RANK[tier] == have   # it may have become worse than an update
         text, written = self.compose(inc, tier, escalated if update else "")
         now = self.now()
+        if unsent and now - float(inc["first_ts"] or now) >= 300:
+            # late through no fault of the call: say so, and when it was heard
+            at = dt.datetime.fromtimestamp(float(inc["first_ts"])).strftime("%I:%M %p").lstrip("0")
+            note = f"Delayed, sir - I could not reach your phone. Heard at {at}. "
+            text, written = note + text, (note + written if written else written)
         # CLAIM, THEN SPEAK: the incident records what it is about to be sent
         # before anything goes out. If that write fails, nothing is sent.
         if not store.update_incident(iid, {"tier": tier, "delivered_ts": now, "decided": why, "pending": ""}):
@@ -1916,6 +2154,9 @@ class ScannerDesk:
                 # delivery's repeat window - or its hourly ceiling, which must
                 # never simply lose an emergency: retried when it opens
                 revert["pending"] = tier
+            elif rwhy in UNSENT_WHY:
+                # his phone could not be reached: NOT lost, tried again each minute
+                revert["pending"] = UNSENT + tier
             store.update_incident(iid, revert)
             return
         msg_id = r.get("message_id") if outcome == "telegram" else None
@@ -1924,6 +2165,8 @@ class ScannerDesk:
             old_mid = int(inc.get("msg_id") or 0)
             store.update_incident(iid, {"msg_id": int(msg_id), "edited_ts": now})
             self._edited[iid] = written
+            self._pushed[iid] = dict(self._snapshot(store.incident(iid) or inc), ts=now,
+                                     n=int((self._pushed.get(iid) or {}).get("n", 0)))
             if old_mid and old_mid != int(msg_id):
                 # the quiet "Unconfirmed" line before it must not go on saying so
                 self._spawn_task(self._close_old(old_mid, iid), name=f"scanner-close-{iid}")
@@ -1963,19 +2206,25 @@ class ScannerDesk:
         types = [t for t in (inc.get("types") or []) if t in rules.KINDS]
         if not types:
             return False
-        town, miles = inc.get("town") or "", inc.get("miles")
-        near = town == home_town().name or (miles is not None and float(miles) <= float(_cfg("near_miles", 5.0)))
+        if types == [rules.PAGED]:
+            return False
+        town = inc.get("town") or ""
+        if town == home_town().name:
+            return True
+        # the towns around him: what is serious. Further away the ordinary
+        # rule stands - danger sounds once a second transmission agrees.
         danger = any(rules.KINDS[t].danger for t in types)
-        return near or danger
+        sev = max(rules.KINDS[t].severity for t in types)
+        return town in ring() and (danger or sev >= int(_cfg("neighbour_min_severity", 4)))
 
     def set_emergency(self, on: bool) -> str:
         config.set("scanner", "emergency_mode", value=bool(on))
         log.warning("scanner: emergency mode %s", "ON" if on else "off")
         near = float(_cfg("near_miles", 5.0))
         if on:
-            return (f"Emergency mode is on, sir. Every scanner call I can name in {home_town().name} or within "
-                    f"{near:g} miles, and any danger call within {geo.radius_mi():.0f}, will sound on your phone "
-                    "the moment I hear it, day or night. Say 'scanner normal mode' to end it.")
+            return (f"Emergency mode is on, sir. Every scanner call I can name in {home_town().name}, and anything "
+                    "serious in the towns around you, will sound on your phone the moment I hear it, day or night. "
+                    "Say 'scanner normal mode' to end it.")
         return "Emergency mode is off, sir. Scanner calls are quiet again unless they are confirmed danger near you."
 
     async def _retry_pending(self) -> None:
@@ -1984,6 +2233,14 @@ class ScannerDesk:
         now = self.now()
         for inc in store.pending_incidents(now - 4 * 3600):
             tier = inc["pending"]
+            if str(tier).startswith(UNSENT):
+                if now - float(inc["first_ts"] or 0) > UNSENT_MAX_S:
+                    store.update_incident(inc["id"], {"pending": ""})
+                    log.warning("scanner: #%d never reached his phone in %d minutes - let go",
+                                inc["id"], UNSENT_MAX_S // 60)
+                    continue
+                self._spawn_task(self._consider(inc["id"], None, ""), name=f"scanner-unsent-{inc['id']}")
+                continue
             gap = float(config.get("proactive", "urgent_repeat_minutes" if tier == URGENT else
                                    "repeat_cooldown_minutes", default=10 if tier == URGENT else 45)) * 60
             if inc["status"] != "active" or now - float(inc["last_ts"]) > gap + 900:
@@ -2119,7 +2376,10 @@ class ScannerDesk:
         (`most`); the voice, two."""
         if inc.get("burst") and not inc.get("types"):
             return ""
-        facts = [d for d in (inc.get("details") or []) if d != "units on scene"][:most]
+        # a fact that IS the call adds nothing: "someone unconscious in
+        # Ashland, 4 miles away. Someone unconscious." (sent 2026-11-16)
+        label = str(inc.get("label") or "").lower()
+        facts = [d for d in (inc.get("details") or []) if d != "units on scene" and d.lower() != label][:most]
         out = _cap(", ".join(facts)) + "." if facts else ""
         units = (inc.get("units") or [])[:3]
         if units:
@@ -2127,6 +2387,29 @@ class ScannerDesk:
             names = units[0] if len(units) == 1 else ", ".join(units[:-1]) + f" and {units[-1]}"
             out += (" " if out else "") + f"{who} sent {names}."
         return out
+
+    def headline(self, inc: dict, tier: str = FYI) -> str:
+        """HIS WORDS (2026-11-19): "it should just say the station, example
+        Framingham PD - active shooter at Beaver Street"."""
+        lab = rules.parse_label(inc.get("channel") or "")
+        who = lab.spoken or inc.get("town") or "Scanner"
+        address = inc.get("address") or ""
+        roads = [r for r in (inc.get("roads") or [])]
+        if inc.get("burst") and not inc.get("types"):
+            what = "unusually busy"
+        elif (inc.get("types") or []) == [rules.PAGED]:
+            what = "station toned out, call type not heard"
+        else:
+            what = headword(inc.get("label") or "activity")
+        at = ""
+        if address:
+            at = (" on " if address.lower().startswith(("route ", "the ")) else " at ") + address
+        elif roads:
+            at = f" on {roads[0]}"
+        town = inc.get("town") or ""
+        if town and lab.town and town != lab.town.name:
+            at += f" in {town}"                    # mutual aid: the station is not the place
+        return ("URGENT - " if tier == URGENT else "") + f"{who} - {what}{at}"
 
     def written(self, inc: dict, tier: str, update: str = "") -> str:
         """The phone's version, in his words (2026-11-08): "the heading, the
@@ -2141,27 +2424,19 @@ class ScannerDesk:
         home = home_town().name
         town = inc.get("town") or "?"
         dist = "home" if town == home else f"{float(inc.get('miles') or 0):.0f} mi"
-        grade = "" if tier == FYI else f" - {tier.upper()}"
-        lines = [f"SCANNER{grade} - {town} ({dist})"]
+        lines = [self.headline(inc, tier)]
         if update:
             lines.append(f"UPDATE: {update}.")
         address = inc.get("address") or ""
         if inc.get("burst") and not inc.get("types"):
-            lines.append(f"Unusual activity on {inc.get('channel')}: {inc.get('summary') or 'far more traffic than usual'}")
-        else:
-            what = (inc.get("label") or "activity") + (f" - {address}" if address else "")
-            if (inc.get("types") or []) == [rules.PAGED]:
-                # toned out, and the words would not name it
-                lines.append("Paged dispatch - I couldn't make out the call type" + (f" - {address}" if address else ""))
-            elif inc.get("paged") and self._unconfirmed(inc):
-                # one transmission, but the dispatcher's own page came with it
-                lines.append(f"Paged dispatch: {what} (one transmission so far)")
-            else:
-                # one transmission is evidence, not a conclusion: said so, plainly
-                lines.append(f"Unconfirmed: {what} (one transmission so far)" if self._unconfirmed(inc) else _cap(what))
+            lines.append(inc.get("summary") or "Far more traffic than usual.")
+        elif (inc.get("types") or []) != [rules.PAGED] and self._unconfirmed(inc):
+            # one transmission is evidence, not a conclusion: said so, plainly
+            lines.append("Paged dispatch, one transmission so far." if inc.get("paged")
+                         else "Unconfirmed - one transmission so far.")
         roads = [r for r in (inc.get("roads") or []) if r not in address]
-        if address or roads:
-            lines.append("Where: " + ", ".join(x for x in [address] + roads if x))
+        if address and roads:
+            lines.append("Also: " + ", ".join(roads))
         said = inc.get("said") or []
         if said:
             told = self.told(inc)
@@ -2173,7 +2448,7 @@ class ScannerDesk:
         first = min(starts) if starts else None        # the first word heard, not when it ended
         if first:
             n = int(inc.get("hits") or len(said) or 1)
-            foot = f"First heard {_hm(float(first))} - {n} transmission{'s' if n != 1 else ''}"
+            foot = f"{town} ({dist}) - first heard {_hm(float(first))} - {n} transmission{'s' if n != 1 else ''}"
             if inc.get("status") == "over":
                 foot += f" - over by {_hm(float(inc.get('last_ts') or first))}"
             elif float(inc.get("last_ts") or first) - float(first) >= 60:
@@ -2880,10 +3155,14 @@ class ScannerDesk:
         comes in" - no such rule exists, and he is relying on these."""
         home = home_town().name
         near = float(_cfg("near_miles", 5.0))
+        around = sorted(ring() - {home})
+        towns = (", ".join(around[:-1]) + f" and {around[-1]}") if len(around) > 1 else "".join(around)
         parts = [
-            f"Here's how scanner calls reach you, sir. A call I can name within {geo.radius_mi():.0f} miles - "
-            "a fire, a crash, a medical or a police call - comes to your phone as a silent message with the "
-            "recording, marked unconfirmed until a second transmission backs it up.",
+            f"Here's how scanner calls reach you, sir. Every call I can name in {home} comes to your phone as one "
+            "silent message: the station, the call and the place, marked unconfirmed until a second transmission "
+            "backs it up. As I hear more about it I send each new piece of information as an update.",
+            f"From the towns around you - {towns} - only what is serious. Anything further away reaches you "
+            f"only if it is major and confirmed, out to {geo.radius_mi():.0f} miles.",
             f"Only active danger makes a sound: a working fire, shots fired, a crash with people trapped and "
             f"the like, here in {home} or within {near:.0f} miles, once two transmissions agree.",
         ]
@@ -2899,12 +3178,15 @@ class ScannerDesk:
                 parts.append(f"From {a} to {b} it's all silent except danger in {home}, and the night "
                              f"comes to you as a summary at {b}.")
         if self.emergency():
-            parts.insert(1, "EMERGENCY MODE IS ON: every call I can name here or within "
-                         f"{float(_cfg('near_miles', 5.0)):g} miles, and any danger call in range, sounds at once, "
-                         "confirmed or not, day and night.")
-        parts.append("If I can't make out what a call is, I can't send it - unless the dispatcher toned a station "
-                     "out first: a paged dispatch comes through silently even when I can't name it. A page never "
-                     "makes a sound by itself. And I'll tell you if I stop being able to hear the scanner.")
+            parts.insert(1, f"EMERGENCY MODE IS ON: every call I can name in {home}, and anything serious in the "
+                         "towns around you, sounds at once, confirmed or not, day and night.")
+        if _cfg("unnamed_pages", False):
+            parts.append("If I can't make out what a call is, I can't send it - unless the dispatcher toned a "
+                         "station out first: a paged dispatch comes through silently even when I can't name it.")
+        else:
+            parts.append("If I can't make out what a call is, I don't send it. When the dispatcher toned a station "
+                         "out first I keep it, and send it the moment the words name it.")
+        parts.append("A page never makes a sound by itself. And I'll tell you if I stop being able to hear the scanner.")
         return " ".join(parts)
 
     def _say_summary(self) -> str:

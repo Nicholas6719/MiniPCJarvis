@@ -27,7 +27,9 @@ life of the process and kill every turn (volatile.py tells that story).
 """
 from __future__ import annotations
 
+import functools
 import logging
+import threading
 import os
 import time
 
@@ -59,6 +61,19 @@ CREATE TABLE IF NOT EXISTS standing_watches (
 """
 
 _db = None
+# ONE CONNECTION, SEVERAL THREADS: the proactive sweep, the news sweep and a
+# tool call each reach this store from their own worker thread. Unguarded, a
+# read came back with a short row once (2026-11-17 17:33, "tuple index out of
+# range") and that sweep's watches went unchecked.
+_lock = threading.RLock()
+
+
+def _locked(fn):
+    @functools.wraps(fn)
+    def run(*a, **k):
+        with _lock:
+            return fn(*a, **k)
+    return run
 
 
 def _conn():
@@ -83,6 +98,7 @@ def _row(r) -> dict:
 
 
 # ---------------------------------------------------------------- keeping them
+@_locked
 def add(kind: str, target: str = "", *, folder: str = "", level: float = 0.0,
         description: str = "", armed: bool | None = None) -> dict:
     """Keep one. A process watch starts UNARMED: it has to see the thing
@@ -110,6 +126,7 @@ def add(kind: str, target: str = "", *, folder: str = "", level: float = 0.0,
         raise
 
 
+@_locked
 def all_watches() -> list[dict]:
     try:
         rows = _conn().execute(
@@ -131,6 +148,7 @@ def cancel(query: str = "") -> list[dict]:
     return dropped
 
 
+@_locked
 def _delete(ids: list[int]) -> None:
     if not ids:
         return
@@ -143,6 +161,7 @@ def _delete(ids: list[int]) -> None:
         log.exception("could not drop standing watches %s", ids)
 
 
+@_locked
 def _arm(watch_id: int) -> None:
     try:
         db = _conn()
