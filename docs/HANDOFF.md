@@ -5849,10 +5849,19 @@ The reshape:
 - A transmission on the channel of a live call he was told about is
   transcribed first (`_next_row`).
 
+- **The live board** (`board`, `_keep_board`, `BOARD_KEY`): one pinned Telegram
+  message, "LIVE - Framingham and the towns around it", edited only when the
+  picture changes (never a sound): ACTIVE calls, EARLIER (3 h), and when
+  Framingham Fire was last understood. Routine neighbour calls that are no
+  longer sent as messages can be seen there. A new board once a day.
+- **Console 1.3.2** (same day, main fb25299, installed): the monitor files a
+  transmission by frequency (`Monitor.resolve`, `Device.channel_on`), and the
+  Scan Doctor never puts a priority channel on trial. Doctor still stopped.
+- CH54 tone left at 127 on purpose: a quarter of the worded Framingham
+  transmissions arrived with no tone decoded, and tone squelch would drop them.
+
 Not done: Framingham **Police** is digital and cannot be decoded by a
-BC125AT - police matters reach him only when Fire/EMS is sent. CH54 is still
-tone 127 (search); `tone_seen` is 80 on 210 real hits, so tone 80 would cut
-~1,900 noise hits, at the risk of missing weak ones - his call.
+BC125AT - police matters reach him only when Fire/EMS is sent.
 
 ## User's standing priorities
 Mic must always work (done, verified w/ Wispr) → speed ("quicker = more real") →

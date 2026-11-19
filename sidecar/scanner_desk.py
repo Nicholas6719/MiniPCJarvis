@@ -89,6 +89,11 @@ def headword(label: str) -> str:
     return w[:1].upper() + w[1:]
 
 
+# THE LIVE BOARD (his answer, 2026-11-19: "a live local picture"). One pinned
+# message in his chat, edited as calls come and go - an edit never makes a sound.
+BOARD_KEY = "scanner_board"
+BOARD_ACTIVE_S = 45 * 60          # a call with traffic this recently is "active"
+BOARD_EARLIER_S = 3 * 3600        # ...and this far back it is still listed as earlier
 UNSENT = "net:"
 UNSENT_MAX_S = 2 * 3600.0
 UNSENT_WHY = ("telegram did not accept it",)
@@ -808,6 +813,9 @@ class ScannerDesk:
         self._pushed: dict[int, dict] = {}
         self._update_waiting: set[int] = set()
         self._update_due: set[int] = set()
+        self.boarder = None           # async (message id or None, text) -> message id or None
+        self._board_body = ""
+        self._board_fails = 0
         self._by_freq: dict[int, str] = {}
         self._by_freq_ts = 0.0
         self._refiled = False
@@ -926,6 +934,10 @@ class ScannerDesk:
                 await self._morning_summary(now)
             except Exception:
                 self._log_every("morning", 3600, logging.WARNING, "scanner: the morning summary failed", exc=True)
+            try:
+                await self._keep_board(now)
+            except Exception:
+                self._log_every("board", 3600, logging.WARNING, "scanner: the live board failed", exc=True)
             try:
                 await self._check_hearing(now)
             except Exception:
@@ -1646,6 +1658,104 @@ class ScannerDesk:
         finally:
             self._refreshing.discard(iid)
             self._dirty.discard(iid)
+
+    # ------------------------------------------------------------ the live board
+    def _on_board(self, inc: dict) -> bool:
+        """A call he was told about, or one in his towns the rules could name
+        and believe - the too-routine ones included: the board is where they
+        can be seen without ever reaching his phone as a message."""
+        if not inc.get("types") or (inc.get("types") or []) == [rules.PAGED]:
+            return False
+        if inc.get("delivered_ts"):
+            return True
+        return (inc.get("town") or "") in ring() and self._believed(inc, inc.get("label") or "", "")[0]
+
+    def board(self, now: float) -> str:
+        """Everything going on around him, as of now: (body) with no clock in
+        it, so it changes only when the picture does."""
+        home = home_town().name
+        calls = [i for i in store.incidents_since(now - BOARD_EARLIER_S) if self._on_board(i)]
+        calls.sort(key=lambda i: -float(i.get("last_ts") or 0))
+        active = [i for i in calls if i.get("status") == "active"
+                  and now - float(i.get("last_ts") or 0) <= BOARD_ACTIVE_S]
+        earlier = [i for i in calls if i not in active]
+        lines: list[str] = []
+        if active:
+            lines.append("ACTIVE")
+            for i in active[:8]:
+                first, last = float(i.get("first_ts") or now), float(i.get("last_ts") or now)
+                when = _hm(first) + (f", latest {_hm(last)}" if last - first >= 60 else "")
+                lines.append(f"- {self.headline(i, i.get('tier') or FYI)} ({when})")
+                told = self.told(i) if i.get("said") else ""
+                if told:
+                    lines.append(f"  {told[:300]}")
+        else:
+            lines.append("Nothing active right now.")
+        if earlier:
+            lines.append("")
+            lines.append("EARLIER")
+            for i in earlier[:6]:
+                over = " - over" if i.get("status") == "over" else ""
+                lines.append(f"- {_hm(float(i.get('first_ts') or now))}  {self.headline(i, FYI)}{over}")
+        lines.append("")
+        if not self.up:
+            lines.append("I can't reach the scanner right now.")
+        else:
+            heard = [(store.last_worded_ts(n), n) for n in sorted(set(self._by_freq.values()))
+                     if (rules.parse_label(n).town and rules.parse_label(n).town.name == home)]
+            ts, name = max(heard, default=(0.0, ""))
+            if name and ts:
+                lines.append(f"{rules.parse_label(name).spoken}: last understood at {_hm(ts)}"
+                             + ("" if now - ts < 86400 else f" on {dt.datetime.fromtimestamp(ts).strftime('%b %d')}") + ".")
+            elif name:
+                lines.append(f"{rules.parse_label(name).spoken}: nothing understood yet.")
+        if self.home_gap:
+            lines.append(self.home_gap.replace(", sir,", ",").replace(", sir.", "."))
+        return "\n".join(lines).strip()
+
+    async def _keep_board(self, now: float) -> None:
+        """Bring the pinned board up to date - only when the picture changed.
+        A new board is posted (silently) and pinned once a day, or when the
+        old one can no longer be edited three times running."""
+        if not _cfg("board", True):
+            return
+        body = self.board(now)
+        import volatile
+        kept = (volatile.get(BOARD_KEY) or {}).get("value") or {}
+        day = dt.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+        mid = int(kept.get("mid") or 0) if kept.get("day") == day else 0
+        if mid and body == self._board_body:
+            return
+        if mid and not self._board_body and body == kept.get("body"):
+            self._board_body = body               # a restart: the board already says this
+            return
+        text = f"LIVE - {home_town().name} and the towns around it\nUpdated {_hm(now)}\n\n{body}"
+        if mid and self._board_fails >= 3:
+            mid = 0
+        new = await self._post_board(mid or None, text)
+        if not new:
+            self._board_fails += 1
+            return
+        self._board_fails = 0
+        self._board_body = body
+        volatile.put(BOARD_KEY, {"mid": int(new), "day": day, "body": body}, source="scanner")
+
+    async def _post_board(self, mid: int | None, text: str) -> int | None:
+        if self.boarder is not None:
+            return await self.boarder(mid, text)
+        from remote_telegram import telegram
+        if mid:
+            return mid if await telegram.edit_text(mid, text) else None
+        chat = config.get("remote", "telegram_chat_id", default=None)
+        if not chat:
+            return None
+        res = await telegram._api("sendMessage", chat_id=chat, text=text[:4000], disable_notification=True)
+        new = res.get("message_id") if isinstance(res, dict) else None
+        if not new:
+            return None
+        # pinned without a notification; a pin that fails still leaves the board there
+        await telegram._api("pinChatMessage", chat_id=chat, message_id=int(new), disable_notification=True)
+        return int(new)
 
     # ------------------------------------------------------------ updates, as they are heard
     UPDATE_GAP_S = 45.0           # at most one pushed update per call per this long

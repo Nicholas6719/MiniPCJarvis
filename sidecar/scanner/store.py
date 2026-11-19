@@ -230,6 +230,13 @@ def refile_hits(freq: float, name: str, town: str, agency: str) -> int:
         return 0
 
 
+def last_worded_ts(name: str) -> float:
+    """When words were last made out on this channel (0.0 if never)."""
+    r = _rows("SELECT MAX(ts) FROM scanner_hits WHERE name=? AND transcript IS NOT NULL AND transcript != ''",
+              (name,))
+    return float(r[0][0] or 0) if r else 0.0
+
+
 def count_hits(name: str, since: float, until: float | None = None) -> int:
     if until is None:
         r = _rows("SELECT COUNT(*) FROM scanner_hits WHERE name=? AND ts >= ?", (name, float(since)))

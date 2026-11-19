@@ -62,6 +62,10 @@ TEST_CHANNELS = ("Framnghm FD", "Newton PD", "Natick PD", "Sudbury FD", "Waltham
                  "Southboro FD", "Sherborn FD", "Framingham EMS",
                  "Hopkinton FD", "Holliston PD", "Weston FD", "Dover FD", "Maynard FD")
 TMP = Path(tempfile.mkdtemp(prefix="scanner-gate-"))
+
+
+async def _no_board(self, mid, text):
+    return await self.boarder(mid, text) if self.boarder is not None else None
 WIDE = {"ring": ["Natick", "Ashland", "Sudbury", "Wayland", "Southborough", "Marlborough", "Sherborn", "Hudson",
                  "Hopkinton", "Holliston", "Weston", "Dover", "Maynard", "Waltham", "Wellesley", "Newton"],
         "neighbour_min_severity": 3, "unnamed_pages": True, "bursts_beyond_home": True}
@@ -283,6 +287,7 @@ async def run() -> None:
     # section "his towns" at the end holds the desk to his own defaults.
     config.data["scanner"].update(WIDE)
     SD.ScannerDesk.UPDATE_GAP_S = 0.2
+    SD.ScannerDesk._post_board = _no_board           # the gate never reaches Telegram
     console = Console()
     try:
         await _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, volatile)
@@ -2206,6 +2211,78 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         n_v = len(vsent)
         await fresh_desk._push_update(danger_inc)
         check("...and a call can push only so many: past that its message is edited, not re-sent", len(vsent) == n_v)
+
+        print("\n-- the live board: one pinned message, the whole local picture (2026-11-19) --")
+        bdesk = SD.ScannerDesk()
+        bdesk.quiet_hours, bdesk.up = (lambda: False), True
+        bdesk._by_freq = {SD.freq_key(483.7625): "Framnghm FD"}
+        posts: list[tuple] = []
+        board_ok = [True]
+
+        async def boarder(mid, text):
+            posts.append((mid, text))
+            if not board_ok[0]:
+                return None
+            return mid or 9500 + len(posts)
+        bdesk.boarder = boarder
+        board_before = volatile.get(SD.BOARD_KEY)
+        volatile.forget(SD.BOARD_KEY)
+        S._write("DELETE FROM scanner_incidents WHERE town IN (?, ?) AND address IN (?, ?)",
+                 ("Natick", "Waltham", "9 Board St", "9 Far St"))
+        fall_id = S.create_incident({
+            "first_ts": now - 300, "last_ts": now + 5, "town": "Natick", "miles": 5.0, "agency": "FD",
+            "channel": "Natick FD", "family": "ems", "kind": "fall", "label": "a fall", "severity": 3,
+            "types": ["fall"], "address": "9 Board St", "street": "board st", "roads": [], "units": ["Ambulance 1"],
+            "said": [{"ts": now - 300, "conf": 0.9, "text": "Ambulance 1 respond to 9 Board Street for a fall."}],
+            "hits": 1, "status": "active"})
+        far_id = S.create_incident({
+            "first_ts": now - 300, "last_ts": now + 5, "town": "Waltham", "miles": 11.0, "agency": "FD",
+            "channel": "Waltham FD", "family": "ems", "kind": "fall", "label": "a fall", "severity": 3,
+            "types": ["fall"], "address": "9 Far St", "street": "far st", "roads": [], "units": [],
+            "said": [{"ts": now - 300, "conf": 0.9, "text": "Ambulance 1 respond to 9 Far Street for a fall."}],
+            "hits": 1, "status": "active"})
+        try:
+            body = bdesk.board(now)
+            check("the board lists the medical call he was sent, in the same words as its message - over now, so under EARLIER",
+                  "ACTIVE" in body and "EARLIER" in body
+                  and "Framingham Fire - Medical call at 470 Franklin St - over" in body.split("EARLIER")[1], body)
+            check("...and a routine call next door that never reached his phone as a message is there to SEE",
+                  "- Natick Fire - Fall at 9 Board St" in body.split("EARLIER")[0] and bdesk.decide(S.incident(fall_id))[0] is None, body)
+            check("...while a routine call outside his towns is not", "9 Far St" not in body, body)
+            check("...and it says when his own town was last understood, with no clock of its own",
+                  "Framingham Fire:" in body and "Updated" not in body, body)
+            await bdesk._keep_board(now)
+            check("the first board is posted (silently, pinned) and remembered",
+                  len(posts) == 1 and posts[0][0] is None and posts[0][1].startswith("LIVE - Framingham")
+                  and (volatile.get(SD.BOARD_KEY) or {}).get("value", {}).get("mid"), posts)
+            board_mid = volatile.get(SD.BOARD_KEY)["value"]["mid"]
+            await bdesk._keep_board(now + 60)
+            check("nothing changed: the board is not touched", len(posts) == 1, posts[1:])
+            S.update_incident(fall_id, {"status": "over", "last_ts": now + 6})
+            await bdesk._keep_board(now + 120)
+            check("a call that ended moves to EARLIER - by EDITING the same message",
+                  len(posts) == 2 and posts[1][0] == board_mid and "EARLIER" in posts[1][1]
+                  and "Fall at 9 Board St - over" in posts[1][1], posts[1:])
+            again = SD.ScannerDesk()
+            again.boarder, again.up, again._by_freq = boarder, True, bdesk._by_freq
+            await again._keep_board(now + 130)
+            check("after a restart the same picture is not posted again", len(posts) == 2, posts[2:])
+            board_ok[0] = False
+            for k_ in range(3):
+                S.update_incident(fall_id, {"last_ts": now + 7 + k_, "units": [f"Ambulance {k_ + 2}"],
+                                            "address": f"{k_ + 1} Board St"})
+                await bdesk._keep_board(now + 200 + k_)
+            board_ok[0] = True
+            S.update_incident(fall_id, {"address": "77 Board St"})
+            await bdesk._keep_board(now + 300)
+            check("a board that could not be edited three times running is posted afresh",
+                  posts[-1][0] is None and volatile.get(SD.BOARD_KEY)["value"]["mid"] != board_mid, posts[-1])
+        finally:
+            S._write("DELETE FROM scanner_incidents WHERE id IN (?, ?)", (fall_id, far_id))
+            if board_before:
+                volatile.put(SD.BOARD_KEY, board_before["value"], source="scanner")
+            else:
+                volatile.forget(SD.BOARD_KEY)
 
         qdesk = SD.ScannerDesk()
         qdesk.now = lambda: now
