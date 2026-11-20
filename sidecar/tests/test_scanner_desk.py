@@ -66,6 +66,13 @@ TMP = Path(tempfile.mkdtemp(prefix="scanner-gate-"))
 
 async def _no_board(self, mid, text):
     return await self.boarder(mid, text) if self.boarder is not None else None
+
+
+RETIRED: list[int] = []
+
+
+async def _no_retire(self, mid):
+    RETIRED.append(int(mid))
 WIDE = {"ring": ["Natick", "Ashland", "Sudbury", "Wayland", "Southborough", "Marlborough", "Sherborn", "Hudson",
                  "Hopkinton", "Holliston", "Weston", "Dover", "Maynard", "Waltham", "Wellesley", "Newton"],
         "neighbour_min_severity": 3, "unnamed_pages": True, "bursts_beyond_home": True}
@@ -288,6 +295,7 @@ async def run() -> None:
     config.data["scanner"].update(WIDE)
     SD.ScannerDesk.UPDATE_GAP_S = 0.2
     SD.ScannerDesk._post_board = _no_board           # the gate never reaches Telegram
+    SD.ScannerDesk._retire_board = _no_retire
     console = Console()
     try:
         await _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, volatile)
@@ -833,8 +841,10 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
             burst.append({"id": hid, "start": ts, "end": ts + 4, "duration": 4, "channel": 9, "name": name,
                           "freq": 33.9, "audio_path": "", "quality": {"class": "digital", "confidence": 0.9}})
         desk.after_id = BASE + n0 - many - 1
+        desk.hearing_now = lambda _now: None     # these are digital channels, not a deaf PC (that is its own section)
         await desk.ingest(burst)
     await desk.settle()
+    del desk.hearing_now
     bursts = {i["channel"]: i for i in S.incidents_since(now - 900) if i["burst"] and not i["types"]}
     check("Ashland FD at many times its normal traffic is a burst", "Ashland FD" in bursts,
           sorted(bursts))
@@ -1490,8 +1500,14 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
     class StubConsole:
         base_url, last_error = "stub", None
 
+        restarts = 0
+
         async def doctor_status(self):
             return None
+
+        async def audio_restart(self):
+            StubConsole.restarts += 1
+            return True
 
         async def health(self):
             return {"version": "1.3.0", "connected": True, "scanning": True,
@@ -1506,16 +1522,32 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
         volatile.put(SD.DEAF_KEY, {}, source="gate")
         h1 = await hdesk._check_hearing(hnow)
         h2 = await hdesk._check_hearing(hnow + 120)
+        restarts_first = StubConsole.restarts
+        deaf_board = hdesk.board(hnow + 130)
+        deaf_busy = hdesk.compose({**S.incident(old_inc), "summary": "15 transmissions in 10 minutes"}, ALERT)[0]
+        hdesk.quiet_hours = lambda: True
+        h_night = await hdesk._check_hearing(hnow + 300 + SD.DEAF_REMIND_S)
+        hdesk.quiet_hours = lambda: False
+        h_still = await hdesk._check_hearing(hnow + 400 + SD.DEAF_REMIND_S)
+        h_soon = await hdesk._check_hearing(hnow + 500 + SD.DEAF_REMIND_S)
+        restarts_later = StubConsole.restarts
+        off = SD.ScannerDesk()
+        off.deliverer, off.client, off.up = hdeliver, StubConsole(), True
+        off.health = {"connected": True, "scanning": True, "audio": {"enabled": False}}
+        off_restarted = await off._revive_audio(hnow, "gate")
+        # the hearing-back check below reads its own clock
+        hnow_back = hnow + 600 + SD.DEAF_REMIND_S
         said_health = await hdesk._say_health()
         n_spoken, n_written = hdesk.night_summary(hnow - 2500, hnow)
         empty_spoken, _ = hdesk.night_summary(hnow + 86400, hnow + 86400 + 7 * 3600)
         bline = hdesk.brief_line(hnow - 2500)
         for k in range(2):
-            S.log_hit({"id": hid + 40 + k, "ts": hnow + 200 + k * 30, "end_ts": hnow + 203 + k * 30, "duration": 3,
+            S.log_hit({"id": hid + 40 + k, "ts": hnow_back + 200 + k * 30, "end_ts": hnow_back + 203 + k * 30,
+                       "duration": 3,
                        "name": "Natick FD", "town": "Natick", "agency": "FD", "audio_path": "y.wav",
                        "transcript": "Engine 2 respond to 14 Elm Street for a fire alarm activation."})
-        h3 = await hdesk._check_hearing(hnow + 400)
-        h4 = await hdesk._check_hearing(hnow + 500)
+        h3 = await hdesk._check_hearing(hnow_back + 400)
+        h4 = await hdesk._check_hearing(hnow_back + 500)
         rules_said = hdesk._say_rules()
     finally:
         if kept_deaf:
@@ -1530,6 +1562,22 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           and not NP.audible(hsent[0][1], NP.kind_of(hsent[0][3], hsent[0][2])), hsent[:1])
     check("...and not again while it lasts",
           h2 == "" and sum(1 for m in hsent if "no sound reached" in m[0]) == 1, hsent)
+    print("\n-- deaf for 21 hours, told once (2026-11-19) --")
+    check("no sound: I have the console reopen its sound MYSELF, and say that I did",
+          restarts_first == 1 and "restarted the console's sound" in hsent[0][0], (restarts_first, hsent[:1]))
+    check("...the live board says it for as long as it is true",
+          deaf_board.startswith("I CAN'T HEAR THE SCANNER"), deaf_board)
+    check("...and a busy spell sent while deaf says so, instead of 'I can't make out the words yet'",
+          "can't hear the scanner at the moment" in deaf_busy and "yet" not in deaf_busy, deaf_busy)
+    check("...still deaf four hours on: said again, silently - but never in his quiet hours",
+          h_night == "" and h_still == "still" and h_soon == ""
+          and sum(1 for m in hsent if "still can't hear the scanner" in m[0]) == 1
+          and not any(NP.audible(m[1], NP.kind_of(m[3], m[2])) for m in hsent if "still can't" in m[0]),
+          (h_night, h_still, h_soon, hsent))
+    check("...and the console is asked again while it lasts, not every minute",
+          2 <= restarts_later <= 3, restarts_later)
+    check("audio he turned off himself is never turned back on", off_restarted is False and
+          StubConsole.restarts == restarts_later, off_restarted)
     check("asked if it's working, it says it can't hear - never 'the audio level is fine'",
           "can't hear it" in said_health and "fine" not in said_health, said_health)
     check("the night's summary says what it couldn't hear instead of 'a quiet night'",
@@ -1541,8 +1589,8 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
           "30 transmissions" in bline and " calls" not in bline and "couldn't hear" in bline, bline)
     check("...and leaves out a busy spell that began before its window", "busy spell" not in bline, bline)
     check("words again: he is told it can hear once more",
-          h3 == "back" and len(hsent) == 2 and "hear the scanner again" in hsent[1][0], hsent[1:])
-    check("...once", h4 == "" and len(hsent) == 2, len(hsent))
+          h3 == "back" and "hear the scanner again" in hsent[-1][0], hsent[1:])
+    check("...once", h4 == "" and sum(1 for m in hsent if "hear the scanner again" in m[0]) == 1, len(hsent))
     check("how calls reach him comes from the real rules, with no promise of 'right away'",
           "silent message" in rules_said and "Only active danger makes a sound" in rules_said
           and "10:30 PM to 5:30 AM" in rules_said and "right away" not in rules_said, rules_said)
@@ -2277,6 +2325,13 @@ async def _run(SD, R, S, ConsoleClient, console, geo, config, ALERT, URGENT, vol
             await bdesk._keep_board(now + 300)
             check("a board that could not be edited three times running is posted afresh",
                   posts[-1][0] is None and volatile.get(SD.BOARD_KEY)["value"]["mid"] != board_mid, posts[-1])
+            check("...and the board it replaces is taken away: there is only ever ONE",
+                  RETIRED[-1:] == [board_mid], RETIRED)
+            del RETIRED[:]
+            today_mid = volatile.get(SD.BOARD_KEY)["value"]["mid"]
+            await bdesk._keep_board(now + 86400 + 400)
+            check("a new day's board replaces yesterday's, which is removed",
+                  posts[-1][0] is None and RETIRED == [today_mid], (posts[-1], RETIRED))
         finally:
             S._write("DELETE FROM scanner_incidents WHERE id IN (?, ?)", (fall_id, far_id))
             if board_before:

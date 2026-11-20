@@ -130,6 +130,11 @@ class ConsoleClient:
             return False
         return True
 
+    async def audio_restart(self) -> bool:
+        """Have the console reopen its sound-card stream, settings unchanged
+        (the caller has checked its audio is enabled)."""
+        return await self._post("/api/audio", {"audio_enabled": True}, timeout=15.0)
+
     async def doctor_stop(self, revert: bool = True) -> bool:
         """Stop the scan optimiser; `revert` puts channels it was trying new
         settings on back as they were (its own backed-up write path)."""

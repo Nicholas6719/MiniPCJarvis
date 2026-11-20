@@ -137,6 +137,14 @@ DEAF_WORDLESS = 80        # this many in a row and not one word understood
 DEAF_UNRECORDED = 25      # ...or this many in a row with no sound at all
 DEAF_SETTLE_S = 180       # the newest few may not be transcribed yet
 DEAF_KEY = "scanner:deaf"
+# DEAF FOR 21 HOURS, TOLD ONCE (2026-11-19 08:13 to 11-20 05:48). The console's
+# sound stream stalled when it was restarted: "running", no error, and not one
+# recording. I said so once at 08:22 - "check the cable" - and then nothing,
+# and did nothing about it. So: I have the console reopen its sound myself,
+# I say it again while it lasts, and the live board says it for as long as it
+# is true.
+AUDIO_RESTART_S = 600     # ask the console to reopen its sound at most this often
+DEAF_REMIND_S = 4 * 3600  # still deaf: say so again this often, outside his quiet hours
 NIGHT_GAP_S = 7200        # two hours with nothing logged at all is said, not assumed quiet
 LOST_AFTER_S = 600        # console silent, or scanner disconnected, this long before he is told
 GOOD_VOLUME = 15          # every transmission understood on 2026-11-07 was recorded at 15
@@ -800,6 +808,7 @@ class ScannerDesk:
         self._last_prune = 0.0
         self._lost_since: float | None = None
         self._last_hear = 0.0
+        self._last_revive = 0.0
         self._last_doctor = 0.0
         self.home_gap = ""            # what is wrong with his own town's fire channel, if anything
         self._home_watched: float | None = None   # when its channel was first seen on the scanner (this run)
@@ -1698,6 +1707,11 @@ class ScannerDesk:
                 over = " - over" if i.get("status") == "over" else ""
                 lines.append(f"- {_hm(float(i.get('first_ts') or now))}  {self.headline(i, FYI)}{over}")
         lines.append("")
+        deaf = self.hearing_now(now) if self.up else None
+        if deaf:
+            lines.insert(0, "")
+            lines.insert(0, f"I CAN'T HEAR THE SCANNER - nothing since {_hm(deaf['start'])}. Calls may be missing "
+                            "from this board.")
         if not self.up:
             lines.append("I can't reach the scanner right now.")
         else:
@@ -1739,6 +1753,24 @@ class ScannerDesk:
         self._board_fails = 0
         self._board_body = body
         volatile.put(BOARD_KEY, {"mid": int(new), "day": day, "body": body}, source="scanner")
+        old = int(kept.get("mid") or 0)
+        if old and old != int(new):
+            # ONE board: yesterday's (found 2026-11-20 still pinned beside today's) goes
+            try:
+                await self._retire_board(old)
+            except Exception:
+                self._log_every("board-old", 3600, logging.WARNING, "scanner: the old board could not be removed",
+                                exc=True)
+
+    async def _retire_board(self, mid: int) -> None:
+        """Take a replaced board away: deleted, or at least no longer pinned."""
+        from remote_telegram import telegram
+        chat = config.get("remote", "telegram_chat_id", default=None)
+        if not chat:
+            return
+        res = await telegram._api("deleteMessage", chat_id=chat, message_id=int(mid))
+        if not res:
+            await telegram._api("unpinChatMessage", chat_id=chat, message_id=int(mid))
 
     async def _post_board(self, mid: int | None, text: str) -> int | None:
         if self.boarder is not None:
@@ -2458,8 +2490,11 @@ class ScannerDesk:
         town = inc.get("town") or ""
         unnamed = (inc.get("types") or []) == [rules.PAGED]
         if inc.get("burst") and not inc.get("types"):
+            # deaf, "yet" is a promise I can't keep (sent 2026-11-19 16:43, eight hours deaf)
+            deaf = self.hearing_now(self.now())
             spoken = f"{lab.spoken} is unusually busy, sir: {inc.get('summary') or 'far more traffic than usual'}. " \
-                     "I can't make out the words yet."
+                     + (f"I can't hear the scanner at the moment - nothing since {_hm(deaf['start'])} - so I can't "
+                        "say what it is." if deaf else "I can't make out the words yet.")
         elif update:
             noun = {"fire": "the fire", "traffic": "the crash", "police": "the police call",
                     "ems": "the medical call"}.get(inc.get("family") or "", "the call")
@@ -2801,6 +2836,21 @@ class ScannerDesk:
         last = hits[-1]
         return spans[-1] if spans[-1]["end"] == float(last.get("end_ts") or last["ts"]) else None
 
+    async def _revive_audio(self, now: float, why: str) -> bool:
+        """Have the console reopen its sound stream: the one cause of
+        deafness I can put right myself. Never turns on audio he turned off."""
+        audio = (self.health or {}).get("audio") or {}
+        if not audio.get("enabled") or now - self._last_revive < AUDIO_RESTART_S:
+            return False
+        self._last_revive = now
+        try:
+            ok = bool(await self.client.audio_restart())
+        except Exception:
+            ok = False
+        log.warning("scanner: %s - asked the console to reopen its sound (%s)", why,
+                    "done" if ok else "it did not")
+        return ok
+
     async def _check_hearing(self, now: float) -> str:
         """Tell him once, silently, when I stop being able to hear the scanner,
         and once when I can again (his answer, 2026-11-08: "Warn me when sound
@@ -2825,12 +2875,19 @@ class ScannerDesk:
         else:
             self._lost_since = None
             deaf = self.hearing_now(now)
+            revived = False
+            if (h.get("audio") or {}).get("stalled"):
+                revived = await self._revive_audio(now, "the console's sound has stalled")
+            elif deaf and deaf["silent"]:
+                revived = await self._revive_audio(now, f"{deaf['n']} transmissions with no sound")
             if deaf:
                 if deaf["silent"]:
                     lost = (deaf["start"],
                             f"I can't hear the scanner, sir: {deaf['n']} transmissions since {_hm(deaf['start'])} "
-                            "and no sound reached the PC. Check the audio cable at both ends and the scanner's "
-                            f"volume - {GOOD_VOLUME} is what works.")
+                            "and no sound reached the PC. "
+                            + ("I've restarted the console's sound in case it had stalled, and I'll say when I can "
+                               "hear it again. If I don't, check " if revived else "Check ")
+                            + f"the audio cable at both ends and the scanner's volume - {GOOD_VOLUME} is what works.")
                 else:
                     lost = (deaf["start"],
                             f"I can't make out the scanner, sir: {deaf['n']} transmissions since "
@@ -2846,6 +2903,21 @@ class ScannerDesk:
                                     subject="scanner-fyi: hearing")
             log.warning("scanner: can't hear it -> %s: %s", r.get("delivered"), text)
             return "lost"
+        if lost and state.get("since"):
+            # still deaf: once was not enough for 21 hours
+            said = float(state.get("said") or state["since"])
+            if now - said >= DEAF_REMIND_S and not self.quiet_hours():
+                n = int(state.get("reminders") or 0) + 1
+                if not volatile.put(DEAF_KEY, {**state, "said": now, "reminders": n}, source="scanner"):
+                    return ""
+                text = (f"I still can't hear the scanner, sir - nothing since {_hm(float(state['since']))}"
+                        + ("" if now - float(state["since"]) < 86400 else
+                           f" on {dt.datetime.fromtimestamp(float(state['since'])).strftime('%b %d')}")
+                        + ". Local calls are being missed until it is put right.")
+                r = await self._deliver(text, ALERT, key=f"scanner-fyi:hearing:{int(float(state['since']))}:r{n}",
+                                        subject="scanner-fyi: hearing")
+                log.warning("scanner: still can't hear it -> %s: %s", r.get("delivered"), text)
+                return "still"
         if not lost and state.get("since"):
             # back only on real evidence: connected, and two understood
             # transmissions in the last half hour, so a lone word in a dead
