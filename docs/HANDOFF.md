@@ -5798,7 +5798,20 @@ scripts run from the agent shell must set JARVIS_DB or they open the mirror
 2. Dataset export (JSONL of turns) for real LoRA fine-tuning later.
 3. OS-like UI expansion (files, settings panels inside the HUD).
 
-### 2026-11-19 - the scanner, reshaped to his description (two hot-swaps)
+### 2026-11-20 - deaf for 21 hours after the console install
+
+Installing console 1.3.2 on 11-19 08:13 left its sound stream stalled:
+health said running/recording, no error, and not one transmission was recorded
+until 11-20 05:48 (about 4,000 hits, 0 words). JARVIS said so once at 08:22.
+Fixed: console 1.3.3 (34bd157) notices a stream whose callback stops (8 s) and
+restarts it, and reports `stalled`; JARVIS (d45a854) asks the console to reopen
+its sound itself (`client.audio_restart`), reminds him every 4 h while deaf,
+leads the live board with it, and deletes a replaced board.
+RULE: after any console install, wait for a transmission with
+`recent_peak_dbfs` set - health "recording: true" proved nothing.
+Still not seen live: a real Framingham call in the new headline format.
+
+## 2026-11-19 - the scanner, reshaped to his description (two hot-swaps)
 
 Audit of the real log and database since 11-13 (he has not spoken to JARVIS
 since 11-08: everything he gets is proactive). His words after it: "a call
