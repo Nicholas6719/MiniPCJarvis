@@ -5880,3 +5880,33 @@ BC125AT - police matters reach him only when Fire/EMS is sent.
 Mic must always work (done, verified w/ Wispr) → speed ("quicker = more real") →
 brain/training → OS-like UI (never leave the app) → everything verified on the REAL
 install, never on the sandbox mirror.
+
+### 2026-11-21 - fans all night: 76 model reloads on a broken graphics driver
+
+He heard the fans all night. Cause, from the real log: Windows Update installed a
+new Radeon driver on 11-19 07:42 and left the adapter's Vulkan AND OpenGL
+registrations pointing at folders that do not exist. The model server that started
+at the 11-20 06:15 hot-swap found only Microsoft's Direct3D12 mapping layer
+("Vulkan0: Microsoft Direct3D12 (AMD Radeon 780M Graphics)"): prompt reading six
+times slower (240 s for the warm-up instead of 40 s), several cores busy, and every
+answer empty. The liveness probe failed twice, the watchdog reloaded 15 GB and
+re-read 12,000 tokens, and that repeated every 20 minutes - 76 times in 26 hours.
+JARVIS had no language model that whole time and never said so.
+
+- `llm/llama_server.py`: before every start, `--list-devices`; when only the
+  mapping layer answers, the newest vendor ICD in the driver store is handed to the
+  child with `VK_DRIVER_FILES` (that process only; nothing on the system changes).
+  `llama.gpu` is native / repaired / mapped / none / unknown.
+- `orchestrator.py`: a restart that did not cure it is not repeated all night -
+  two tries, then one every six hours, and he is told once a day, quietly
+  (kind "model"). One working probe clears the count.
+- `tools/fabrication.py`: PrusaSlicer is run with `--sw-renderer`; headless it still
+  loaded the OpenGL driver and hung on an invisible "LoadLibrary failed with error
+  126" dialog.
+- Gates: tests/test_llm_patience.py (new sections), test_faster.py, test_fabrication.py.
+- Verified live 08:57: "starting the model on the vendor driver directly", warm-up
+  46 s, answers generated.
+- STILL BROKEN ON THE MACHINE (his to do, needs admin): the Radeon driver itself.
+  A reboot or a driver reinstall should repair the registration; JARVIS works either way.
+- How to check: `C:\AI\llama.cpp\llama-server.exe --list-devices` must NOT say
+  "Microsoft Direct3D12"; `grep 'restarting llama-server' sidecar.log` must be rare.

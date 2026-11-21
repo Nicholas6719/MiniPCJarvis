@@ -104,7 +104,86 @@ def _parent_alive(pid: int | None) -> bool:
         return True
 
 
+# THE GRAPHICS DRIVER CAN VANISH UNDER US. On 2026-11-19 07:42 Windows Update
+# installed a new Radeon driver and left the adapter's Vulkan registration
+# pointing at a driver folder it had just deleted. The next model server to
+# start (11-20 06:15) found only Microsoft's Direct3D12 mapping layer: six
+# times slower to read a prompt, several processor cores busy, and every
+# answer EMPTY. The watchdog then reloaded the 15 GB model every twenty
+# minutes for 26 hours - the fans he heard all night - and JARVIS had no
+# language model the whole time. The vendor's driver was still on disk; the
+# loader only needed to be told where. So before every start: ask the server
+# what it can see, and when it sees only the mapping layer, hand it the
+# vendor's driver directly (for this child process alone - nothing on the
+# system is changed).
+MAPPED_DEVICE = "Microsoft Direct3D12"
+VENDOR_ICDS = ("amdvlk.inf_amd64_*/amd-vulkan64.json", "nv*.inf_amd64_*/nv-vk64.json",
+               "iigd*.inf_amd64_*/igvk64.json")
+ICD_ENV = ("VK_DRIVER_FILES", "VK_ICD_FILENAMES")
+
+
+def parse_devices(out: str) -> list[str]:
+    """The device names from `llama-server --list-devices`."""
+    names, seen = [], False
+    for line in (out or "").splitlines():
+        if line.strip().lower().startswith("available devices"):
+            seen = True
+            continue
+        if seen and ":" in line and line[:1] in (" ", "\t"):
+            names.append(line.split(":", 1)[1].strip())
+    return names
+
+
+def list_devices(binary: str, extra: dict | None = None) -> list[str] | None:
+    """What this server binary can run on; None when it would not say."""
+    try:
+        r = subprocess.run([binary, "--list-devices"], capture_output=True, text=True, timeout=30,
+                           env={**os.environ, **(extra or {})},
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return parse_devices((r.stdout or "") + "\n" + (r.stderr or ""))
+    except Exception:
+        return None
+
+
+def vendor_icds() -> list[str]:
+    """Vendor Vulkan driver manifests in the driver store, newest first."""
+    root = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "DriverStore" / "FileRepository"
+    found: list[Path] = []
+    try:
+        for pat in VENDOR_ICDS:
+            found += list(root.glob(pat))
+        found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    except Exception:
+        return []
+    return [str(p) for p in found]
+
+
+def gpu_env(devices_of, icds: list[str], preset: bool = False) -> tuple[dict, str]:
+    """(extra environment for the server, what was found).
+
+    "native" - the vendor's driver is there; "repaired" - only the mapping
+    layer was, and a vendor driver from the store answers when named;
+    "mapped" - only the mapping layer, and nothing better could be found;
+    "none" - no device at all; "unknown" - the server would not say.
+    Unknown changes nothing: this must never be why he has no model.
+    """
+    seen = devices_of({})
+    if seen is None:
+        return {}, "unknown"
+    if any(MAPPED_DEVICE not in d for d in seen):
+        return {}, "native"
+    if not preset:                      # he set the driver himself: leave it be
+        for icd in icds:
+            got = devices_of({"VK_DRIVER_FILES": icd})
+            if got and any(MAPPED_DEVICE not in d for d in got):
+                return {"VK_DRIVER_FILES": icd}, "repaired"
+    return {}, ("mapped" if seen else "none")
+
+
 class LlamaServer:
+    # what the last start found: see gpu_env
+    gpu = "unknown"
+
     def __init__(self, adopt: bool = True) -> None:
         import secrets as _secrets
         import socket
@@ -222,10 +301,20 @@ class LlamaServer:
         # JARVIS for up to 24 minutes. Wait for room instead, and say so.
         if not await self._wait_for_memory(Path(model_path)):
             return False
+        extra, self.gpu = await asyncio.to_thread(
+            gpu_env, lambda e: list_devices(binary, e), vendor_icds(),
+            any(os.environ.get(k) for k in ICD_ENV))
+        if self.gpu == "repaired":
+            log.warning("the graphics driver's Vulkan registration is broken (only the Direct3D12 mapping "
+                        "layer answers) - starting the model on the vendor driver directly: %s",
+                        extra.get("VK_DRIVER_FILES"))
+        elif self.gpu in ("mapped", "none"):
+            log.error("no vendor Vulkan driver for the model (%s) - it will be slow and may answer nothing; "
+                      "the graphics driver needs reinstalling", self.gpu)
         log.info("starting llama-server: %s", model_name)
         # the API key goes in the child's ENVIRONMENT, never on its command line:
         # any local process can read another process's argv (WMI/Win32_Process).
-        env = {**os.environ, "LLAMA_API_KEY": self.api_key}
+        env = {**os.environ, **extra, "LLAMA_API_KEY": self.api_key}
         self.proc = subprocess.Popen(
             args,
             stdout=subprocess.DEVNULL,

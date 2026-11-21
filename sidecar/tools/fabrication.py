@@ -853,7 +853,13 @@ async def slice_part(stl_path: str = "") -> dict:
     mesh_warning = await asyncio.to_thread(mesh_warning_for, str(stl))
     gcode = work_dir() / (stl.stem + ".gcode")
     args = [exe, "-g", str(stl), "--output", str(gcode)]
-    profile = config.get("fabrication", "slicer_profile", default="")
+    # SLICING NEEDS NO GRAPHICS CARD. PrusaSlicer loads the OpenGL driver even
+    # headless; when a Windows Update broke the Radeon driver (2026-11-19) it
+    # put up "LoadLibrary failed with error 126" in a dialog nobody could see
+    # and hung until the timeout. Its own software renderer has no such need.
+    if (Path(exe).parent / "mesa").is_dir():
+        args.insert(1, "--sw-renderer")
+    profile =config.get("fabrication", "slicer_profile", default="")
     if not profile:
         # Frozen, the profile lives under sys._MEIPASS/profiles — the same shape
         # the models use. Checking only the source tree would silently fall back

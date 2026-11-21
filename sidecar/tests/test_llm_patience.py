@@ -80,6 +80,87 @@ def main() -> int:
     check("the start path waits for memory before it launches",
           body.index("_wait_for_memory(") < body.index("subprocess.Popen("))
 
+    print("\n-- the graphics driver vanished under it (2026-11-19 to 11-21) --")
+    from llm import llama_server as LS
+    real = "Available devices:\n  Vulkan0: AMD Radeon 780M Graphics (17834 MiB, 16942 MiB free)\n"
+    mapped = ("[Vulkan Loader] ERROR: loader_get_json: Failed to open JSON file C:\\x\\amd-vulkan64.json\n"
+              "Available devices:\n  Vulkan0: Microsoft Direct3D12 (AMD Radeon 780M Graphics) (14762 MiB, 16972 MiB free)\n")
+    check("the device list is read from what the server prints",
+          LS.parse_devices(real) == ["AMD Radeon 780M Graphics (17834 MiB, 16942 MiB free)"]
+          and LS.parse_devices(mapped)[0].startswith("Microsoft Direct3D12") and LS.parse_devices("") == [],
+          (LS.parse_devices(real), LS.parse_devices(mapped)))
+    asked = []
+
+    def broken(extra):
+        asked.append(dict(extra))
+        return LS.parse_devices(real if extra.get("VK_DRIVER_FILES") == "new.json" else mapped)
+
+    check("the vendor driver is there: nothing is touched",
+          LS.gpu_env(lambda e: LS.parse_devices(real), ["new.json"]) == ({}, "native"))
+    env, state = LS.gpu_env(broken, ["stale.json", "new.json"])
+    check("only the mapping layer answers: the vendor's driver from the store is handed to the server",
+          env == {"VK_DRIVER_FILES": "new.json"} and state == "repaired", (env, state, asked))
+    check("...a driver that does not answer either is passed over", {"VK_DRIVER_FILES": "stale.json"} in asked)
+    check("nothing better on disk: said, not hidden",
+          LS.gpu_env(lambda e: LS.parse_devices(mapped), []) == ({}, "mapped")
+          and LS.gpu_env(lambda e: [], ["x.json"]) == ({}, "none"))
+    check("a driver he chose himself is left alone",
+          LS.gpu_env(broken, ["new.json"], preset=True) == ({}, "mapped"))
+    check("a server that will not say changes nothing - never the reason for no model",
+          LS.gpu_env(lambda e: None, ["new.json"]) == ({}, "unknown"))
+    check("the start path looks before it launches, and the child gets the driver",
+          body.index("gpu_env,") < body.index("subprocess.Popen(") and "**extra," in body)
+    check("the real binary's answer is read in a thread, with no window and a time limit",
+          "asyncio.to_thread(" in body and "timeout=30" in start_src and "CREATE_NO_WINDOW" in start_src)
+
+    print("\n-- a restart that did not cure it is not repeated all night --")
+    gap = Orchestrator.llm_restart_gap
+    check("the first two tries are ten minutes apart", gap(0) == 600.0 and gap(1) == 600.0)
+    check("after two that did not help: one every six hours, not every twenty minutes",
+          gap(2) == 6 * 3600.0 and gap(40) == 6 * 3600.0)
+    told, o = [], Orchestrator.__new__(Orchestrator)
+
+    async def fake_say():
+        told.append(1)
+
+    async def night():
+        import orchestrator as OM
+        loads = []
+
+        async def stop():
+            loads.append("stop")
+
+        async def ensure(*a, **k):
+            return False
+        real_stop, real_ensure, real_emit, real_time = OM.llama.stop, OM.llama.ensure, OM.bus.emit, OM.time.time
+
+        async def emit(*a, **k):
+            return None
+        clock = [1_000_000.0]
+        OM.llama.stop, OM.llama.ensure, OM.bus.emit = stop, ensure, emit
+        OM.time.time = lambda: clock[0]
+        o._say_model_broken = fake_say
+        try:
+            for _ in range(75):                 # 75 failed probe pairs, twenty minutes apart: the real night
+                await o._restart_llm("two liveness probes in a row came back with nothing speakable")
+                clock[0] += 1200
+        finally:
+            OM.llama.stop, OM.llama.ensure, OM.bus.emit, OM.time.time = real_stop, real_ensure, real_emit, real_time
+        return len(loads)
+
+    n = asyncio.run(night())
+    check("the night of 75 reloads would have been 6: two tries, then one every six hours", n == 6, n)
+    check("...and he is TOLD the model is gone", len(told) >= 1, told)
+    psrc = src[src.index("async def _probe_model"):src.index("async def _llm_watchdog")]
+    check("one working answer clears the count", "self._uncured_restarts = 0" in psrc)
+    said = src[src.index("async def _say_model_broken"):src.index("async def _restart_llm")]
+    check("he is told once, through the ledger, quietly",
+          "if self._told_model_broken:" in said and 'key=f"model:{day}"' in said)
+    import notify_policy as NP
+    check("...a model note never makes a sound or interrupts",
+          NP.kind_of("model", "model:2026-11-21") == "model" and "model" in NP.QUIET_KINDS
+          and "model" in NP.NO_INTERRUPT)
+
     print(f"\n{'ALL PASS' if not fails else f'{len(fails)} FAILURES'}")
     return 1 if fails else 0
 

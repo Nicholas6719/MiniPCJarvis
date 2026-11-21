@@ -216,7 +216,7 @@ def main() -> int:
     from config import DEFAULTS as _D
     check("the rewarm is off by default", _D["llm"].get("rewarm_history") is False)
     check("a runaway round is recognised by its token count", "def _runaway_round(self)" in orch and ">= 600" in orch)
-    check("...and restarts llama-server, at most once per ten minutes", "async def _restart_llm" in orch and "_last_llm_restart < 600" in orch and "await llama.stop()" in orch)
+    check("...and restarts llama-server, at most once per ten minutes", "async def _restart_llm" in orch and "_last_llm_restart < self.llm_restart_gap(" in orch and "RESTART_GAP_S = 600.0" in orch and "await llama.stop()" in orch)
     check("...through a held task, and he is told", 'spawn(self._restart_llm(' in orch and "went off the rails" in orch)
 
     print("\n-- the model is probed every ten idle minutes --")

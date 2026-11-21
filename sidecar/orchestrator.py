@@ -1142,6 +1142,8 @@ class Orchestrator:
         self._probe_done_at = time.time()
         if self._probe_verdict(text, finish):
             self._probe_failures = 0
+            self._uncured_restarts = 0
+            self._told_model_broken = False
             return
         self._probe_failures += 1
         log.warning("model probe %d/2 failed: finish=%s text=%r", self._probe_failures, finish, text[:80])
@@ -2625,11 +2627,52 @@ class Orchestrator:
         lc = getattr(local_llm, "last_call", {}) or {}
         return int(lc.get("gen_tokens") or 0) >= 600
 
+    # A RESTART THAT DID NOT CURE IT IS NOT REPEATED ALL NIGHT. From 2026-11-20
+    # 06:15 the model answered nothing (a broken graphics driver, see
+    # llm/llama_server.py); every twenty minutes for 26 hours the watchdog
+    # killed it, reloaded 15 GB and re-read 12,000 tokens of prompt - five
+    # minutes of flat-out processor each time, 75 times, fans and all - and
+    # never once said the model was gone. Two tries; after that one every six
+    # hours, and he is told, once a day, quietly.
+    RESTART_GAP_S = 600.0
+    RESTART_GAP_UNCURED_S = 6 * 3600.0
+    _uncured_restarts = 0
+    _told_model_broken = False
+
+    @classmethod
+    def llm_restart_gap(cls, uncured: int) -> float:
+        """How long to leave between restarts, given how many in a row have
+        not been followed by one working answer."""
+        return cls.RESTART_GAP_S if uncured < 2 else cls.RESTART_GAP_UNCURED_S
+
+    async def _say_model_broken(self) -> None:
+        if self._told_model_broken:
+            return
+        self._told_model_broken = True
+        how = {"mapped": " The graphics driver's Vulkan support is missing - reinstalling the Radeon driver, "
+                         "or a reboot, should put it right.",
+               "none": " The model server cannot see the graphics chip at all - reinstalling the Radeon "
+                       "driver, or a reboot, should put it right."}.get(getattr(llama, "gpu", ""), "")
+        text = ("My language model is not answering properly, sir, and restarting it twice has not helped. "
+                "I've stopped reloading it over and over. Reminders, briefs and the scanner carry on; "
+                "anything that needs me to think will not work until it is put right." + how)
+        try:
+            from delivery import ALERT, delivery
+            day = time.strftime("%Y-%m-%d")
+            await delivery.deliver(text, ALERT, key=f"model:{day}", subject="model")
+            log.error("told him the model is broken: %s", text)
+        except Exception:
+            log.exception("could not tell him the model is broken")
+
     async def _restart_llm(self, why: str) -> None:
-        """Restart llama-server in the background, at most once per ten minutes."""
-        if time.time() - self._last_llm_restart < 600:
+        """Restart llama-server in the background: at most once per ten
+        minutes, and once per six hours when restarting has not been curing it."""
+        if time.time() - self._last_llm_restart < self.llm_restart_gap(self._uncured_restarts):
+            if self._uncured_restarts >= 2:
+                await self._say_model_broken()
             return
         self._last_llm_restart = time.time()
+        self._uncured_restarts += 1
         log.error("restarting llama-server: %s", why)
         await bus.emit("error", summary="language model went off the rails - restarting it")
         try:

@@ -30,9 +30,9 @@ URGENT = "urgent"
 
 # kinds that never sound, whatever their tier. "scanner_fyi" is the scanner's
 # quiet feed: a crash or a reported fire in his radius, there when he looks.
-QUIET_KINDS = frozenset({"brief", "market", "memory", "held", "render", "scanner_fyi"})
+QUIET_KINDS = frozenset({"brief", "market", "memory", "model", "held", "render", "scanner_fyi"})
 # ...and that never cut into what he is doing at the PC either
-NO_INTERRUPT = frozenset({"brief", "market", "memory", "scanner_fyi"})
+NO_INTERRUPT = frozenset({"brief", "market", "memory", "model", "scanner_fyi"})
 # kinds that sound at any tier: he asked for them, at a time he chose. The
 # nudge is his reminder again, half an hour on with no Done: it sounds like
 # the reminder (his words, 2026-11-07: "I don't want that, why would it be
@@ -78,6 +78,8 @@ def kind_of(subject: str = "", key: str = "") -> str:
         return "brief"
     if s == "memory" or k.startswith("memory"):
         return "memory"
+    if s == "model" or k.startswith("model:"):
+        return "model"
     if s == "held" or k.startswith("held:"):
         return "held"
     if k.startswith("render-done:"):
