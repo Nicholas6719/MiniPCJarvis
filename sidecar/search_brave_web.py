@@ -261,6 +261,12 @@ class BraveWebSearch:
             args.append("--profile-directory=Default")
         else:
             args.append("--window-position=-32000,-32000")
+            # A WINDOW NOBODY SEES NEEDS NO GRAPHICS CARD. With the Radeon driver
+            # broken (2026-11-19) Brave's gpu-process fell back to software
+            # rendering and held one whole core at 100% on about:blank, for as
+            # long as JARVIS ran. Measured 2026-11-21: 100% without this flag,
+            # 0% with it, pages read the same.
+            args.append("--disable-gpu")
         try:
             self._ctx = await self._pw.chromium.launch_persistent_context(
                 profile, executable_path=_brave_path(), headless=False,

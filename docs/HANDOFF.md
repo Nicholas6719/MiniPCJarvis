@@ -5910,3 +5910,7 @@ JARVIS had no language model that whole time and never said so.
   A reboot or a driver reinstall should repair the registration; JARVIS works either way.
 - How to check: `C:\AI\llama.cpp\llama-server.exe --list-devices` must NOT say
   "Microsoft Direct3D12"; `grep 'restarting llama-server' sidecar.log` must be rare.
+- Also 11-21: JARVIS's hidden search browser held one whole core at 100% on
+  about:blank (its gpu-process in software mode, same broken driver). It now
+  launches with `--disable-gpu` (measured 100% -> 0%, pages read the same).
+  Gate: test_faster.py. Liveness probes 09:09 and 09:19 passed, no reloads.

@@ -255,6 +255,10 @@ def main() -> int:
     BI._DDG_BREAKER.update(failures=0, until=0.0)
     src = (ROOT / "tools" / "builtin.py").read_text(encoding="utf-8")
     check("the browser is the fallback, not the first reach", src.index("fast = await _ddg_first(query, count)") < src.index("from search_brave_web import brave_web"))
+    bsrc = (ROOT / "search_brave_web.py").read_text(encoding="utf-8")
+    check("JARVIS's hidden browser runs without a graphics process (it held a core at 100%, 2026-11-21)",
+          bsrc.index('args.append("--window-position=-32000,-32000")') < bsrc.index('args.append("--disable-gpu")')
+          < bsrc.index("launch_persistent_context("))
     import day_memory as DM
     import volatile
     check("no summary, no line", DM.line() == "" or "Earlier today" in DM.line())
